@@ -1,0 +1,27 @@
+# Installed dependencies
+node_modules/
+
+# Generated output and test coverage
+dist/
+coverage/
+*.tsbuildinfo
+
+# Local Pi configuration and session data
+.pi/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Logs and package archives
+*.log
+*.tgz
+
+# OS and editor temporary files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
