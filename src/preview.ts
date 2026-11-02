@@ -1,7 +1,7 @@
 import { Markdown, ScrollView, Text, truncateToWidth, wrapTextWithAnsi, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { KeyHint } from "./key-hints.js";
-import { fittingHints, panelFrame, panelLayout } from "./panel-layout.js";
+import { alignedHints, fittingHints, panelFrame, panelLayout } from "./panel-layout.js";
 import { formatTokenUsage } from "./usage.js";
 import { resultHeading, sanitizeTerminalText, type SummaryOptions } from "./presentation.js";
 
@@ -135,7 +135,7 @@ export class PreviewPanel implements Component {
       helpLine(["m", "Model"], ["c", "Cycle favorites"]);
       helpLine(["o", "Original"], ["v", "Formatted/source"]);
       helpLine(["↑↓", "Scroll"], ["PgUp/PgDn", "Page"]);
-      helpLine(["i", "Input"], ["→", "Context (← returns without saving)"]);
+      helpLine(["i", "Input"], ["→", "Settings (← discards unsaved context)"]);
       helpLine(["q", "Back"], ["?", "Hide help"]);
       paragraph("Enter won't send", "muted");
       if (!options.canRestore) paragraph("Nothing to restore.", "muted");
@@ -192,7 +192,7 @@ export class PreviewPanel implements Component {
     return bounded;
   }
 
-  render(width: number): string[] {
+  render(width: number, tabs?: string): string[] {
     if (width < 1) return [];
     const { theme, options } = this;
     const layout = panelLayout(width, this.rows());
@@ -200,9 +200,10 @@ export class PreviewPanel implements Component {
     const heading = options.accepted
       ? `${theme.fg("success", theme.bold(`✓ Accepted · ${options.elapsedSeconds}s`))}  ${theme.fg("muted", "Prompt Refine")}`
       : resultHeading(options, theme);
-    const header = [truncateToWidth(`${theme.fg("accent", theme.bold("Main"))}  ${heading}`, innerWidth, "")];
+    const header = [truncateToWidth(tabs ?? `${theme.fg("accent", theme.bold("Main"))}  ${heading}`, innerWidth, "")];
     const model = options.state.model;
-    header.push(theme.fg("muted", sanitizeTerminalText(options.notice ?? `${model ? `${model.provider}/${model.id}` : "No model"} · ${options.contextLabel}`)));
+    const metadata = sanitizeTerminalText(options.notice ?? `${model ? `${model.provider}/${model.id}` : "No model"} · ${options.contextLabel}`);
+    header.push(theme.fg("muted", metadata));
     const ready = options.candidateText !== undefined;
     const primary: KeyHint[] = options.accepted
       ? [["r", "Refine draft"], ...(options.canRestore ? [["z", "Restore"] as KeyHint] : [])]
@@ -211,14 +212,14 @@ export class PreviewPanel implements Component {
         : [["r", options.state.phase === "generating" ? "Restart" : "Refine"], ["m", "Model"], ["x", options.state.phase === "generating" ? "Break" : "Cancel"]];
     const hint = ([key, label]: KeyHint) => `${theme.fg("accent", theme.bold(key))}${key ? " " : ""}${label}`;
     const secondary: KeyHint[] = [
-      ["q", "Back"], ["?", this.helpVisible ? "Hide help" : "Help"], ["i", "Input"], ["→", innerWidth < 30 ? "Ctx" : "Context"],
+      ["q", "Back"], ["?", this.helpVisible ? "Hide help" : "Help"], ["i", "Input"], ["→", "Settings"],
       ...(ready ? [["o", this.originalVisible ? "Hide original" : "Original"] as KeyHint] : []),
     ];
-    const footer = [
-      fittingHints([...primary.map(hint), "Enter won't send"], innerWidth),
-      fittingHints(secondary.map(hint), innerWidth),
-    ];
-    if (layout.footerHeight === 1) footer[0] = fittingHints(["q Back", "i Input", "→ Ctx", "? Help"], innerWidth);
+    const footer = alignedHints([
+      [...primary.map(hint), "Enter won't send"],
+      secondary.map(hint),
+    ], innerWidth);
+    if (layout.footerHeight === 1) footer[0] = fittingHints(["q Back", "i Input", "→ Settings", "? Help"], innerWidth);
     // ScrollView owns offsets/clamping. Explicit viewport composition also works in regular
     // mode, where ScrollView.render() alone returns the entire document without clipping.
     const body = this.scroll.render(innerWidth);
@@ -231,7 +232,16 @@ export class PreviewPanel implements Component {
     const visible = body.slice(start, start + bodyHeight);
     if (body.length > bodyHeight) {
       const position = `↑↓ ${start + 1}–${Math.min(body.length, start + bodyHeight)}/${body.length}`;
-      header[1] = theme.fg("muted", sanitizeTerminalText(`${position} · ${options.notice ?? options.contextLabel}`));
+      // Position is secondary to notices; scrolling must not hide request feedback.
+      header[1] = options.notice
+        ? theme.fg("muted", `${sanitizeTerminalText(options.notice)} · ${position}`)
+        : theme.fg("muted", `${position} · ${metadata}`);
+    }
+    if (tabs) header[1] = `${heading} · ${header[1]}`;
+    if (options.state.pendingSend) {
+      // Delivery is not completion. Keep this visible even at the end of a long result.
+      header[1] = `${theme.fg("warning", "Send pending · draft kept")} · ${header[1]}`;
+      if (layout.headerHeight === 1) header[0] = theme.fg("warning", "Send pending · draft kept");
     }
     return panelFrame(layout, header, visible, footer, (text) => theme.fg("borderMuted", text));
   }

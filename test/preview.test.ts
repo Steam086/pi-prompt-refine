@@ -98,7 +98,7 @@ describe("result reading panel", () => {
     const footer = lines.slice(lines.findIndex((line) => line.includes("──")) + 1);
     expect(footer).toEqual([
       "  r Refine · m Model · x Cancel · Enter won't send",
-      "  q Back · ? Help · i Input · → Context",
+      "  q Back   · ? Help  · i Input  · → Settings",
     ]);
     const theme = getThemeByName("dark")!;
     const styled = new PreviewPanel(options, theme, () => 40, vi.fn()).render(100);
@@ -150,7 +150,7 @@ describe("result reading panel", () => {
     expect(next).toContain("q Back");
     expect(next).not.toContain("q/Esc");
     expect(next).toContain("i Input");
-    expect(next).toContain("→ Context");
+    expect(next).toContain("→ Settings");
     expect(next).not.toContain("t Context");
     panel.scrollBy(10000);
     expect(panel.render(80).join("\n")).toContain("内容 79");
@@ -217,6 +217,24 @@ describe("result reading panel", () => {
     const text = panel.render(width).join("\n");
     expect(text).toContain("Send");
     expect(text).not.toContain("s Send");
+  });
+
+  it("keeps pending delivery visible after scrolling and in short terminals", () => {
+    for (const rows of [8, 40]) {
+      const panel = create({ state: { ...options.state, pendingSend: true }, candidateText: "Result\n".repeat(100) }, rows);
+      panel.render(40);
+      panel.scrollBy(10000);
+      const lines = panel.render(40, "Prompt refine");
+      expect(lines.slice(0, panelLayout(40, rows).headerHeight).join("\n")).toContain("Send pending");
+    }
+  });
+
+  it("retains model identity while scrolling and prioritizes notices", () => {
+    const panel = create({ candidateText: "Result\n".repeat(100) });
+    expect(panel.render(100)[1]).toContain("openai-codex/example-model");
+    panel.setNotice("Context saved");
+    panel.scrollBy(10);
+    expect(panel.render(40)[1]).toMatch(/Context saved.*↑↓/);
   });
 
   it.each([40, 80, 100])("uses English chrome with elapsed time and no ellipses at %i columns", (width) => {

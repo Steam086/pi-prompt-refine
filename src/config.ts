@@ -38,6 +38,8 @@ export interface RefineConfig {
   model?: ModelRef;
   /** Explicit optimizer override; omitted means inherit the active Pi session level. */
   thinkingLevel?: ModelThinkingLevel;
+  /** Custom optimization instructions; omitted uses the built-in prompt. */
+  systemPrompt?: string;
   favorites: ModelRef[];
   shortcuts: ShortcutConfig;
   timeoutMs: number;
@@ -246,6 +248,10 @@ export function parseConfig(value: unknown): LoadedConfig {
 
   const config = structuredClone(DEFAULT_CONFIG);
   config.projectContext = parseProjectContext(value.projectContext, warnings);
+  if (value.systemPrompt !== undefined) {
+    if (typeof value.systemPrompt === "string" && value.systemPrompt.trim()) config.systemPrompt = value.systemPrompt;
+    else warnings.push("systemPrompt must be a non-empty string; using the built-in prompt.");
+  }
   if (value.model !== undefined) {
     const selected = modelRef(value.model);
     if (selected) config.model = selected;

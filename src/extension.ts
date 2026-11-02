@@ -10,8 +10,9 @@ import {
   type ShortcutAction,
   loadConfig,
 } from "./config.js";
-import { buildRefineInput, buildRefineSystemPrompt, parseRefineOutput, selectHistory, type HistorySnapshot } from "./context.js";
-import { READING_WIDTH, renderSummary } from "./presentation.js";
+import { buildRefineInput, buildRefineSystemPrompt, parseRefineOutput, selectHistory, REFINE_SYSTEM_PROMPT, type HistorySnapshot } from "./context.js";
+import { renderSummary } from "./presentation.js";
+import { renderModelChoices } from "./model-picker.js";
 import { RefineWorkspace } from "./workspace.js";
 import { PreviewPanel, type PreviewOptions } from "./preview.js";
 import { RefineController, type Candidate, type CandidateToken, type ControllerState, type RefineRequest } from "./controller.js";
@@ -21,7 +22,7 @@ import { assembleProjectContext, captureProjectContext, collectDirectoryContext 
 
 const STATUS_KEY = "prompt-refine";
 
-type PreviewAction = "accept" | "edit" | "send" | "dismiss" | "restore" | "close" | "optimize" | "model" | "cycle";
+type PreviewAction = "accept" | "edit" | "send" | "dismiss" | "restore" | "close" | "optimize" | "model" | "cycle" | "system-prompt";
 
 function sameModel(model: Model<Api>, ref: ModelRef): boolean {
   return model.provider === ref.provider && model.id === ref.id;
@@ -122,6 +123,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       const available = ctx.modelRegistry.getAvailable().some((candidate) => sameModel(candidate, request.model));
       if (!available) throw new Error(`Model is not currently available: ${displayModel(request.model)}`);
 
+      const systemPrompt = buildRefineSystemPrompt(!!request.generateTitle, config.systemPrompt);
       let projectText = "";
       if (request.project) {
         // History gates only the default tree; explicit @directories are independent.
@@ -152,7 +154,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       };
       const response = await ctx.modelRegistry.streamSimple(
         model,
-        { systemPrompt: buildRefineSystemPrompt(!!request.generateTitle), messages: [userMessage], tools: [] },
+        { systemPrompt, messages: [userMessage], tools: [] },
         {
           signal,
           maxTokens: Math.min(config.maxOutputTokens, model.maxTokens),
@@ -199,7 +201,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const warning = projectWarnings.length ? `⚠${projectWarnings.length} · ` : "";
     const history = !historySnapshot.messageCount
       ? (projectLabel ? "No history" : "Draft only")
-      : `${historySnapshot.messageCount} msgs/${historySnapshot.characterCount} ch · ${historySnapshot.latestAssistantIncluded ? "asst" : "no asst"}${historySnapshot.truncated ? " · trimmed" : ""}`;
+      : `${historySnapshot.messageCount} msgs · ${historySnapshot.characterCount} char · ${historySnapshot.latestAssistantIncluded ? "assistant" : "no assistant"}${historySnapshot.truncated ? " · trimmed" : ""}`;
     return `${warning}${history}${projectLabel ? ` · ${projectLabel}` : ""}`;
   }
 
@@ -310,8 +312,17 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         const level = effectiveThinkingLevel(model, thinkingOverride, ctx.thinkingLevel);
         return `Thinking level: ${level} · ${thinkingSource(thinkingOverride, ctx.thinkingLevel)}`;
       };
+      const selectedDetails = (model: Model<Api> | undefined): string => {
+        if (!model) return theme.fg("muted", statusFor(model));
+        return [
+          theme.fg("accent", theme.bold("Selected model")),
+          theme.fg("text", model.name),
+          theme.fg("muted", displayModel(modelRef(model))),
+          theme.fg("accent", statusFor(model)),
+        ].join("\n");
+      };
       const updateThinkingStatus = (model?: Model<Api>) => {
-        thinkingStatus?.setText(theme.fg("muted", statusFor(model ?? highlightedModel())));
+        thinkingStatus?.setText(selectedDetails(model ?? highlightedModel()));
       };
       const rebuild = () => {
         container.clear();
@@ -336,8 +347,12 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           updateThinkingStatus(highlightedModel(item.value));
           tui.requestRender();
         };
-        container.addChild(list);
-        thinkingStatus = new Text(theme.fg("muted", statusFor(highlightedModel())), 1, 0);
+        container.addChild({
+          render: (width) => renderModelChoices(items, list.getSelectedItem()?.value, width, tui.terminal.rows, theme),
+          invalidate: () => list.invalidate(),
+        });
+        container.addChild(new DynamicBorder((text) => theme.fg("borderMuted", text)));
+        thinkingStatus = new Text(selectedDetails(highlightedModel()), 1, 0);
         container.addChild(thinkingStatus);
         container.addChild(new Text(theme.fg("muted", `Type to search · ↑↓ Select · ${cycleThinkingKeys || "thinking-cycle shortcut disabled"} to adjust thinking · Enter Confirm · Esc Cancel`), 1, 0));
         container.addChild(new DynamicBorder((text) => theme.fg("borderMuted", text)));
@@ -345,7 +360,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       rebuild();
 
       return {
-        render: (width) => container.render(Math.min(width, READING_WIDTH)),
+        render: (width) => width < 1 ? [] : container.render(width),
         invalidate: () => container.invalidate(),
         handleInput(data) {
           if (keybindings.matches(data, "tui.select.cancel")) {
@@ -416,6 +431,26 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     notifyCurrent(`Optimizer model set to ${displayModel(selected)}; thinking level: ${thinking}; main session unchanged.`, "info");
   }
 
+  async function editSystemPrompt(ctx: ExtensionContext): Promise<void> {
+    const original = config.systemPrompt ?? REFINE_SYSTEM_PROMPT;
+    const sessionId = controller.getSessionId();
+    const generation = controller.getGeneration();
+    const isCurrent = () => controller.getSessionId() === sessionId &&
+      controller.getGeneration() === generation && (config.systemPrompt ?? REFINE_SYSTEM_PROMPT) === original;
+    const edited = await ctx.ui.editor("Optimization prompt · Edit (cancel keeps original)", original);
+    if (edited === undefined || edited === original || !isCurrent()) return;
+    if (!edited.trim()) {
+      notify(ctx, "Optimization prompt cannot be empty. Original kept.", "warning");
+      return;
+    }
+    const confirmed = await ctx.ui.confirm("Apply optimization prompt changes?",
+      "Use the edited instructions for future refinements and save them to prompt-refine.json? Existing results and running requests are unchanged. Session title rules are appended automatically.");
+    if (!confirmed || !isCurrent()) return;
+    config.systemPrompt = edited;
+    const persisted = await persistConfig(ctx);
+    notify(ctx, persisted ? "Optimization prompt saved · Next refinement only." : "Optimization prompt applied · Not persisted.");
+  }
+
   async function cycleModel(ctx: ExtensionContext): Promise<void> {
     useContext(ctx);
     if (ctx.mode !== "tui") {
@@ -483,7 +518,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const previousContext = { historySnapshot, projectLabel, projectWarnings };
     historySnapshot = history;
     const project = config.projectContext.enabled ? captureProjectContext(ctx, config.projectContext, draft, followUp) : undefined;
-    projectLabel = project ? `${project.instructionCount} rules   ·   ${project.skillCount} skills${config.projectContext.tree.enabled && !history.text ? " · tree" : ""}` : "";
+    projectLabel = project ? `${project.instructionCount} rules · ${project.skillCount} skills${config.projectContext.tree.enabled && !history.text ? " · tree" : ""}` : "";
     projectWarnings = project?.warnings ?? [];
     const result = controller.trigger({
       draft,
@@ -629,7 +664,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
   }
 
-  async function showPreviewContent(ctx: ExtensionContext): Promise<void> {
+  async function showPreviewContent(ctx: ExtensionContext, settingsContext?: boolean[], settingsCursor = 3): Promise<void> {
     useContext(ctx);
     if (ctx.mode !== "tui") {
       notify(ctx, "Preview requires TUI mode.", "warning");
@@ -637,7 +672,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
     if (closePreview) return; // One user-opened panel; never stack dialogs on repeated shortcuts.
     const sessionId = controller.getSessionId();
-    type Selection = { action: PreviewAction; generation: number; token?: CandidateToken };
+    type Selection = { action: PreviewAction; generation: number; token?: CandidateToken; settingsContext?: boolean[] };
     let selection: Selection | undefined;
     try {
       selection = await ctx.ui.custom<Selection | undefined>((tui, theme, keybindings, done) => {
@@ -666,6 +701,27 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         const workspace = new RefineWorkspace(panel, tui, theme, keybindings, {
           context: () => [config.projectContext.instructionsEnabled, config.projectContext.tree.enabled, config.projectContext.skillsEnabled],
           contextEnabled: () => config.projectContext.enabled,
+          optimizer: () => {
+            const ref = controller.getModel();
+            const model = registeredModels(ctx).find((candidate) => ref && sameModel(candidate, ref));
+            return {
+              model: ref ? displayModel(ref) : "Not configured",
+              thinking: model ? `${effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel)} · ${thinkingSource(config.thinkingLevel, ctx.thinkingLevel)}` : "Choose a model first",
+            };
+          },
+          chooseModel: (context) => finish({ action: "model", generation: controller.getGeneration(), settingsContext: context }),
+          editSystemPrompt: (context) => finish({ action: "system-prompt", generation: controller.getGeneration(), settingsContext: context }),
+          cycleThinking: async () => {
+            if (closed || ctx.sessionManager.getSessionId() !== sessionId) return "Session changed; settings not saved.";
+            const ref = controller.getModel();
+            const model = registeredModels(ctx).find((candidate) => ref && sameModel(candidate, ref));
+            if (!model) return "Choose an available model first.";
+            const levels = getSupportedThinkingLevels(model);
+            if (levels.length <= 1) return "Thinking level is fixed for this model.";
+            const current = effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel);
+            config.thinkingLevel = levels[(levels.indexOf(current) + 1) % levels.length];
+            return await persistConfig(ctx) ? "Thinking level saved" : "Thinking applied · Not persisted; check configuration";
+          },
           saveContext: async (selected) => {
             if (closed || ctx.sessionManager.getSessionId() !== sessionId) return "Session changed; settings not saved.";
             config.projectContext.instructionsEnabled = selected[0]!;
@@ -689,6 +745,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           closePreview = undefined;
           done(value);
         };
+        if (settingsContext) workspace.openSettings(settingsContext, settingsCursor);
         closePreview = () => finish();
         refreshPreview = () => {
           if (closed) return;
@@ -746,7 +803,18 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const { action, token } = selection;
     if (action === "dismiss") controller.cancelAndDismiss();
     else if (action === "restore") await restoreDraft(ctx);
-    else if (action === "model") await selectModel(ctx);
+    else if (action === "model") {
+      await selectModel(ctx);
+      if (selection.settingsContext && ctx.sessionManager.getSessionId() === sessionId) {
+        await showPreviewContent(ctx, selection.settingsContext);
+      }
+    }
+    else if (action === "system-prompt") {
+      await editSystemPrompt(ctx);
+      if (selection.settingsContext && ctx.sessionManager.getSessionId() === sessionId) {
+        await showPreviewContent(ctx, selection.settingsContext, 5);
+      }
+    }
     else if (action === "cycle") await cycleModel(ctx);
     else if (action === "optimize") {
       triggerOptimize(ctx, true);

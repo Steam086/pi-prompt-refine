@@ -26,6 +26,28 @@ export function panelFrame(layout: PanelLayout, header: string[], body: string[]
   ].map((line) => " ".repeat(layout.inset) + truncateToWidth(line, layout.innerWidth, ""));
 }
 
+/** Shared terminal-column widths keep corresponding hints aligned across rows. */
+export function alignedHints(rows: string[][], width: number): string[] {
+  const columns = Math.max(0, ...rows.map((row) => row.length));
+  const selected: { index: number; width: number }[] = [];
+  let used = 0;
+  for (let index = 0; index < columns; index++) {
+    const columnWidth = Math.max(...rows.map((row) => visibleWidth(row[index] ?? "")));
+    const required = columnWidth + (selected.length ? 3 : 0);
+    if (used + required > width) continue;
+    selected.push({ index, width: columnWidth });
+    used += required;
+  }
+  return rows.map((row) => {
+    let last = selected.length - 1;
+    while (last >= 0 && !row[selected[last].index]) last--;
+    return selected.slice(0, last + 1).map((column, i) => {
+      const cell = row[column.index] ?? "";
+      return cell + (i < last ? " ".repeat(column.width - visibleWidth(cell)) : "");
+    }).join(" · ");
+  });
+}
+
 /** Omit secondary hints instead of wrapping chrome into the content viewport. */
 export function fittingHints(hints: string[], width: number): string {
   let line = "";

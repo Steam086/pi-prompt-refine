@@ -221,7 +221,9 @@ Produce the refined prompt now using the required JSON object format.
 - `parseRefineOutput()`：严格解析 JSON 对象和非空字符串 `prompt`，保持 prompt 字符串原样；独立校验可选 `title`，无效名称不影响有效 prompt。
 - `buildRefineInput()`：将项目背景、选中的历史和当前草稿明确分区；背景不能改变优化器职责，遗漏不能被当作不存在，技能目录不能被当作优化器工具。
 
-当前配置没有自定义模板字段，优化调用也不加载 `.pi/prompts/*.md`；草稿中的 `/模板名` 不会由本扩展在优化时展开。
+在 Settings 中选择 **Optimization prompt: View / Edit**，可查看和编辑当前优化系统提示词。提交后需确认才会应用并保存到 `prompt-refine.json` 的 `systemPrompt` 字段；取消、未修改或空白内容不会覆盖原值。更改仅影响后续优化，不改变已有结果或进行中的请求。省略 `systemPrompt` 使用内置提示词；会话标题规则仍自动追加。请保留返回 `{"prompt":"..."}` JSON 的要求，以便扩展解析结果。
+
+优化调用不加载 `.pi/prompts/*.md`；草稿中的 `/模板名` 不会由本扩展在优化时展开。
 
 ### 工具与独立 Pi session 的差异
 
