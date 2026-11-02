@@ -21,9 +21,9 @@ export function readTokenUsage(value: unknown): TokenUsage | undefined {
 export function formatTokenUsage(usage: TokenUsage | undefined): string | undefined {
   if (!usage) return undefined;
   const labels = [
-    ["totalTokens", "总计"], ["input", "输入"], ["output", "输出"],
-    ["cacheRead", "缓存读取"], ["cacheWrite", "缓存写入"], ["reasoning", "推理（含于输出）"],
+    ["totalTokens", "total"], ["input", "in"], ["output", "out"],
+    ["cacheRead", "read"], ["cacheWrite", "write"], ["reasoning", "think(out)"],
   ] as const;
   const parts = labels.flatMap(([key, label]) => usage[key] === undefined ? [] : [`${label} ${usage[key]}`]);
-  return parts.length ? `Token：${parts.join(" · ")}` : undefined;
+  return parts.length ? `Tokens: ${parts.join(" · ")}` : undefined;
 }

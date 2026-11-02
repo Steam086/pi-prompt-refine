@@ -78,22 +78,23 @@ function userMessageText(message: unknown): string | undefined {
 
 function errorStatus(state: ControllerState): string {
   switch (state.error) {
-    case "timeout": return "Refine · 超时 · 可重试";
-    case "empty": return "Refine · 模型未返回 Prompt · 可重试";
-    case "truncated": return "Refine · 输出不完整 · 可重试";
-    case "tool-call": return "Refine · 模型返回了非文本操作 · 可重试";
-    case "invalid-output": return "Refine · 返回格式无效或缺少 Prompt · 可重试";
-    default: return "Refine · 请求失败 · 检查模型/网络后重试";
+    case "timeout": return "Refine: timed out. Retry.";
+    case "empty": return "Refine: no prompt returned. Retry.";
+    case "truncated": return "Refine: incomplete output. Retry.";
+    case "tool-call": return "Refine: unexpected tool call. Retry.";
+    case "invalid-output": return "Refine: invalid output. Retry.";
+    default: return "Refine: request failed. Check model/network.";
   }
 }
 
-function formatStatus(state: ControllerState, viewShortcut: string, accepted: boolean): string | undefined {
-  if (state.phase === "generating") return `Refine · ${state.model ? displayModel(state.model) : "模型"} · 生成中`;
+function formatStatus(state: ControllerState, viewShortcut: string, accepted?: Candidate): string | undefined {
+  const time = `${state.elapsedSeconds ?? 0}s`;
+  if (state.phase === "generating") return `Refine · working · ${time}`;
   if (state.phase === "ready") return state.pendingSend
-    ? "Refine · 发送待 Pi 确认 · 主草稿保留"
-    : `Refine · 结果就绪 · ${viewShortcut} 查看`;
-  if (state.phase === "error") return errorStatus(state);
-  if (accepted) return `Refine · 已接受 · ${viewShortcut} 查看（不调用模型）`;
+    ? `Refine · send pending · ${time} · draft kept`
+    : `Refine · done · ${time} · ${viewShortcut} view`;
+  if (state.phase === "error") return `${errorStatus(state)} · ${time}`;
+  if (accepted) return `Refine · accepted · ${accepted.elapsedSeconds ?? 0}s · ${viewShortcut} view`;
   return undefined;
 }
 
@@ -109,7 +110,6 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   let projectLabel = "";
   let projectWarnings: string[] = [];
   let generatingRequestId: number | undefined;
-  let startedAt = 0;
   let progressTimer: ReturnType<typeof setInterval> | undefined;
   let refreshPreview: (() => void) | undefined;
   let closePreview: (() => void) | undefined;
@@ -133,7 +133,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
 
       let projectText = "";
       if (request.project) {
-        const tree = config.projectContext.tree.enabled
+        // Use the selected history sent in this request, not session activity.
+        const tree = config.projectContext.tree.enabled && !request.historyText
           ? await collectTree(request.project.cwd, request.draft, config.projectContext.tree, signal)
           : { text: "", warnings: [] };
         if (signal.aborted) throw new Error("Context collection cancelled");
@@ -195,17 +196,17 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       pi.setSessionName(candidate.title);
       namedSessions.add(candidate.sessionId);
     } catch {
-      notify(ctx, "Prompt 已接受，但会话命名失败；现有名称未主动覆盖。", "warning");
+      notify(ctx, "Prompt accepted, but session naming failed. Existing name kept.", "warning");
     }
   }
 
   function contextLabel(): string {
-    if (!historySnapshot) return "上下文：尚未捕获";
-    const warning = projectWarnings.length ? `⚠ ${projectWarnings.length} 项上下文警告 · ` : "";
+    if (!historySnapshot) return "Context: not captured";
+    const warning = projectWarnings.length ? `⚠${projectWarnings.length} · ` : "";
     const history = !historySnapshot.messageCount
-      ? (projectLabel ? "无会话历史" : "仅草稿")
-      : `${historySnapshot.messageCount} 条 / ${historySnapshot.characterCount} 字符 · ${historySnapshot.latestAssistantIncluded ? "含最近 assistant 回复" : "无可用 assistant 回复"}${historySnapshot.truncated ? " · 已截断" : ""}`;
-    return `${warning}上下文：${history}${projectLabel ? ` · ${projectLabel}` : ""}`;
+      ? (projectLabel ? "No history" : "Draft only")
+      : `${historySnapshot.messageCount} msgs/${historySnapshot.characterCount} ch · ${historySnapshot.latestAssistantIncluded ? "asst" : "no asst"}${historySnapshot.truncated ? " · trimmed" : ""}`;
+    return `${warning}${history}${projectLabel ? ` · ${projectLabel}` : ""}`;
   }
 
   function updatePresentation(state: ControllerState): void {
@@ -216,13 +217,12 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     } else if (generatingRequestId !== state.requestId) {
       if (progressTimer) clearInterval(progressTimer);
       generatingRequestId = state.requestId;
-      startedAt = Date.now();
       progressTimer = setInterval(() => updatePresentation(controller.getState()), 1_000);
       progressTimer.unref?.();
     }
     const ctx = currentUiContext;
     if (ctx?.mode !== "tui") return;
-    ctx.ui.setStatus(STATUS_KEY, formatStatus(state, openHint, !!controller.getAccepted()));
+    ctx.ui.setStatus(STATUS_KEY, formatStatus(state, openHint, controller.getAccepted()));
     if (state.phase === "idle") {
       historySnapshot = undefined;
       projectLabel = "";
@@ -234,7 +234,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       ctx.ui.setWidget(STATUS_KEY, closePreview ? undefined : (_tui, theme) => ({
         render: (width) => renderSummary({
           state, candidateText, contextLabel: contextLabel(), openHint,
-          elapsedSeconds: Math.max(0, Math.floor((Date.now() - startedAt) / 1_000)),
+          elapsedSeconds: state.elapsedSeconds ?? 0,
           errorLabel: errorStatus(state),
         }, width, theme),
         invalidate() {},
@@ -482,7 +482,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const previousContext = { historySnapshot, projectLabel, projectWarnings };
     historySnapshot = history;
     const project = config.projectContext.enabled ? captureProjectContext(ctx, config.projectContext, draft) : undefined;
-    projectLabel = project ? `项目 ${project.instructionCount} 指令 / ${project.skillCount} 技能${config.projectContext.tree.enabled ? " / 有界 tree" : ""}` : "";
+    projectLabel = project ? `${project.instructionCount} rules/${project.skillCount} skills${config.projectContext.tree.enabled && !history.text ? " · tree" : ""}` : "";
     projectWarnings = project?.warnings ?? [];
     const result = controller.trigger({
       draft,
@@ -510,7 +510,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   async function confirmCurrentDraft(ctx: ExtensionContext, currentDraft: string, purpose: string): Promise<boolean> {
     return ctx.ui.confirm(
       purpose,
-      `此操作将覆盖主输入框。以下是确认时实际将被替换的草稿：\n---\n${currentDraft}\n---\n\n确认后若草稿或会话变化，本次操作仍会取消。`,
+      `Replace the main editor? Current draft:\n---\n${currentDraft}\n---\n\nCancelled if the draft or session changes during confirmation.`,
     );
   }
 
@@ -522,24 +522,24 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const currentDraft = ctx.ui.getEditorText();
     let confirmedOverwrite = false;
     if (currentDraft !== candidate.draft) {
-      void confirmCurrentDraft(ctx, currentDraft, "当前草稿已变化").then((confirmed) => {
+      void confirmCurrentDraft(ctx, currentDraft, "Draft changed").then((confirmed) => {
         if (!confirmed) return;
         if (!controller.isCandidateCurrent(token) || ctx.ui.getEditorText() !== currentDraft) {
-          notifyIfSameSession(token.sessionId, "确认后草稿、候选或会话已变化；未覆盖输入框。");
+          notifyIfSameSession(token.sessionId, "Draft, candidate or session changed. Editor unchanged.");
           return;
         }
         const applied = controller.acceptCandidate(token, currentDraft, true, (text) => ctx.ui.setEditorText(text));
         if (applied) {
-          notify(ctx, "候选已放入输入框，尚未发送。再次按快捷键只查看；按面板 r 才重新优化当前草稿。", "info");
+          notify(ctx, "Accepted into editor, not sent. Shortcut views; r refines again.", "info");
         }
-      }).catch(() => notifyIfSameSession(token.sessionId, "覆盖确认未完成；主输入框未修改。"));
+      }).catch(() => notifyIfSameSession(token.sessionId, "Confirmation incomplete. Editor unchanged."));
       return;
     }
     confirmedOverwrite = true;
     if (!controller.isCandidateCurrent(token) || ctx.ui.getEditorText() !== currentDraft) return;
     const applied = controller.acceptCandidate(token, currentDraft, confirmedOverwrite, (text) => ctx.ui.setEditorText(text));
     if (applied) {
-      notify(ctx, "候选已放入输入框，尚未发送。再次按快捷键只查看；按面板 r 才重新优化当前草稿。", "info");
+      notify(ctx, "Accepted into editor, not sent. Shortcut views; r refines again.", "info");
     }
   }
 
@@ -547,49 +547,49 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     if (!controller.isCandidateCurrent(token)) return;
     const candidate = controller.getCandidate();
     if (!candidate) return;
-    const edited = await ctx.ui.editor("微调优化结果（取消不修改候选）", candidate.text);
+    const edited = await ctx.ui.editor("Edit candidate (cancel keeps original)", candidate.text);
     if (edited === undefined) return;
     if (!controller.isCandidateCurrent(token)) {
-      notifyIfSameSession(token.sessionId, "微调期间候选或会话已变化；编辑未应用。");
+      notifyIfSameSession(token.sessionId, "Candidate or session changed. Edits not applied.");
       return;
     }
     if (edited.length > Math.max(config.maxDraftChars, config.maxOutputTokens * 32)) {
-      notify(ctx, "微调结果过长，候选保持不变。", "warning");
+      notify(ctx, "Edit too long. Candidate unchanged.", "warning");
       return;
     }
     if (!controller.updateCandidate(token, edited)) {
-      notify(ctx, "微调结果为空或候选已过期；原候选保持不变。", "warning");
+      notify(ctx, "Empty edit or stale candidate. Candidate unchanged.", "warning");
       return;
     }
-    notify(ctx, "候选已更新；主输入框未修改。", "info");
+    notify(ctx, "Candidate updated. Editor unchanged.", "info");
   }
 
   async function restoreDraft(ctx: ExtensionContext): Promise<void> {
     useContext(ctx);
     if (ctx.mode !== "tui") {
-      notify(ctx, "恢复输入框仅在 TUI 模式可用。", "warning");
+      notify(ctx, "Restore requires TUI mode.", "warning");
       return;
     }
     const token = controller.getRestoreToken();
     const snapshot = controller.getRestore();
     if (!token || !snapshot) {
-      notify(ctx, "没有可恢复的上一次接受操作。", "info");
+      notify(ctx, "Nothing to restore.", "info");
       return;
     }
     const currentDraft = ctx.ui.getEditorText();
     let confirmedOverwrite = false;
     if (currentDraft !== snapshot.applied) {
-      const confirmed = await confirmCurrentDraft(ctx, currentDraft, "主草稿在接受后已变化");
+      const confirmed = await confirmCurrentDraft(ctx, currentDraft, "Editor changed since acceptance");
       if (!confirmed) return;
       if (!controller.isRestoreCurrent(token) || ctx.ui.getEditorText() !== currentDraft) {
-        notifyIfSameSession(token.sessionId, "确认后草稿或会话已变化；未恢复。");
+        notifyIfSameSession(token.sessionId, "Draft or session changed. Restore cancelled.");
         return;
       }
       confirmedOverwrite = true;
     }
     if (!controller.isRestoreCurrent(token) || ctx.ui.getEditorText() !== currentDraft) return;
     if (controller.restoreDraft(token, currentDraft, confirmedOverwrite, (text) => ctx.ui.setEditorText(text))) {
-      notify(ctx, "已恢复接受前的主草稿；尚未发送。", "info");
+      notify(ctx, "Draft restored, not sent.", "info");
     }
   }
 
@@ -600,7 +600,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     if (!candidate) return;
     const send = controller.beginSend(token);
     if (!send) {
-      notify(ctx, "该候选已在等待提交确认；没有重复发送。", "warning");
+      notify(ctx, "Send already pending. Not resubmitted.", "warning");
       return;
     }
     try {
@@ -608,18 +608,18 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       if (busy) pi.sendUserMessage(send.text, { deliverAs: "followUp" });
       else pi.sendUserMessage(send.text);
       notify(ctx, busy
-        ? "发送请求已交给 Pi，作为 follow-up 排队；主输入框草稿不会被覆盖或清空。"
-        : "发送请求已交给 Pi；主输入框草稿不会被覆盖或清空。", "info");
+        ? "Queued as Pi follow-up. Editor draft kept."
+        : "Sent to Pi. Editor draft kept.", "info");
     } catch {
       controller.failSend(send.requestId);
-      notify(ctx, "Pi 未接受发送请求；候选已保留，可重试。", "error");
+      notify(ctx, "Pi rejected the send. Candidate kept; retry.", "error");
     }
   }
 
   async function showPreview(ctx: ExtensionContext): Promise<void> {
     useContext(ctx);
     if (ctx.mode !== "tui") {
-      notify(ctx, "结果预览仅在 TUI 模式可用。", "warning");
+      notify(ctx, "Preview requires TUI mode.", "warning");
       return;
     }
     if (closePreview) return; // One user-opened panel; never stack dialogs on repeated shortcuts.
@@ -643,8 +643,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             accepted: accepted ? { editorChanged: ctx.ui.getEditorText() !== accepted.text } : undefined,
             draftChanged: !!candidate && ctx.ui.getEditorText() !== candidate.draft,
             canRestore: !!controller.getRestore(),
-            contextLabel: accepted ? "上次接受结果 · 本次查看未调用模型" : contextLabel(), openHint,
-            elapsedSeconds: Math.max(0, Math.floor((Date.now() - startedAt) / 1_000)),
+            contextLabel: accepted ? "Accepted snapshot · no model call" : contextLabel(), openHint,
+            elapsedSeconds: displayed?.elapsedSeconds ?? state.elapsedSeconds ?? 0,
             errorLabel: errorStatus(state),
           };
         };
@@ -731,7 +731,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     dismiss: (ctx) => {
       useContext(ctx);
       controller.cancelAndDismiss();
-      notify(ctx, "优化任务和候选已忽略；主输入框未修改。", "info");
+      notify(ctx, "Refinement cancelled. Editor unchanged.", "info");
     },
     selectModel: (ctx) => selectModel(ctx),
     cycleModel: (ctx) => cycleModel(ctx),
