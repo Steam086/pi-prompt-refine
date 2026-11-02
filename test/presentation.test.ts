@@ -4,7 +4,7 @@ import { renderSummary, sanitizeTerminalText, type SummaryOptions } from "../src
 
 const options: SummaryOptions = {
   state: { phase: "ready", requestId: 1, pendingSend: false, model: { provider: "fake", id: "chat" } },
-  contextLabel: "2 msgs/100 ch · asst",
+  contextLabel: "2 msgs · 100 char · assistant",
   candidateText: "优化结果 😀 中文\n".repeat(100),
   openHint: "ctrl+\\",
   elapsedSeconds: 12,
@@ -34,7 +34,7 @@ describe("passive result summary", () => {
   });
 
   it.each([40, 80, 100])("uses compact English chrome without ellipses at %i columns", (width) => {
-    const contextLabel = "⚠1 · 7 msgs/2032 ch · asst · 3 rules   ·   10 skills";
+    const contextLabel = "⚠1 · 7 msgs · 2032 char · assistant · 3 rules · 10 skills";
     for (const phase of ["generating", "ready", "error"] as const) {
       const lines = renderSummary({ ...options, contextLabel, candidateText: "Refined prompt", state: { ...options.state, phase } }, width);
       const text = lines.join("\n");
@@ -53,8 +53,17 @@ describe("passive result summary", () => {
     });
     expect(lines[0]).toBe("─".repeat(80));
     expect(lines.at(-1)).toBe(lines[0]);
-    expect(lines[1]).toContain("Prompt Refine");
+    expect(lines[1]).toContain("[Prompt refine]");
     expect(colors).toContain("borderMuted");
+  });
+
+  it("aligns the background card with the workspace and keeps the shortcut concise", () => {
+    const lines = renderSummary({ ...options, state: { ...options.state, phase: "generating" } }, 80);
+    expect(lines[1]).toBe("  [Prompt refine] · ◌ Refining · 12s");
+    expect(lines[2]).toBe("  2 msgs · 100 char · assistant");
+    expect(lines).toContain("  Working in background. Keep editing.");
+    expect(lines.at(-2)).toBe("  ctrl+\\ View");
+    expect(lines.join("\n")).not.toMatch(/│|\/ actions/);
   });
 
   it("normalizes display-only CRLF and tabs without permitting cursor controls", () => {

@@ -22,7 +22,7 @@ export interface SummaryOptions {
   errorLabel?: string;
 }
 
-export function resultHeading(options: SummaryOptions, theme: PresentationTheme): string {
+export function resultHeading(options: SummaryOptions, theme: PresentationTheme, includeBrand = true): string {
   const { state } = options;
   const time = `${options.elapsedSeconds}s`;
   const label = state.phase === "generating" ? `◌ Refining · ${time}`
@@ -30,7 +30,8 @@ export function resultHeading(options: SummaryOptions, theme: PresentationTheme)
       : state.phase === "idle" ? "Refine"
         : state.pendingSend ? `◌ Send pending · ${time}` : `✓ Done · ${time}`;
   const color = state.phase === "error" ? "warning" : state.phase === "ready" && !state.pendingSend ? "success" : "accent";
-  return `${theme.fg(color, theme.bold(label))}  ${theme.fg("muted", "Prompt Refine")}`;
+  const status = theme.fg(color, theme.bold(label));
+  return includeBrand ? `${status} · ${theme.fg("muted", "Prompt Refine")}` : status;
 }
 
 /** Passive, height-bounded preview: no input handler, focus changes, or editor writes. */
@@ -39,7 +40,7 @@ export function renderSummary(options: SummaryOptions, width: number, theme: Pre
   const available = Math.min(width, READING_WIDTH);
   const inset = available >= 12 ? 2 : 0;
   const contentWidth = Math.max(1, available - inset);
-  const lines = [resultHeading(options, theme)];
+  const lines = [`${theme.fg("accent", theme.bold("[Prompt refine]"))} · ${resultHeading(options, theme, false)}`];
   lines.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(options.contextLabel), contentWidth, "")));
   lines.push("");
   if (options.state.phase === "ready" && options.candidateText) {
@@ -50,18 +51,19 @@ export function renderSummary(options: SummaryOptions, width: number, theme: Pre
     const message = options.state.phase === "error"
       ? options.errorLabel ?? "Request failed. Retry."
       : "Working in background. Keep editing.";
-    lines.push(theme.fg(options.state.phase === "error" ? "warning" : "text", sanitizeTerminalText(message)));
+    lines.push(...wrapTextWithAnsi(sanitizeTerminalText(message), contentWidth).slice(0, 2)
+      .map((line) => theme.fg(options.state.phase === "error" ? "warning" : "muted", line)));
   }
   const usageLabel = formatTokenUsage(options.state.usage);
   if (usageLabel && options.state.phase !== "generating") {
     lines.push(theme.fg("muted", truncateToWidth(usageLabel, contentWidth, "")));
   }
   lines.push("");
-  const hint = options.state.pendingSend ? "View · draft kept" : "View / actions";
-  lines.push(`${theme.fg("accent", theme.bold(sanitizeTerminalText(options.openHint)))}  ${theme.fg("muted", hint)}`);
+  const hint = options.state.pendingSend ? "View · draft kept" : "View";
+  lines.push(`${theme.fg("accent", theme.bold(sanitizeTerminalText(options.openHint)))} ${theme.fg("muted", hint)}`);
   const separator = theme.fg("borderMuted", "─".repeat(available));
-  const content = lines.map((line, index) => {
-    const prefix = inset ? (index >= 3 && index < lines.length - 2 ? `${theme.fg("borderMuted", "│")} ` : "  ") : "";
+  const content = lines.map((line) => {
+    const prefix = " ".repeat(inset);
     return prefix + truncateToWidth(line, contentWidth, "");
   });
   return [separator, ...content, separator];
