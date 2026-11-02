@@ -58,10 +58,10 @@ describe("host project resources", () => {
 
   it("distinguishes absent resources, opaque system prompts, malformed sections and read failures", () => {
     expect(resourcesFromPrompt("<cwd>\n/repo\n</cwd>").warnings).toEqual([]);
-    expect(resourcesFromPrompt("opaque custom prompt").warnings.join(" ")).toContain("未提供可识别");
-    expect(resourcesFromPrompt("<project_context>\nunknown custom format\n</project_context>").warnings.join(" ")).toContain("无法完整识别");
+    expect(resourcesFromPrompt("opaque custom prompt").warnings.join(" ")).toContain("did not provide recognizable project resources");
+    expect(resourcesFromPrompt("<project_context>\nunknown custom format\n</project_context>").warnings.join(" ")).toContain("unrecognized format");
     const snapshot = captureProjectContext({ getSystemPrompt() { throw new Error("unavailable"); } } as unknown as ExtensionContext, DEFAULT_CONFIG.projectContext, "draft");
-    expect(snapshot.warnings.join(" ")).toContain("无法获取");
+    expect(snapshot.warnings.join(" ")).toContain("Could not read Pi's loaded project");
   });
 
   it("keeps complete Markdown sections with line provenance and warns rather than silently head/tail truncating instructions", () => {
@@ -74,7 +74,7 @@ describe("host project resources", () => {
     expect(snapshot.text).toContain('"startLine":');
     expect(snapshot.text).not.toContain("x".repeat(100));
     const assembled = assembleProjectContext(snapshot, { text: "", warnings: [] }, config);
-    expect(assembled.warnings.join(" ")).toContain("项目指令未完整提供");
+    expect(assembled.warnings.join(" ")).toContain("Project instructions are incomplete");
     expect(assembled.text).toContain("CONTEXT WARNINGS");
   });
 
@@ -106,8 +106,8 @@ describe("host project resources", () => {
     }, config, "draft");
     const assembled = assembleProjectContext(snapshot, { text: "t".repeat(1000), warnings: [] }, config);
     expect(assembled.text.length).toBeLessThanOrEqual(512);
-    expect(assembled.warnings.join(" ")).toContain("Skills 目录未完整提供");
-    expect(assembled.warnings.join(" ")).toContain("项目上下文总预算");
+    expect(assembled.warnings.join(" ")).toContain("skills catalog is incomplete");
+    expect(assembled.warnings.join(" ")).toContain("total project context budget was exceeded");
     expect(assembled.text).not.toContain("a".repeat(10));
     const smallSkills = formatProjectResources({ skills: [{ name: "huge", description: "a".repeat(2000) }, { name: "small", description: "Read PDFs" }] }, { ...config, maxChars: 1024 }, "draft");
     expect(smallSkills.text).toContain("Read PDFs");
@@ -307,19 +307,19 @@ describe("bounded asynchronous project tree", () => {
     expect(result.text).toContain("target.ts");
     expect(result.text).toContain("package.json");
     expect(result.text.length).toBeLessThanOrEqual(256);
-    expect(result.warnings.join(" ")).toContain("条目上限");
+    expect(result.warnings.join(" ")).toContain("entry limit");
     const tiny = await collectTree(dir, "draft", { ...DEFAULT_CONFIG.projectContext.tree, maxChars: 128, timeoutMs: 2000 }, new AbortController().signal);
     expect(tiny.text.length).toBeLessThanOrEqual(128);
-    expect(tiny.warnings.join(" ")).toContain("字符预算");
+    expect(tiny.warnings.join(" ")).toContain("character budget");
   });
 
   it("stops enumeration at its scan cap and handles missing directories", async () => {
     const dir = await fixture();
     await Promise.all(Array.from({ length: 10 }, (_, index) => writeFile(join(dir, `${index}.txt`), "")));
     const result = await collectTree(dir, "draft", { ...DEFAULT_CONFIG.projectContext.tree, maxScannedEntries: 2, timeoutMs: 2000 }, new AbortController().signal);
-    expect(result.warnings.join(" ")).toContain("扫描条目上限");
+    expect(result.warnings.join(" ")).toContain("scan entry limit");
     const missing = await collectTree(join(dir, "missing"), "draft", DEFAULT_CONFIG.projectContext.tree, new AbortController().signal);
-    expect(missing.warnings.join(" ")).toContain("读取失败");
+    expect(missing.warnings.join(" ")).toContain("directory could not be read");
   });
 
   it("applies inherited and nested ignore rules including negation from a subdirectory", async () => {
@@ -353,7 +353,7 @@ describe("bounded asynchronous project tree", () => {
     const pending = collectTree(dir, "draft", { ...DEFAULT_CONFIG.projectContext.tree, timeoutMs: 10 }, new AbortController().signal);
     vi.advanceTimersByTime(10);
     const result = await pending;
-    expect(result.warnings.join(" ")).toContain("时间预算");
+    expect(result.warnings.join(" ")).toContain("time budget");
     expect(vi.getTimerCount()).toBe(0);
   });
 });

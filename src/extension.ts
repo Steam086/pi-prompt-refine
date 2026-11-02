@@ -40,8 +40,8 @@ function effectiveThinkingLevel(model: Model<Api>, override: ModelThinkingLevel 
 }
 
 function thinkingSource(override: ModelThinkingLevel | undefined, sessionLevel: ModelThinkingLevel | undefined): string {
-  if (override !== undefined) return "扩展设置";
-  return sessionLevel === undefined ? "默认 medium" : "继承当前 session";
+  if (override !== undefined) return "Extension setting";
+  return sessionLevel === undefined ? "Default (medium)" : "Inherited from current session";
 }
 
 /** Availability/authentication is owned by Pi; this only searches and labels its chat models. */
@@ -58,7 +58,7 @@ export function modelPickerItems(models: Model<Api>[], query: string, selected?:
       const isSelected = selected && sameModel(model, selected);
       return {
         value: identity,
-        label: `${identity}${model.reasoning ? " [thinking]" : ""}${isSelected ? " (当前)" : ""}`,
+        label: `${identity}${model.reasoning ? " [thinking]" : ""}${isSelected ? " (current)" : ""}`,
         description: model.name,
       };
     });
@@ -257,7 +257,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
 
   async function persistConfig(ctx: ExtensionContext): Promise<void> {
     if (!configWritable) {
-      notify(ctx, "配置文件有错误，未覆盖原文件；本次设置仅在当前进程有效。请先修复配置并 /reload。", "warning");
+      notify(ctx, "The configuration file contains errors and was not overwritten. This setting is only effective for the current process. Fix the configuration and /reload.", "warning");
       return;
     }
     const snapshot = structuredClone(config);
@@ -266,7 +266,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     try {
       await write;
     } catch {
-      notifyCurrent("设置本次有效，但写入 prompt-refine.json 失败，未能持久化。", "warning");
+      notifyCurrent("This setting is effective now, but writing prompt-refine.json failed; it was not persisted.", "warning");
     }
   }
 
@@ -277,13 +277,13 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   async function selectModel(ctx: ExtensionContext): Promise<void> {
     useContext(ctx);
     if (ctx.mode !== "tui") {
-      notify(ctx, "优化模型选择仅在 TUI 模式可用。", "warning");
+      notify(ctx, "Optimizer model selection is only available in TUI mode.", "warning");
       return;
     }
 
     const available = registeredModels(ctx);
     if (available.length === 0) {
-      notify(ctx, "当前没有可用于文本生成的已授权模型；请先在 Pi 中配置模型/认证。", "warning");
+      notify(ctx, "No authorized text-generation models are available. Configure a model and authentication in Pi first.", "warning");
       return;
     }
 
@@ -302,11 +302,11 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       const highlightedModel = (key = list?.getSelectedItem()?.value): Model<Api> | undefined =>
         available.find((candidate) => displayModel(modelRef(candidate)) === key);
       const statusFor = (model: Model<Api> | undefined): string => {
-        if (!model) return "思考强度：未选中模型";
+        if (!model) return "Thinking level: no model selected";
         const levels = getSupportedThinkingLevels(model);
-        if (levels.length === 1 && levels[0] === "off") return "思考强度：此模型不支持";
+        if (levels.length === 1 && levels[0] === "off") return "Thinking level: not supported by this model";
         const level = effectiveThinkingLevel(model, thinkingOverride, ctx.thinkingLevel);
-        return `思考强度：${level} · ${thinkingSource(thinkingOverride, ctx.thinkingLevel)}`;
+        return `Thinking level: ${level} · ${thinkingSource(thinkingOverride, ctx.thinkingLevel)}`;
       };
       const updateThinkingStatus = (model?: Model<Api>) => {
         thinkingStatus?.setText(theme.fg("muted", statusFor(model ?? highlightedModel())));
@@ -314,9 +314,9 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       const rebuild = () => {
         container.clear();
         container.addChild(new DynamicBorder((text) => theme.fg("borderMuted", text)));
-        container.addChild(new Text(theme.fg("accent", theme.bold("选择优化模型")), 1, 0));
-        container.addChild(new Text(theme.fg("muted", "仅用于 Prompt Refine，不改变主会话模型或 thinking"), 1, 0));
-        container.addChild(new Text(`搜索：${query || theme.fg("muted", "provider/model、名称或 thinking")}`, 1, 1));
+        container.addChild(new Text(theme.fg("accent", theme.bold("Choose optimizer model")), 1, 0));
+        container.addChild(new Text(theme.fg("muted", "Only used by Prompt Refine; does not change the main session model or its thinking settings"), 1, 0));
+        container.addChild(new Text(`Search: ${query || theme.fg("muted", "provider/model, name, or thinking")}`, 1, 1));
         const items = modelPickerItems(available, query, controller.getModel());
         list = new SelectList(items, Math.min(10, Math.max(1, items.length)), {
           selectedPrefix: (text) => theme.fg("accent", text),
@@ -337,7 +337,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         container.addChild(list);
         thinkingStatus = new Text(theme.fg("muted", statusFor(highlightedModel())), 1, 0);
         container.addChild(thinkingStatus);
-        container.addChild(new Text(theme.fg("muted", `输入搜索 · ↑↓ 选择 · ${cycleThinkingKeys || "thinking-cycle 快捷键已禁用"} 调整思考强度 · Enter 确认 · Esc 取消`), 1, 0));
+        container.addChild(new Text(theme.fg("muted", `Type to search · ↑↓ Select · ${cycleThinkingKeys || "thinking-cycle shortcut disabled"} to adjust thinking · Enter Confirm · Esc Cancel`), 1, 0));
         container.addChild(new DynamicBorder((text) => theme.fg("borderMuted", text)));
       };
       rebuild();
@@ -386,12 +386,12 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
 
     if (!selection) return;
     if (controller.getGeneration() !== startGeneration || controller.getSessionId() !== startSessionId) {
-      notifyIfSameSession(startSessionId, "会话或结果在模型选择器打开期间已变化；未应用旧选择。");
+      notifyIfSameSession(startSessionId, "The session or result changed while the model picker was open; the previous selection was not applied.");
       return;
     }
     const model = available.find((candidate) => displayModel(modelRef(candidate)) === selection.modelKey);
     if (!model) {
-      notify(ctx, "所选模型已不可用；请重新打开模型选择器。", "warning");
+      notify(ctx, "The selected model is no longer available; reopen the model picker.", "warning");
       return;
     }
 
@@ -404,27 +404,27 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
     if (!changed) {
       const level = effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel);
-      notify(ctx, `${displayModel(selected)} 已是当前优化模型；思考强度 ${level}（${thinkingSource(config.thinkingLevel, ctx.thinkingLevel)}）。`, "info");
+      notify(ctx, `${displayModel(selected)} is already the current optimizer model; thinking level: ${level} (${thinkingSource(config.thinkingLevel, ctx.thinkingLevel)}).`, "info");
       return;
     }
     await persistConfig(ctx);
     const level = effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel);
     const source = thinkingSource(config.thinkingLevel, ctx.thinkingLevel);
-    const thinking = getSupportedThinkingLevels(model).length === 1 ? "模型不支持" : `${level}（${source}）`;
-    notifyCurrent(`优化模型已设为 ${displayModel(selected)}；思考强度 ${thinking}；主会话未改变。`, "info");
+    const thinking = getSupportedThinkingLevels(model).length === 1 ? "not supported by this model" : `${level} (${source})`;
+    notifyCurrent(`Optimizer model set to ${displayModel(selected)}; thinking level: ${thinking}; main session unchanged.`, "info");
   }
 
   async function cycleModel(ctx: ExtensionContext): Promise<void> {
     useContext(ctx);
     if (ctx.mode !== "tui") {
-      notify(ctx, "常用优化模型循环仅在 TUI 模式可用。", "warning");
+      notify(ctx, "Favorite model cycling is only available in TUI mode.", "warning");
       return;
     }
     const available = registeredModels(ctx);
     const byKey = new Map(available.map((model) => [displayModel(modelRef(model)), model]));
     const usable = config.favorites.filter((favorite) => byKey.has(displayModel(favorite)));
     if (usable.length === 0) {
-      notify(ctx, "收藏列表中没有当前可用的文本生成模型；请编辑 prompt-refine.json 的 favorites。", "warning");
+      notify(ctx, "No available text-generation models are in favorites; edit the favorites list in prompt-refine.json.", "warning");
       return;
     }
     const current = controller.getModel();
@@ -432,18 +432,18 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const next = usable[(currentIndex + 1) % usable.length];
     if (!next) return;
     if (!controller.setModel(next)) {
-      notify(ctx, `收藏循环仅找到当前模型 ${displayModel(next)}。`, "info");
+      notify(ctx, `Favorites contain only the current model ${displayModel(next)}.`, "info");
       return;
     }
     config.model = { ...next };
     await persistConfig(ctx);
-    notifyCurrent(`优化模型已切换为 ${displayModel(next)}；主会话模型未改变。`, "info");
+    notifyCurrent(`Optimizer model switched to ${displayModel(next)}; the main session model is unchanged.`, "info");
   }
 
   function triggerOptimize(ctx: ExtensionContext, force = false, suppliedDraft?: string): void {
     useContext(ctx);
     if (ctx.mode !== "tui") {
-      notify(ctx, "后台 Prompt 优化仅在 TUI 模式可用；未发送模型请求。", "warning");
+      notify(ctx, "Background prompt refinement is only available in TUI mode; no model request was sent.", "warning");
       return;
     }
     const draft = suppliedDraft ?? ctx.ui.getEditorText();
@@ -451,22 +451,22 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     // available for retry/accept/restore, but never overwrite another draft.
     if (suppliedDraft !== undefined && !ctx.ui.getEditorText()) ctx.ui.setEditorText(draft);
     if (!draft.trim()) {
-      notify(ctx, "输入框为空，没有发送优化请求。", "info");
+      notify(ctx, "The editor is empty; no refinement request was sent.", "info");
       return;
     }
     if (draft.length > config.maxDraftChars) {
-      notify(ctx, `草稿超过 ${config.maxDraftChars} 个字符；未发送请求，已有结果保留。`, "warning");
+      notify(ctx, `The draft exceeds ${config.maxDraftChars} characters; no request was sent, and the existing result was kept.`, "warning");
       return;
     }
     const selected = controller.getModel();
     if (!selected) {
-      notify(ctx, "尚未配置优化模型；使用 /refine model 先选择一个文本生成模型。", "warning");
+      notify(ctx, "No optimizer model is configured; use /refine model to select a text-generation model first.", "warning");
       return;
     }
     const model = ctx.modelRegistry.find(selected.provider, selected.id);
     const available = ctx.modelRegistry.getAvailable().some((candidate) => sameModel(candidate, selected));
     if (!model || !available) {
-      notify(ctx, `已配置的优化模型 ${displayModel(selected)} 当前不存在或不可用；没有自动切换模型。`, "warning");
+      notify(ctx, `The configured optimizer model ${displayModel(selected)} is missing or unavailable; no automatic model switch was made.`, "warning");
       return;
     }
 
@@ -497,10 +497,10 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     if (result.kind !== "started") {
       ({ historySnapshot, projectLabel, projectWarnings } = previousContext);
     }
-    if (result.kind === "empty") notify(ctx, "输入框为空，没有发送优化请求。", "info");
-    else if (result.kind === "too-long") notify(ctx, `草稿超过 ${config.maxDraftChars} 个字符；未发送请求，请缩短后重试。`, "warning");
+    if (result.kind === "empty") notify(ctx, "The editor is empty; no refinement request was sent.", "info");
+    else if (result.kind === "too-long") notify(ctx, `The draft exceeds ${config.maxDraftChars} characters; no request was sent. Shorten it and try again.`, "warning");
     else if (result.kind === "duplicate" || result.kind === "ready") {
-      void showPreview(ctx).catch(() => notifyCurrent("优化面板未能打开；主草稿未修改。", "warning"));
+      void showPreview(ctx).catch(() => notifyCurrent("Could not open the refinement panel; the main draft was not changed.", "warning"));
     }
     else if (result.kind === "started") {
       // A synchronously completed adapter is still handled without opening any UI.
@@ -885,7 +885,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     canNameSession(ctx);
     controller.setSession(ctx.sessionManager.getSessionId());
     for (const warning of loaded.warnings) notify(ctx, warning, "warning");
-    if (loaded.shortcutsMigrated) notify(ctx, "Prompt Refine 旧默认键位已迁移为 Control+\\；原配置文件未改写，自定义键位不受影响。", "info");
+    if (loaded.shortcutsMigrated) notify(ctx, "Prompt Refine legacy default shortcuts were migrated to Control+\\; the original configuration file was not rewritten, and custom shortcuts are unchanged.", "info");
   });
   pi.on("session_before_tree", (_event, ctx) => {
     currentUiContext = ctx;

@@ -591,8 +591,8 @@ describe("project context injection", () => {
     const text = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
     expect(text).toContain("CONTEXT WARNINGS");
     expect(text).toContain('"complete":false');
-    expect(harness.notifications.join(" ")).toContain("项目指令未完整提供");
-    expect(harness.notifications.join(" ")).toContain("Skills 目录未完整提供");
+    expect(harness.notifications.join(" ")).toContain("Project instructions are incomplete");
+    expect(harness.notifications.join(" ")).toContain("skills catalog is incomplete");
     expect(harness.widgetLines().join("\n")).toContain("⚠2");
     expect(harness.customCalls()).toBe(0);
   });
@@ -633,7 +633,7 @@ describe("optimizer model picker", () => {
   it("keeps both reasoning and ordinary models when no search is entered", () => {
     const items = modelPickerItems([thinking, plain], "", thinking);
     expect(items.map((item) => item.value)).toEqual(["fake-provider/reasoner", "other/plain"]);
-    expect(items[0]?.label).toBe("fake-provider/reasoner [thinking] (当前)");
+    expect(items[0]?.label).toBe("fake-provider/reasoner [thinking] (current)");
     expect(items[1]?.label).toBe("other/plain");
   });
 
@@ -1206,7 +1206,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await harness.command("model", harness.context);
     const stored = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8")) as RefineConfig;
     expect(stored.thinkingLevel).toBe("high");
-    expect(harness.notifications.join(" ")).toContain("思考强度 high（扩展设置）");
+    expect(harness.notifications.join(" ")).toContain("thinking level: high (Extension setting)");
 
     await trigger(harness);
     expect((harness.complete.mock.calls[0] as any[])[2]).toMatchObject({ reasoning: "high" });
@@ -1216,8 +1216,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const harness = await makeHarness();
     harness.setCustomAction("\x1b");
     await harness.command("model", harness.context);
-    expect(harness.panelLines().join("\n")).toContain("选择优化模型");
-    expect(harness.panelLines().join("\n")).toContain("不改变主会话模型");
+    expect(harness.panelLines().join("\n")).toContain("Choose optimizer model");
+    expect(harness.panelLines().join("\n")).toContain("does not change the main session model");
     for (const { width, lines } of harness.renderedWidths) {
       for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }
@@ -1229,14 +1229,14 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const unconfigured = await makeHarness({ configureModel: false });
     await trigger(unconfigured);
     expect(unconfigured.complete).not.toHaveBeenCalled();
-    expect(unconfigured.notifications.join(" ")).toContain("尚未配置优化模型");
+    expect(unconfigured.notifications.join(" ")).toContain("No optimizer model is configured");
 
     const unavailable = await makeHarness({ noAvailableModels: true });
     await trigger(unavailable);
     expect(unavailable.complete).not.toHaveBeenCalled();
-    expect(unavailable.notifications.join(" ")).toContain("当前不存在或不可用");
+    expect(unavailable.notifications.join(" ")).toContain("is missing or unavailable");
     await shortcut(unavailable, "f5")(unavailable.context);
-    expect(unavailable.notifications.join(" ")).toContain("当前没有可用于文本生成的已授权模型");
+    expect(unavailable.notifications.join(" ")).toContain("No authorized text-generation models are available");
   });
 
   it("runs the optimizer in the background without writing the editor or session", async () => {
