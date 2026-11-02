@@ -1,8 +1,9 @@
 import { Markdown, ScrollView, Text, truncateToWidth, wrapTextWithAnsi, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { keyHintGrid, type KeyHint } from "./key-hints.js";
+import type { KeyHint } from "./key-hints.js";
+import { fittingHints, panelFrame, panelLayout } from "./panel-layout.js";
 import { formatTokenUsage } from "./usage.js";
-import { READING_WIDTH, resultHeading, sanitizeTerminalText, type SummaryOptions } from "./presentation.js";
+import { resultHeading, sanitizeTerminalText, type SummaryOptions } from "./presentation.js";
 
 export interface PreviewOptions extends SummaryOptions {
   draft?: string;
@@ -12,6 +13,7 @@ export interface PreviewOptions extends SummaryOptions {
   draftChanged?: boolean;
   /** Pending metadata, never part of the editable prompt or an accepted snapshot. */
   sessionTitle?: string;
+  notice?: string;
 }
 
 type PreviewTheme = Pick<Theme, "fg" | "bold" | "italic" | "underline" | "strikethrough">;
@@ -58,10 +60,14 @@ export class PreviewPanel implements Component {
 
   update(options: PreviewOptions): void {
     const changed = options.state.requestId !== this.options.state.requestId || options.candidateText !== this.options.candidateText;
+    const textChanged = options.candidateText !== this.options.candidateText;
     this.options = options;
-    this.rebuildDocument();
+    if (textChanged) this.rebuildDocument();
+    else this.cachedBody = undefined;
     if (changed) this.scroll.scrollToStart();
   }
+
+  setNotice(notice: string): void { this.options = { ...this.options, notice }; }
 
   toggleOriginal(): void {
     if (this.options.draft === undefined) return;
@@ -133,6 +139,9 @@ export class PreviewPanel implements Component {
       helpLine(["q", "Back"], ["?", "Hide help"]);
       paragraph("Enter won't send", "muted");
       if (!options.canRestore) paragraph("Nothing to restore.", "muted");
+      const model = options.state.model;
+      paragraph(model ? `Model: ${model.provider}/${model.id}` : "No model", "muted");
+      paragraph(options.contextLabel, "muted");
       lines.push("");
     }
     if (options.candidateText !== undefined) {
@@ -186,44 +195,33 @@ export class PreviewPanel implements Component {
   render(width: number): string[] {
     if (width < 1) return [];
     const { theme, options } = this;
-    const panelWidth = Math.min(width, READING_WIDTH);
-    const inset = panelWidth >= 16 ? 2 : 0;
-    const innerWidth = Math.max(1, panelWidth - inset * 2);
-    const height = Math.max(1, Math.min(34, this.rows() - 4));
-    const compact = height < 12;
+    const layout = panelLayout(width, this.rows());
+    const { innerWidth, bodyHeight } = layout;
     const heading = options.accepted
       ? `${theme.fg("success", theme.bold(`✓ Accepted · ${options.elapsedSeconds}s`))}  ${theme.fg("muted", "Prompt Refine")}`
       : resultHeading(options, theme);
     const header = [truncateToWidth(`${theme.fg("accent", theme.bold("Main"))}  ${heading}`, innerWidth, "")];
-    if (!compact) {
-      const model = options.state.model;
-      header.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(model ? `${model.provider}/${model.id}` : "No model"), innerWidth, "")));
-      header.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(options.contextLabel), innerWidth, "")), "");
-    }
+    const model = options.state.model;
+    header.push(theme.fg("muted", sanitizeTerminalText(options.notice ?? `${model ? `${model.provider}/${model.id}` : "No model"} · ${options.contextLabel}`)));
     const ready = options.candidateText !== undefined;
     const primary: KeyHint[] = options.accepted
       ? [["r", "Refine draft"], ...(options.canRestore ? [["z", "Restore"] as KeyHint] : [])]
       : ready
         ? [["a", "Accept"], ["e", "Edit"], options.state.pendingSend ? ["", "Send pending"] : ["s", "Send"], ["x", "Cancel"]]
         : [["r", options.state.phase === "generating" ? "Restart" : "Refine"], ["m", "Model"], ["x", options.state.phase === "generating" ? "Break" : "Cancel"]];
+    const hint = ([key, label]: KeyHint) => `${theme.fg("accent", theme.bold(key))}${key ? " " : ""}${label}`;
     const secondary: KeyHint[] = [
-      ...(ready && !options.accepted ? [["r", "Refine"] as KeyHint] : []),
+      ["q", "Back"], ["?", this.helpVisible ? "Hide help" : "Help"], ["i", "Input"], ["→", innerWidth < 30 ? "Ctx" : "Context"],
       ...(ready ? [["o", this.originalVisible ? "Hide original" : "Original"] as KeyHint] : []),
-      ["?", this.helpVisible ? "Hide help" : "Help"], ["q", "Back"],
     ];
     const footer = [
-      ...keyHintGrid(primary, innerWidth, theme),
-      ...keyHintGrid(secondary, innerWidth, theme),
-      ...keyHintGrid([["i", "Input"], ["→", "Context"]], innerWidth, theme),
+      fittingHints([...primary.map(hint), "Enter won't send"], innerWidth),
+      fittingHints(secondary.map(hint), innerWidth),
     ];
-    const navigation = (label: string) => theme.fg("muted", `↑↓ / PgUp/PgDn   ${label} · Enter won't send`);
-    if (!compact) footer.push(navigation("Scroll"));
-    const border = theme.fg("borderMuted", "─".repeat(innerWidth));
+    if (layout.footerHeight === 1) footer[0] = fittingHints(["q Back", "i Input", "→ Ctx", "? Help"], innerWidth);
     // ScrollView owns offsets/clamping. Explicit viewport composition also works in regular
     // mode, where ScrollView.render() alone returns the entire document without clipping.
     const body = this.scroll.render(innerWidth);
-    const chrome = header.length + footer.length + (compact ? 0 : 2);
-    const bodyHeight = Math.max(1, height - chrome);
     this.scroll.updateLayout(body.length, bodyHeight, this.requestRender);
     if (this.revealOriginal) {
       this.scroll.scrollTo(this.originalLine);
@@ -231,13 +229,10 @@ export class PreviewPanel implements Component {
     }
     const start = this.scroll.scrollTop;
     const visible = body.slice(start, start + bodyHeight);
-    // Reserve the viewport even for short results so navigation never changes panel height.
-    while (visible.length < bodyHeight) visible.push("");
-    if (body.length > bodyHeight && !compact) {
-      footer[footer.length - 1] = navigation(`Scroll ${start + 1}–${Math.min(body.length, start + bodyHeight)}/${body.length}`);
+    if (body.length > bodyHeight) {
+      const position = `↑↓ ${start + 1}–${Math.min(body.length, start + bodyHeight)}/${body.length}`;
+      header[1] = theme.fg("muted", sanitizeTerminalText(`${position} · ${options.notice ?? options.contextLabel}`));
     }
-    const lines = [...header, ...visible, ...(!compact ? ["", border] : []), ...footer];
-    // Tiny terminals degrade to a bounded view instead of exceeding the host viewport.
-    return lines.slice(0, height).map((line) => " ".repeat(inset) + truncateToWidth(line, innerWidth, ""));
+    return panelFrame(layout, header, visible, footer, (text) => theme.fg("borderMuted", text));
   }
 }

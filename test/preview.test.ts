@@ -4,6 +4,7 @@ import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { PreviewPanel, type PreviewOptions } from "../src/preview.js";
 import { READING_WIDTH } from "../src/presentation.js";
+import { panelLayout } from "../src/panel-layout.js";
 
 const identity = (text: string) => text;
 const plainTheme = { fg: (_color: string, text: string) => text, bold: identity, italic: identity, underline: identity, strikethrough: identity };
@@ -25,7 +26,7 @@ describe("result reading panel", () => {
   it.each([8, 20, 40])("reserves a stable viewport across content and help at %i rows", (rows) => {
     const panel = create({ candidateText: undefined }, rows);
     for (const width of [12, 40, 100]) {
-      const height = Math.max(1, Math.min(34, rows - 4));
+      const height = panelLayout(width, rows).height;
       expect(panel.render(width)).toHaveLength(height);
       panel.toggleHelp();
       expect(panel.render(width)).toHaveLength(height);
@@ -90,16 +91,14 @@ describe("result reading panel", () => {
     expect(panel.render(100).join("\n")).toContain("a/e/s disabled");
   });
 
-  it("uses fixed tab stops for action rows and highlights the current page", () => {
+  it("reserves only two action rows and highlights the current page", () => {
     const panel = create({ candidateText: undefined, state: { ...options.state, phase: "idle" } });
     const lines = panel.render(100);
     expect(lines[0]).toContain("Main");
     const footer = lines.slice(lines.findIndex((line) => line.includes("──")) + 1);
     expect(footer).toEqual([
-      "  r Refine              m Model               x Cancel",
-      "  ? Help                q Back",
-      "  i Input               → Context",
-      "  ↑↓ / PgUp/PgDn   Scroll · Enter won't send",
+      "  r Refine · m Model · x Cancel · Enter won't send",
+      "  q Back · ? Help · i Input · → Context",
     ]);
     const theme = getThemeByName("dark")!;
     const styled = new PreviewPanel(options, theme, () => 40, vi.fn()).render(100);
@@ -190,6 +189,15 @@ describe("result reading panel", () => {
     panel.invalidate();
     expect(panel.render(100)).toEqual(before);
     for (const line of before) expect(visibleWidth(line)).toBeLessThanOrEqual(100);
+  });
+
+  it("sanitizes context in the scrolling header and exposes full metadata in help", () => {
+    const panel = create({ candidateText: "long result\n".repeat(100), contextLabel: "context\x1b[2J\x07" });
+    expect(panel.render(100).join("\n")).not.toMatch(/[\x00-\x09\x0b-\x1f\x7f-\x9f]/);
+    panel.toggleHelp();
+    panel.render(100);
+    panel.scrollBy(10);
+    expect(panel.render(100).join("\n")).toContain("Model: openai-codex/example-model");
   });
 
   it("rebuilds cached body styles when the active theme changes", () => {
