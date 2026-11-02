@@ -113,57 +113,57 @@ export class PreviewPanel implements Component {
       lines.push("");
     }
     if (this.helpVisible) {
-      paragraph("操作说明", "muted");
-      if (options.accepted) paragraph("已接受结果仅供查看；a/e/s 不操作历史快照。\n请返回主输入框继续编辑或发送当前草稿。");
-      else paragraph("a 接受到输入框（不发送） · e 微调候选\ns 发送候选（忙时 follow-up，保留主草稿）");
-      paragraph("x/d 取消任务与候选 · z 恢复上次接受前的草稿\nr 重新优化当前输入框（调用模型）\nm 选择模型 · c 收藏循环\no 展开/收起原稿 · v 排版/纯文本\n↑↓ 逐行 · PgUp/PgDn 翻页\nq/Esc 返回 · Enter 不发送 · ? 收起帮助");
-      if (!options.canRestore) paragraph("暂无可恢复的接受记录。", "muted");
+      paragraph("Keys", "muted");
+      if (options.accepted) paragraph("Read-only snapshot; a/e/s disabled.\nEdit or send from the main editor.");
+      else paragraph("a Accept into editor (no send) · e Edit candidate\ns Send (follow-up if busy; draft kept)");
+      paragraph("x/d Cancel · z Restore draft before acceptance\nr Refine current draft (model call)\nm Model · c Cycle favorites\no Original · v Formatted/source\n↑↓ Scroll · PgUp/PgDn Page\nq/Esc Back · Enter won't send · ? Hide help");
+      if (!options.canRestore) paragraph("Nothing to restore.", "muted");
       lines.push("");
     }
     if (options.candidateText !== undefined) {
       if (options.accepted) {
         paragraph(options.accepted.editorChanged
-          ? "主输入框已修改。下方是上次接受的结果，不包含后续微调。"
-          : "结果已在主输入框。查看不会调用模型，也不会覆盖草稿。", options.accepted.editorChanged ? "warning" : "muted");
-        paragraph("q 返回继续编辑 · r 使用当前输入框重新优化", "muted");
+          ? "Editor changed; this snapshot excludes later edits."
+          : "In editor. Viewing makes no model call or draft changes.", options.accepted.editorChanged ? "warning" : "muted");
+        paragraph("q Back to editor · r Refine current draft", "muted");
         lines.push("");
       } else if (options.draftChanged) {
-        paragraph("主输入框已修改；此候选仍基于触发时草稿。", "warning");
+        paragraph("Editor changed; candidate uses the original draft.", "warning");
         lines.push("");
       }
       if (!options.accepted && options.sessionTitle) {
-        paragraph(`接受后会话名称：${options.sessionTitle}`, "muted");
+        paragraph(`Title on accept: ${options.sessionTitle}`, "muted");
         lines.push("");
       }
-      const title = options.accepted ? "上次接受的 Prompt · 只读快照" : "优化后的 Prompt";
-      lines.push(theme.fg("accent", theme.bold(`${title}${this.sourceVisible ? " · 纯文本" : ""}`)), "");
+      const title = options.accepted ? "Accepted prompt · read-only" : "Refined prompt";
+      lines.push(theme.fg("accent", theme.bold(`${title}${this.sourceVisible ? " · source" : ""}`)), "");
       lines.push(...this.document.render(width));
       if (this.originalVisible && options.draft !== undefined) {
         this.originalLine = lines.length;
         lines.push("", theme.fg("borderMuted", "─".repeat(width)), "");
-        paragraph("原始草稿 · 触发时", "muted");
+        paragraph("Original draft · at request time", "muted");
         lines.push("");
         // Keep the comparison literal and legible, rather than dimming its body.
         lines.push(...new Text(sanitizeTerminalText(options.draft), 0, 0).render(width));
       }
     } else if (options.state.phase === "generating") {
-      paragraph("正在整理你的 Prompt…");
+      paragraph("Refining your prompt.");
       lines.push("");
-      paragraph("完成后会在这里显示结果。\nEsc 返回继续编辑，不会取消后台任务。", "muted");
+      paragraph("Results appear here. Esc returns to editing; work continues.", "muted");
     } else if (options.state.phase === "error") {
-      paragraph(options.errorLabel ?? "请求失败，请重试。", "warning");
+      paragraph(options.errorLabel ?? "Request failed. Retry.", "warning");
       lines.push("");
-      paragraph("原始草稿未修改。按 r 重试，或 m 更换模型。", "muted");
+      paragraph("Draft unchanged. r Retry · m Model", "muted");
     } else {
-      paragraph("当前没有可预览的结果。");
+      paragraph("No result yet.");
       lines.push("");
-      paragraph("按 r 优化当前草稿，或 m 选择模型。", "muted");
+      paragraph("r Refine current draft · m Model", "muted");
     }
     if (options.state.pendingSend) {
       lines.push("");
-      paragraph("发送待 Pi 确认；主草稿保留，请勿重复提交。", "warning");
+      paragraph("Send pending Pi confirmation. Draft kept; don't resubmit.", "warning");
     }
-    const bounded = lines.map((line) => truncateToWidth(line, width));
+    const bounded = lines.map((line) => truncateToWidth(line, width, ""));
     this.cachedBody = { width, lines: bounded };
     return bounded;
   }
@@ -177,29 +177,29 @@ export class PreviewPanel implements Component {
     const height = Math.max(1, Math.min(34, this.rows() - 4));
     const compact = height < 12;
     const heading = options.accepted
-      ? `${theme.fg("success", theme.bold("✓ 已接受到输入框"))}  ${theme.fg("muted", "Prompt Refine")}`
+      ? `${theme.fg("success", theme.bold(`✓ Accepted · ${options.elapsedSeconds}s`))}  ${theme.fg("muted", "Prompt Refine")}`
       : resultHeading(options, theme);
-    const header = [truncateToWidth(heading, innerWidth)];
+    const header = [truncateToWidth(heading, innerWidth, "")];
     if (!compact) {
       const model = options.state.model;
-      header.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(model ? `${model.provider}/${model.id}` : "未配置模型"), innerWidth)));
-      header.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(options.contextLabel), innerWidth)), "");
+      header.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(model ? `${model.provider}/${model.id}` : "No model"), innerWidth, "")));
+      header.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(options.contextLabel), innerWidth, "")), "");
     }
     const key = (label: string) => theme.fg("accent", theme.bold(label));
     const ready = options.candidateText !== undefined;
     const primary = options.accepted
-      ? `${key("r")} 优化当前草稿${options.canRestore ? `  ${key("z")} 恢复接受前草稿` : ""}`
+      ? `${key("r")} Refine draft${options.canRestore ? `  ${key("z")} Restore` : ""}`
       : ready
-        ? `${key("a")} 接受  ${key("e")} 微调  ${options.state.pendingSend ? theme.fg("muted", "发送待确认") : `${key("s")} 发送`}  ${key("x")} 取消`
-        : `${key("r")} ${options.state.phase === "generating" ? "重新优化" : "优化当前草稿"}  ${key("m")} 模型  ${key("x")} 取消`;
-    const secondary = `${ready && !options.accepted ? `${key("r")} 优化当前草稿  ` : ""}${ready ? `${key("o")} ${this.originalVisible ? "收起原稿" : "查看原稿"}  ` : ""}${key("?")} ${this.helpVisible ? "收起帮助" : "更多操作"}  ${key("q/Esc")} 返回`;
-    const compactPrimary = options.accepted ? "r 优化当前草稿" : ready
-      ? options.state.pendingSend ? "a 接受 · 发送待确认" : "a 接受 · s 发送"
-      : "r 优化 · m 模型";
-    const footer = innerWidth < 40
-      ? [truncateToWidth(compactPrimary, innerWidth), truncateToWidth("? 帮助 · q 返回", innerWidth)]
+        ? `${key("a")} Accept  ${key("e")} Edit  ${options.state.pendingSend ? theme.fg("muted", "Send pending") : `${key("s")} Send`}  ${key("x")} Cancel`
+        : `${key("r")} ${options.state.phase === "generating" ? "Restart" : "Refine"}  ${key("m")} Model  ${key("x")} Cancel`;
+    const secondary = `${ready && !options.accepted ? `${key("r")} Refine  ` : ""}${ready ? `${key("o")} ${this.originalVisible ? "Hide original" : "Original"}  ` : ""}${key("?")} ${this.helpVisible ? "Hide help" : "Help"}  ${key("q/Esc")} Back`;
+    const compactPrimary = options.accepted ? "r Refine draft" : ready
+      ? options.state.pendingSend ? "a Accept · Send pending" : "a Accept · s Send"
+      : "r Refine · m Model";
+    const footer = innerWidth < 60
+      ? [truncateToWidth(compactPrimary, innerWidth, ""), truncateToWidth("? Help · q Back", innerWidth, "")]
       : [primary, secondary];
-    if (!compact) footer.push(theme.fg("muted", "↑↓ / PgUp/PgDn 滚动 · Enter 不发送"));
+    if (!compact) footer.push(theme.fg("muted", "↑↓ / PgUp/PgDn Scroll · Enter won't send"));
     const border = theme.fg("borderMuted", "─".repeat(innerWidth));
     // ScrollView owns offsets/clamping. Explicit viewport composition also works in regular
     // mode, where ScrollView.render() alone returns the entire document without clipping.
@@ -214,10 +214,10 @@ export class PreviewPanel implements Component {
     const start = this.scroll.scrollTop;
     const visible = body.slice(start, start + bodyHeight);
     if (body.length > bodyHeight && !compact) {
-      footer[footer.length - 1] = theme.fg("muted", `↑↓ / PgUp/PgDn · ${start + 1}–${Math.min(body.length, start + bodyHeight)} / ${body.length} 行 · Enter 不发送`);
+      footer[footer.length - 1] = theme.fg("muted", `↑↓ / PgUp/PgDn · ${start + 1}–${Math.min(body.length, start + bodyHeight)}/${body.length} lines · Enter won't send`);
     }
     const lines = [...header, ...visible, ...(!compact ? ["", border] : []), ...footer];
     // Tiny terminals degrade to a bounded view instead of exceeding the host viewport.
-    return lines.slice(0, height).map((line) => " ".repeat(inset) + truncateToWidth(line, innerWidth));
+    return lines.slice(0, height).map((line) => " ".repeat(inset) + truncateToWidth(line, innerWidth, ""));
   }
 }

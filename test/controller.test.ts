@@ -33,6 +33,63 @@ function setup(complete: (request: RefineRequest, signal: AbortSignal) => Promis
 }
 
 describe("RefineController request lifecycle", () => {
+  it("freezes duration through edits, pending sends, acceptance and restore, and resets it on retry", async () => {
+    let now = 0;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      let pending = deferred<RefineCompletion>();
+      const { controller } = setup(() => pending.promise);
+      controller.trigger(input("First"));
+      now = 12_900;
+      expect(controller.getState().elapsedSeconds).toBe(12);
+      pending.resolve(success("First result"));
+      await flushPromises();
+      now = 60_000;
+      expect(controller.getState().elapsedSeconds).toBe(12);
+      controller.updateCandidate(controller.getCandidateToken()!, "Edited first result");
+      controller.beginSend(controller.getCandidateToken()!);
+      expect(controller.getState().elapsedSeconds).toBe(12);
+      controller.failSend(controller.getState().requestId);
+      controller.acceptCandidate(controller.getCandidateToken()!, "First", false, () => {});
+      expect(controller.getAccepted()?.elapsedSeconds).toBe(12);
+
+      pending = deferred<RefineCompletion>();
+      controller.trigger(input("Edited first result"));
+      expect(controller.getState().elapsedSeconds).toBe(0);
+      now += 3_000;
+      pending.resolve(success("Second result"));
+      await flushPromises();
+      controller.acceptCandidate(controller.getCandidateToken()!, "Edited first result", false, () => {});
+      expect(controller.getAccepted()?.elapsedSeconds).toBe(3);
+      controller.restoreDraft(controller.getRestoreToken()!, "Second result", false, () => {});
+      expect(controller.getAccepted()?.elapsedSeconds).toBe(12);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each(["failure", "timeout"])("freezes duration after %s and ignores late output", async (kind) => {
+    let now = 0;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      const pending = deferred<RefineCompletion>();
+      const { controller, scheduler } = setup(() => pending.promise);
+      controller.trigger(input("Draft"));
+      now = 5_000;
+      if (kind === "timeout") scheduler.advance(100);
+      else pending.reject(new Error("offline"));
+      await flushPromises();
+      expect(controller.getState()).toMatchObject({ phase: "error", elapsedSeconds: 5 });
+      now += 30_000;
+      pending.resolve(success("Late"));
+      await flushPromises();
+      expect(controller.getState().elapsedSeconds).toBe(5);
+      expect(controller.getCandidate()).toBeUndefined();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it("includes title eligibility in deduplication and drops unsolicited titles", async () => {
     const { controller } = setup(async () => ({ ...success("Prompt"), title: "Project task" }));
     controller.trigger(input("Draft", { generateTitle: true }));

@@ -34,6 +34,8 @@ export interface RefineCompletion {
 }
 
 export interface Candidate {
+  /** Frozen request duration, retained in accepted/restored snapshots. */
+  elapsedSeconds?: number;
   usage?: TokenUsage;
   title?: string;
   generateTitle?: boolean;
@@ -71,6 +73,7 @@ export interface RestoreToken {
 }
 
 export interface ControllerState {
+  elapsedSeconds?: number;
   usage?: TokenUsage;
   phase: RefinePhase;
   requestId: number;
@@ -104,6 +107,7 @@ export type TriggerResult =
   | { kind: "no-model" };
 
 interface ActiveRequest {
+  startedAt: number;
   request: RefineRequest;
   controller: AbortController;
   timeout: unknown;
@@ -126,6 +130,10 @@ function sameModel(left: ModelRef | undefined, right: ModelRef | undefined): boo
 
 function fingerprint(request: RefineRequestInput): string {
   return JSON.stringify([request.draft, request.model.provider, request.model.id, request.thinkingLevel, request.sessionId, request.branchLeafId, request.historyText, request.project, request.generateTitle]);
+}
+
+function elapsedSeconds(active: ActiveRequest): number {
+  return Math.max(0, Math.floor((Date.now() - active.startedAt) / 1_000));
 }
 
 function cloneCandidate(candidate: Candidate): Candidate {
@@ -170,7 +178,8 @@ export class RefineController {
 
   getState(): ControllerState {
     const usage = this.candidate?.usage ?? this.state.usage;
-    return { ...this.state, ...(usage ? { usage: { ...usage } } : {}), ...(this.state.model ? { model: { ...this.state.model } } : {}) };
+    const elapsed = this.active ? elapsedSeconds(this.active) : this.candidate?.elapsedSeconds ?? this.state.elapsedSeconds;
+    return { ...this.state, ...(elapsed !== undefined ? { elapsedSeconds: elapsed } : {}), ...(usage ? { usage: { ...usage } } : {}), ...(this.state.model ? { model: { ...this.state.model } } : {}) };
   }
 
   getModel(): ModelRef | undefined {
@@ -330,7 +339,7 @@ export class RefineController {
     };
     const controller = new AbortController();
     const timeout = this.scheduler.setTimeout(() => this.onTimeout(requestId), this.timeoutMs);
-    this.active = { request, controller, timeout };
+    this.active = { request, controller, timeout, startedAt: Date.now() };
     this.state = { phase: "generating", requestId, model: { ...input.model }, pendingSend: false };
     this.emitState();
     void this.run(this.active).catch(() => undefined);
@@ -454,6 +463,7 @@ export class RefineController {
 
       this.clearActive(active);
       const candidate: Candidate = {
+        elapsedSeconds: elapsedSeconds(active),
         ...(result.usage ? { usage: { ...result.usage } } : {}),
         requestId: active.request.requestId,
         version: ++this.candidateSequence,
@@ -498,7 +508,7 @@ export class RefineController {
     this.candidate = undefined;
     if (this.restore) this.restore = { ...this.restore, generation: this.generation };
     this.clearPendingSend();
-    this.state = { phase: "error", requestId: active.request.requestId, model: { ...active.request.model }, error, pendingSend: false, usage: this.state.usage };
+    this.state = { phase: "error", requestId: active.request.requestId, model: { ...active.request.model }, error, pendingSend: false, usage: this.state.usage, elapsedSeconds: elapsedSeconds(active) };
     this.emitState();
   }
 
@@ -512,7 +522,7 @@ export class RefineController {
     if (this.restore) this.restore = { ...this.restore, generation: this.generation };
     this.clearPendingSend();
     active.controller.abort();
-    this.state = { phase: "error", requestId, model: { ...active.request.model }, error: "timeout", pendingSend: false };
+    this.state = { phase: "error", requestId, model: { ...active.request.model }, error: "timeout", pendingSend: false, elapsedSeconds: elapsedSeconds(active) };
     this.emitState();
   }
 

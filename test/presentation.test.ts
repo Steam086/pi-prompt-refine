@@ -4,10 +4,10 @@ import { renderSummary, sanitizeTerminalText, type SummaryOptions } from "../src
 
 const options: SummaryOptions = {
   state: { phase: "ready", requestId: 1, pendingSend: false, model: { provider: "fake", id: "chat" } },
-  contextLabel: "上下文：2 条 / 100 字符 · 含最近 assistant 回复",
+  contextLabel: "2 msgs/100 ch · asst",
   candidateText: "优化结果 😀 中文\n".repeat(100),
   openHint: "ctrl+\\",
-  elapsedSeconds: 0,
+  elapsedSeconds: 12,
 };
 
 describe("passive result summary", () => {
@@ -18,7 +18,7 @@ describe("passive result summary", () => {
   });
 
   it("marks preview truncation and never renders terminal control sequences from the model", () => {
-    expect(renderSummary(options, 80).join("\n")).toContain("摘要已截断");
+    expect(renderSummary(options, 80).join("\n")).toContain("Open for full prompt");
     const lines = renderSummary({ ...options, candidateText: "\x1b[2Jdanger\r\x07" }, 80);
     expect(lines.join("\n")).not.toMatch(/[\x00-\x09\x0b-\x1f\x7f]/);
   });
@@ -26,11 +26,23 @@ describe("passive result summary", () => {
   it("keeps the summary focused and limits prose even on wide terminals", () => {
     const lines = renderSummary(options, 200);
     const text = lines.join("\n");
-    expect(text).toContain("✓ 优化完成");
+    expect(text).toContain("✓ Done · 12s");
     expect(text).toContain("ctrl+\\");
     expect(text).not.toContain("fake/chat");
-    expect(text).not.toContain("a 接受");
+    expect(text).not.toContain("a Accept");
     for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(100);
+  });
+
+  it.each([40, 80, 100])("uses compact English chrome without ellipses at %i columns", (width) => {
+    const contextLabel = "⚠1 · 7 msgs/2032 ch · asst · 3 rules/10 skills";
+    for (const phase of ["generating", "ready", "error"] as const) {
+      const lines = renderSummary({ ...options, contextLabel, candidateText: "Refined prompt", state: { ...options.state, phase } }, width);
+      const text = lines.join("\n");
+      expect(text).not.toMatch(/[\p{Script=Han}…]|\.{3}/u);
+      expect(text).toContain("12s");
+      if (width >= 80) expect(lines.filter((line) => line.includes(contextLabel))).toHaveLength(1);
+      for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+    }
   });
 
   it("normalizes display-only CRLF and tabs without permitting cursor controls", () => {

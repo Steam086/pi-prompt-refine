@@ -11,7 +11,7 @@ const options: PreviewOptions = {
   state: { phase: "ready", requestId: 1, pendingSend: false, model: { provider: "openai-codex", id: "example-model" } },
   candidateText: "请优化本项目的 UI 视觉效果。\n\n## 重点\n- 保留 **用户目标** 与约束。\n- 让内容清晰、美观、易读。",
   draft: "这是原始草稿。",
-  contextLabel: "上下文：仅草稿",
+  contextLabel: "Draft only",
   elapsedSeconds: 0,
   openHint: "ctrl+\\",
   canRestore: false,
@@ -25,25 +25,25 @@ describe("result reading panel", () => {
   it("shows pending session metadata separately and hides it in accepted snapshots", () => {
     const panel = create({ sessionTitle: "路径解析修复" });
     const text = panel.render(100).join("\n");
-    expect(text).toContain("接受后会话名称：路径解析修复");
-    expect(text).toContain("优化后的 Prompt");
+    expect(text).toContain("Title on accept: 路径解析修复");
+    expect(text).toContain("Refined prompt");
     panel.toggleSource();
-    expect(panel.render(100).join("\n")).toContain("接受后会话名称：路径解析修复");
+    expect(panel.render(100).join("\n")).toContain("Title on accept: 路径解析修复");
     panel.update({ ...options, sessionTitle: "路径解析修复", accepted: { editorChanged: false } });
-    expect(panel.render(100).join("\n")).not.toContain("接受后会话名称");
+    expect(panel.render(100).join("\n")).not.toContain("Title on accept:");
   });
   it("puts the result first and hides the original and secondary actions by default", () => {
     const panel = create();
     const text = panel.render(100).join("\n");
-    expect(text).toContain("✓ 优化完成");
-    expect(text).toContain("优化后的 Prompt");
+    expect(text).toContain("✓ Done · 0s");
+    expect(text).toContain("Refined prompt");
     expect(text).toContain("用户目标");
     expect(text).not.toContain("**用户目标**");
     expect(text).not.toContain(options.draft);
-    expect(text).not.toContain("收藏循环");
-    expect(text).toContain("o 查看原稿");
-    expect(text).toContain("? 更多操作");
-    expect(text).toContain("Enter 不发送");
+    expect(text).not.toContain("Cycle favorites");
+    expect(text).toContain("o Original");
+    expect(text).toContain("? Help");
+    expect(text).toContain("Enter won't send");
     expect(text.match(/Prompt Refine/g)).toHaveLength(1);
     panel.toggleOriginal();
     expect(panel.render(100).join("\n")).toContain(options.draft);
@@ -54,15 +54,15 @@ describe("result reading panel", () => {
   it.each([false, true])("distinguishes an accepted snapshot from the current editor (changed: %s)", (editorChanged) => {
     const panel = create({ state: { ...options.state, phase: "idle" }, accepted: { editorChanged }, canRestore: true });
     const text = panel.render(100).join("\n");
-    expect(text).toContain("已接受到输入框");
-    expect(text).toContain("只读快照");
-    expect(text).toContain("r 优化当前草稿");
-    expect(text).not.toContain("a 接受");
-    expect(text).not.toContain("e 微调");
-    expect(text).not.toContain("s 发送");
-    expect(text).toContain(editorChanged ? "不包含后续微调" : "查看不会调用模型");
+    expect(text).toContain("✓ Accepted · 0s");
+    expect(text).toContain("read-only");
+    expect(text).toContain("r Refine draft");
+    expect(text).not.toContain("a Accept");
+    expect(text).not.toContain("e Edit");
+    expect(text).not.toContain("s Send");
+    expect(text).toContain(editorChanged ? "excludes later edits" : "no model call");
     panel.toggleHelp();
-    expect(panel.render(100).join("\n")).toContain("a/e/s 不操作历史快照");
+    expect(panel.render(100).join("\n")).toContain("a/e/s disabled");
   });
 
   it("offers a literal view without modifying the candidate", () => {
@@ -71,7 +71,7 @@ describe("result reading panel", () => {
     const text = panel.render(100).join("\n");
     expect(text).toContain("## 重点");
     expect(text).toContain("**用户目标**");
-    expect(text).toContain("纯文本");
+    expect(text).toContain("source");
     panel.toggleSource();
     expect(panel.render(100).join("\n")).not.toContain("**用户目标**");
     expect(options.candidateText).toContain("**用户目标**");
@@ -81,11 +81,11 @@ describe("result reading panel", () => {
     const panel = create();
     panel.toggleHelp();
     const text = panel.render(100).join("\n");
-    for (const hint of ["follow-up", "x/d", "z 恢复", "r 重新优化", "m 选择模型", "c 收藏循环", "v 排版/纯文本", "暂无可恢复"]) {
+    for (const hint of ["follow-up", "x/d", "z Restore", "r Refine", "m Model", "c Cycle favorites", "v Formatted/source", "Nothing to restore"]) {
       expect(text).toContain(hint);
     }
     panel.toggleHelp();
-    expect(panel.render(100).join("\n")).not.toContain("操作说明");
+    expect(panel.render(100).join("\n")).not.toContain("Keys");
   });
 
   it.each([1, 2, 10, 20, 40, 80, 100, 160])("bounds Unicode, Markdown and chrome at %i columns", (width) => {
@@ -106,8 +106,8 @@ describe("result reading panel", () => {
     panel.page(1);
     const next = panel.render(80).join("\n");
     expect(next).not.toContain("内容 0\n");
-    expect(next).toContain("a 接受");
-    expect(next).toContain("q/Esc 返回");
+    expect(next).toContain("a Accept");
+    expect(next).toContain("q/Esc Back");
     panel.scrollBy(10000);
     expect(panel.render(80).join("\n")).toContain("内容 79");
     panel.scrollBy(-10000);
@@ -123,10 +123,10 @@ describe("result reading panel", () => {
     panel.render(80);
     panel.toggleOriginal();
     const original = panel.render(80).join("\n");
-    expect(original).toContain("原始草稿 · 触发时");
+    expect(original).toContain("Original draft · at request time");
     expect(original).toContain("原稿起点");
     panel.toggleOriginal();
-    expect(panel.render(80).join("\n")).toContain("优化后的 Prompt");
+    expect(panel.render(80).join("\n")).toContain("Refined prompt");
   });
 
   it("sanitizes terminal controls in all external text including the original", () => {
@@ -140,8 +140,8 @@ describe("result reading panel", () => {
     expect(theme).toBeDefined();
     const panel = new PreviewPanel(options, theme, () => 40, vi.fn());
     const before = panel.render(100);
-    expect(before.join("\n")).toContain(theme.fg("success", theme.bold("✓ 优化完成")));
-    expect(before.join("\n")).toContain(theme.fg("accent", theme.bold("优化后的 Prompt")));
+    expect(before.join("\n")).toContain(theme.fg("success", theme.bold("✓ Done · 0s")));
+    expect(before.join("\n")).toContain(theme.fg("accent", theme.bold("Refined prompt")));
     panel.invalidate();
     expect(panel.render(100)).toEqual(before);
     for (const line of before) expect(visibleWidth(line)).toBeLessThanOrEqual(100);
@@ -162,13 +162,20 @@ describe("result reading panel", () => {
   it.each([20, 80])("makes pending delivery clear without offering send again at %i columns", (width) => {
     const panel = create({ state: { ...options.state, pendingSend: true } });
     const text = panel.render(width).join("\n");
-    expect(text).toContain("发送");
-    expect(text).not.toContain("s 发送");
+    expect(text).toContain("Send");
+    expect(text).not.toContain("s Send");
+  });
+
+  it.each([40, 80, 100])("uses English chrome with elapsed time and no ellipses at %i columns", (width) => {
+    const panel = create({ candidateText: "Refined prompt", draft: "Draft", elapsedSeconds: 17 });
+    const text = panel.render(width).join("\n");
+    expect(text).toContain("17s");
+    expect(text).not.toMatch(/[\p{Script=Han}…]|\.{3}/u);
   });
 
   it("refreshes a completed candidate and preserves expansion settings without stale content", () => {
     const panel = create({ state: { ...options.state, phase: "generating" }, candidateText: undefined, draft: undefined });
-    expect(panel.render(80).join("\n")).toContain("正在优化");
+    expect(panel.render(80).join("\n")).toContain("Refining");
     panel.update(options);
     expect(panel.render(80).join("\n")).toContain("用户目标");
     panel.update({ ...options, candidateText: "新的优化结果" });

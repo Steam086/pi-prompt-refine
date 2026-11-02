@@ -24,10 +24,11 @@ export interface SummaryOptions {
 
 export function resultHeading(options: SummaryOptions, theme: PresentationTheme): string {
   const { state } = options;
-  const label = state.phase === "generating" ? `◌ 正在优化 · ${options.elapsedSeconds}s`
-    : state.phase === "error" ? "! 优化未完成"
-      : state.phase === "idle" ? "Prompt 优化"
-        : state.pendingSend ? "◌ 等待发送确认" : "✓ 优化完成";
+  const time = `${options.elapsedSeconds}s`;
+  const label = state.phase === "generating" ? `◌ Refining · ${time}`
+    : state.phase === "error" ? `! Failed · ${time}`
+      : state.phase === "idle" ? "Refine"
+        : state.pendingSend ? `◌ Send pending · ${time}` : `✓ Done · ${time}`;
   const color = state.phase === "error" ? "warning" : state.phase === "ready" && !state.pendingSend ? "success" : "accent";
   return `${theme.fg(color, theme.bold(label))}  ${theme.fg("muted", "Prompt Refine")}`;
 }
@@ -39,27 +40,27 @@ export function renderSummary(options: SummaryOptions, width: number, theme: Pre
   const inset = available >= 12 ? 2 : 0;
   const contentWidth = Math.max(1, available - inset);
   const lines = [resultHeading(options, theme)];
-  lines.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(options.contextLabel), contentWidth)));
+  lines.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(options.contextLabel), contentWidth, "")));
   lines.push("");
   if (options.state.phase === "ready" && options.candidateText) {
     const body = wrapTextWithAnsi(sanitizeTerminalText(options.candidateText), contentWidth);
     lines.push(...body.slice(0, 6).map((line) => theme.fg("text", line)));
-    if (body.length > 6) lines.push(theme.fg("muted", "… 摘要已截断，打开面板查看完整结果"));
+    if (body.length > 6) lines.push(theme.fg("muted", "Open for full prompt"));
   } else {
     const message = options.state.phase === "error"
-      ? options.errorLabel ?? "请求失败，请重试。"
-      : "后台生成中，可继续编辑原稿。";
+      ? options.errorLabel ?? "Request failed. Retry."
+      : "Working in background. Keep editing.";
     lines.push(theme.fg(options.state.phase === "error" ? "warning" : "text", sanitizeTerminalText(message)));
   }
   const usageLabel = formatTokenUsage(options.state.usage);
   if (usageLabel && options.state.phase !== "generating") {
-    lines.push(theme.fg("muted", truncateToWidth(usageLabel, contentWidth)));
+    lines.push(theme.fg("muted", truncateToWidth(usageLabel, contentWidth, "")));
   }
   lines.push("");
-  const hint = options.state.pendingSend ? "主草稿保留 · 查看详情" : "查看结果与操作";
+  const hint = options.state.pendingSend ? "View · draft kept" : "View / actions";
   lines.push(`${theme.fg("accent", theme.bold(sanitizeTerminalText(options.openHint)))}  ${theme.fg("muted", hint)}`);
   return lines.map((line, index) => {
     const prefix = inset ? (index >= 3 && index < lines.length - 2 ? `${theme.fg("borderMuted", "│")} ` : "  ") : "";
-    return prefix + truncateToWidth(line, contentWidth);
+    return prefix + truncateToWidth(line, contentWidth, "");
   });
 }
