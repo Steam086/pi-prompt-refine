@@ -116,7 +116,7 @@ export class PreviewPanel implements Component {
       paragraph("Keys", "muted");
       if (options.accepted) paragraph("Read-only snapshot; a/e/s disabled.\nEdit or send from the main editor.");
       else paragraph("a Accept into editor (no send) · e Edit candidate\ns Send (follow-up if busy; draft kept)");
-      paragraph("x/d Cancel · z Restore draft before acceptance\nr Refine current draft (model call)\nm Model · c Cycle favorites\no Original · v Formatted/source\n↑↓ Scroll · PgUp/PgDn Page\nq/Esc Back · Enter won't send · ? Hide help");
+      paragraph("x/d Cancel · z Restore draft before acceptance\nr Refine current draft (model call)\nm Model · c Cycle favorites\no Original · v Formatted/source\n↑↓ Scroll · PgUp/PgDn Page\nq/Esc/Ctrl+\\ Back · Enter won't send · ? Hide help");
       if (!options.canRestore) paragraph("Nothing to restore.", "muted");
       lines.push("");
     }
@@ -192,7 +192,7 @@ export class PreviewPanel implements Component {
       : ready
         ? `${key("a")} Accept  ${key("e")} Edit  ${options.state.pendingSend ? theme.fg("muted", "Send pending") : `${key("s")} Send`}  ${key("x")} Cancel`
         : `${key("r")} ${options.state.phase === "generating" ? "Restart" : "Refine"}  ${key("m")} Model  ${key("x")} Cancel`;
-    const secondary = `${ready && !options.accepted ? `${key("r")} Refine  ` : ""}${ready ? `${key("o")} ${this.originalVisible ? "Hide original" : "Original"}  ` : ""}${key("?")} ${this.helpVisible ? "Hide help" : "Help"}  ${key("q/Esc")} Back`;
+    const secondary = `${ready && !options.accepted ? `${key("r")} Refine  ` : ""}${ready ? `${key("o")} ${this.originalVisible ? "Hide original" : "Original"}  ` : ""}${key("?")} ${this.helpVisible ? "Hide help" : "Help"}  ${key("q/Esc/Ctrl+\\")} Back`;
     const compactPrimary = options.accepted ? "r Refine draft" : ready
       ? options.state.pendingSend ? "a Accept · Send pending" : "a Accept · s Send"
       : "r Refine · m Model";

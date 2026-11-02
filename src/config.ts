@@ -15,6 +15,7 @@ export interface ProjectContextConfig {
   enabled: boolean;
   maxChars: number;
   instructionsMaxChars: number;
+  instructionsOnFollowUp: boolean;
   skillsMaxChars: number;
   /** Explicit @directory listings; shares tree limits, not tree.enabled. */
   referencedDirectories: { enabled: boolean; maxReferences: number };
@@ -72,6 +73,7 @@ export const DEFAULT_CONFIG: RefineConfig = {
     enabled: true,
     maxChars: 28_000,
     instructionsMaxChars: 16_000,
+    instructionsOnFollowUp: false,
     skillsMaxChars: 6_000,
     referencedDirectories: { enabled: true, maxReferences: 8 },
     tree: {
@@ -201,6 +203,7 @@ function parseProjectContext(value: unknown, warnings: string[]): ProjectContext
   if (value === undefined) return config;
   if (!isRecord(value)) { warnings.push("projectContext 必须是对象；已使用默认配置。"); return config; }
   config.enabled = booleanOption(value.enabled, config.enabled, "projectContext.enabled", warnings);
+  config.instructionsOnFollowUp = booleanOption(value.instructionsOnFollowUp, config.instructionsOnFollowUp, "projectContext.instructionsOnFollowUp", warnings);
   for (const key of ["maxChars", "instructionsMaxChars", "skillsMaxChars"] as const) {
     config[key] = boundedInteger(value[key], config[key], 512, 100_000, `projectContext.${key}`, warnings);
   }

@@ -29,6 +29,7 @@
     "enabled": true,
     "maxChars": 28000,
     "instructionsMaxChars": 16000,
+    "instructionsOnFollowUp": false,
     "skillsMaxChars": 6000,
     "referencedDirectories": {
       "enabled": true,

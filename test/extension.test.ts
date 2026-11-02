@@ -284,6 +284,8 @@ async function trigger(harness: Harness): Promise<void> {
 function projectConfig(tree = false): RefineConfig["projectContext"] {
   const config = structuredClone(DEFAULT_CONFIG.projectContext);
   config.tree.enabled = tree;
+  // Existing resource/budget tests explicitly exercise repeat injection.
+  config.instructionsOnFollowUp = true;
   return config;
 }
 
@@ -457,6 +459,21 @@ describe("project context injection", () => {
     expect(harness.notifications).toEqual(["Refinement cancelled. Editor unchanged."]);
   });
 
+  it.each([false, true])("defaults to first-prompt-only instructions with followUp=%s, independent of history budget", async (followUp) => {
+    const config = structuredClone(DEFAULT_CONFIG.projectContext);
+    config.tree.enabled = false;
+    expect(config.instructionsOnFollowUp).toBe(false);
+    const harness = await makeHarness({ config: { projectContext: config, context: { maxMessages: 0, maxChars: 0 } } });
+    vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue(followUp
+      ? [{ type: "message", message: { role: "user", content: "Earlier prompt" } }] as any : []);
+    vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
+    await trigger(harness);
+    const input = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
+    expect(input.includes("Use the project venv.")).toBe(!followUp);
+    expect(input.includes("/repo/AGENTS.md")).toBe(!followUp);
+    expect(input).toContain("Extract PDF tables");
+  });
+
   it("injects skills, applicable instructions and a real bounded tree on the first shortcut in an empty session", async () => {
     const harness = await makeHarness({ config: { projectContext: projectConfig(true) } });
     vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([]);
@@ -469,6 +486,7 @@ describe("project context injection", () => {
     expect(input).toContain("Extract PDF tables");
     expect(input).toContain("PROJECT TREE");
     expect(input).toContain("prompt-refine.json");
+    expect(harness.widgetLines().join("\n")).toContain("1 rules   ·   1 skills");
     expect(input).not.toContain("PRIVATE MAIN AGENT TOOLS");
     expect(input).not.toContain("Use bash to load skills");
     expect(request.tools).toEqual([]);
@@ -948,6 +966,19 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.complete.mockImplementationOnce(() => new Promise(() => {}));
     await trigger(harness);
     expect(harness.widgetLines().join("\n")).not.toContain("Tokens:");
+  });
+
+  it.each(["\x1b", "\x1c"])("closes the preview with %j without changing the candidate or draft", async (key) => {
+    const harness = await makeHarness();
+    await trigger(harness);
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput(key);
+    await view;
+    expect(harness.widgetLines().join("\n")).toContain("Refined prompt");
+    expect(harness.editorWrites).toEqual([]);
+    expect(harness.sent).toEqual([]);
+    expect(harness.complete).toHaveBeenCalledTimes(1);
   });
 
   it("shows a single result surface and toggles reading options without writing or sending", async () => {

@@ -34,6 +34,14 @@ describe("Prompt Refine configuration", () => {
     expect(invalid.warnings.join(" ")).toContain("thinkingLevel");
   });
 
+  it("defaults follow-up instructions off and validates the opt-in", () => {
+    expect(parseConfig({ version: 1 }).config.projectContext.instructionsOnFollowUp).toBe(false);
+    expect(parseConfig({ version: 1, projectContext: { instructionsOnFollowUp: true } }).config.projectContext.instructionsOnFollowUp).toBe(true);
+    const invalid = parseConfig({ version: 1, projectContext: { instructionsOnFollowUp: "yes" } });
+    expect(invalid.config.projectContext.instructionsOnFollowUp).toBe(false);
+    expect(invalid.warnings.join(" ")).toContain("instructionsOnFollowUp");
+  });
+
   it("enables bounded project context by default and validates independent opt-outs and limits", () => {
     expect(DEFAULT_CONFIG.projectContext.enabled).toBe(true);
     expect(DEFAULT_CONFIG.projectContext.tree).toMatchObject({ maxDepth: 2, maxEntriesPerDirectory: 20, maxEntries: 120, maxChars: 4000 });

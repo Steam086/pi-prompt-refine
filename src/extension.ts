@@ -480,15 +480,18 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
 
     completionContext = ctx;
+    const branch = ctx.sessionManager.getBranch();
+    const followUp = branch.some((entry) => entry.type === "message" &&
+      (entry.message.role === "user" || entry.message.role === "assistant"));
     const history = selectHistory(
-      ctx.sessionManager.getBranch(),
+      branch,
       config.context.maxMessages,
       config.context.maxChars,
     );
     const previousContext = { historySnapshot, projectLabel, projectWarnings };
     historySnapshot = history;
-    const project = config.projectContext.enabled ? captureProjectContext(ctx, config.projectContext, draft) : undefined;
-    projectLabel = project ? `${project.instructionCount} rules/${project.skillCount} skills${config.projectContext.tree.enabled && !history.text ? " · tree" : ""}` : "";
+    const project = config.projectContext.enabled ? captureProjectContext(ctx, config.projectContext, draft, followUp) : undefined;
+    projectLabel = project ? `${project.instructionCount} rules   ·   ${project.skillCount} skills${config.projectContext.tree.enabled && !history.text ? " · tree" : ""}` : "";
     projectWarnings = project?.warnings ?? [];
     const result = controller.trigger({
       draft,
@@ -675,7 +678,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           render: (width) => panel.render(width),
           invalidate: () => panel.invalidate(),
           handleInput(data) {
-            if (keybindings.matches(data, "tui.select.cancel")) { finish(); return; }
+            if (keybindings.matches(data, "tui.select.cancel") || parseKey(data) === "ctrl+\\") { finish(); return; }
             if (keybindings.matches(data, "tui.input.submit")) return;
             if (keybindings.matches(data, "tui.editor.cursorUp")) panel.scrollBy(-1);
             else if (keybindings.matches(data, "tui.editor.cursorDown")) panel.scrollBy(1);
