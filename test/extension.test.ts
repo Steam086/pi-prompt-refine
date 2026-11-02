@@ -51,7 +51,8 @@ interface Harness {
   widgetLines(width?: number): string[];
   holdPanel(): void;
   panelInput(key: string): void;
-  panelLines(): string[];
+  panelLines(width?: number): string[];
+  resize(rows: number): void;
   customCalls(): number;
 }
 
@@ -121,6 +122,7 @@ async function makeHarness(options: { sessionName?: string; mode?: "tui" | "prin
   let panel: { render(width: number): string[]; handleInput?(data: string): void } | undefined;
   let holdPanel = false;
   let customCalls = 0;
+  const terminal = { rows: 40 };
   const theme = {
     fg: (_color: string, text: string) => text, bold: (text: string) => text,
     italic: (text: string) => text, underline: (text: string) => text, strikethrough: (text: string) => text,
@@ -151,7 +153,7 @@ async function makeHarness(options: { sessionName?: string; mode?: "tui" | "prin
       customCalls += 1;
       return await new Promise<T>((resolve) => {
         const component = factory(
-          { requestRender: vi.fn(), terminal: { rows: 40 } },
+          { requestRender: vi.fn(), terminal },
           theme,
           {
             getKeys: (action: string) => action === "app.thinking.cycle" ? ["shift+tab"] : [],
@@ -168,6 +170,7 @@ async function makeHarness(options: { sessionName?: string; mode?: "tui" | "prin
           resolve,
         );
         panel = component;
+        component.focused = true;
         for (const width of [20, 40, 80]) {
           const lines = component.render?.(width) ?? [];
           renderedWidths.push({ width, lines });
@@ -265,7 +268,8 @@ async function makeHarness(options: { sessionName?: string; mode?: "tui" | "prin
     widgetLines: (width = 80) => widget?.render(width) ?? [],
     holdPanel: () => { holdPanel = true; },
     panelInput: (key) => panel?.handleInput?.(key),
-    panelLines: () => panel?.render(80) ?? [],
+    panelLines: (width = 80) => panel?.render(width) ?? [],
+    resize: (rows) => { terminal.rows = rows; },
     customCalls: () => customCalls,
   };
   activeHarnesses.push(harness);
@@ -1010,19 +1014,23 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
 
   it("opens input without refining and starts only after submission", async () => {
     const harness = await makeHarness();
-    let submit!: (value: string | undefined) => void;
-    vi.mocked(harness.context.ui.input).mockImplementation(() => new Promise((resolve) => { submit = resolve; }));
     harness.holdPanel();
     const view = harness.command("view", harness.context);
+    const height = harness.panelLines().length;
     harness.panelInput("i");
-    await flushPromises();
-    expect(harness.context.ui.input).toHaveBeenCalledTimes(1);
+    expect(harness.panelLines()).toHaveLength(height);
+    expect(harness.panelLines()[0]).toContain("Input");
+    expect(harness.context.ui.input).not.toHaveBeenCalled();
     expect(harness.complete).not.toHaveBeenCalled();
-    submit("New input prompt");
+    harness.panelInput("New input prompt");
+    harness.panelInput("\r");
     await flushPromises();
     expect(harness.complete).toHaveBeenCalledTimes(1);
     expect((harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text).toContain("New input prompt");
     expect(harness.sent).toEqual([]);
+    expect(harness.editorWrites).toEqual([]);
+    expect(harness.customCalls()).toBe(1);
+    expect(harness.panelLines()).toHaveLength(height);
     harness.panelInput("q");
     await view;
     const footer = vi.mocked(harness.context.ui.setFooter);
@@ -1030,14 +1038,22 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(footer).toHaveBeenLastCalledWith(undefined);
   });
 
-  it.each([undefined, "   "])("does not refine canceled or blank input %j", async (value) => {
+  it("retains canceled input and rejects blank submissions in place", async () => {
     const harness = await makeHarness();
-    vi.mocked(harness.context.ui.input).mockResolvedValue(value);
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     harness.panelInput("i");
-    await flushPromises();
+    harness.panelInput("   ");
+    harness.panelInput("\r");
+    expect(harness.panelLines()[0]).toContain("Input");
+    expect(harness.panelLines().join("\n")).toContain("empty");
+    harness.panelInput("irq"); // Letters are text, never main-page actions.
+    harness.panelInput("\x1b");
+    expect(harness.panelLines()[0]).toContain("Main");
+    harness.panelInput("i");
+    expect(harness.panelLines().join("\n")).toContain("irq");
     expect(harness.complete).not.toHaveBeenCalled();
+    harness.panelInput("\x1b");
     harness.panelInput("q");
     await view;
   });
@@ -1067,6 +1083,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput(back);
     await flushPromises();
     expect(harness.complete).not.toHaveBeenCalled();
+    expect(harness.customCalls()).toBe(1);
+    expect(harness.panelLines()).toEqual(main);
     harness.panelInput("q");
     await view;
     await trigger(harness);
@@ -1093,7 +1111,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\x1b[B");
     harness.panelInput(" ");
     harness.panelInput("\r");
-    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Prompt Refine"));
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved"));
     harness.panelInput("q");
     await view;
     const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
@@ -1104,6 +1122,75 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(input).not.toContain("Use the project venv.");
     expect(input).not.toContain("PROJECT TREE");
     expect(input).toContain("Extract PDF tables");
+  });
+
+  it.each([
+    { configureModel: false, error: "No optimizer model" },
+    { noAvailableModels: true, error: "missing or unavailable" },
+    { config: { maxDraftChars: 100 }, error: "exceeds" },
+  ])("retains input on validation failure: $error", async (options) => {
+    const harness = await makeHarness(options);
+    harness.setEditorText("");
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("i");
+    const text = "retained prompt ".repeat(10);
+    harness.panelInput(text);
+    harness.panelInput("\r");
+    expect(harness.panelLines()[0]).toContain("Input");
+    expect(harness.panelLines().join("\n")).toContain(options.error);
+    expect(harness.panelLines().join("\n")).toContain("retained prompt");
+    expect(harness.editorWrites).toEqual([]);
+    expect(harness.complete).not.toHaveBeenCalled();
+    harness.panelInput("\x1b");
+    harness.panelInput("q");
+    await view;
+  });
+
+  it("submits input without filling even an empty main editor", async () => {
+    const harness = await makeHarness();
+    harness.setEditorText("");
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("i");
+    harness.panelInput("Independent prompt");
+    harness.panelInput("\r");
+    await flushPromises();
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    expect(harness.getEditor()).toBe("");
+    expect(harness.editorWrites).toEqual([]);
+    expect(harness.sent).toEqual([]);
+    harness.panelInput("q");
+    await view;
+  });
+
+  it.each(["i", "\x1b[C"])("closes secondary state %j on lifecycle invalidation and rejects stale input", async (key) => {
+    const harness = await makeHarness();
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput(key);
+    harness.handlers.get("session_before_tree")?.[0]?.({ type: "session_before_tree" }, harness.context);
+    await view;
+    harness.panelInput("stale prompt");
+    harness.panelInput("\r");
+    expect(harness.complete).not.toHaveBeenCalled();
+    expect(harness.customCalls()).toBe(1);
+    expect(harness.context.ui.setFooter).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it("reports settings persistence failure without claiming a successful save", async () => {
+    const harness = await makeHarness();
+    await rm(join(harness.agentDir, "prompt-refine.json"));
+    await mkdir(join(harness.agentDir, "prompt-refine.json"));
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("\x1b[C");
+    harness.panelInput(" ");
+    harness.panelInput("\r");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Not persisted"));
+    expect(harness.panelLines().join("\n")).not.toContain("Context saved");
+    harness.panelInput("q");
+    await view;
   });
 
   it("x Break aborts the provider request and ignores late output", async () => {

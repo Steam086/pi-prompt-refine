@@ -12,16 +12,16 @@ import {
 } from "./config.js";
 import { buildRefineInput, buildRefineSystemPrompt, parseRefineOutput, selectHistory, type HistorySnapshot } from "./context.js";
 import { READING_WIDTH, renderSummary } from "./presentation.js";
+import { RefineWorkspace } from "./workspace.js";
 import { PreviewPanel, type PreviewOptions } from "./preview.js";
 import { RefineController, type Candidate, type CandidateToken, type ControllerState, type RefineRequest } from "./controller.js";
 
 import { readTokenUsage } from "./usage.js";
-import { keyHintGrid } from "./key-hints.js";
 import { assembleProjectContext, captureProjectContext, collectDirectoryContext } from "./project-context.js";
 
 const STATUS_KEY = "prompt-refine";
 
-type PreviewAction = "accept" | "edit" | "send" | "dismiss" | "restore" | "close" | "optimize" | "model" | "cycle" | "input" | "settings";
+type PreviewAction = "accept" | "edit" | "send" | "dismiss" | "restore" | "close" | "optimize" | "model" | "cycle";
 
 function sameModel(model: Model<Api>, ref: ModelRef): boolean {
   return model.provider === ref.provider && model.id === ref.id;
@@ -255,18 +255,20 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     if (controller.getSessionId() === sessionId) notifyCurrent(message, "warning");
   }
 
-  async function persistConfig(ctx: ExtensionContext): Promise<void> {
+  async function persistConfig(ctx: ExtensionContext): Promise<boolean> {
     if (!configWritable) {
       notify(ctx, "The configuration file contains errors and was not overwritten. This setting is only effective for the current process. Fix the configuration and /reload.", "warning");
-      return;
+      return false;
     }
     const snapshot = structuredClone(config);
     const write = saveQueue.then(() => saveConfig(filePath, snapshot));
     saveQueue = write.catch(() => undefined);
     try {
       await write;
+      return true;
     } catch {
       notifyCurrent("This setting is effective now, but writing prompt-refine.json failed; it was not persisted.", "warning");
+      return false;
     }
   }
 
@@ -440,7 +442,18 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     notifyCurrent(`Optimizer model switched to ${displayModel(next)}; the main session model is unchanged.`, "info");
   }
 
-  function triggerOptimize(ctx: ExtensionContext, force = false, suppliedDraft?: string): void {
+  function optimizationError(ctx: ExtensionContext, draft: string): string | undefined {
+    if (!draft.trim()) return "The editor is empty; no refinement request was sent.";
+    if (draft.length > config.maxDraftChars) return `The draft exceeds ${config.maxDraftChars} characters; no request was sent, and the existing result was kept.`;
+    const selected = controller.getModel();
+    if (!selected) return "No optimizer model is configured; use /refine model to select a text-generation model first.";
+    if (!ctx.modelRegistry.find(selected.provider, selected.id) || !ctx.modelRegistry.getAvailable().some((candidate) => sameModel(candidate, selected))) {
+      return `Optimizer model is missing or unavailable: ${displayModel(selected)}; no automatic model switch was made.`;
+    }
+    return undefined;
+  }
+
+  function triggerOptimize(ctx: ExtensionContext, force = false, suppliedDraft?: string, keepEditor = false): void {
     useContext(ctx);
     if (ctx.mode !== "tui") {
       notify(ctx, "Background prompt refinement is only available in TUI mode; no model request was sent.", "warning");
@@ -449,26 +462,14 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const draft = suppliedDraft ?? ctx.ui.getEditorText();
     // Pi clears the editor on slash-command submission. Keep the supplied source
     // available for retry/accept/restore, but never overwrite another draft.
-    if (suppliedDraft !== undefined && !ctx.ui.getEditorText()) ctx.ui.setEditorText(draft);
-    if (!draft.trim()) {
-      notify(ctx, "The editor is empty; no refinement request was sent.", "info");
+    if (!keepEditor && suppliedDraft !== undefined && !ctx.ui.getEditorText()) ctx.ui.setEditorText(draft);
+    const error = optimizationError(ctx, draft);
+    if (error) {
+      notify(ctx, error, draft.trim() ? "warning" : "info");
       return;
     }
-    if (draft.length > config.maxDraftChars) {
-      notify(ctx, `The draft exceeds ${config.maxDraftChars} characters; no request was sent, and the existing result was kept.`, "warning");
-      return;
-    }
-    const selected = controller.getModel();
-    if (!selected) {
-      notify(ctx, "No optimizer model is configured; use /refine model to select a text-generation model first.", "warning");
-      return;
-    }
-    const model = ctx.modelRegistry.find(selected.provider, selected.id);
-    const available = ctx.modelRegistry.getAvailable().some((candidate) => sameModel(candidate, selected));
-    if (!model || !available) {
-      notify(ctx, `The configured optimizer model ${displayModel(selected)} is missing or unavailable; no automatic model switch was made.`, "warning");
-      return;
-    }
+    const selected = controller.getModel()!;
+    const model = ctx.modelRegistry.find(selected.provider, selected.id)!;
 
     completionContext = ctx;
     const branch = ctx.sessionManager.getBranch();
@@ -616,63 +617,6 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
   }
 
-  async function showContextSettings(ctx: ExtensionContext): Promise<void> {
-    const sessionId = ctx.sessionManager.getSessionId();
-    const selected = [config.projectContext.instructionsEnabled, config.projectContext.tree.enabled, config.projectContext.skillsEnabled];
-    const saved = await ctx.ui.custom<boolean>((tui, theme, keys, done) => {
-      let cursor = 0;
-      return {
-        render: (width) => {
-          if (width < 1) return [];
-          const panelWidth = Math.min(width, READING_WIDTH);
-          const inset = panelWidth >= 16 ? 2 : 0;
-          const innerWidth = Math.max(1, panelWidth - inset * 2);
-          const height = Math.max(1, Math.min(34, tui.terminal.rows - 4));
-          const compact = height < 12;
-          const header = [theme.fg("accent", theme.bold("Context · Default context"))];
-          if (!compact) header.push(theme.fg("muted", "Choose context for prompt refinement"), theme.fg("muted", "Changes apply after saving"), "");
-          const body = [
-            ...(config.projectContext.enabled ? [] : [theme.fg("warning", "Disabled by projectContext.enabled=false")]),
-            ...["AGENTS.md", "tree", "skills"].map((label, index) => {
-              const text = `${index === cursor ? "›" : " "} [${selected[index] ? "x" : " "}] ${label}`;
-              return theme.fg(index === cursor ? "accent" : "text", index === cursor ? theme.bold(text) : text);
-            }),
-            "", theme.fg("muted", "AGENTS.md/tree retain first-prompt rules; explicit @dirs unchanged."),
-          ];
-          const footer = [
-            ...keyHintGrid([["↑↓", "Select"], ["Space", "Toggle"], ["Enter", "Save"], ["←/q/Esc", "Back (discard)"]], innerWidth, theme, 7, 30),
-          ];
-          // Match Main's reserved viewport and bottom-anchored actions.
-          if (!compact) {
-            while (footer.length < 3) footer.push("");
-            footer.push(theme.fg("muted", "← Back to Main · Unsaved changes are discarded"));
-          }
-          const bodyHeight = Math.max(1, height - header.length - footer.length - (compact ? 0 : 2));
-          const visible = body.slice(0, bodyHeight);
-          while (visible.length < bodyHeight) visible.push("");
-          return [...header, ...visible, ...(!compact ? ["", theme.fg("borderMuted", "─".repeat(innerWidth))] : []), ...footer]
-            .slice(0, height).map((line) => " ".repeat(inset) + truncateToWidth(line, innerWidth, ""));
-        },
-        invalidate() {},
-        handleInput(data) {
-          const key = parseKey(data);
-          if (key === "right") return;
-          if (key === "left" || keys.matches(data, "tui.select.cancel") || key === "q" || key === "ctrl+\\") { done(false); return; }
-          if (keys.matches(data, "tui.input.submit")) { done(true); return; }
-          if (keys.matches(data, "tui.select.up")) cursor = (cursor + 2) % 3;
-          else if (keys.matches(data, "tui.select.down")) cursor = (cursor + 1) % 3;
-          else if (key === "space") selected[cursor] = !selected[cursor];
-          tui.requestRender();
-        },
-      };
-    });
-    if (!saved || ctx.sessionManager.getSessionId() !== sessionId) return;
-    config.projectContext.instructionsEnabled = selected[0]!;
-    config.projectContext.tree.enabled = selected[1]!;
-    config.projectContext.skillsEnabled = selected[2]!;
-    await persistConfig(ctx);
-  }
-
   async function showPreview(ctx: ExtensionContext): Promise<void> {
     if (interacting || ctx.mode !== "tui") return;
     interacting = true;
@@ -719,9 +663,28 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         };
         const panel = new PreviewPanel(snapshot(), theme, () => tui.terminal.rows, () => tui.requestRender());
         let closed = false;
+        const workspace = new RefineWorkspace(panel, tui, theme, keybindings, {
+          context: () => [config.projectContext.instructionsEnabled, config.projectContext.tree.enabled, config.projectContext.skillsEnabled],
+          contextEnabled: () => config.projectContext.enabled,
+          saveContext: async (selected) => {
+            if (closed || ctx.sessionManager.getSessionId() !== sessionId) return "Session changed; settings not saved.";
+            config.projectContext.instructionsEnabled = selected[0]!;
+            config.projectContext.tree.enabled = selected[1]!;
+            config.projectContext.skillsEnabled = selected[2]!;
+            return await persistConfig(ctx) ? "Context saved · Next refinement only" : "Context applied · Not persisted; check configuration";
+          },
+          submit: (text) => {
+            if (closed || ctx.sessionManager.getSessionId() !== sessionId) return "Session changed; no request sent.";
+            const error = optimizationError(ctx, text);
+            if (error) return error;
+            triggerOptimize(ctx, true, text, true);
+            return undefined;
+          },
+        });
         const finish = (value?: Selection) => {
           if (closed) return;
           closed = true;
+          workspace.dispose();
           refreshPreview = undefined;
           closePreview = undefined;
           done(value);
@@ -735,15 +698,14 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         // The full panel replaces the passive card; never show the same result twice.
         ctx.ui.setWidget(STATUS_KEY, undefined);
         return {
-          render: (width) => panel.render(width),
-          invalidate: () => panel.invalidate(),
+          get focused() { return workspace.focused; },
+          set focused(value: boolean) { workspace.focused = value; },
+          render: (width) => workspace.render(width),
+          invalidate: () => workspace.invalidate(),
           handleInput(data) {
+            if (workspace.handleInput(data)) return;
             const navigationKey = parseKey(data);
             if (navigationKey === "left") return;
-            if (navigationKey === "right") {
-              finish({ action: "settings", generation: controller.getGeneration(), token: displayedToken });
-              return;
-            }
             if (keybindings.matches(data, "tui.select.cancel") || navigationKey === "ctrl+\\") { finish(); return; }
             if (keybindings.matches(data, "tui.input.submit")) return;
             if (keybindings.matches(data, "tui.editor.cursorUp")) panel.scrollBy(-1);
@@ -761,7 +723,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
               }
               const keys: Record<string, PreviewAction> = {
                 a: "accept", e: "edit", s: "send", x: "dismiss", d: "dismiss", z: "restore",
-                r: "optimize", m: "model", c: "cycle", q: "close", i: "input",
+                r: "optimize", m: "model", c: "cycle", q: "close",
               };
               const action = key ? keys[key] : undefined;
               if (action) {
@@ -782,16 +744,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     if (!selection || selection.action === "close") return;
     if (controller.getSessionId() !== sessionId || controller.getGeneration() !== selection.generation) return;
     const { action, token } = selection;
-    if (action === "input" || action === "settings") {
-      if (action === "settings") await showContextSettings(ctx);
-      else {
-        const draft = await ctx.ui.input("Prompt · Enter Refine", "Type a prompt");
-        if (ctx.sessionManager.getSessionId() !== sessionId || controller.getGeneration() !== selection.generation) return;
-        if (draft?.trim()) triggerOptimize(ctx, true, draft);
-      }
-      if (ctx.sessionManager.getSessionId() === sessionId) await showPreviewContent(ctx);
-    }
-    else if (action === "dismiss") controller.cancelAndDismiss();
+    if (action === "dismiss") controller.cancelAndDismiss();
     else if (action === "restore") await restoreDraft(ctx);
     else if (action === "model") await selectModel(ctx);
     else if (action === "cycle") await cycleModel(ctx);
