@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "model": {
+    "provider": "openai",
+    "id": "gpt-4.1-mini"
+  },
+  "favorites": [
+    {
+      "provider": "openai",
+      "id": "gpt-4.1-mini"
+    }
+  ],
+  "shortcuts": {
+    "optimize": "ctrl+\\",
+    "view": null,
+    "dismiss": null,
+    "selectModel": null,
+    "cycleModel": null,
+    "restore": null
+  },
+  "timeoutMs": 60000,
+  "context": {
+    "maxMessages": 12,
+    "maxChars": 16000
+  },
+  "maxDraftChars": 16000,
+  "maxOutputTokens": 2048
+}
