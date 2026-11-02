@@ -1,6 +1,6 @@
 import { lstat, open, opendir } from "node:fs/promises";
 import { constants } from "node:fs";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import ignore, { type Ignore } from "ignore";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ProjectContextConfig } from "./config.js";
@@ -14,7 +14,13 @@ export interface ProjectSnapshot {
   instructionCount: number;
   skillCount: number;
 }
-export interface TreeSnapshot { text: string; warnings: string[] }
+export interface TreeSnapshot {
+  text: string;
+  warnings: string[];
+  entryCount?: number;
+  scannedCount?: number;
+  referencedDirectoryCount?: number;
+}
 
 function prefix(text: string, maxChars: number): string {
   let end = Math.max(0, maxChars);
@@ -214,7 +220,12 @@ function isIgnored(path: string, directory: boolean, rules: IgnoreRules[]): bool
   return ignored;
 }
 
-export async function collectTree(cwd: string, draft: string, config: ProjectContextConfig["tree"], signal: AbortSignal): Promise<TreeSnapshot> {
+interface TreeOptions {
+  inheritedRules?: IgnoreRules[];
+  skipDirectories?: ReadonlySet<string>;
+}
+
+export async function collectTree(cwd: string, draft: string, config: ProjectContextConfig["tree"], signal: AbortSignal, options: TreeOptions = {}): Promise<TreeSnapshot> {
   if (!config.enabled || signal.aborted) return { text: "", warnings: [] };
   const local = new AbortController();
   const combined = AbortSignal.any([signal, local.signal]);
@@ -225,7 +236,7 @@ export async function collectTree(cwd: string, draft: string, config: ProjectCon
     const excluded = new Set([".git", ...config.exclude]);
     const entries: TreeEntry[] = [];
     const reasons = new Set<string>();
-    const inherited = await ancestorIgnoreRules(root, reasons, combined);
+    const inherited = options.inheritedRules ?? await ancestorIgnoreRules(root, reasons, combined);
     const queue: Array<{ path: string; depth: number; rules: IgnoreRules[] }> = [{ path: "", depth: 0, rules: inherited }];
     let scanned = 0;
     while (queue.length && !combined.aborted && entries.length < config.maxEntries) {
@@ -251,7 +262,9 @@ export async function collectTree(cwd: string, draft: string, config: ProjectCon
       for (const child of children.slice(0, config.maxEntriesPerDirectory)) {
         if (entries.length >= config.maxEntries) { reasons.add("全树条目上限"); break; }
         entries.push(child);
-        if (child.directory && parent.depth + 1 < config.maxDepth) queue.push({ path: child.path, depth: parent.depth + 1, rules });
+        if (child.directory && parent.depth + 1 < config.maxDepth && !options.skipDirectories?.has(join(root, child.path))) {
+          queue.push({ path: child.path, depth: parent.depth + 1, rules });
+        }
       }
       if (scanned > config.maxScannedEntries) break;
     }
@@ -267,7 +280,8 @@ export async function collectTree(cwd: string, draft: string, config: ProjectCon
       for (let index = 0; index < children.length; index += 1) {
         const child = children[index]!;
         const last = index === children.length - 1;
-        const line = `${indent}${last ? "└── " : "├── "}${JSON.stringify(basename(child.path))}${child.directory ? "/" : child.symlink ? " [symlink; not followed]" : ""}`;
+        const separate = child.directory && options.skipDirectories?.has(join(root, child.path));
+        const line = `${indent}${last ? "└── " : "├── "}${JSON.stringify(basename(child.path))}${child.directory ? "/" : child.symlink ? " [symlink; not followed]" : ""}${separate ? " [separate @reference]" : ""}`;
         if (used + line.length + 1 > config.maxChars) { reasons.add("tree 字符预算"); break; }
         lines.push(line); used += line.length + 1;
         if (child.directory) render(child.path, indent + (last ? "    " : "│   "));
@@ -275,7 +289,7 @@ export async function collectTree(cwd: string, draft: string, config: ProjectCon
     };
     render("", "");
     const warnings = reasons.size ? [`Tree 未完整提供：${[...reasons].join("、")}；更多条目未展示或未枚举。`] : [];
-    return { text: prefix(lines.join("\n") + footer, config.maxChars), warnings };
+    return { text: prefix(lines.join("\n") + footer, config.maxChars), warnings, entryCount: entries.length, scannedCount: scanned };
   };
   try {
     return await Promise.race([
@@ -286,6 +300,153 @@ export async function collectTree(cwd: string, draft: string, config: ProjectCon
       }),
       new Promise<TreeSnapshot>((done) => {
         onAbort = () => done({ text: "", warnings: [] });
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+    local.abort();
+  }
+}
+
+/** Literal @paths only: no shell expansion; quote paths containing spaces or punctuation. */
+export function directoryReferences(draft: string, maxReferences: number): { paths: string[]; truncated: boolean } {
+  const paths = new Set<string>();
+  const pattern = /(?:^|[\s([{"'`，。；：])@(?:"([^"\r\n]+)"|'([^'\r\n]+)'|`([^`\r\n]+)`|([^\s"'`<>(){}\[\],;:!?，。；：！？]+))/gu;
+  for (const match of draft.matchAll(pattern)) {
+    const path = match[1] ?? match[2] ?? match[3] ?? match[4]!;
+    if (path.includes("@")) continue; // Not an email address or a nested scoped package token.
+    if (paths.has(path)) continue;
+    if (paths.size >= maxReferences) return { paths: [...paths], truncated: true };
+    paths.add(path);
+  }
+  return { paths: [...paths], truncated: false };
+}
+
+/** Explicit directories get first use of one shared tree budget, regardless of history. */
+export async function collectDirectoryContext(
+  cwd: string, draft: string, config: ProjectContextConfig, includeDefault: boolean, signal: AbortSignal,
+): Promise<TreeSnapshot> {
+  const empty = (): TreeSnapshot => ({ text: "", warnings: [] });
+  if (!config.enabled || signal.aborted) return empty();
+  const refs = config.referencedDirectories.enabled
+    ? directoryReferences(draft, config.referencedDirectories.maxReferences)
+    : { paths: [], truncated: false };
+  const defaultEnabled = includeDefault && config.tree.enabled;
+  if (!refs.paths.length) return defaultEnabled ? collectTree(cwd, draft, config.tree, signal) : empty();
+
+  const local = new AbortController();
+  const combined = AbortSignal.any([signal, local.signal]);
+  const warnings: string[] = refs.truncated ? ["Directory reference limit reached; later references omitted."] : [];
+  const sections: string[] = [];
+  let referenceCount = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const snapshot = (): TreeSnapshot => ({ text: sections.join("\n\n"), warnings: [...warnings], referencedDirectoryCount: referenceCount });
+  const scan = async (): Promise<TreeSnapshot> => {
+    const root = resolve(cwd);
+    const reasons = new Set<string>();
+    const inherited = await ancestorIgnoreRules(root, reasons, combined);
+    const excluded = new Set([".git", ...config.tree.exclude]);
+    const directories = new Map<string, IgnoreRules[]>();
+    const checked = new Set<string>();
+    for (const ref of refs.paths) {
+      if (combined.aborted) return empty();
+      const path = resolve(root, ref);
+      const name = relative(root, path);
+      const label = JSON.stringify(prefix(ref, 200));
+      if (name === ".." || name.startsWith(`..${sep}`) || isAbsolute(name) ||
+          ref.split(/[\\/]/).includes("..") || /[\x00-\x1f\x7f]/.test(ref) || (sep !== "\\" && ref.includes("\\"))) {
+        warnings.push(`Directory reference ${label} skipped: only literal paths within cwd are supported.`);
+        continue;
+      }
+      if (checked.has(path)) continue;
+      checked.add(path);
+      const parts = name ? name.split(sep) : [];
+      if (parts.length > 32) { warnings.push(`Directory reference ${label} skipped: path depth limit.`); continue; }
+      let current = root;
+      const rules = [...inherited];
+      let usable = true;
+      try {
+        // Check every component, so @link/subdir cannot bypass the symlink policy.
+        const rootStat = await lstat(root);
+        if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error("unsafe root");
+        for (let index = 0; index < parts.length; index += 1) {
+          if (combined.aborted) return empty();
+          const part = parts[index]!;
+          const localRules = await readIgnore(current, reasons);
+          if (localRules) rules.push(localRules);
+          current = join(current, part);
+          const stat = await lstat(current);
+          if (stat.isSymbolicLink() || excluded.has(part) || part === ".env" || part.startsWith(".env.") || isIgnored(current, stat.isDirectory(), rules)) {
+            warnings.push(`Directory reference ${label} skipped: ignored, excluded or symlink path.`);
+            usable = false;
+            break;
+          }
+          if (!stat.isDirectory()) {
+            // Ordinary @file references stay literal; never open their contents.
+            if (index < parts.length - 1) warnings.push(`Directory reference ${label} skipped: a parent is not a directory.`);
+            usable = false;
+            break;
+          }
+        }
+        if (usable) directories.set(path, rules);
+      } catch {
+        if (!combined.aborted) warnings.push(`Directory reference ${label} unavailable: missing or unreadable path.`);
+      }
+    }
+    if (combined.aborted) return empty();
+    if (reasons.size) warnings.push(`Directory reference ignore rules incomplete: ${[...reasons].join("; ")}.`);
+    if (!directories.size) {
+      const tree = defaultEnabled ? await collectTree(root, draft, config.tree, combined) : empty();
+      return { ...tree, warnings: [...warnings, ...tree.warnings] };
+    }
+    const skipDirectories = new Set(directories.keys());
+    const targets = [...directories].map(([path, rules]) => ({ path, rules, explicit: true }));
+    if (defaultEnabled && !directories.has(root)) targets.push({ path: root, rules: inherited, explicit: false });
+    let remainingChars = config.tree.maxChars;
+    let remainingEntries = config.tree.maxEntries;
+    let remainingScans = config.tree.maxScannedEntries;
+    for (const target of targets) {
+      if (combined.aborted) return empty();
+      const header = target.explicit ? `REFERENCED DIRECTORY: ${JSON.stringify(relative(root, target.path) || ".")}\n` : "WORKING DIRECTORY TREE:\n";
+      const separator = sections.length ? 2 : 0;
+      const room = remainingChars - header.length - separator;
+      if (room < 128 || remainingEntries <= 0 || remainingScans <= 0) {
+        warnings.push("Shared directory budget exhausted; remaining listings omitted.");
+        break;
+      }
+      const result = await collectTree(target.path, draft, {
+        ...config.tree, enabled: true, maxChars: room, maxEntries: remainingEntries, maxScannedEntries: remainingScans,
+      }, combined, { inheritedRules: target.rules, skipDirectories });
+      if (combined.aborted) return empty();
+      warnings.push(...result.warnings);
+      if (result.text) {
+        const section = header + result.text;
+        sections.push(section);
+        remainingChars -= section.length + separator;
+        if (target.explicit) referenceCount += 1;
+      }
+      remainingEntries -= result.entryCount ?? 0;
+      remainingScans -= result.scannedCount ?? 0;
+    }
+    return snapshot();
+  };
+  try {
+    return await Promise.race([
+      scan(),
+      new Promise<TreeSnapshot>((done) => {
+        timer = setTimeout(() => {
+          local.abort();
+          warnings.push("Directory collection timed out; remaining listings omitted.");
+          done(snapshot());
+        }, config.tree.timeoutMs);
+        timer.unref?.();
+      }),
+      new Promise<TreeSnapshot>((done) => {
+        onAbort = () => done(empty());
         if (signal.aborted) onAbort();
         else signal.addEventListener("abort", onAbort, { once: true });
       }),

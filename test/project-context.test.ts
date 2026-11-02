@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_CONFIG } from "../src/config.js";
-import { assembleProjectContext, captureProjectContext, collectTree, formatProjectResources, resourcesFromPrompt } from "../src/project-context.js";
+import { assembleProjectContext, captureProjectContext, collectDirectoryContext, collectTree, directoryReferences, formatProjectResources, resourcesFromPrompt } from "../src/project-context.js";
 
 const dirs: string[] = [];
 async function fixture(): Promise<string> {
@@ -111,6 +111,168 @@ describe("host project resources", () => {
     expect(assembled.text).not.toContain("a".repeat(10));
     const smallSkills = formatProjectResources({ skills: [{ name: "huge", description: "a".repeat(2000) }, { name: "small", description: "Read PDFs" }] }, { ...config, maxChars: 1024 }, "draft");
     expect(smallSkills.text).toContain("Read PDFs");
+  });
+});
+
+describe("explicit directory references", () => {
+  function config() {
+    const config = structuredClone(DEFAULT_CONFIG.projectContext);
+    config.tree.timeoutMs = 2000;
+    return config;
+  }
+  const signal = () => new AbortController().signal;
+
+  it("parses literal, quoted and Markdown references without matching emails, URLs or escaped @", () => {
+    const draft = 'Inspect @src/ (`@./tests`) @"docs with spaces" @\'more docs\' @`other docs` @src/ ' +
+      'user@example.com https://example.com/@ignored \\@escaped @@scope/package';
+    expect(directoryReferences(draft, 8)).toEqual({ paths: ["src/", "./tests", "docs with spaces", "more docs", "other docs"], truncated: false });
+    expect(directoryReferences("@a @a @b @c", 2)).toEqual({ paths: ["a", "b"], truncated: true });
+  });
+
+  it.each([false, true])("lists referenced folders with default tree enabled=%s, without needing empty history", async (enabled) => {
+    const dir = await fixture();
+    await mkdir(join(dir, "src", "nested"), { recursive: true });
+    await mkdir(join(dir, "docs with spaces"));
+    await writeFile(join(dir, "src", "nested", "target.ts"), "PRIVATE CONTENT");
+    await writeFile(join(dir, "docs with spaces", "guide.md"), "PRIVATE GUIDE");
+    await writeFile(join(dir, "unrelated.txt"), "");
+    const settings = config();
+    settings.tree.enabled = enabled;
+    const result = await collectDirectoryContext(dir, '@src @"docs with spaces"', settings, false, signal());
+    expect(result.warnings).toEqual([]);
+    expect(result.referencedDirectoryCount).toBe(2);
+    expect(result.text).toContain('REFERENCED DIRECTORY: "src"');
+    expect(result.text).toContain('REFERENCED DIRECTORY: "docs with spaces"');
+    expect(result.text).toContain("target.ts");
+    expect(result.text).toContain("guide.md");
+    expect(result.text).not.toContain("unrelated.txt");
+    expect(result.text).not.toContain("PRIVATE");
+    expect(result.text.length).toBeLessThanOrEqual(settings.tree.maxChars);
+  });
+
+  it("deduplicates normalized aliases and overlapping default/explicit subtrees without losing deeper references", async () => {
+    const dir = await fixture();
+    await mkdir(join(dir, "src", "nested", "deep"), { recursive: true });
+    await writeFile(join(dir, "src", "top.ts"), "");
+    await writeFile(join(dir, "src", "nested", "deep", "bottom.ts"), "");
+    await writeFile(join(dir, "README.md"), "");
+    const result = await collectDirectoryContext(dir, `@src @./src/ @${join(dir, "src")} @src/nested`, config(), true, signal());
+    expect(result.referencedDirectoryCount).toBe(2);
+    expect(result.text.match(/top\.ts/g)).toHaveLength(1);
+    expect(result.text.match(/bottom\.ts/g)).toHaveLength(1);
+    expect(result.text).toContain("README.md");
+    expect(result.text).toContain("[separate @reference]");
+    const root = await collectDirectoryContext(dir, "@./ @.", config(), true, signal());
+    expect(root.referencedDirectoryCount).toBe(1);
+    expect(root.text).not.toContain("WORKING DIRECTORY TREE:");
+  });
+
+  it("keeps the default policy for no references, ordinary files and non-path mentions", async () => {
+    const dir = await fixture();
+    await writeFile(join(dir, "file.ts"), "PRIVATE FILE");
+    const settings = config();
+    const defaultTree = await collectTree(dir, "draft", settings.tree, signal());
+    for (const draft of ["draft", "@file.ts", "user@example.com https://example.com/@src"]) {
+      const without = await collectDirectoryContext(dir, draft, settings, false, signal());
+      expect(without.text).toBe("");
+      expect(without.warnings).toEqual([]);
+      const withDefault = await collectDirectoryContext(dir, draft, settings, true, signal());
+      expect(withDefault.text).toBe(defaultTree.text);
+      expect(withDefault.text).not.toContain("PRIVATE FILE");
+    }
+  });
+
+  it("honors independent opt-outs and does not inspect references when disabled", async () => {
+    const settings = config();
+    settings.referencedDirectories.enabled = false;
+    expect(await collectDirectoryContext("/missing", "@missing", settings, false, signal())).toEqual({ text: "", warnings: [] });
+    const dir = await fixture();
+    await mkdir(join(dir, "src"));
+    await writeFile(join(dir, "src", "default-only.ts"), "");
+    const defaultOnly = await collectDirectoryContext(dir, "@src", settings, true, signal());
+    expect(defaultOnly.text).toContain("default-only.ts");
+    expect(defaultOnly.text).not.toContain("REFERENCED DIRECTORY:");
+    settings.referencedDirectories.enabled = true;
+    settings.enabled = false;
+    expect(await collectDirectoryContext("/missing", "@missing", settings, true, signal())).toEqual({ text: "", warnings: [] });
+  });
+
+  it("rejects outside, traversal, ignored and symlink paths, including symlink parents", async () => {
+    const dir = await fixture();
+    const outside = await fixture();
+    await mkdir(join(outside, "nested"));
+    await writeFile(join(outside, "nested", "outside-secret.txt"), "");
+    await symlink(outside, join(dir, "linked"));
+    await mkdir(join(dir, "ignored", "child"), { recursive: true });
+    await writeFile(join(dir, "ignored", "child", "ignored-secret.txt"), "");
+    await mkdir(join(dir, "node_modules"));
+    await mkdir(join(dir, ".env.private"));
+    await writeFile(join(dir, ".gitignore"), "ignored/\n");
+    const result = await collectDirectoryContext(dir,
+      `@${outside} @../escape @linked/nested @ignored/child @node_modules @.env.private @missing`, config(), false, signal());
+    expect(result.text).toBe("");
+    expect(result.warnings).toHaveLength(7);
+    expect(result.warnings.join(" ")).toContain("within cwd");
+    expect(result.warnings.join(" ")).toContain("symlink");
+    expect(result.warnings.join(" ")).toContain("missing or unreadable");
+  });
+
+  it("inherits ignore rules through non-Git parents and respects nested negations", async () => {
+    const dir = await fixture();
+    await mkdir(join(dir, "src", "nested"), { recursive: true });
+    await writeFile(join(dir, ".gitignore"), "*.log\n*.ts\n");
+    await writeFile(join(dir, "src", ".gitignore"), "!keep.ts\n");
+    await writeFile(join(dir, "src", "nested", "skip.log"), "");
+    await writeFile(join(dir, "src", "nested", "skip.ts"), "");
+    await writeFile(join(dir, "src", "nested", "keep.ts"), "");
+    const result = await collectDirectoryContext(dir, "@src/nested", config(), false, signal());
+    expect(result.warnings).toEqual([]);
+    expect(result.text).toContain("keep.ts");
+    expect(result.text).not.toContain("skip.log");
+    expect(result.text).not.toContain("skip.ts");
+  });
+
+  it("bounds references, shares entry/character/scan budgets and prioritizes explicit directories", async () => {
+    const dir = await fixture();
+    for (const name of ["one", "two"]) {
+      await mkdir(join(dir, name));
+      for (let index = 0; index < 6; index += 1) await writeFile(join(dir, name, `item-${index}.ts`), "");
+    }
+    const settings = config();
+    settings.tree.maxEntries = 2;
+    const result = await collectDirectoryContext(dir, "@one @two", settings, true, signal());
+    expect(result.text).toContain('REFERENCED DIRECTORY: "one"');
+    expect(result.text.match(/item-\d\.ts/g)).toHaveLength(2);
+    expect(result.warnings.join(" ")).toContain("Shared directory budget");
+    expect(result.text).not.toContain("WORKING DIRECTORY TREE");
+    settings.tree.maxEntries = 120;
+    settings.tree.maxScannedEntries = 2;
+    expect((await collectDirectoryContext(dir, "@one @two", settings, false, signal())).warnings.join(" ")).toContain("Shared directory budget");
+    settings.tree.maxScannedEntries = 2000;
+    settings.tree.maxChars = 256;
+    const small = await collectDirectoryContext(dir, "@one @two", settings, true, signal());
+    expect(small.text.length).toBeLessThanOrEqual(256);
+    expect(small.warnings.join(" ")).toContain("Shared directory budget");
+    settings.referencedDirectories.maxReferences = 1;
+    const limited = await collectDirectoryContext(dir, "@one @two", settings, false, signal());
+    expect(limited.warnings.join(" ")).toContain("reference limit");
+    expect(limited.text).not.toContain('REFERENCED DIRECTORY: "two"');
+  });
+
+  it("cancels reference resolution and shares one deadline including filesystem validation", async () => {
+    const dir = await fixture();
+    await mkdir(join(dir, "src"));
+    const abort = new AbortController();
+    const pending = collectDirectoryContext(dir, "@src", config(), false, abort.signal);
+    abort.abort();
+    expect(await pending).toEqual({ text: "", warnings: [] });
+    vi.useFakeTimers();
+    const settings = config();
+    settings.tree.timeoutMs = 10;
+    const timed = collectDirectoryContext(dir, "@src", settings, false, signal());
+    vi.advanceTimersByTime(10);
+    expect((await timed).warnings.join(" ")).toContain("timed out");
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

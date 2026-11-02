@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -292,6 +292,108 @@ function resourcePrompt(skillDescription = "Extract PDF tables", instructions = 
 }
 
 describe("project context injection", () => {
+  it.each([
+    { history: true, tree: true }, { history: true, tree: false },
+    { history: false, tree: true }, { history: false, tree: false },
+  ])("injects explicit directories independently of history=$history and default tree=$tree", async ({ history, tree }) => {
+    const settings = projectConfig(tree);
+    settings.tree.timeoutMs = 2000;
+    const harness = await makeHarness({ config: { projectContext: settings }, sessionName: "Existing title" });
+    await mkdir(join(harness.agentDir, "src"));
+    await writeFile(join(harness.agentDir, "src", "target.ts"), "PRIVATE SOURCE BODY");
+    await writeFile(join(harness.agentDir, "unrelated-root.txt"), "");
+    if (!history) vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([]);
+    vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
+    harness.setEditorText("Explain @src without edits");
+    await trigger(harness);
+    await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
+    const request = (harness.complete.mock.calls[0] as any[])[1];
+    const input = request.messages[0].content[0].text;
+    expect(input).toContain('REFERENCED DIRECTORY: "src"');
+    expect(input.match(/target\.ts/g)).toHaveLength(1);
+    expect(input).toContain("Use the project venv.");
+    expect(input).toContain("Extract PDF tables");
+    expect(input).toContain("Explain @src without edits");
+    expect(input).not.toContain("PRIVATE SOURCE BODY");
+    expect(input.includes("visible answer")).toBe(history);
+    expect(input.includes("unrelated-root.txt")).toBe(!history && tree);
+    expect(harness.widgetLines(200).join("\n")).toContain("@dirs 1");
+    expect(request.systemPrompt).toContain("Do not generate a title");
+    expect(request.tools).toEqual([]);
+    expect(harness.sent).toEqual([]);
+    expect(harness.editorWrites).toEqual([]);
+  });
+
+  it.each(["references", "project"])("respects the %s opt-out with explicit directories", async (disabled) => {
+    const settings = projectConfig(false);
+    if (disabled === "references") settings.referencedDirectories.enabled = false;
+    else settings.enabled = false;
+    const harness = await makeHarness({ config: { projectContext: settings } });
+    await mkdir(join(harness.agentDir, "src"));
+    await writeFile(join(harness.agentDir, "src", "target.ts"), "");
+    harness.setEditorText("Explain @src");
+    await trigger(harness);
+    const input = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
+    expect(input).toContain("Explain @src");
+    expect(input).not.toContain("REFERENCED DIRECTORY:");
+    expect(input).not.toContain("target.ts");
+  });
+
+  it("does not collect directories mentioned only in visible history", async () => {
+    const harness = await makeHarness({ config: { projectContext: projectConfig(true) } });
+    await mkdir(join(harness.agentDir, "src"));
+    await writeFile(join(harness.agentDir, "src", "history-only.ts"), "");
+    vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([
+      { type: "message", message: { role: "user", content: "Previously inspect @src" } },
+    ] as any);
+    harness.setEditorText("Explain the previous decision");
+    await trigger(harness);
+    const input = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
+    expect(input).toContain("Previously inspect @src");
+    expect(input).not.toContain("REFERENCED DIRECTORY:");
+    expect(input).not.toContain("history-only.ts");
+    expect(input).not.toContain("PROJECT TREE");
+  });
+
+  it("warns on unavailable directory references without blocking refinement or expanding file contents", async () => {
+    const harness = await makeHarness({ config: { projectContext: projectConfig(false) } });
+    await writeFile(join(harness.agentDir, "file.ts"), "PRIVATE FILE BODY");
+    harness.setEditorText("Explain @missing/ and @file.ts");
+    await trigger(harness);
+    await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
+    const input = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
+    expect(input).toContain("Directory reference");
+    expect(input).toContain("missing or unreadable");
+    expect(input).not.toContain("PRIVATE FILE BODY");
+    expect(harness.notifications.join(" ")).toContain("missing or unreadable");
+    expect(harness.widgetLines().join("\n")).toContain("⚠1");
+  });
+
+  it("uses only the captured draft's directory references despite subsequent editor changes", async () => {
+    const harness = await makeHarness({ config: { projectContext: projectConfig(false) } });
+    await mkdir(join(harness.agentDir, "src"));
+    await writeFile(join(harness.agentDir, "src", "captured.ts"), "");
+    harness.setEditorText("Inspect @src");
+    await harness.command("optimize", harness.context);
+    harness.setEditorText("Inspect @missing instead");
+    await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
+    const input = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
+    expect(input).toContain("captured.ts");
+    expect(input).not.toContain("@missing");
+    expect(harness.getEditor()).toBe("Inspect @missing instead");
+  });
+
+  it("cancels explicit directory collection with visible history and default tree disabled", async () => {
+    const harness = await makeHarness({ config: { projectContext: projectConfig(false) } });
+    harness.setEditorText("Inspect @missing");
+    await harness.command("optimize", harness.context);
+    await harness.command("cancel", harness.context);
+    await flushPromises();
+    expect(harness.complete).not.toHaveBeenCalled();
+    expect(harness.widgetLines()).toEqual([]);
+    expect(harness.notifications).toEqual(["Refinement cancelled. Editor unchanged."]);
+  });
+
   it("injects skills, applicable instructions and a real bounded tree on the first shortcut in an empty session", async () => {
     const harness = await makeHarness({ config: { projectContext: projectConfig(true) } });
     vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([]);

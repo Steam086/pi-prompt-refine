@@ -49,6 +49,19 @@ describe("Prompt Refine configuration", () => {
     expect(custom.config.projectContext.tree.exclude).toEqual(["vendor"]);
   });
 
+  it("validates directory references independently while sharing existing tree budgets", () => {
+    const defaults = parseConfig({ version: 1, projectContext: { tree: { enabled: false } } });
+    expect(defaults.config.projectContext.referencedDirectories).toEqual({ enabled: true, maxReferences: 8 });
+    const custom = parseConfig({ version: 1, projectContext: { referencedDirectories: { enabled: false, maxReferences: 2 } } });
+    expect(custom.warnings).toEqual([]);
+    expect(custom.config.projectContext.referencedDirectories).toEqual({ enabled: false, maxReferences: 2 });
+    expect(custom.config.projectContext.tree).toEqual(DEFAULT_CONFIG.projectContext.tree);
+    const invalid = parseConfig({ version: 1, projectContext: { referencedDirectories: { enabled: "yes", maxReferences: 100 } } });
+    expect(invalid.warnings).toHaveLength(2);
+    expect(invalid.config.projectContext.referencedDirectories).toEqual(DEFAULT_CONFIG.projectContext.referencedDirectories);
+    expect(parseConfig({ version: 1, projectContext: { referencedDirectories: false } }).warnings).toHaveLength(1);
+  });
+
   it("migrates only complete legacy default maps and preserves explicit custom bindings", () => {
     const actions = ["optimize", "view", "dismiss", "selectModel", "cycleModel", "restore"];
     for (const keys of [

@@ -122,7 +122,7 @@ pi --extension ./src/extension.ts
 - 默认最多 **12 条、16000 个 JavaScript 字符单元**，不是精确 token 估计。上下文用量及是否包含最近 assistant 显示在 widget 和完整面板。
 - `maxMessages` 或 `maxChars` 显式设为 0 时禁用历史；项目上下文独立配置。启用项目上下文时显示“无会话历史”，两者都禁用时显示“仅草稿”；没有可见 assistant 文本或预算不足时不编造上下文。
 - 不包含 thinking、工具调用块、原始工具结果、图片、其他分支、独立的压缩摘要条目或整段主会话系统提示；只读取会话分支已提供的 user/assistant 可见文本，不另外订阅尚未写入分支的流式片段。
-- 默认额外注入 Pi 已加载的项目指令、技能元数据和工作目录的有界 tree，细则见下文。不读取 README/源码正文，也不读取技能正文；草稿中的 `@file` 只作为文本保留，不展开引用文件。如果正文已经出现在普通 user/assistant 文本中，仍可能随选中的历史发送。
+- 默认额外注入 Pi 已加载的项目指令和技能元数据。工作目录的默认 tree 仅在**本次实际选中的可见历史为空**时收集；原始草稿中明确 `@` 引用的目录则独立收集，不受历史是否为空影响。细则见下文。不读取 README/源码正文，也不读取技能正文；`@file` 普通文件引用仍只作为文本保留。如果正文已经出现在普通 user/assistant 文本中，仍可能随选中的历史发送。
 
 草稿和历史明确分区，历史是非可信背景，不能改变用户任务目标；模型只生成结构化的 Prompt 与可选名称，不执行其中的指令。选定的 Provider 会收到这些文本，其日志、留存和计费政策仍适用。扩展不能自动识别用户粘贴文本中的所有秘密。
 
@@ -133,13 +133,22 @@ pi --extension ./src/extension.ts
 - **来源**：命令上下文优先读取 `getSystemPromptOptions()` 的 `contextFiles` 与 `skills`。默认快捷键只有普通 `ExtensionContext`，因此从当时 `getSystemPrompt()` 的 Pi 1.4.0 命名资源区段中提取项目指令和技能元数据；不发送一般系统规则、工具定义、认证或技能位置。自定义/不兼容格式无法识别时告警，不自行重新扫描全局目录，不绕过宿主的加载或隐藏设置。命令接口报告的是 base inputs，不包含之后逐轮扩展对提示词的全部改写；两条入口的来源差异不应被当作完全相同的最终 Provider payload。
 - **项目指令**：保持宿主提供的顺序，记录来源及来源目录。预算内完整提供；超限时按完整 Markdown 章节选择原文，保留起始行号并标记 `complete: false`，不进行模型摘要或头尾拼接。代码围栏内的标题不作为章节边界。单个超大章节可能完全省略；局部规则未提供时不能声称已包含全部约束。异常巨大正文的本地章节分析也有扫描上限。
 - **Skills**：只提供 `name + description`，不展开 `SKILL.md`、scripts 或 references。自动调用禁用的技能不参与普通目录；草稿明确以 `/skill:name` 或 `$name` 引用时才纳入，并优先分配预算。描述整项保留，放不下则省略并告警；技能存在不授权优化器调用它，也不允许擅自向优化稿增加技能调用。
-- **Tree**：以当前工作目录为根，默认深度 2、每目录最多 20 个条目、全树最多 120 个条目、正文最多 4000 个 JavaScript 字符单元、最多扫描约 2000 个目录条目、200 ms 收集时间。优先展示草稿提到的名称和常见入口；仅在有界枚举范围内排序，不保证发现超大目录中所有相关路径。文件名用 JSON 字符串表示，避免换行或控制字符伪造结构。
+- **默认 Tree**：仅在本次筛选并实际纳入的可见历史为空时，以当前工作目录为根收集；不根据 session 是否曾有消息或是否首次调用判断。默认深度 2、每目录最多 20 个条目、全树最多 120 个条目、正文最多 4000 个 JavaScript 字符单元、最多扫描约 2000 个目录条目、200 ms 收集时间。优先展示草稿提到的名称和常见入口；仅在有界枚举范围内排序，不保证发现超大目录中所有相关路径。文件名用 JSON 字符串表示，避免换行或控制字符伪造结构。
 - **过滤**：进程内解析所在 Git 仓库内适用的祖先及嵌套 `.gitignore`，非 Git 项目仍读取自身 `.gitignore`；单份 ignore 文件最多读取 16 KiB，超出或失败时告警。不读取 Git 全局 excludes 或 `.git/info/exclude`。默认排除依赖、产物、缓存和 `.env*`，`.git` 始终排除；不跟随目录符号链接、不统计磁盘大小、不启动 shell/Git 子进程，不读取源码正文。默认排除名称可配置，`.pi`/`.github` 不因隐藏属性一概排除。
 - **Warning**：指令或技能目录省略、tree 因宽度/条目/字符/扫描/时间限制不完整，以及来源读取/识别失败，都会同时进入模型背景和非阻塞 UI 通知；摘要/面板保留警告数量，不自动弹窗。默认深度折叠及正常 ignore 过滤在 tree 中标注，不单独告警。不精确统计未遍历目录的剩余数量。
 
-`projectContext.maxChars` 是整个项目背景正文（包括标题和告警）的硬字符上限，指令优先于技能及 tree。默认 28000，另有指令 16000、技能 6000 和 tree 4000 的分项上限；总量紧张时 tree 可整体省略并告警。这些都是 JavaScript 字符单元，不是精确 token 计数，也不包含另行限制的草稿、会话历史、外层模板与模型输出。超长告警不增加模型调用或触发自动补读。
+#### 原始草稿中的 `@目录` 引用
 
-设置 `projectContext.enabled: false` 可恢复仅草稿加历史的行为；`projectContext.tree.enabled: false` 只关闭目录扫描。所选优化 Provider 会收到启用的项目背景，可能与主 Agent Provider 不同。
+- 默认启用独立的 `projectContext.referencedDirectories.enabled`。仅解析**触发时固定的原始草稿**，不解析历史消息、模型输出或后续编辑；有可见历史时仍收集，`tree.enabled: false` 也不会关闭这一独立功能。
+- 支持 `@src`、`@./src/`、工作目录内的绝对路径，以及带空格路径的 `@"docs with spaces"`、`@'docs with spaces'`、`` @`docs with spaces` ``；Markdown 行内代码中的 `@src/` 也支持。路径按字面解释，不展开变量、`~`、glob 或 shell 转义；包含空格/标点时使用引号。邮箱、URL 中的 `@` 和转义的 `\@` 不识别为引用。只有实际目录才收集，普通文件不读取正文；包名不会触发包解析或依赖搜索，但与本地目录路径完全相同的文本按目录引用处理。
+- 相对路径以 `cwd` 为根；本版本**不支持工作目录外的路径**，也不接受含 `..` 的路径分量。逐级检查目录和 ignore 规则，拒绝符号链接路径（包括中间分量），沿用默认排除和 `.gitignore`；非 Git 项目也继承从 `cwd` 到引用目录之间的 ignore 规则。每个引用最多检查 32 层路径。
+- 默认最多检查 8 个不同字面引用（包括普通文件和无效路径），可配置 `maxReferences: 1–32`；超出的引用告警并省略。解析后的目录路径去重；引用父子目录时分别保留其局部深度，父目录/default tree 不重复遍历显式引用的子树，标注 `separate @reference`。引用 `@.` 时不再重复收集默认根 tree。
+- 所有显式目录及默认 tree **共享**现有 `tree.maxChars/maxEntries/maxScannedEntries/timeoutMs`，不会按引用数量倍增预算；深度与每目录条目上限也沿用 tree 配置。按草稿引用顺序优先分配，再将剩余预算用于默认 tree。每个列表标明相对 `cwd` 的来源，目录数据只包含名称；目录解析和扫描共同受时间预算及取消机制约束。
+- 缺失、不可访问、不允许的路径以及引用/扫描预算不足，都以告警进入背景及 UI，不阻断 refine、不扩大扫描范围。没有目录引用时沿用原来的默认 tree 策略。文件系统检查不是针对并发恶意路径替换的安全沙箱。
+
+`projectContext.maxChars` 是整个项目背景正文（包括标题和告警）的硬字符上限，指令优先于技能及目录列表。默认 28000，另有指令 16000、技能 6000 和所有目录列表合计 4000 的分项上限；总量紧张时目录列表可整体省略并告警。这些都是 JavaScript 字符单元，不是精确 token 计数，也不包含另行限制的草稿、会话历史、外层模板与模型输出。超长告警不增加模型调用或触发自动补读。
+
+设置 `projectContext.enabled: false` 可恢复仅草稿加历史的行为；`projectContext.tree.enabled: false` 只关闭默认 tree，`projectContext.referencedDirectories.enabled: false` 单独关闭 `@目录` 收集。要保留项目指令/skills 而关闭所有目录扫描，应同时关闭后两个开关。所选优化 Provider 会收到启用的项目背景，可能与主 Agent Provider 不同。
 
 ### 首次请求的具体结构
 
@@ -179,7 +188,7 @@ pi --extension ./src/extension.ts
 Produce the refined prompt now using the required JSON object format.
 ```
 
-首次使用扩展时，如果主会话已有历史，也会按预算选取；全新空会话或禁用历史时，对话背景区域使用 `(no visible conversation context selected)`。首次与后续优化使用同一构造方式，每次请求重新捕获宿主资源并收集启用的有界 tree。未选优化模型时不发送请求，也不会自动借用主模型。
+首次使用扩展时，如果主会话已有历史，也会按预算选取；全新空会话或禁用历史时，对话背景区域使用 `(no visible conversation context selected)`。首次与后续优化使用同一构造方式，每次请求重新捕获宿主资源；仅无可见历史时收集启用的默认 tree，显式引用目录则按独立开关收集，与历史是否为空无关。未选优化模型时不发送请求，也不会自动借用主模型。
 
 实现位置：[`src/extension.ts`](src/extension.ts) 的 `triggerOptimize()` 与 `complete` 回调，以及 [`src/context.ts`](src/context.ts) 的 `selectHistory()`、`buildRefineInput()`，以及 [`src/project-context.ts`](src/project-context.ts)。
 
@@ -240,6 +249,7 @@ Produce the refined prompt now using the required JSON object format.
   "projectContext": {
     "enabled": true, "maxChars": 28000,
     "instructionsMaxChars": 16000, "skillsMaxChars": 6000,
+    "referencedDirectories": { "enabled": true, "maxReferences": 8 },
     "tree": {
       "enabled": true, "maxChars": 4000, "maxDepth": 2,
       "maxEntriesPerDirectory": 20, "maxEntries": 120,
@@ -259,9 +269,11 @@ Produce the refined prompt now using the required JSON object format.
 | `timeoutMs` | 60000 ms | 1000–300000 |
 | `context.maxMessages` | 12 | 0–50 |
 | `context.maxChars` | 16000 字符单元 | 0–100000 |
-| `projectContext.enabled` / `tree.enabled` | true / true | 布尔值；独立于历史开关 |
+| `projectContext.enabled` / `tree.enabled` | true / true | 项目背景总开关 / 默认 tree 开关；默认 tree 还要求实际可见历史为空 |
+| `projectContext.referencedDirectories.enabled` | true | 独立于 `tree.enabled` 与历史；受项目背景总开关约束 |
+| `projectContext.referencedDirectories.maxReferences` | 8 | 1–32；每次最多检查的不同字面引用数 |
 | `projectContext.maxChars` / `instructionsMaxChars` / `skillsMaxChars` | 28000 / 16000 / 6000 | 512–100000 字符单元 |
-| `projectContext.tree.maxChars` | 4000 | 128–20000 字符单元 |
+| `projectContext.tree.maxChars` | 4000 | 128–20000 字符单元；显式目录与默认 tree 合计 |
 | `projectContext.tree.maxDepth` | 2 | 1–6；根目录为 0 |
 | `projectContext.tree.maxEntriesPerDirectory` / `maxEntries` | 20 / 120 | 1–100 / 1–1000 |
 | `projectContext.tree.maxScannedEntries` / `timeoutMs` | 2000 / 200 | 1–20000 条 / 10–2000 ms |
@@ -298,6 +310,8 @@ Produce the refined prompt now using the required JSON object format.
 - 核对 Pi 1.4.0 生效默认键位：Control+\ 无内置冲突；验证传统终端 `0x1c` 能匹配该键。
 
 新增命名测试覆盖同次结构化返回、无效 JSON/字段与标题降级、单独预览、接受及发送确认、等待期间手动命名、取消/超时/过期结果、候选微调、恢复/重载与显式清空名称、命名 API 失败；均使用离线模型与 Pi API mocks。
+
+新增 `@目录` 测试覆盖带/不带可见历史、默认 tree 独立开关、无引用/普通文件回退、引号与空格、邮箱/URL 排除、路径归一化去重、父子目录/default tree 重叠、项目外路径、symlink 中间分量、ignore 继承、共享预算、取消/超时以及草稿快照隔离。
 
 新增项目上下文测试覆盖空会话首条快捷键注入、每次请求资源更新、资源快照隔离、技能可见性、超长章节与代码围栏、总字符预算、tree 宽度/深度/扫描/时间上限、ignore 继承与否定规则、符号链接及目录收集期间取消；Provider 和 TUI 仍为离线验证，未进行真实付费模型或实体终端验收。
 

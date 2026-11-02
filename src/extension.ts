@@ -16,7 +16,7 @@ import { PreviewPanel, type PreviewOptions } from "./preview.js";
 import { RefineController, type Candidate, type CandidateToken, type ControllerState, type RefineRequest } from "./controller.js";
 
 import { readTokenUsage } from "./usage.js";
-import { assembleProjectContext, captureProjectContext, collectTree } from "./project-context.js";
+import { assembleProjectContext, captureProjectContext, collectDirectoryContext } from "./project-context.js";
 
 const STATUS_KEY = "prompt-refine";
 
@@ -133,15 +133,18 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
 
       let projectText = "";
       if (request.project) {
-        // Use the selected history sent in this request, not session activity.
-        const tree = config.projectContext.tree.enabled && !request.historyText
-          ? await collectTree(request.project.cwd, request.draft, config.projectContext.tree, signal)
-          : { text: "", warnings: [] };
+        // History gates only the default tree; explicit @directories are independent.
+        const tree = await collectDirectoryContext(
+          request.project.cwd, request.draft, config.projectContext, !request.historyText, signal,
+        );
         if (signal.aborted) throw new Error("Context collection cancelled");
         const project = assembleProjectContext(request.project.snapshot, tree, config.projectContext);
         projectText = project.text;
         if (controller.getState().requestId === request.requestId && controller.getGeneration() === request.generation) {
           projectWarnings = project.warnings;
+          if (tree.referencedDirectoryCount && project.text.includes("REFERENCED DIRECTORY:")) {
+            projectLabel += ` · @dirs ${tree.referencedDirectoryCount}`;
+          }
           if (projectWarnings.length) notify(ctx, projectWarnings.join("\n"), "warning");
           updatePresentation(controller.getState());
         }
