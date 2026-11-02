@@ -159,7 +159,13 @@ pi --extension ./src/extension.ts
 
 `projectContext.instructionsOnFollowUp` 默认 `false`：当前分支已有 user/assistant 消息时，优化请求不再注入 AGENTS.md 等宿主项目指令；首次仍注入，skills 不受影响。判定不受历史选取预算影响，也不以优化次数计数；设为 `true` 可恢复每次注入。此设置不改变主 Agent 自身加载的指令。
 
-完整预览面板中，`Ctrl+\` 与 `Esc` 一样返回编辑器，保留候选结果和后台优化；主编辑器中的原有优化/查看快捷键行为不变。
+完整预览面板的返回提示只显示 `q Back`；`Ctrl+\` 与 `Esc` 仍同样返回编辑器，保留候选结果和后台优化。`x`（兼容 `d`）在运行时显示为 `Break`，会中止目录收集/模型请求并丢弃迟到结果，不仅是关闭界面。主编辑器中的原有快捷键行为不变。
+
+- `i Input`：进入 prompt 输入框，Enter 提交后才启动优化；取消或空白输入不发请求，输入不会自动发送给主 Agent。
+- 主界面 `→ Context` 进入设置页（不再使用 `t`）；设置页 `←` 返回主界面并放弃未保存修改，与 `q`/Esc 一致。主界面 `←` 和设置页 `→` 不执行操作。顶部加粗标识当前页面，底部快捷键按固定列宽对齐，窄窗口按整列换行。
+- Context 页竖向勾选默认注入内容，初始为 `[x] AGENTS.md`、`[x] tree`、`[ ] skills`。上下选择、Space 切换、Enter 保存，`←`/`q`/Esc 取消未保存修改。设置沿用 `prompt-refine.json`，下次请求生效，不改变当前请求快照。
+- 对应配置为 `projectContext.instructionsEnabled: true`、`tree.enabled: true`、`skillsEnabled: false`。已有显式值保留，缺省 skills 关闭；AGENTS.md 仍遵循 `instructionsOnFollowUp`，tree 仍遵循历史为空的规则，显式 `@目录` 的独立开关不变。项目背景总开关 `enabled` 仍优先。
+- 插件交互界面隐藏宿主 token/费用/模型页脚，退出后恢复；插件不再写入重复的底部 `Refine` 状态行。
 
 设置 `projectContext.enabled: false` 可恢复仅草稿加历史的行为；`projectContext.tree.enabled: false` 只关闭默认 tree，`projectContext.referencedDirectories.enabled: false` 单独关闭 `@目录` 收集。要保留项目指令/skills 而关闭所有目录扫描，应同时关闭后两个开关。所选优化 Provider 会收到启用的项目背景，可能与主 Agent Provider 不同。
 
@@ -263,6 +269,7 @@ Produce the refined prompt now using the required JSON object format.
     "enabled": true, "maxChars": 28000,
     "instructionsMaxChars": 16000, "skillsMaxChars": 6000,
     "instructionsOnFollowUp": false,
+    "instructionsEnabled": true, "skillsEnabled": false,
     "referencedDirectories": { "enabled": true, "maxReferences": 8 },
     "tree": {
       "enabled": true, "maxChars": 4000, "maxDepth": 2,
@@ -283,6 +290,8 @@ Produce the refined prompt now using the required JSON object format.
 | `timeoutMs` | 60000 ms | 1000–300000 |
 | `context.maxMessages` | 12 | 0–50 |
 | `context.maxChars` | 16000 字符单元 | 0–100000 |
+| `projectContext.instructionsEnabled` / `skillsEnabled` | true / false | 项目指令 / 技能元数据默认注入开关 |
+| `projectContext.instructionsOnFollowUp` | false | 后续 prompt 是否注入项目指令 |
 | `projectContext.enabled` / `tree.enabled` | true / true | 项目背景总开关 / 默认 tree 开关；默认 tree 还要求实际可见历史为空 |
 | `projectContext.referencedDirectories.enabled` | true | 独立于 `tree.enabled` 与历史；受项目背景总开关约束 |
 | `projectContext.referencedDirectories.maxReferences` | 8 | 1–32；每次最多检查的不同字面引用数 |

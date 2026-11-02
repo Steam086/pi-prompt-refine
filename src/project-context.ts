@@ -70,8 +70,9 @@ export function captureProjectContext(ctx: ExtensionContext, config: ProjectCont
     if (typeof command.getSystemPromptOptions === "function") resources = command.getSystemPromptOptions();
     else ({ resources, warnings } = resourcesFromPrompt(ctx.getSystemPrompt()));
   } catch { warnings.push("无法获取 Pi 已加载的项目指令和 skills；本次项目资源不完整。"); }
-  const omitInstructions = followUp && !config.instructionsOnFollowUp;
-  return formatProjectResources({ ...resources, cwd: ctx.cwd, ...(omitInstructions ? { contextFiles: [] } : {}) }, config, draft, warnings);
+  const omitInstructions = !config.instructionsEnabled || (followUp && !config.instructionsOnFollowUp);
+  return formatProjectResources({ ...resources, cwd: ctx.cwd, ...(omitInstructions ? { contextFiles: [] } : {}),
+    ...(!config.skillsEnabled ? { skills: [] } : {}) }, config, draft, warnings);
 }
 
 function markdownSections(content: string): Array<{ startLine: number; content: string }> {

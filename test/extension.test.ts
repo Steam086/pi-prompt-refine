@@ -131,6 +131,8 @@ async function makeHarness(options: { sessionName?: string; mode?: "tui" | "prin
     }),
     notify: vi.fn((message: string) => notifications.push(message)),
     setStatus: vi.fn((_key: string, text: string | undefined) => statuses.push(text)),
+    setFooter: vi.fn(),
+    input: vi.fn(async () => undefined as string | undefined),
     getEditorText: () => editor,
     setEditorText: (text: string) => {
       editor = text;
@@ -286,6 +288,7 @@ function projectConfig(tree = false): RefineConfig["projectContext"] {
   config.tree.enabled = tree;
   // Existing resource/budget tests explicitly exercise repeat injection.
   config.instructionsOnFollowUp = true;
+  config.skillsEnabled = true;
   return config;
 }
 
@@ -471,7 +474,7 @@ describe("project context injection", () => {
     const input = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
     expect(input.includes("Use the project venv.")).toBe(!followUp);
     expect(input.includes("/repo/AGENTS.md")).toBe(!followUp);
-    expect(input).toContain("Extract PDF tables");
+    expect(input).not.toContain("Extract PDF tables");
   });
 
   it("injects skills, applicable instructions and a real bounded tree on the first shortcut in an empty session", async () => {
@@ -912,7 +915,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     resolve(refinement("Timed result"));
     await flushPromises();
     expect(harness.widgetLines().join("\n")).toContain("Done · 12s");
-    expect(harness.statuses.at(-1)).toContain("done · 12s");
+    expect(harness.statuses.at(-1)).toBeUndefined();
     expect(vi.getTimerCount()).toBe(0);
 
     await vi.advanceTimersByTimeAsync(30_000);
@@ -920,7 +923,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.panelLines().join("\n")).toContain("Done · 12s");
     expect(harness.widgetLines().join("\n")).toContain("Done · 12s");
     await panelAction(harness, "a");
-    expect(harness.statuses.at(-1)).toContain("accepted · 12s");
+    expect(harness.statuses.at(-1)).toBeUndefined();
     await vi.advanceTimersByTimeAsync(30_000);
     await panelAction(harness, "q");
     expect(harness.panelLines().join("\n")).toContain("Accepted · 12s");
@@ -1003,6 +1006,123 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.widgetLines().join("\n")).toContain("Refined prompt");
     expect(harness.getEditor()).toBe("Draft A");
     expect(harness.customCalls()).toBe(1);
+  });
+
+  it("opens input without refining and starts only after submission", async () => {
+    const harness = await makeHarness();
+    let submit!: (value: string | undefined) => void;
+    vi.mocked(harness.context.ui.input).mockImplementation(() => new Promise((resolve) => { submit = resolve; }));
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("i");
+    await flushPromises();
+    expect(harness.context.ui.input).toHaveBeenCalledTimes(1);
+    expect(harness.complete).not.toHaveBeenCalled();
+    submit("New input prompt");
+    await flushPromises();
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    expect((harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text).toContain("New input prompt");
+    expect(harness.sent).toEqual([]);
+    harness.panelInput("q");
+    await view;
+    const footer = vi.mocked(harness.context.ui.setFooter);
+    expect((footer.mock.calls[0]![0] as any)().render(80)).toEqual([]);
+    expect(footer).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it.each([undefined, "   "])("does not refine canceled or blank input %j", async (value) => {
+    const harness = await makeHarness();
+    vi.mocked(harness.context.ui.input).mockResolvedValue(value);
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("i");
+    await flushPromises();
+    expect(harness.complete).not.toHaveBeenCalled();
+    harness.panelInput("q");
+    await view;
+  });
+
+  it.each(["\x1b[D", "q", "\x1b"])("cancels unsaved context edits with %j and keeps default injection", async (back) => {
+    const harness = await makeHarness({ config: { projectContext: structuredClone(DEFAULT_CONFIG.projectContext) } });
+    vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([]);
+    vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    const main = harness.panelLines();
+    expect(main[0]).toContain("Main");
+    harness.panelInput("t");
+    harness.panelInput("\x1b[D");
+    expect(harness.panelLines()).toEqual(main);
+    harness.panelInput("\x1b[C");
+    await flushPromises();
+    const settings = harness.panelLines();
+    expect(settings[0]).toContain("Context");
+    expect(settings).toHaveLength(main.length);
+    expect(settings.findIndex((line) => line.includes("──"))).toBe(main.findIndex((line) => line.includes("──")));
+    expect(settings[0]?.startsWith("  ")).toBe(true);
+    harness.panelInput(" ");
+    const edited = harness.panelLines();
+    harness.panelInput("\x1b[C");
+    expect(harness.panelLines()).toEqual(edited);
+    harness.panelInput(back);
+    await flushPromises();
+    expect(harness.complete).not.toHaveBeenCalled();
+    harness.panelInput("q");
+    await view;
+    await trigger(harness);
+    await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
+    const input = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
+    expect(input).toContain("Use the project venv.");
+    expect(input).toContain("PROJECT TREE");
+    expect(input).not.toContain("Extract PDF tables");
+  });
+
+  it("saves vertical context selections and applies them after reload", async () => {
+    const harness = await makeHarness({ config: { projectContext: structuredClone(DEFAULT_CONFIG.projectContext) } });
+    vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([]);
+    vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("\x1b[C");
+    await flushPromises();
+    const lines = harness.panelLines();
+    expect(lines.filter((line) => /\[[x ]\]/.test(line))).toEqual(["  › [x] AGENTS.md", "    [x] tree", "    [ ] skills"]);
+    harness.panelInput(" ");
+    harness.panelInput("\x1b[B");
+    harness.panelInput(" ");
+    harness.panelInput("\x1b[B");
+    harness.panelInput(" ");
+    harness.panelInput("\r");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Prompt Refine"));
+    harness.panelInput("q");
+    await view;
+    const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
+    expect(saved.projectContext).toMatchObject({ instructionsEnabled: false, skillsEnabled: true, tree: { enabled: false } });
+    await harness.reload();
+    await trigger(harness);
+    const input = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
+    expect(input).not.toContain("Use the project venv.");
+    expect(input).not.toContain("PROJECT TREE");
+    expect(input).toContain("Extract PDF tables");
+  });
+
+  it("x Break aborts the provider request and ignores late output", async () => {
+    const harness = await makeHarness();
+    let resolve!: (value: any) => void;
+    harness.complete.mockImplementation(() => new Promise((res) => { resolve = res; }));
+    await trigger(harness);
+    const signal = (harness.complete.mock.calls[0] as any[])[2].signal as AbortSignal;
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    expect(harness.panelLines().join("\n")).toContain("x Break");
+    harness.panelInput("x");
+    await view;
+    expect(signal.aborted).toBe(true);
+    resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "Late output" }) }], stopReason: "stop" });
+    await flushPromises();
+    expect(harness.widgetLines()).toEqual([]);
+    expect(harness.sent).toEqual([]);
+    expect(harness.getEditor()).toBe("Draft A");
   });
 
   it("closing a live panel keeps generating and does not reopen it on completion", async () => {
@@ -1379,7 +1499,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.sent).toEqual([{ text: "Refined prompt", options: undefined }]);
 
     harness.handlers.get("input")?.[0]?.({ type: "input", text: "Refined prompt", source: "extension" }, harness.context);
-    expect(harness.statuses.at(-1)).toBe("Refine · send pending · 0s · draft kept");
+    expect(harness.statuses.at(-1)).toBeUndefined();
     harness.setCustomAction("s");
     await shortcut(harness, "f3")(harness.context);
     expect(harness.sent).toHaveLength(1);

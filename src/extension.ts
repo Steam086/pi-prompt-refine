@@ -1,4 +1,4 @@
-import { Container, parseKey, SelectList, Text, type KeyId, type SelectItem } from "@earendil-works/pi-tui";
+import { Container, parseKey, SelectList, Text, truncateToWidth, type KeyId, type SelectItem } from "@earendil-works/pi-tui";
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model, type ModelThinkingLevel, type UserMessage } from "@earendil-works/pi-ai";
 import { DynamicBorder, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
@@ -16,11 +16,12 @@ import { PreviewPanel, type PreviewOptions } from "./preview.js";
 import { RefineController, type Candidate, type CandidateToken, type ControllerState, type RefineRequest } from "./controller.js";
 
 import { readTokenUsage } from "./usage.js";
+import { keyHintGrid } from "./key-hints.js";
 import { assembleProjectContext, captureProjectContext, collectDirectoryContext } from "./project-context.js";
 
 const STATUS_KEY = "prompt-refine";
 
-type PreviewAction = "accept" | "edit" | "send" | "dismiss" | "restore" | "close" | "optimize" | "model" | "cycle";
+type PreviewAction = "accept" | "edit" | "send" | "dismiss" | "restore" | "close" | "optimize" | "model" | "cycle" | "input" | "settings";
 
 function sameModel(model: Model<Api>, ref: ModelRef): boolean {
   return model.provider === ref.provider && model.id === ref.id;
@@ -87,17 +88,6 @@ function errorStatus(state: ControllerState): string {
   }
 }
 
-function formatStatus(state: ControllerState, viewShortcut: string, accepted?: Candidate): string | undefined {
-  const time = `${state.elapsedSeconds ?? 0}s`;
-  if (state.phase === "generating") return `Refine · working · ${time}`;
-  if (state.phase === "ready") return state.pendingSend
-    ? `Refine · send pending · ${time} · draft kept`
-    : `Refine · done · ${time} · ${viewShortcut} view`;
-  if (state.phase === "error") return `${errorStatus(state)} · ${time}`;
-  if (accepted) return `Refine · accepted · ${accepted.elapsedSeconds ?? 0}s · ${viewShortcut} view`;
-  return undefined;
-}
-
 export default async function promptRefineExtension(pi: ExtensionAPI): Promise<void> {
   const filePath = configPath(getAgentDir());
   const loaded = await loadConfig(filePath);
@@ -113,6 +103,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   let progressTimer: ReturnType<typeof setInterval> | undefined;
   let refreshPreview: (() => void) | undefined;
   let closePreview: (() => void) | undefined;
+  let interacting = false;
   // Session-wide, not branch/workflow state. Rebuilt from Pi metadata on resume/reload.
   const namedSessions = new Set<string>();
   const openHint = config.shortcuts.view ?? config.shortcuts.optimize ?? "/refine view";
@@ -225,7 +216,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
     const ctx = currentUiContext;
     if (ctx?.mode !== "tui") return;
-    ctx.ui.setStatus(STATUS_KEY, formatStatus(state, openHint, controller.getAccepted()));
+    ctx.ui.setStatus(STATUS_KEY, undefined);
     if (state.phase === "idle") {
       historySnapshot = undefined;
       projectLabel = "";
@@ -234,7 +225,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       closePreview?.();
     } else {
       const candidateText = controller.getCandidate()?.text;
-      ctx.ui.setWidget(STATUS_KEY, closePreview ? undefined : (_tui, theme) => ({
+      ctx.ui.setWidget(STATUS_KEY, interacting || closePreview ? undefined : (_tui, theme) => ({
         render: (width) => renderSummary({
           state, candidateText, contextLabel: contextLabel(), openHint,
           elapsedSeconds: state.elapsedSeconds ?? 0,
@@ -266,7 +257,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
 
   async function persistConfig(ctx: ExtensionContext): Promise<void> {
     if (!configWritable) {
-      notify(ctx, "配置文件有错误，未覆盖原文件；本次模型选择仅在当前进程有效。请先修复配置并 /reload。", "warning");
+      notify(ctx, "配置文件有错误，未覆盖原文件；本次设置仅在当前进程有效。请先修复配置并 /reload。", "warning");
       return;
     }
     const snapshot = structuredClone(config);
@@ -275,7 +266,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     try {
       await write;
     } catch {
-      notifyCurrent("模型选择本次有效，但写入 prompt-refine.json 失败，未能持久化。", "warning");
+      notifyCurrent("设置本次有效，但写入 prompt-refine.json 失败，未能持久化。", "warning");
     }
   }
 
@@ -625,7 +616,76 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
   }
 
+  async function showContextSettings(ctx: ExtensionContext): Promise<void> {
+    const sessionId = ctx.sessionManager.getSessionId();
+    const selected = [config.projectContext.instructionsEnabled, config.projectContext.tree.enabled, config.projectContext.skillsEnabled];
+    const saved = await ctx.ui.custom<boolean>((tui, theme, keys, done) => {
+      let cursor = 0;
+      return {
+        render: (width) => {
+          if (width < 1) return [];
+          const panelWidth = Math.min(width, READING_WIDTH);
+          const inset = panelWidth >= 16 ? 2 : 0;
+          const innerWidth = Math.max(1, panelWidth - inset * 2);
+          const height = Math.max(1, Math.min(34, tui.terminal.rows - 4));
+          const compact = height < 12;
+          const header = [theme.fg("accent", theme.bold("Context · Default context"))];
+          if (!compact) header.push(theme.fg("muted", "Choose context for prompt refinement"), theme.fg("muted", "Changes apply after saving"), "");
+          const body = [
+            ...(config.projectContext.enabled ? [] : [theme.fg("warning", "Disabled by projectContext.enabled=false")]),
+            ...["AGENTS.md", "tree", "skills"].map((label, index) => {
+              const text = `${index === cursor ? "›" : " "} [${selected[index] ? "x" : " "}] ${label}`;
+              return theme.fg(index === cursor ? "accent" : "text", index === cursor ? theme.bold(text) : text);
+            }),
+            "", theme.fg("muted", "AGENTS.md/tree retain first-prompt rules; explicit @dirs unchanged."),
+          ];
+          const footer = [
+            ...keyHintGrid([["↑↓", "Select"], ["Space", "Toggle"], ["Enter", "Save"], ["←/q/Esc", "Back (discard)"]], innerWidth, theme, 7, 30),
+          ];
+          // Match Main's reserved viewport and bottom-anchored actions.
+          if (!compact) {
+            while (footer.length < 3) footer.push("");
+            footer.push(theme.fg("muted", "← Back to Main · Unsaved changes are discarded"));
+          }
+          const bodyHeight = Math.max(1, height - header.length - footer.length - (compact ? 0 : 2));
+          const visible = body.slice(0, bodyHeight);
+          while (visible.length < bodyHeight) visible.push("");
+          return [...header, ...visible, ...(!compact ? ["", theme.fg("borderMuted", "─".repeat(innerWidth))] : []), ...footer]
+            .slice(0, height).map((line) => " ".repeat(inset) + truncateToWidth(line, innerWidth, ""));
+        },
+        invalidate() {},
+        handleInput(data) {
+          const key = parseKey(data);
+          if (key === "right") return;
+          if (key === "left" || keys.matches(data, "tui.select.cancel") || key === "q" || key === "ctrl+\\") { done(false); return; }
+          if (keys.matches(data, "tui.input.submit")) { done(true); return; }
+          if (keys.matches(data, "tui.select.up")) cursor = (cursor + 2) % 3;
+          else if (keys.matches(data, "tui.select.down")) cursor = (cursor + 1) % 3;
+          else if (key === "space") selected[cursor] = !selected[cursor];
+          tui.requestRender();
+        },
+      };
+    });
+    if (!saved || ctx.sessionManager.getSessionId() !== sessionId) return;
+    config.projectContext.instructionsEnabled = selected[0]!;
+    config.projectContext.tree.enabled = selected[1]!;
+    config.projectContext.skillsEnabled = selected[2]!;
+    await persistConfig(ctx);
+  }
+
   async function showPreview(ctx: ExtensionContext): Promise<void> {
+    if (interacting || ctx.mode !== "tui") return;
+    interacting = true;
+    ctx.ui.setFooter(() => ({ render: () => [], invalidate() {} }));
+    try { await showPreviewContent(ctx); }
+    finally {
+      interacting = false;
+      ctx.ui.setFooter(undefined);
+      updatePresentation(controller.getState());
+    }
+  }
+
+  async function showPreviewContent(ctx: ExtensionContext): Promise<void> {
     useContext(ctx);
     if (ctx.mode !== "tui") {
       notify(ctx, "Preview requires TUI mode.", "warning");
@@ -678,7 +738,13 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           render: (width) => panel.render(width),
           invalidate: () => panel.invalidate(),
           handleInput(data) {
-            if (keybindings.matches(data, "tui.select.cancel") || parseKey(data) === "ctrl+\\") { finish(); return; }
+            const navigationKey = parseKey(data);
+            if (navigationKey === "left") return;
+            if (navigationKey === "right") {
+              finish({ action: "settings", generation: controller.getGeneration(), token: displayedToken });
+              return;
+            }
+            if (keybindings.matches(data, "tui.select.cancel") || navigationKey === "ctrl+\\") { finish(); return; }
             if (keybindings.matches(data, "tui.input.submit")) return;
             if (keybindings.matches(data, "tui.editor.cursorUp")) panel.scrollBy(-1);
             else if (keybindings.matches(data, "tui.editor.cursorDown")) panel.scrollBy(1);
@@ -695,7 +761,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
               }
               const keys: Record<string, PreviewAction> = {
                 a: "accept", e: "edit", s: "send", x: "dismiss", d: "dismiss", z: "restore",
-                r: "optimize", m: "model", c: "cycle", q: "close",
+                r: "optimize", m: "model", c: "cycle", q: "close", i: "input",
               };
               const action = key ? keys[key] : undefined;
               if (action) {
@@ -716,7 +782,16 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     if (!selection || selection.action === "close") return;
     if (controller.getSessionId() !== sessionId || controller.getGeneration() !== selection.generation) return;
     const { action, token } = selection;
-    if (action === "dismiss") controller.cancelAndDismiss();
+    if (action === "input" || action === "settings") {
+      if (action === "settings") await showContextSettings(ctx);
+      else {
+        const draft = await ctx.ui.input("Prompt · Enter Refine", "Type a prompt");
+        if (ctx.sessionManager.getSessionId() !== sessionId || controller.getGeneration() !== selection.generation) return;
+        if (draft?.trim()) triggerOptimize(ctx, true, draft);
+      }
+      if (ctx.sessionManager.getSessionId() === sessionId) await showPreviewContent(ctx);
+    }
+    else if (action === "dismiss") controller.cancelAndDismiss();
     else if (action === "restore") await restoreDraft(ctx);
     else if (action === "model") await selectModel(ctx);
     else if (action === "cycle") await cycleModel(ctx);
@@ -732,6 +807,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   const actions: Record<ShortcutAction, (ctx: ExtensionContext) => void | Promise<void>> = {
     optimize: (ctx) => {
       if (ctx.mode !== "tui") return triggerOptimize(ctx);
+      if (interacting) return;
       useContext(ctx);
       if (controller.shouldOpenPanel() || !controller.getModel() || !ctx.ui.getEditorText().trim()) return showPreview(ctx);
       triggerOptimize(ctx);

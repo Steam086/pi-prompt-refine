@@ -34,7 +34,7 @@ describe("host project resources", () => {
   it("extracts only current Pi resource sections before any user message, with XML-decoded metadata", () => {
     const prompt = `PRIVATE SYSTEM RULES\n<tools>\nPRIVATE TOOL DEFINITIONS\n</tools>\n<project_context>\nProject-specific instructions and guidelines:\n\n<project_instructions path="/repo/AGENTS.md">\n# Rules\nUse the existing parser.\n</project_instructions>\n</project_context>\n<skills>\nUse bash to read files.\n<available_skills>\n<skill><name>pdf</name><description>Read &amp; inspect &lt;PDF&gt; files.</description><location>/private/skill/SKILL.md</location></skill>\n</available_skills>\n</skills>\n<cwd>\n/repo\n</cwd>`;
     const ctx = { getSystemPrompt: () => prompt } as ExtensionContext;
-    const snapshot = captureProjectContext(ctx, DEFAULT_CONFIG.projectContext, "Explain PDFs");
+    const snapshot = captureProjectContext(ctx, { ...DEFAULT_CONFIG.projectContext, skillsEnabled: true }, "Explain PDFs");
     expect(snapshot.warnings).toEqual([]);
     expect(snapshot.text).toContain("Use the existing parser.");
     expect(snapshot.text).toContain("Read & inspect <PDF> files.");
@@ -50,10 +50,10 @@ describe("host project resources", () => {
       skills: [{ name: "pdf", description: "Extract tables" }, { name: "publish", description: "Publish releases", disableModelInvocation: true }],
     };
     const ctx = { getSystemPromptOptions: () => resources, getSystemPrompt: () => { throw new Error("must not read full system"); } } as unknown as ExtensionContext;
-    const snapshot = captureProjectContext(ctx, DEFAULT_CONFIG.projectContext, "Use /skill:publisher");
+    const snapshot = captureProjectContext(ctx, { ...DEFAULT_CONFIG.projectContext, skillsEnabled: true }, "Use /skill:publisher");
     expect(snapshot.text.indexOf("Global rule")).toBeLessThan(snapshot.text.indexOf("Local override"));
     expect(snapshot.text).not.toContain("Publish releases");
-    expect(captureProjectContext(ctx, DEFAULT_CONFIG.projectContext, "Use /skill:publish now").text).toContain("Publish releases");
+    expect(captureProjectContext(ctx, { ...DEFAULT_CONFIG.projectContext, skillsEnabled: true }, "Use /skill:publish now").text).toContain("Publish releases");
   });
 
   it("distinguishes absent resources, opaque system prompts, malformed sections and read failures", () => {

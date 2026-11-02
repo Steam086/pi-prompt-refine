@@ -1,5 +1,6 @@
 import { Markdown, ScrollView, Text, truncateToWidth, wrapTextWithAnsi, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
+import { keyHintGrid, type KeyHint } from "./key-hints.js";
 import { formatTokenUsage } from "./usage.js";
 import { READING_WIDTH, resultHeading, sanitizeTerminalText, type SummaryOptions } from "./presentation.js";
 
@@ -113,10 +114,24 @@ export class PreviewPanel implements Component {
       lines.push("");
     }
     if (this.helpVisible) {
-      paragraph("Keys", "muted");
+      lines.push(theme.fg("accent", theme.bold("Help · Keyboard reference")), "");
       if (options.accepted) paragraph("Read-only snapshot; a/e/s disabled.\nEdit or send from the main editor.");
-      else paragraph("a Accept into editor (no send) · e Edit candidate\ns Send (follow-up if busy; draft kept)");
-      paragraph("x/d Cancel · z Restore draft before acceptance\nr Refine current draft (model call)\nm Model · c Cycle favorites\no Original · v Formatted/source\n↑↓ Scroll · PgUp/PgDn Page\nq/Esc/Ctrl+\\ Back · Enter won't send · ? Hide help");
+      const hint = (key: string, label: string) => `${theme.fg("accent", theme.bold(key))} ${theme.fg("text", label)}`;
+      const helpLine = (...items: KeyHint[]) => lines.push(...wrapTextWithAnsi(items.map(([key, label]) => hint(key, label)).join(theme.fg("muted", " · ")), width));
+      if (!options.accepted) {
+        helpLine(["a", "Accept into editor (no send)"], ["e", "Edit candidate"]);
+        helpLine(["s", "Send (follow-up if busy; draft kept)"]);
+      }
+      helpLine(["x/d", "Break / cancel (stops the running request)"]);
+      helpLine(["z", "Restore draft before acceptance"]);
+      lines.push("", theme.bold("Refine & navigate"));
+      helpLine(["r", "Refine current draft (model call)"]);
+      helpLine(["m", "Model"], ["c", "Cycle favorites"]);
+      helpLine(["o", "Original"], ["v", "Formatted/source"]);
+      helpLine(["↑↓", "Scroll"], ["PgUp/PgDn", "Page"]);
+      helpLine(["i", "Input"], ["→", "Context (← returns without saving)"]);
+      helpLine(["q", "Back"], ["?", "Hide help"]);
+      paragraph("Enter won't send", "muted");
       if (!options.canRestore) paragraph("Nothing to restore.", "muted");
       lines.push("");
     }
@@ -149,7 +164,7 @@ export class PreviewPanel implements Component {
     } else if (options.state.phase === "generating") {
       paragraph("Refining your prompt.");
       lines.push("");
-      paragraph("Results appear here. Esc returns to editing; work continues.", "muted");
+      paragraph("Results appear here. q returns to editing; work continues.", "muted");
     } else if (options.state.phase === "error") {
       paragraph(options.errorLabel ?? "Request failed. Retry.", "warning");
       lines.push("");
@@ -179,27 +194,30 @@ export class PreviewPanel implements Component {
     const heading = options.accepted
       ? `${theme.fg("success", theme.bold(`✓ Accepted · ${options.elapsedSeconds}s`))}  ${theme.fg("muted", "Prompt Refine")}`
       : resultHeading(options, theme);
-    const header = [truncateToWidth(heading, innerWidth, "")];
+    const header = [truncateToWidth(`${theme.fg("accent", theme.bold("Main"))}  ${heading}`, innerWidth, "")];
     if (!compact) {
       const model = options.state.model;
       header.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(model ? `${model.provider}/${model.id}` : "No model"), innerWidth, "")));
       header.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(options.contextLabel), innerWidth, "")), "");
     }
-    const key = (label: string) => theme.fg("accent", theme.bold(label));
     const ready = options.candidateText !== undefined;
-    const primary = options.accepted
-      ? `${key("r")} Refine draft${options.canRestore ? `  ${key("z")} Restore` : ""}`
+    const primary: KeyHint[] = options.accepted
+      ? [["r", "Refine draft"], ...(options.canRestore ? [["z", "Restore"] as KeyHint] : [])]
       : ready
-        ? `${key("a")} Accept  ${key("e")} Edit  ${options.state.pendingSend ? theme.fg("muted", "Send pending") : `${key("s")} Send`}  ${key("x")} Cancel`
-        : `${key("r")} ${options.state.phase === "generating" ? "Restart" : "Refine"}  ${key("m")} Model  ${key("x")} Cancel`;
-    const secondary = `${ready && !options.accepted ? `${key("r")} Refine  ` : ""}${ready ? `${key("o")} ${this.originalVisible ? "Hide original" : "Original"}  ` : ""}${key("?")} ${this.helpVisible ? "Hide help" : "Help"}  ${key("q/Esc/Ctrl+\\")} Back`;
-    const compactPrimary = options.accepted ? "r Refine draft" : ready
-      ? options.state.pendingSend ? "a Accept · Send pending" : "a Accept · s Send"
-      : "r Refine · m Model";
-    const footer = innerWidth < 60
-      ? [truncateToWidth(compactPrimary, innerWidth, ""), truncateToWidth("? Help · q Back", innerWidth, "")]
-      : [primary, secondary];
-    if (!compact) footer.push(theme.fg("muted", "↑↓ / PgUp/PgDn Scroll · Enter won't send"));
+        ? [["a", "Accept"], ["e", "Edit"], options.state.pendingSend ? ["", "Send pending"] : ["s", "Send"], ["x", "Cancel"]]
+        : [["r", options.state.phase === "generating" ? "Restart" : "Refine"], ["m", "Model"], ["x", options.state.phase === "generating" ? "Break" : "Cancel"]];
+    const secondary: KeyHint[] = [
+      ...(ready && !options.accepted ? [["r", "Refine"] as KeyHint] : []),
+      ...(ready ? [["o", this.originalVisible ? "Hide original" : "Original"] as KeyHint] : []),
+      ["?", this.helpVisible ? "Hide help" : "Help"], ["q", "Back"],
+    ];
+    const footer = [
+      ...keyHintGrid(primary, innerWidth, theme),
+      ...keyHintGrid(secondary, innerWidth, theme),
+      ...keyHintGrid([["i", "Input"], ["→", "Context"]], innerWidth, theme),
+    ];
+    const navigation = (label: string) => theme.fg("muted", `↑↓ / PgUp/PgDn   ${label} · Enter won't send`);
+    if (!compact) footer.push(navigation("Scroll"));
     const border = theme.fg("borderMuted", "─".repeat(innerWidth));
     // ScrollView owns offsets/clamping. Explicit viewport composition also works in regular
     // mode, where ScrollView.render() alone returns the entire document without clipping.
@@ -213,8 +231,10 @@ export class PreviewPanel implements Component {
     }
     const start = this.scroll.scrollTop;
     const visible = body.slice(start, start + bodyHeight);
+    // Reserve the viewport even for short results so navigation never changes panel height.
+    while (visible.length < bodyHeight) visible.push("");
     if (body.length > bodyHeight && !compact) {
-      footer[footer.length - 1] = theme.fg("muted", `↑↓ / PgUp/PgDn · ${start + 1}–${Math.min(body.length, start + bodyHeight)}/${body.length} lines · Enter won't send`);
+      footer[footer.length - 1] = navigation(`Scroll ${start + 1}–${Math.min(body.length, start + bodyHeight)}/${body.length}`);
     }
     const lines = [...header, ...visible, ...(!compact ? ["", border] : []), ...footer];
     // Tiny terminals degrade to a bounded view instead of exceeding the host viewport.
