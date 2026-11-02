@@ -1,6 +1,7 @@
 {
   "name": "pi-prompt-refine",
   "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
   "description": "Non-blocking prompt refinement extension for Pi",
   "keywords": [

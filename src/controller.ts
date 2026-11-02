@@ -1,5 +1,6 @@
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ModelRef } from "./config.js";
+import type { TokenUsage } from "./usage.js";
 
 export type RefinePhase = "idle" | "generating" | "ready" | "error";
 export type RefineStopReason = "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred" | "pending";
@@ -20,11 +21,13 @@ export interface RefineRequest extends RefineRequestInput {
 }
 
 export interface RefineCompletion {
+  usage?: TokenUsage;
   text: string;
   stopReason: RefineStopReason;
 }
 
 export interface Candidate {
+  usage?: TokenUsage;
   requestId: number;
   version: number;
   generation: number;
@@ -58,6 +61,7 @@ export interface RestoreToken {
 }
 
 export interface ControllerState {
+  usage?: TokenUsage;
   phase: RefinePhase;
   requestId: number;
   model?: ModelRef;
@@ -113,7 +117,7 @@ function fingerprint(request: RefineRequestInput): string {
 }
 
 function cloneCandidate(candidate: Candidate): Candidate {
-  return { ...candidate, model: { ...candidate.model } };
+  return { ...candidate, ...(candidate.usage ? { usage: { ...candidate.usage } } : {}), model: { ...candidate.model } };
 }
 
 export class RefineController {
@@ -151,7 +155,8 @@ export class RefineController {
   }
 
   getState(): ControllerState {
-    return { ...this.state, ...(this.state.model ? { model: { ...this.state.model } } : {}) };
+    const usage = this.candidate?.usage ?? this.state.usage;
+    return { ...this.state, ...(usage ? { usage: { ...usage } } : {}), ...(this.state.model ? { model: { ...this.state.model } } : {}) };
   }
 
   getModel(): ModelRef | undefined {
@@ -408,6 +413,8 @@ export class RefineController {
     try {
       const result = await this.complete(active.request, active.controller.signal);
       if (!this.isActiveCurrent(active.request)) return;
+      // Retain reported usage even when the completed response is unusable.
+      this.state = { ...this.state, usage: result.usage ? { ...result.usage } : undefined };
       if (result.stopReason !== "stop") {
         const error = result.stopReason === "length" ? "truncated" : result.stopReason === "toolUse" ? "tool-call" : "failed";
         this.finishWithError(active, error);
@@ -425,6 +432,7 @@ export class RefineController {
 
       this.clearActive(active);
       const candidate: Candidate = {
+        ...(result.usage ? { usage: { ...result.usage } } : {}),
         requestId: active.request.requestId,
         version: ++this.candidateSequence,
         generation: active.request.generation,
@@ -465,7 +473,7 @@ export class RefineController {
     this.candidate = undefined;
     if (this.restore) this.restore = { ...this.restore, generation: this.generation };
     this.clearPendingSend();
-    this.state = { phase: "error", requestId: active.request.requestId, model: { ...active.request.model }, error, pendingSend: false };
+    this.state = { phase: "error", requestId: active.request.requestId, model: { ...active.request.model }, error, pendingSend: false, usage: this.state.usage };
     this.emitState();
   }
 
