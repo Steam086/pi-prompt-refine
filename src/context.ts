@@ -114,7 +114,7 @@ Preserve the user's language, tone, intent, explicit constraints, paths, command
 
 export function buildRefineSystemPrompt(generateTitle: boolean): string {
   return `${REFINE_SYSTEM_PROMPT}\n\n${generateTitle
-    ? 'Also include a "title" string in the same JSON object. Create a concise, specific session name summarizing the task or project, naturally using the user\'s language. Prefer a short phrase (roughly 4–8 words or 8–20 Chinese characters), at most 80 Unicode code points on one line. Use project names only when supported by the supplied context. Avoid generic labels such as "New session", "Task", or "优化提示词". Do not include secrets, credentials, explanations, or Markdown decorations in the title. The title is metadata, not part of the prompt.'
+    ? 'Also include a "title" string in the same JSON object. Create a concise, specific session name summarizing the task or project, naturally using the user\'s language. Prefer a short phrase (roughly 4–8 words or 8–20 CJK characters), at most 80 Unicode code points on one line. Use project names only when supported by the supplied context. Avoid generic labels such as "New session", "Task", or "Prompt refinement". Do not include secrets, credentials, explanations, or Markdown decorations in the title. The title is metadata, not part of the prompt.'
     : 'Do not generate a title: this session has already been named. Return only the "prompt" field.'}`;
 }
 

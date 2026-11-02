@@ -42,7 +42,7 @@ export function resourcesFromPrompt(prompt: string): { resources: HostResources;
     const pattern = /<project_instructions path="([^"\n]+)">\n([\s\S]*?)\n<\/project_instructions>/g;
     for (const match of projectSection.matchAll(pattern)) files.push({ path: match[1]!, content: match[2]! });
     const remainder = projectSection.replace(pattern, "").replace("Project-specific instructions and guidelines:", "").trim();
-    if (remainder) warnings.push("Pi 项目指令格式无法完整识别，部分规则未提供。");
+    if (remainder) warnings.push("Pi project instructions use an unrecognized format; some rules were omitted.");
     resources.contextFiles = files;
   }
   const skillSection = /(?:^|\n)<skills>\n([\s\S]*?)\n<\/skills>(?=\n|$)/.exec(prompt)?.[1];
@@ -53,10 +53,10 @@ export function resourcesFromPrompt(prompt: string): { resources: HostResources;
     if (catalog !== undefined) {
       for (const match of catalog.matchAll(pattern)) skills.push({ name: decodeXml(match[1]!), description: decodeXml(match[2]!) });
     }
-    if (catalog === undefined || catalog.replace(pattern, "").trim()) warnings.push("Pi skills 目录格式无法完整识别，部分技能描述未提供。");
+    if (catalog === undefined || catalog.replace(pattern, "").trim()) warnings.push("The Pi skills catalog uses an unrecognized format; some skill descriptions were omitted.");
     resources.skills = skills;
   }
-  if (!/<(?:cwd|project_context|skills)>\n/.test(prompt)) warnings.push("宿主未提供可识别的项目资源；未自动扫描 AGENTS.md 或技能目录。");
+  if (!/<(?:cwd|project_context|skills)>\n/.test(prompt)) warnings.push("The host did not provide recognizable project resources; AGENTS.md and skills directories were not scanned automatically.");
   return { resources, warnings };
 }
 
@@ -69,7 +69,7 @@ export function captureProjectContext(ctx: ExtensionContext, config: ProjectCont
     const command = ctx as ExtensionContext & { getSystemPromptOptions?: () => HostResources };
     if (typeof command.getSystemPromptOptions === "function") resources = command.getSystemPromptOptions();
     else ({ resources, warnings } = resourcesFromPrompt(ctx.getSystemPrompt()));
-  } catch { warnings.push("无法获取 Pi 已加载的项目指令和 skills；本次项目资源不完整。"); }
+  } catch { warnings.push("Could not read Pi's loaded project instructions and skills; project resources are incomplete for this request."); }
   const omitInstructions = !config.instructionsEnabled || (followUp && !config.instructionsOnFollowUp);
   return formatProjectResources({ ...resources, cwd: ctx.cwd, ...(omitInstructions ? { contextFiles: [] } : {}),
     ...(!config.skillsEnabled ? { skills: [] } : {}) }, config, draft, warnings);
@@ -124,7 +124,7 @@ export function formatProjectResources(resources: HostResources, config: Project
   const files = resources.contextFiles ?? [];
   const instructions: string[] = [];
   let environment = resources.cwd ? `WORKING DIRECTORY: ${JSON.stringify(resources.cwd)}\n\n` : "";
-  if (environment.length > available / 2) { environment = ""; warnings.push("工作目录名称超出上下文预算，已省略。"); }
+  if (environment.length > available / 2) { environment = ""; warnings.push("The working directory name exceeded the context budget and was omitted."); }
   const instructionHeader = environment + "PROJECT INSTRUCTIONS (JSON records, in host precedence order):\n";
   const skillHeader = "\n\nMAIN AGENT SKILLS (metadata only; not optimizer tools):\n";
   available -= instructionHeader.length + skillHeader.length + 32;
@@ -141,7 +141,7 @@ export function formatProjectResources(resources: HostResources, config: Project
     if (result.text) { instructions.push(result.text); instructionBudget -= result.text.length + 1; available -= result.text.length + 1; }
     if (result.incomplete) incompleteFiles += 1;
   }
-  if (incompleteFiles) warnings.push(`项目指令未完整提供：${incompleteFiles}/${files.length} 个文件超出字符预算；仅保留可容纳的完整章节，complete=false 的记录不代表全部规则。`);
+  if (incompleteFiles) warnings.push(`Project instructions are incomplete: ${incompleteFiles}/${files.length} files exceeded the character budget; only complete sections that fit were included. Records marked complete=false do not represent all rules.`);
   let text = instructionHeader + (instructions.join("\n") || "(none provided)");
   const selectedSkills: string[] = [];
   const explicit = (skill: SkillMetadata): boolean => {
@@ -158,7 +158,7 @@ export function formatProjectResources(resources: HostResources, config: Project
     selectedSkills.push(entry);
     skillBudget -= entry.length + 1;
   }
-  if (selectedSkills.length < skills.length) warnings.push(`Skills 目录未完整提供：已提供 ${selectedSkills.length}/${skills.length} 项，超出字符预算的条目已省略；未提供不等于不可用。`);
+  if (selectedSkills.length < skills.length) warnings.push(`The skills catalog is incomplete: ${selectedSkills.length}/${skills.length} entries were provided; entries that exceeded the character budget were omitted. Omitted entries may still be available.`);
   text += skillHeader + (selectedSkills.join("\n") || "(none provided)");
   return { text, warnings, instructionCount: instructions.length, skillCount: selectedSkills.length };
 }
@@ -181,11 +181,11 @@ async function readIgnore(base: string, reasons: Set<string>): Promise<IgnoreRul
       if (!(await file.stat()).isFile()) return undefined;
       const buffer = Buffer.alloc(16_385);
       const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
-      if (bytesRead > 16_384) { reasons.add(".gitignore 超出读取预算"); return undefined; }
+      if (bytesRead > 16_384) { reasons.add(".gitignore exceeded the read budget"); return undefined; }
       return { base, matcher: ignore().add(buffer.subarray(0, bytesRead).toString("utf8")) };
     } finally { await file.close(); }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") reasons.add(".gitignore 读取失败");
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") reasons.add(".gitignore could not be read");
     return undefined;
   }
 }
@@ -251,18 +251,18 @@ export async function collectTree(cwd: string, draft: string, config: ProjectCon
         for await (const item of dir) {
           if (combined.aborted) break;
           scanned += 1;
-          if (scanned > config.maxScannedEntries) { reasons.add("扫描条目上限"); break; }
+          if (scanned > config.maxScannedEntries) { reasons.add("scan entry limit"); break; }
           if (excluded.has(item.name) || item.name === ".env" || item.name.startsWith(".env.")) continue;
           if (isIgnored(join(root, parent.path, item.name), item.isDirectory(), rules)) continue;
           children.push({ path: join(parent.path, item.name), directory: item.isDirectory(), symlink: item.isSymbolicLink() });
-          if (children.length >= Math.max(config.maxEntriesPerDirectory * 4, 100)) { reasons.add("目录枚举上限"); break; }
+          if (children.length >= Math.max(config.maxEntriesPerDirectory * 4, 100)) { reasons.add("directory enumeration limit"); break; }
         }
-      } catch { if (!combined.aborted) reasons.add("目录读取失败"); }
+      } catch { if (!combined.aborted) reasons.add("directory could not be read"); }
       if (combined.aborted) break;
       children.sort((a, b) => priority(basename(a.path), draft) - priority(basename(b.path), draft) || Number(b.directory) - Number(a.directory) || a.path.localeCompare(b.path, "en"));
-      if (children.length > config.maxEntriesPerDirectory) reasons.add("每目录条目上限");
+      if (children.length > config.maxEntriesPerDirectory) reasons.add("per-directory entry limit");
       for (const child of children.slice(0, config.maxEntriesPerDirectory)) {
-        if (entries.length >= config.maxEntries) { reasons.add("全树条目上限"); break; }
+        if (entries.length >= config.maxEntries) { reasons.add("total tree entry limit"); break; }
         entries.push(child);
         if (child.directory && parent.depth + 1 < config.maxDepth && !options.skipDirectories?.has(join(root, child.path))) {
           queue.push({ path: child.path, depth: parent.depth + 1, rules });
@@ -270,12 +270,12 @@ export async function collectTree(cwd: string, draft: string, config: ProjectCon
       }
       if (scanned > config.maxScannedEntries) break;
     }
-    if (queue.length && entries.length >= config.maxEntries) reasons.add("全树条目上限");
+    if (queue.length && entries.length >= config.maxEntries) reasons.add("total tree entry limit");
     if (combined.aborted) return { text: "", warnings: [] };
     const visible = entries;
     const lines = [JSON.stringify(basename(root) || root) + "/"];
     const footer = `\n[Partial tree: maxDepth=${config.maxDepth}; default excludes + .gitignore; unlisted paths may exist.]`;
-    if (lines[0]!.length + footer.length > config.maxChars) { lines[0] = "./"; reasons.add("tree 字符预算"); }
+    if (lines[0]!.length + footer.length > config.maxChars) { lines[0] = "./"; reasons.add("tree character budget"); }
     let used = lines[0]!.length + footer.length;
     const render = (parent: string, indent: string): void => {
       const children = visible.filter((entry) => dirname(entry.path) === (parent || "."));
@@ -284,20 +284,20 @@ export async function collectTree(cwd: string, draft: string, config: ProjectCon
         const last = index === children.length - 1;
         const separate = child.directory && options.skipDirectories?.has(join(root, child.path));
         const line = `${indent}${last ? "└── " : "├── "}${JSON.stringify(basename(child.path))}${child.directory ? "/" : child.symlink ? " [symlink; not followed]" : ""}${separate ? " [separate @reference]" : ""}`;
-        if (used + line.length + 1 > config.maxChars) { reasons.add("tree 字符预算"); break; }
+        if (used + line.length + 1 > config.maxChars) { reasons.add("tree character budget"); break; }
         lines.push(line); used += line.length + 1;
         if (child.directory) render(child.path, indent + (last ? "    " : "│   "));
       }
     };
     render("", "");
-    const warnings = reasons.size ? [`Tree 未完整提供：${[...reasons].join("、")}；更多条目未展示或未枚举。`] : [];
+    const warnings = reasons.size ? [`Tree is incomplete: ${[...reasons].join(", ")}; additional entries were not displayed or enumerated.`] : [];
     return { text: prefix(lines.join("\n") + footer, config.maxChars), warnings, entryCount: entries.length, scannedCount: scanned };
   };
   try {
     return await Promise.race([
       scan(),
       new Promise<TreeSnapshot>((done) => {
-        timer = setTimeout(() => { local.abort(); done({ text: "[Tree unavailable: collection time budget exhausted.]", warnings: ["Tree 收集超过时间预算，已停止扫描；项目结构未完整提供。"] }); }, config.timeoutMs);
+        timer = setTimeout(() => { local.abort(); done({ text: "[Tree unavailable: collection time budget exhausted.]", warnings: ["Tree collection exceeded the time budget and was stopped; the project structure is incomplete."] }); }, config.timeoutMs);
         timer.unref?.();
       }),
       new Promise<TreeSnapshot>((done) => {
@@ -470,7 +470,7 @@ export function assembleProjectContext(snapshot: ProjectSnapshot, tree: TreeSnap
   const remaining = Math.max(0, config.maxChars - warningHeader().length - snapshot.text.length - treeHeader.length);
   let treeText = tree.text;
   if (treeText.length > remaining) {
-    if (!warnings.some((warning) => warning.includes("项目上下文总预算"))) warnings.push("项目上下文总预算不足，Tree 已省略。");
+    if (!warnings.some((warning) => warning.includes("total project context budget"))) warnings.push("The total project context budget was exceeded; the tree was omitted.");
     treeText = "";
   }
   // Snapshot formatting reserves room for diagnostics. Never silently cut instruction records.

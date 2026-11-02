@@ -25,6 +25,22 @@ describe("Prompt Refine configuration", () => {
     expect(result.config.context).toEqual({ maxMessages: 12, maxChars: 16_000 });
   });
 
+  it("reports validation warnings in English", () => {
+    const result = parseConfig({
+      version: 1,
+      shortcuts: false,
+      projectContext: { tree: [] },
+      model: { provider: "", id: "" },
+      thinkingLevel: "turbo",
+      favorites: [null],
+      context: [],
+    });
+    const warnings = result.warnings.join(" ");
+    expect(warnings).toContain("shortcuts must be an object");
+    expect(warnings).toContain("projectContext.tree must be an object");
+    expect(warnings).not.toMatch(/\p{Script=Han}/u);
+  });
+
   it("accepts an optional thinking override and leaves it unset for session inheritance", () => {
     expect(parseConfig({ version: 1 }).config.thinkingLevel).toBeUndefined();
     expect(parseConfig({ version: 1, thinkingLevel: "high" }).config.thinkingLevel).toBe("high");

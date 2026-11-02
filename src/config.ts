@@ -155,7 +155,7 @@ function isLegacyDefaultShortcuts(value: unknown): boolean {
 function validateShortcuts(value: unknown, warnings: string[]): ShortcutConfig {
   const shortcuts: ShortcutConfig = { ...DEFAULT_SHORTCUTS };
   if (value !== undefined && !isRecord(value)) {
-    warnings.push("shortcuts 必须是对象；已使用默认快捷键。");
+    warnings.push("shortcuts must be an object; using the default shortcuts.");
     return shortcuts;
   }
 
@@ -167,7 +167,7 @@ function validateShortcuts(value: unknown, warnings: string[]): ShortcutConfig {
       continue;
     }
     if (typeof proposed !== "string" || !canonicalShortcut(proposed)) {
-      warnings.push(`快捷键 ${action} 无效；已使用默认值。`);
+      warnings.push(`Shortcut ${action} is invalid; using the default value.`);
       continue;
     }
     shortcuts[action] = proposed as KeyId;
@@ -180,7 +180,7 @@ function validateShortcuts(value: unknown, warnings: string[]): ShortcutConfig {
     if (!canonical) continue;
     const previous = owners.get(canonical);
     if (previous) {
-      warnings.push(`快捷键 ${previous} 与 ${action} 重复；已全部恢复为默认快捷键。`);
+      warnings.push(`Shortcuts ${previous} and ${action} conflict; all shortcuts were reset to their defaults.`);
       return { ...DEFAULT_SHORTCUTS };
     }
     owners.set(canonical, action);
@@ -191,21 +191,21 @@ function validateShortcuts(value: unknown, warnings: string[]): ShortcutConfig {
 function boundedInteger(value: unknown, fallback: number, min: number, max: number, label: string, warnings: string[]): number {
   if (value === undefined) return fallback;
   if (typeof value === "number" && Number.isInteger(value) && value >= min && value <= max) return value;
-  warnings.push(`${label} 超出有效范围 ${min}–${max}；已使用默认值 ${fallback}。`);
+  warnings.push(`${label} is outside the valid range ${min}–${max}; using the default value ${fallback}.`);
   return fallback;
 }
 
 function booleanOption(value: unknown, fallback: boolean, label: string, warnings: string[]): boolean {
   if (value === undefined) return fallback;
   if (typeof value === "boolean") return value;
-  warnings.push(`${label} 必须是布尔值；已使用默认值。`);
+  warnings.push(`${label} must be a boolean; using the default value.`);
   return fallback;
 }
 
 function parseProjectContext(value: unknown, warnings: string[]): ProjectContextConfig {
   const config = structuredClone(DEFAULT_CONFIG.projectContext);
   if (value === undefined) return config;
-  if (!isRecord(value)) { warnings.push("projectContext 必须是对象；已使用默认配置。"); return config; }
+  if (!isRecord(value)) { warnings.push("projectContext must be an object; using the default configuration."); return config; }
   config.enabled = booleanOption(value.enabled, config.enabled, "projectContext.enabled", warnings);
   for (const key of ["instructionsOnFollowUp", "instructionsEnabled", "skillsEnabled"] as const) {
     config[key] = booleanOption(value[key], config[key], `projectContext.${key}`, warnings);
@@ -221,7 +221,7 @@ function parseProjectContext(value: unknown, warnings: string[]): ProjectContext
     config.referencedDirectories.enabled = booleanOption(refs.enabled, config.referencedDirectories.enabled, "projectContext.referencedDirectories.enabled", warnings);
     config.referencedDirectories.maxReferences = boundedInteger(refs.maxReferences, config.referencedDirectories.maxReferences, 1, 32, "projectContext.referencedDirectories.maxReferences", warnings);
   }
-  if (value.tree !== undefined && !isRecord(value.tree)) warnings.push("projectContext.tree 必须是对象；已使用默认配置。");
+  if (value.tree !== undefined && !isRecord(value.tree)) warnings.push("projectContext.tree must be an object; using the default configuration.");
   if (isRecord(value.tree)) {
     const tree = value.tree;
     config.tree.enabled = booleanOption(tree.enabled, config.tree.enabled, "projectContext.tree.enabled", warnings);
@@ -232,7 +232,7 @@ function parseProjectContext(value: unknown, warnings: string[]): ProjectContext
     if (tree.exclude !== undefined) {
       if (Array.isArray(tree.exclude) && tree.exclude.length <= 100 && tree.exclude.every((name) => typeof name === "string" && name.length > 0 && name.length <= 128 && !/[\/\\\x00-\x1f]/.test(name) && name !== "." && name !== "..")) {
         config.tree.exclude = [...new Set(tree.exclude as string[])];
-      } else warnings.push("projectContext.tree.exclude 必须是最多 100 个目录/文件名称的数组；已使用默认值。");
+      } else warnings.push("projectContext.tree.exclude must be an array of up to 100 directory or file names; using the default value.");
     }
   }
   return config;
@@ -241,7 +241,7 @@ function parseProjectContext(value: unknown, warnings: string[]): ProjectContext
 export function parseConfig(value: unknown): LoadedConfig {
   const warnings: string[] = [];
   if (!isRecord(value) || value.version !== 1) {
-    return { config: structuredClone(DEFAULT_CONFIG), warnings: ["配置结构无效或版本不受支持；未覆盖原文件，并已使用默认配置。"] };
+    return { config: structuredClone(DEFAULT_CONFIG), warnings: ["Configuration structure is invalid or the version is unsupported; the original file was not overwritten. Using the default configuration."] };
   }
 
   const config = structuredClone(DEFAULT_CONFIG);
@@ -249,13 +249,13 @@ export function parseConfig(value: unknown): LoadedConfig {
   if (value.model !== undefined) {
     const selected = modelRef(value.model);
     if (selected) config.model = selected;
-    else warnings.push("model 必须包含非空 provider 与 id；已忽略此项。未配置时不会自动选择或收费。");
+    else warnings.push("model must include a non-empty provider and id; ignoring this value. No model will be selected or billed automatically when unset.");
   }
   if (value.thinkingLevel !== undefined) {
     if (typeof value.thinkingLevel === "string" && THINKING_LEVELS.includes(value.thinkingLevel as ModelThinkingLevel)) {
       config.thinkingLevel = value.thinkingLevel as ModelThinkingLevel;
     } else {
-      warnings.push("thinkingLevel 必须是 off、minimal、low、medium、high、xhigh 或 max；已使用 session 继承模式。");
+      warnings.push("thinkingLevel must be off, minimal, low, medium, high, xhigh, or max; inheriting the session level.");
     }
   }
 
@@ -264,19 +264,19 @@ export function parseConfig(value: unknown): LoadedConfig {
     config.favorites = value.favorites.flatMap((item) => {
       const favorite = modelRef(item);
       if (!favorite) {
-        warnings.push("收藏列表包含无效模型项；已忽略该项。");
+        warnings.push("Favorites contain an invalid model entry; ignoring it.");
         return [];
       }
       const key = `${favorite.provider}/${favorite.id}`;
       if (favoriteKeys.has(key)) {
-        warnings.push(`收藏模型 ${key} 重复；已保留第一次出现的顺序。`);
+        warnings.push(`Favorite model ${key} is duplicated; keeping its first occurrence.`);
         return [];
       }
       favoriteKeys.add(key);
       return [favorite];
     }).slice(0, 100);
   } else if (value.favorites !== undefined) {
-    warnings.push("favorites 必须是数组；已使用空收藏列表。");
+    warnings.push("favorites must be an array; using an empty favorites list.");
   }
 
   const shortcutsMigrated = isLegacyDefaultShortcuts(value.shortcuts);
@@ -286,7 +286,7 @@ export function parseConfig(value: unknown): LoadedConfig {
   config.maxOutputTokens = boundedInteger(value.maxOutputTokens, DEFAULT_CONFIG.maxOutputTokens, 16, 16_384, "maxOutputTokens", warnings);
 
   if (value.context !== undefined && !isRecord(value.context)) {
-    warnings.push("context 必须是对象；已使用默认上下文预算。");
+    warnings.push("context must be an object; using the default context budget.");
   } else if (isRecord(value.context)) {
     config.context.maxMessages = boundedInteger(value.context.maxMessages, DEFAULT_CONFIG.context.maxMessages, 0, 50, "context.maxMessages", warnings);
     config.context.maxChars = boundedInteger(value.context.maxChars, DEFAULT_CONFIG.context.maxChars, 0, 100_000, "context.maxChars", warnings);
@@ -301,13 +301,13 @@ export async function loadConfig(filePath: string): Promise<LoadedConfig> {
     try {
       return parseConfig(JSON.parse(content) as unknown);
     } catch {
-      return { config: structuredClone(DEFAULT_CONFIG), warnings: ["配置不是有效 JSON；未覆盖原文件，并已使用默认配置。"] };
+      return { config: structuredClone(DEFAULT_CONFIG), warnings: ["Configuration is not valid JSON; the original file was not overwritten. Using the default configuration."] };
     }
   } catch (error) {
     if (isRecord(error) && error.code === "ENOENT") {
       return { config: structuredClone(DEFAULT_CONFIG), warnings: [] };
     }
-    return { config: structuredClone(DEFAULT_CONFIG), warnings: ["读取配置失败；已使用默认配置。"] };
+    return { config: structuredClone(DEFAULT_CONFIG), warnings: ["Failed to read configuration; using the default configuration."] };
   }
 }
 
