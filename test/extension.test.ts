@@ -291,6 +291,69 @@ function resourcePrompt(skillDescription = "Extract PDF tables", instructions = 
   return `<tools>\nPRIVATE MAIN AGENT TOOLS\n</tools>\n<project_context>\nProject-specific instructions and guidelines:\n\n<project_instructions path="/repo/AGENTS.md">\n${instructions}\n</project_instructions>\n</project_context>\n<skills>\nUse bash to load skills.\n<available_skills>\n<skill><name>pdf</name><description>${skillDescription}</description><location>/skills/pdf/SKILL.md</location></skill>\n</available_skills>\n</skills>\n<cwd>\n/repo\n</cwd>`;
 }
 
+describe("slash command drafts", () => {
+  it.each([
+    ["请改进 API\n保留 Case 和  两个空格", "请改进 API\n保留 Case 和  两个空格"],
+    ["optimize 请改进 API\n保留 Case", "请改进 API\n保留 Case"],
+    ["OPTIMIZE view", "view"],
+    ["constructor", "constructor"],
+  ])("refines command text: %s", async (args, draft) => {
+    const harness = await makeHarness({ config: { shortcuts: { optimize: null, view: null, dismiss: null, selectModel: null, cycleModel: null, restore: null } } });
+    harness.setEditorText(""); // Real Pi clears the submitted slash command.
+    await harness.command(args, harness.context);
+    await flushPromises();
+    expect(harness.shortcuts.size).toBe(0);
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    expect(harness.complete.mock.calls[0]?.[1]).toMatchObject({
+      messages: [{ content: [{ text: expect.stringContaining(draft) }] }],
+    });
+    expect(harness.getEditor()).toBe(draft);
+    expect(harness.sent).toEqual([]);
+    harness.setCustomAction("a");
+    await harness.command("view", harness.context);
+    expect(harness.getEditor()).toBe("Refined prompt");
+    expect(harness.context.ui.confirm).not.toHaveBeenCalled();
+    await harness.command("restore", harness.context);
+    expect(harness.getEditor()).toBe(draft);
+  });
+
+  it("keeps a different editor draft and requires confirmation before acceptance", async () => {
+    const harness = await makeHarness();
+    await harness.command("optimize Command source", harness.context);
+    await flushPromises();
+    expect(harness.getEditor()).toBe("Draft A");
+    harness.setConfirm(false);
+    harness.setCustomAction("a");
+    await harness.command("view", harness.context);
+    await flushPromises();
+    expect(harness.context.ui.confirm).toHaveBeenCalled();
+    expect(harness.getEditor()).toBe("Draft A");
+  });
+
+  it.each([
+    { configureModel: false },
+    { noAvailableModels: true },
+    { config: { maxDraftChars: 3 } },
+    { mode: "print" as const },
+  ])("keeps existing guards for supplied text: %j", async (options) => {
+    const harness = await makeHarness(options);
+    harness.setEditorText("");
+    await harness.command("optimize Source draft", harness.context);
+    await flushPromises();
+    expect(harness.complete).not.toHaveBeenCalled();
+    expect(harness.sent).toEqual([]);
+  });
+
+  it("still opens the panel for empty arguments and view", async () => {
+    const harness = await makeHarness();
+    await harness.command("  ", harness.context);
+    await harness.command("VIEW", harness.context);
+    expect(harness.customCalls()).toBe(2);
+    expect(harness.complete).not.toHaveBeenCalled();
+    expect(harness.getEditor()).toBe("Draft A");
+  });
+});
+
 describe("project context injection", () => {
   it.each([
     { history: true, tree: true }, { history: true, tree: false },

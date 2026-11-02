@@ -449,13 +449,16 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     notifyCurrent(`优化模型已切换为 ${displayModel(next)}；主会话模型未改变。`, "info");
   }
 
-  function triggerOptimize(ctx: ExtensionContext, force = false): void {
+  function triggerOptimize(ctx: ExtensionContext, force = false, suppliedDraft?: string): void {
     useContext(ctx);
     if (ctx.mode !== "tui") {
       notify(ctx, "后台 Prompt 优化仅在 TUI 模式可用；未发送模型请求。", "warning");
       return;
     }
-    const draft = ctx.ui.getEditorText();
+    const draft = suppliedDraft ?? ctx.ui.getEditorText();
+    // Pi clears the editor on slash-command submission. Keep the supplied source
+    // available for retry/accept/restore, but never overwrite another draft.
+    if (suppliedDraft !== undefined && !ctx.ui.getEditorText()) ctx.ui.setEditorText(draft);
     if (!draft.trim()) {
       notify(ctx, "输入框为空，没有发送优化请求。", "info");
       return;
@@ -466,7 +469,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
     const selected = controller.getModel();
     if (!selected) {
-      notify(ctx, "尚未配置优化模型；使用模型选择快捷键先选择一个文本生成模型。", "warning");
+      notify(ctx, "尚未配置优化模型；使用 /refine model 先选择一个文本生成模型。", "warning");
       return;
     }
     const model = ctx.modelRegistry.find(selected.provider, selected.id);
@@ -750,9 +753,10 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   }
 
   pi.registerCommand("refine", {
-    description: "Prompt Refine: optimize, view, cancel, model, cycle, restore",
+    description: "Prompt Refine: /refine <text> or optimize [text], view, cancel, model, cycle, restore",
     handler: async (args, ctx) => {
-      const action = args.trim().toLocaleLowerCase();
+      const text = args.trim();
+      const action = text.toLocaleLowerCase();
       const mapping: Record<string, ShortcutAction> = {
         optimize: "optimize",
         view: "view",
@@ -766,9 +770,12 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         await showPreview(ctx);
         return;
       }
-      const selectedAction = mapping[action];
-      if (!selectedAction) {
-        notify(ctx, "未知操作。可用：optimize、view、cancel、model、cycle、restore。", "warning");
+      // Only exact bare subcommands are reserved. Preserve prompt case and
+      // internal whitespace; `optimize <text>` disambiguates reserved words.
+      const explicitDraft = /^optimize\s+([\s\S]+)$/i.exec(text)?.[1];
+      const selectedAction = Object.hasOwn(mapping, action) ? mapping[action] : undefined;
+      if (explicitDraft !== undefined || !selectedAction) {
+        triggerOptimize(ctx, true, explicitDraft ?? text);
         return;
       }
       if (selectedAction === "optimize") triggerOptimize(ctx, true);
