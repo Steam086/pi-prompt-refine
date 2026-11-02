@@ -10,10 +10,10 @@ import {
   type ShortcutAction,
   loadConfig,
 } from "./config.js";
-import { buildRefineInput, REFINE_SYSTEM_PROMPT, selectHistory, type HistorySnapshot } from "./context.js";
+import { buildRefineInput, buildRefineSystemPrompt, parseRefineOutput, selectHistory, type HistorySnapshot } from "./context.js";
 import { READING_WIDTH, renderSummary } from "./presentation.js";
 import { PreviewPanel, type PreviewOptions } from "./preview.js";
-import { RefineController, type CandidateToken, type ControllerState, type RefineRequest } from "./controller.js";
+import { RefineController, type Candidate, type CandidateToken, type ControllerState, type RefineRequest } from "./controller.js";
 
 import { readTokenUsage } from "./usage.js";
 import { assembleProjectContext, captureProjectContext, collectTree } from "./project-context.js";
@@ -82,6 +82,7 @@ function errorStatus(state: ControllerState): string {
     case "empty": return "Refine · 模型未返回 Prompt · 可重试";
     case "truncated": return "Refine · 输出不完整 · 可重试";
     case "tool-call": return "Refine · 模型返回了非文本操作 · 可重试";
+    case "invalid-output": return "Refine · 返回格式无效或缺少 Prompt · 可重试";
     default: return "Refine · 请求失败 · 检查模型/网络后重试";
   }
 }
@@ -112,6 +113,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   let progressTimer: ReturnType<typeof setInterval> | undefined;
   let refreshPreview: (() => void) | undefined;
   let closePreview: (() => void) | undefined;
+  // Session-wide, not branch/workflow state. Rebuilt from Pi metadata on resume/reload.
+  const namedSessions = new Set<string>();
   const openHint = config.shortcuts.view ?? config.shortcuts.optimize ?? "/refine view";
 
   const controller = new RefineController({
@@ -119,6 +122,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     maxDraftChars: config.maxDraftChars,
     maxOutputChars: Math.max(config.maxDraftChars, config.maxOutputTokens * 32),
     onState: (state) => updatePresentation(state),
+    onAccepted: applySessionTitle,
     complete: async (request: RefineRequest, signal) => {
       const ctx = completionContext;
       if (!ctx || ctx.mode !== "tui") throw new Error("TUI context unavailable");
@@ -153,7 +157,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       };
       const response = await ctx.modelRegistry.streamSimple(
         model,
-        { systemPrompt: REFINE_SYSTEM_PROMPT, messages: [userMessage], tools: [] },
+        { systemPrompt: buildRefineSystemPrompt(!!request.generateTitle), messages: [userMessage], tools: [] },
         {
           signal,
           maxTokens: Math.min(config.maxOutputTokens, model.maxTokens),
@@ -165,9 +169,35 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         .map((block) => block.text)
         .join("\n");
       const stopReason = response.content.some((block) => block.type === "toolCall") ? "toolUse" : response.stopReason;
-      return { text, stopReason, usage: readTokenUsage(response.usage) };
+      const parsed = stopReason === "stop" ? parseRefineOutput(text) : undefined;
+      return {
+        text: parsed?.text ?? "",
+        title: request.generateTitle ? parsed?.title : undefined,
+        invalidOutput: stopReason === "stop" && !parsed,
+        stopReason,
+        usage: readTokenUsage(response.usage),
+      };
     },
   }, config.model);
+
+  function canNameSession(ctx: ExtensionContext): boolean {
+    const sessionId = ctx.sessionManager.getSessionId();
+    if (pi.getSessionName()?.trim()) namedSessions.add(sessionId);
+    return !namedSessions.has(sessionId);
+  }
+
+  function applySessionTitle(candidate: Candidate): void {
+    const ctx = currentUiContext;
+    if (!ctx || !candidate.title || candidate.sessionId !== ctx.sessionManager.getSessionId() ||
+      candidate.sessionId !== controller.getSessionId() || !canNameSession(ctx)) return;
+    try {
+      // Rechecked at commit time; never overwrite a name set while the model/UI was waiting.
+      pi.setSessionName(candidate.title);
+      namedSessions.add(candidate.sessionId);
+    } catch {
+      notify(ctx, "Prompt 已接受，但会话命名失败；现有名称未主动覆盖。", "warning");
+    }
+  }
 
   function contextLabel(): string {
     if (!historySnapshot) return "上下文：尚未捕获";
@@ -458,6 +488,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       draft,
       model: selected,
       thinkingLevel: effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel),
+      generateTitle: canNameSession(ctx),
       sessionId: ctx.sessionManager.getSessionId(),
       branchLeafId: ctx.sessionManager.getLeafId(),
       historyText: history.text,
@@ -607,6 +638,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           return {
             state: { ...state, usage: displayed?.usage ?? state.usage, model: displayed?.model ?? state.model ?? controller.getModel() },
             candidateText: displayed?.text,
+            sessionTitle: candidate?.title && canNameSession(ctx) ? candidate.title : undefined,
             draft: displayed?.draft,
             accepted: accepted ? { editorChanged: ctx.ui.getEditorText() !== accepted.text } : undefined,
             draftChanged: !!candidate && ctx.ui.getEditorText() !== candidate.draft,
@@ -756,6 +788,12 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   });
   pi.on("session_start", (_event, ctx) => {
     currentUiContext = ctx;
+    // Include abandoned branches: session names are session-wide. A later explicit
+    // clear must not re-enable automatic naming after a resume or /reload either.
+    if (ctx.sessionManager.getEntries().some((entry) => entry.type === "session_info" && entry.name?.trim())) {
+      namedSessions.add(ctx.sessionManager.getSessionId());
+    }
+    canNameSession(ctx);
     controller.setSession(ctx.sessionManager.getSessionId());
     for (const warning of loaded.warnings) notify(ctx, warning, "warning");
     if (loaded.shortcutsMigrated) notify(ctx, "Prompt Refine 旧默认键位已迁移为 Control+\\；原配置文件未改写，自定义键位不受影响。", "info");

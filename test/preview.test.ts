@@ -22,6 +22,16 @@ function create(overrides: Partial<PreviewOptions> = {}, rows = 40) {
 }
 
 describe("result reading panel", () => {
+  it("shows pending session metadata separately and hides it in accepted snapshots", () => {
+    const panel = create({ sessionTitle: "路径解析修复" });
+    const text = panel.render(100).join("\n");
+    expect(text).toContain("接受后会话名称：路径解析修复");
+    expect(text).toContain("优化后的 Prompt");
+    panel.toggleSource();
+    expect(panel.render(100).join("\n")).toContain("接受后会话名称：路径解析修复");
+    panel.update({ ...options, sessionTitle: "路径解析修复", accepted: { editorChanged: false } });
+    expect(panel.render(100).join("\n")).not.toContain("接受后会话名称");
+  });
   it("puts the result first and hides the original and secondary actions by default", () => {
     const panel = create();
     const text = panel.render(100).join("\n");
@@ -81,7 +91,7 @@ describe("result reading panel", () => {
   it.each([1, 2, 10, 20, 40, 80, 100, 160])("bounds Unicode, Markdown and chrome at %i columns", (width) => {
     const panel = create({ candidateText: "## 中文 😀 é\n\n" + "- **👩‍💻 保留目标** [link](https://example.com)\n".repeat(100) });
     for (const rows of [8, 16, 24, 40]) {
-      const bounded = new PreviewPanel({ ...options, candidateText: "中文😀".repeat(500) }, plainTheme, () => rows, vi.fn());
+      const bounded = new PreviewPanel({ ...options, sessionTitle: "任务名称😀".repeat(10), candidateText: "中文😀".repeat(500) }, plainTheme, () => rows, vi.fn());
       const lines = bounded.render(width);
       expect(lines.length).toBeLessThanOrEqual(rows);
       for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(Math.min(width, READING_WIDTH));
