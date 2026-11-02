@@ -16,6 +16,8 @@ export interface ProjectContextConfig {
   maxChars: number;
   instructionsMaxChars: number;
   skillsMaxChars: number;
+  /** Explicit @directory listings; shares tree limits, not tree.enabled. */
+  referencedDirectories: { enabled: boolean; maxReferences: number };
   tree: {
     enabled: boolean;
     maxChars: number;
@@ -71,6 +73,7 @@ export const DEFAULT_CONFIG: RefineConfig = {
     maxChars: 28_000,
     instructionsMaxChars: 16_000,
     skillsMaxChars: 6_000,
+    referencedDirectories: { enabled: true, maxReferences: 8 },
     tree: {
       enabled: true, maxChars: 4_000, maxDepth: 2,
       maxEntriesPerDirectory: 20, maxEntries: 120,
@@ -200,6 +203,14 @@ function parseProjectContext(value: unknown, warnings: string[]): ProjectContext
   config.enabled = booleanOption(value.enabled, config.enabled, "projectContext.enabled", warnings);
   for (const key of ["maxChars", "instructionsMaxChars", "skillsMaxChars"] as const) {
     config[key] = boundedInteger(value[key], config[key], 512, 100_000, `projectContext.${key}`, warnings);
+  }
+  if (value.referencedDirectories !== undefined && !isRecord(value.referencedDirectories)) {
+    warnings.push("projectContext.referencedDirectories must be an object; using defaults.");
+  }
+  if (isRecord(value.referencedDirectories)) {
+    const refs = value.referencedDirectories;
+    config.referencedDirectories.enabled = booleanOption(refs.enabled, config.referencedDirectories.enabled, "projectContext.referencedDirectories.enabled", warnings);
+    config.referencedDirectories.maxReferences = boundedInteger(refs.maxReferences, config.referencedDirectories.maxReferences, 1, 32, "projectContext.referencedDirectories.maxReferences", warnings);
   }
   if (value.tree !== undefined && !isRecord(value.tree)) warnings.push("projectContext.tree 必须是对象；已使用默认配置。");
   if (isRecord(value.tree)) {

@@ -30,6 +30,10 @@
     "maxChars": 28000,
     "instructionsMaxChars": 16000,
     "skillsMaxChars": 6000,
+    "referencedDirectories": {
+      "enabled": true,
+      "maxReferences": 8
+    },
     "tree": {
       "enabled": true,
       "maxChars": 4000,
