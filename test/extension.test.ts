@@ -56,6 +56,9 @@ async function makeHarness(options: { mode?: "tui" | "print"; busy?: boolean; co
   process.env.PI_CODING_AGENT_DIR = agentDir;
 
   const config = { ...structuredClone(DEFAULT_CONFIG), ...options.config } as RefineConfig;
+  // Existing workflow tests exercise the explicitly supported history-only mode.
+  // Project context (including real asynchronous tree collection) has separate integration cases.
+  if (!options.config?.projectContext) config.projectContext = { ...config.projectContext, enabled: false };
   if (options.config?.context) config.context = { ...DEFAULT_CONFIG.context, ...options.config.context };
   // Keep explicit secondary bindings in the older workflow tests; test defaults separately.
   if (!options.useDefaultShortcuts) config.shortcuts = { ...config.shortcuts, view: "f3", selectModel: "f5", restore: "f7" };
@@ -173,6 +176,7 @@ async function makeHarness(options: { mode?: "tui" | "print"; busy?: boolean; co
     scopedModels: [],
     thinkingLevel: options.thinkingLevel,
     isIdle: () => !options.busy,
+    getSystemPrompt: () => `<cwd>\n${agentDir}\n</cwd>`,
   } as unknown as ExtensionContext;
 
   const handlers = new Map<string, Array<(event: any, ctx: ExtensionContext) => unknown>>();
@@ -246,6 +250,98 @@ async function trigger(harness: Harness): Promise<void> {
   await harness.command("optimize", harness.context);
   await flushPromises();
 }
+
+function projectConfig(tree = false): RefineConfig["projectContext"] {
+  const config = structuredClone(DEFAULT_CONFIG.projectContext);
+  config.tree.enabled = tree;
+  return config;
+}
+
+function resourcePrompt(skillDescription = "Extract PDF tables", instructions = "Use the project venv."): string {
+  return `<tools>\nPRIVATE MAIN AGENT TOOLS\n</tools>\n<project_context>\nProject-specific instructions and guidelines:\n\n<project_instructions path="/repo/AGENTS.md">\n${instructions}\n</project_instructions>\n</project_context>\n<skills>\nUse bash to load skills.\n<available_skills>\n<skill><name>pdf</name><description>${skillDescription}</description><location>/skills/pdf/SKILL.md</location></skill>\n</available_skills>\n</skills>\n<cwd>\n/repo\n</cwd>`;
+}
+
+describe("project context injection", () => {
+  it("injects skills, applicable instructions and a real bounded tree on the first shortcut in an empty session", async () => {
+    const harness = await makeHarness({ config: { projectContext: projectConfig(true) } });
+    vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([]);
+    vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
+    await shortcut(harness, "ctrl+\\")(harness.context);
+    await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
+    const request = (harness.complete.mock.calls[0] as any[])[1];
+    const input = request.messages[0].content[0].text;
+    expect(input).toContain("Use the project venv.");
+    expect(input).toContain("Extract PDF tables");
+    expect(input).toContain("PROJECT TREE");
+    expect(input).toContain("prompt-refine.json");
+    expect(input).not.toContain("PRIVATE MAIN AGENT TOOLS");
+    expect(input).not.toContain("Use bash to load skills");
+    expect(request.tools).toEqual([]);
+    expect(harness.notifications).toEqual([]);
+    expect(harness.getEditor()).toBe("Draft A");
+    expect(harness.sent).toEqual([]);
+    expect(harness.sessionWrites).toEqual([]);
+  });
+
+  it("injects fresh metadata on every independent optimization and uses structured command resources when available", async () => {
+    const harness = await makeHarness({ config: { projectContext: projectConfig() } });
+    const source = { contextFiles: [{ path: "/repo/AGENTS.md", content: "Use npm" }], skills: [{ name: "pdf", description: "Read PDFs" }] };
+    Object.assign(harness.context, { getSystemPromptOptions: () => source });
+    await trigger(harness);
+    source.contextFiles[0]!.content = "Use pnpm";
+    source.skills[0]!.description = "Read updated PDFs";
+    await trigger(harness);
+    const first = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
+    const second = (harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text;
+    expect(first).toContain("Use npm");
+    expect(first).toContain("Read PDFs");
+    expect(second).toContain("Use pnpm");
+    expect(second).toContain("Read updated PDFs");
+    expect(second).not.toContain("Use npm");
+  });
+
+  it("warns both the model and user when instructions and skill descriptions exceed their budgets", async () => {
+    const config = projectConfig();
+    config.instructionsMaxChars = 512;
+    config.skillsMaxChars = 512;
+    const harness = await makeHarness({ config: { projectContext: config } });
+    vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt("d".repeat(2000), "# Long\n" + "x".repeat(2000)));
+    await trigger(harness);
+    const text = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
+    expect(text).toContain("CONTEXT WARNINGS");
+    expect(text).toContain('"complete":false');
+    expect(harness.notifications.join(" ")).toContain("项目指令未完整提供");
+    expect(harness.notifications.join(" ")).toContain("Skills 目录未完整提供");
+    expect(harness.widgetLines().join("\n")).toContain("上下文警告");
+    expect(harness.customCalls()).toBe(0);
+  });
+
+  it("does not send a model request or late warnings when cancelled during tree collection", async () => {
+    const harness = await makeHarness({ config: { projectContext: projectConfig(true) } });
+    vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
+    await shortcut(harness, "ctrl+\\")(harness.context);
+    await harness.command("cancel", harness.context);
+    await flushPromises();
+    expect(harness.complete).not.toHaveBeenCalled();
+    expect(harness.widgetLines()).toEqual([]);
+    expect(harness.notifications).toHaveLength(1); // Explicit cancellation notice only.
+  });
+
+  it("freezes host resources before asynchronous tree collection and allows draft edits", async () => {
+    const harness = await makeHarness({ config: { projectContext: projectConfig(true) } });
+    const source = { skills: [{ name: "pdf", description: "Original description" }], contextFiles: [] };
+    Object.assign(harness.context, { getSystemPromptOptions: () => source });
+    await harness.command("optimize", harness.context);
+    source.skills[0]!.description = "Changed after trigger";
+    harness.setEditorText("Draft B");
+    await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
+    const text = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
+    expect(text).toContain("Original description");
+    expect(text).not.toContain("Changed after trigger");
+    expect(text).toContain("Draft A");
+    expect(harness.getEditor()).toBe("Draft B");
+  });
+});
 
 describe("optimizer model picker", () => {
   const thinking = { provider: "fake-provider", id: "reasoner", name: "Reasoner", reasoning: true } as Model<Api>;

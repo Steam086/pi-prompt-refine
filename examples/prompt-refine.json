@@ -24,5 +24,20 @@
     "maxChars": 16000
   },
   "maxDraftChars": 16000,
-  "maxOutputTokens": 2048
+  "maxOutputTokens": 2048,
+  "projectContext": {
+    "enabled": true,
+    "maxChars": 28000,
+    "instructionsMaxChars": 16000,
+    "skillsMaxChars": 6000,
+    "tree": {
+      "enabled": true,
+      "maxChars": 4000,
+      "maxDepth": 2,
+      "maxEntriesPerDirectory": 20,
+      "maxEntries": 120,
+      "maxScannedEntries": 2000,
+      "timeoutMs": 200
+    }
+  }
 }

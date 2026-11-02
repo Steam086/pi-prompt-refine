@@ -1,6 +1,9 @@
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ModelRef } from "./config.js";
 import type { TokenUsage } from "./usage.js";
+import type { ProjectSnapshot } from "./project-context.js";
+
+interface RequestProjectContext { cwd: string; snapshot: ProjectSnapshot }
 
 export type RefinePhase = "idle" | "generating" | "ready" | "error";
 export type RefineStopReason = "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred" | "pending";
@@ -12,6 +15,7 @@ export interface RefineRequestInput {
   sessionId: string;
   branchLeafId: string | null;
   historyText: string;
+  project?: RequestProjectContext;
 }
 
 export interface RefineRequest extends RefineRequestInput {
@@ -37,6 +41,7 @@ export interface Candidate {
   model: ModelRef;
   branchLeafId: string | null;
   historyText: string;
+  project?: RequestProjectContext;
 }
 
 export interface CandidateToken {
@@ -113,11 +118,11 @@ function sameModel(left: ModelRef | undefined, right: ModelRef | undefined): boo
 }
 
 function fingerprint(request: RefineRequestInput): string {
-  return JSON.stringify([request.draft, request.model.provider, request.model.id, request.thinkingLevel, request.sessionId, request.branchLeafId, request.historyText]);
+  return JSON.stringify([request.draft, request.model.provider, request.model.id, request.thinkingLevel, request.sessionId, request.branchLeafId, request.historyText, request.project]);
 }
 
 function cloneCandidate(candidate: Candidate): Candidate {
-  return { ...candidate, ...(candidate.usage ? { usage: { ...candidate.usage } } : {}), model: { ...candidate.model } };
+  return { ...candidate, ...(candidate.project ? { project: structuredClone(candidate.project) } : {}), ...(candidate.usage ? { usage: { ...candidate.usage } } : {}), model: { ...candidate.model } };
 }
 
 export class RefineController {
@@ -308,6 +313,7 @@ export class RefineController {
     const requestId = ++this.requestSequence;
     const request: RefineRequest = {
       ...input,
+      ...(input.project ? { project: structuredClone(input.project) } : {}),
       model: { ...input.model },
       requestId,
       generation: this.generation,
@@ -442,6 +448,7 @@ export class RefineController {
         model: { ...active.request.model },
         branchLeafId: active.request.branchLeafId,
         historyText: active.request.historyText,
+        ...(active.request.project ? { project: structuredClone(active.request.project) } : {}),
       };
       this.candidate = candidate;
       this.state = { phase: "ready", requestId: candidate.requestId, model: { ...candidate.model }, pendingSend: false };

@@ -16,6 +16,7 @@ import { PreviewPanel, type PreviewOptions } from "./preview.js";
 import { RefineController, type CandidateToken, type ControllerState, type RefineRequest } from "./controller.js";
 
 import { readTokenUsage } from "./usage.js";
+import { assembleProjectContext, captureProjectContext, collectTree } from "./project-context.js";
 
 const STATUS_KEY = "prompt-refine";
 
@@ -104,6 +105,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   let completionContext: ExtensionContext | undefined;
   let saveQueue: Promise<void> = Promise.resolve();
   let historySnapshot: HistorySnapshot | undefined;
+  let projectLabel = "";
+  let projectWarnings: string[] = [];
   let generatingRequestId: number | undefined;
   let startedAt = 0;
   let progressTimer: ReturnType<typeof setInterval> | undefined;
@@ -124,13 +127,28 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       const available = ctx.modelRegistry.getAvailable().some((candidate) => sameModel(candidate, request.model));
       if (!available) throw new Error(`Model is not currently available: ${displayModel(request.model)}`);
 
+      let projectText = "";
+      if (request.project) {
+        const tree = config.projectContext.tree.enabled
+          ? await collectTree(request.project.cwd, request.draft, config.projectContext.tree, signal)
+          : { text: "", warnings: [] };
+        if (signal.aborted) throw new Error("Context collection cancelled");
+        const project = assembleProjectContext(request.project.snapshot, tree, config.projectContext);
+        projectText = project.text;
+        if (controller.getState().requestId === request.requestId && controller.getGeneration() === request.generation) {
+          projectWarnings = project.warnings;
+          if (projectWarnings.length) notify(ctx, projectWarnings.join("\n"), "warning");
+          updatePresentation(controller.getState());
+        }
+      }
+
       const userMessage: UserMessage = {
         role: "user",
         content: [{ type: "text", text: buildRefineInput(request.draft, {
           text: request.historyText,
           messageCount: 0,
           characterCount: request.historyText.length,
-        }) }],
+        }, projectText) }],
         timestamp: Date.now(),
       };
       const response = await ctx.modelRegistry.streamSimple(
@@ -153,8 +171,11 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
 
   function contextLabel(): string {
     if (!historySnapshot) return "上下文：尚未捕获";
-    if (!historySnapshot.messageCount) return "上下文：仅草稿";
-    return `上下文：${historySnapshot.messageCount} 条 / ${historySnapshot.characterCount} 字符 · ${historySnapshot.latestAssistantIncluded ? "含最近 assistant 回复" : "无可用 assistant 回复"}${historySnapshot.truncated ? " · 已截断" : ""}`;
+    const warning = projectWarnings.length ? `⚠ ${projectWarnings.length} 项上下文警告 · ` : "";
+    const history = !historySnapshot.messageCount
+      ? (projectLabel ? "无会话历史" : "仅草稿")
+      : `${historySnapshot.messageCount} 条 / ${historySnapshot.characterCount} 字符 · ${historySnapshot.latestAssistantIncluded ? "含最近 assistant 回复" : "无可用 assistant 回复"}${historySnapshot.truncated ? " · 已截断" : ""}`;
+    return `${warning}上下文：${history}${projectLabel ? ` · ${projectLabel}` : ""}`;
   }
 
   function updatePresentation(state: ControllerState): void {
@@ -174,6 +195,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     ctx.ui.setStatus(STATUS_KEY, formatStatus(state, openHint, !!controller.getAccepted()));
     if (state.phase === "idle") {
       historySnapshot = undefined;
+      projectLabel = "";
+      projectWarnings = [];
       ctx.ui.setWidget(STATUS_KEY, undefined);
       closePreview?.();
     } else {
@@ -426,7 +449,11 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       config.context.maxMessages,
       config.context.maxChars,
     );
+    const previousContext = { historySnapshot, projectLabel, projectWarnings };
     historySnapshot = history;
+    const project = config.projectContext.enabled ? captureProjectContext(ctx, config.projectContext, draft) : undefined;
+    projectLabel = project ? `项目 ${project.instructionCount} 指令 / ${project.skillCount} 技能${config.projectContext.tree.enabled ? " / 有界 tree" : ""}` : "";
+    projectWarnings = project?.warnings ?? [];
     const result = controller.trigger({
       draft,
       model: selected,
@@ -434,7 +461,11 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       sessionId: ctx.sessionManager.getSessionId(),
       branchLeafId: ctx.sessionManager.getLeafId(),
       historyText: history.text,
+      ...(project ? { project: { cwd: ctx.cwd, snapshot: project } } : {}),
     }, { force });
+    if (result.kind !== "started") {
+      ({ historySnapshot, projectLabel, projectWarnings } = previousContext);
+    }
     if (result.kind === "empty") notify(ctx, "输入框为空，没有发送优化请求。", "info");
     else if (result.kind === "too-long") notify(ctx, `草稿超过 ${config.maxDraftChars} 个字符；未发送请求，请缩短后重试。`, "warning");
     else if (result.kind === "duplicate" || result.kind === "ready") {

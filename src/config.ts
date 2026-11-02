@@ -11,6 +11,23 @@ export interface ModelRef {
 export type ShortcutAction = "optimize" | "view" | "dismiss" | "selectModel" | "cycleModel" | "restore";
 export type ShortcutConfig = Record<ShortcutAction, KeyId | null>;
 
+export interface ProjectContextConfig {
+  enabled: boolean;
+  maxChars: number;
+  instructionsMaxChars: number;
+  skillsMaxChars: number;
+  tree: {
+    enabled: boolean;
+    maxChars: number;
+    maxDepth: number;
+    maxEntriesPerDirectory: number;
+    maxEntries: number;
+    maxScannedEntries: number;
+    timeoutMs: number;
+    exclude: string[];
+  };
+}
+
 export interface RefineConfig {
   version: 1;
   model?: ModelRef;
@@ -23,6 +40,7 @@ export interface RefineConfig {
     maxMessages: number;
     maxChars: number;
   };
+  projectContext: ProjectContextConfig;
   maxDraftChars: number;
   maxOutputTokens: number;
 }
@@ -48,6 +66,18 @@ export const DEFAULT_CONFIG: RefineConfig = {
   shortcuts: { ...DEFAULT_SHORTCUTS },
   timeoutMs: 60_000,
   context: { maxMessages: 12, maxChars: 16_000 },
+  projectContext: {
+    enabled: true,
+    maxChars: 28_000,
+    instructionsMaxChars: 16_000,
+    skillsMaxChars: 6_000,
+    tree: {
+      enabled: true, maxChars: 4_000, maxDepth: 2,
+      maxEntriesPerDirectory: 20, maxEntries: 120,
+      maxScannedEntries: 2_000, timeoutMs: 200,
+      exclude: [".git", "node_modules", "dist", "build", "coverage", ".venv", "venv", "__pycache__", ".cache", ".next", ".nuxt", ".turbo", ".aws", ".codex"],
+    },
+  },
   maxDraftChars: 16_000,
   maxOutputTokens: 2_048,
 };
@@ -156,6 +186,38 @@ function boundedInteger(value: unknown, fallback: number, min: number, max: numb
   return fallback;
 }
 
+function booleanOption(value: unknown, fallback: boolean, label: string, warnings: string[]): boolean {
+  if (value === undefined) return fallback;
+  if (typeof value === "boolean") return value;
+  warnings.push(`${label} 必须是布尔值；已使用默认值。`);
+  return fallback;
+}
+
+function parseProjectContext(value: unknown, warnings: string[]): ProjectContextConfig {
+  const config = structuredClone(DEFAULT_CONFIG.projectContext);
+  if (value === undefined) return config;
+  if (!isRecord(value)) { warnings.push("projectContext 必须是对象；已使用默认配置。"); return config; }
+  config.enabled = booleanOption(value.enabled, config.enabled, "projectContext.enabled", warnings);
+  for (const key of ["maxChars", "instructionsMaxChars", "skillsMaxChars"] as const) {
+    config[key] = boundedInteger(value[key], config[key], 512, 100_000, `projectContext.${key}`, warnings);
+  }
+  if (value.tree !== undefined && !isRecord(value.tree)) warnings.push("projectContext.tree 必须是对象；已使用默认配置。");
+  if (isRecord(value.tree)) {
+    const tree = value.tree;
+    config.tree.enabled = booleanOption(tree.enabled, config.tree.enabled, "projectContext.tree.enabled", warnings);
+    const bounds = { maxChars: [128, 20_000], maxDepth: [1, 6], maxEntriesPerDirectory: [1, 100], maxEntries: [1, 1_000], maxScannedEntries: [1, 20_000], timeoutMs: [10, 2_000] } as const;
+    for (const key of Object.keys(bounds) as Array<keyof typeof bounds>) {
+      config.tree[key] = boundedInteger(tree[key], config.tree[key], bounds[key][0], bounds[key][1], `projectContext.tree.${key}`, warnings);
+    }
+    if (tree.exclude !== undefined) {
+      if (Array.isArray(tree.exclude) && tree.exclude.length <= 100 && tree.exclude.every((name) => typeof name === "string" && name.length > 0 && name.length <= 128 && !/[\/\\\x00-\x1f]/.test(name) && name !== "." && name !== "..")) {
+        config.tree.exclude = [...new Set(tree.exclude as string[])];
+      } else warnings.push("projectContext.tree.exclude 必须是最多 100 个目录/文件名称的数组；已使用默认值。");
+    }
+  }
+  return config;
+}
+
 export function parseConfig(value: unknown): LoadedConfig {
   const warnings: string[] = [];
   if (!isRecord(value) || value.version !== 1) {
@@ -163,6 +225,7 @@ export function parseConfig(value: unknown): LoadedConfig {
   }
 
   const config = structuredClone(DEFAULT_CONFIG);
+  config.projectContext = parseProjectContext(value.projectContext, warnings);
   if (value.model !== undefined) {
     const selected = modelRef(value.model);
     if (selected) config.model = selected;

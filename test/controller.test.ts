@@ -31,6 +31,23 @@ function setup(complete: (request: RefineRequest, signal: AbortSignal) => Promis
 }
 
 describe("RefineController request lifecycle", () => {
+  it("includes project resources in deduplication and freezes their source snapshot", async () => {
+    const pending = deferred<ReturnType<typeof success>>();
+    const requests: RefineRequest[] = [];
+    const complete = vi.fn((request: RefineRequest) => { requests.push(request); return pending.promise; });
+    const { controller } = setup(complete);
+    const project = { cwd: "/repo", snapshot: { text: "Original rules", warnings: [], instructionCount: 1, skillCount: 0 } };
+    expect(controller.trigger(input("draft", { project })).kind).toBe("started");
+    expect(controller.trigger(input("draft", { project })).kind).toBe("duplicate");
+    project.snapshot.text = "Updated rules";
+    expect(requests[0]?.project?.snapshot.text).toBe("Original rules");
+    expect(controller.trigger(input("draft", { project })).kind).toBe("started");
+    pending.resolve(success("Refined"));
+    await flushPromises();
+    expect(controller.getCandidate()?.project?.snapshot.text).toBe("Updated rules");
+    expect(controller.trigger(input("draft", { project })).kind).toBe("ready");
+  });
+
   it("deduplicates an active snapshot and reuses its ready candidate", async () => {
     const pending = deferred<ReturnType<typeof success>>();
     const complete = vi.fn(() => pending.promise);
