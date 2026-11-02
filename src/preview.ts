@@ -1,5 +1,6 @@
 import { Markdown, ScrollView, Text, truncateToWidth, wrapTextWithAnsi, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
+import { formatTokenUsage } from "./usage.js";
 import { READING_WIDTH, resultHeading, sanitizeTerminalText, type SummaryOptions } from "./presentation.js";
 
 export interface PreviewOptions extends SummaryOptions {
@@ -104,6 +105,11 @@ export class PreviewPanel implements Component {
     const paragraph = (text: string, color: "text" | "muted" | "warning" = "text") => {
       lines.push(...wrapTextWithAnsi(sanitizeTerminalText(text), width).map((line) => theme.fg(color, line)));
     };
+    const usageLabel = formatTokenUsage(options.state.usage);
+    if (usageLabel && options.state.phase !== "generating") {
+      paragraph(usageLabel, "muted");
+      lines.push("");
+    }
     if (this.helpVisible) {
       paragraph("操作说明", "muted");
       if (options.accepted) paragraph("已接受结果仅供查看；a/e/s 不操作历史快照。\n请返回主输入框继续编辑或发送当前草稿。");

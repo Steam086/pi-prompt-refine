@@ -1,6 +1,7 @@
 import { truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { ControllerState } from "./controller.js";
+import { formatTokenUsage } from "./usage.js";
 
 /** Keep prose readable on wide terminals; widths are terminal columns, not characters. */
 export const READING_WIDTH = 100;
@@ -49,6 +50,10 @@ export function renderSummary(options: SummaryOptions, width: number, theme: Pre
       ? options.errorLabel ?? "请求失败，请重试。"
       : "后台生成中，可继续编辑原稿。";
     lines.push(theme.fg(options.state.phase === "error" ? "warning" : "text", sanitizeTerminalText(message)));
+  }
+  const usageLabel = formatTokenUsage(options.state.usage);
+  if (usageLabel && options.state.phase !== "generating") {
+    lines.push(theme.fg("muted", truncateToWidth(usageLabel, contentWidth)));
   }
   lines.push("");
   const hint = options.state.pendingSend ? "主草稿保留 · 查看详情" : "查看结果与操作";

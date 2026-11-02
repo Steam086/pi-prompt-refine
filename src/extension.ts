@@ -15,6 +15,8 @@ import { READING_WIDTH, renderSummary } from "./presentation.js";
 import { PreviewPanel, type PreviewOptions } from "./preview.js";
 import { RefineController, type CandidateToken, type ControllerState, type RefineRequest } from "./controller.js";
 
+import { readTokenUsage } from "./usage.js";
+
 const STATUS_KEY = "prompt-refine";
 
 type PreviewAction = "accept" | "edit" | "send" | "dismiss" | "restore" | "close" | "optimize" | "model" | "cycle";
@@ -145,7 +147,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         .map((block) => block.text)
         .join("\n");
       const stopReason = response.content.some((block) => block.type === "toolCall") ? "toolUse" : response.stopReason;
-      return { text, stopReason };
+      return { text, stopReason, usage: readTokenUsage(response.usage) };
     },
   }, config.model);
 
@@ -572,7 +574,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           const displayed = candidate ?? accepted;
           displayedToken = controller.getCandidateToken();
           return {
-            state: { ...state, model: displayed?.model ?? state.model ?? controller.getModel() },
+            state: { ...state, usage: displayed?.usage ?? state.usage, model: displayed?.model ?? state.model ?? controller.getModel() },
             candidateText: displayed?.text,
             draft: displayed?.draft,
             accepted: accepted ? { editorChanged: ctx.ui.getEditorText() !== accepted.text } : undefined,

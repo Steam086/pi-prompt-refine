@@ -314,6 +314,44 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.sent).toEqual([]);
   });
 
+  it("shows reported usage in the summary and accepted snapshot without extra requests", async () => {
+    const harness = await makeHarness();
+    harness.complete.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Usage result" }], stopReason: "stop",
+      usage: { input: 120, output: 30, cacheRead: 40, cacheWrite: 0, reasoning: 10, totalTokens: 190 },
+    });
+    await trigger(harness);
+    expect(harness.widgetLines(100).join("\n")).toContain("Token：总计 190 · 输入 120 · 输出 30");
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    expect(harness.panelLines().join("").replace(/\s/g, "")).toContain("推理（含于输出）10");
+    harness.panelInput("a");
+    await view;
+    const acceptedView = harness.command("view", harness.context);
+    expect(harness.panelLines().join("\n")).toContain("Token：总计 190");
+    harness.panelInput("q");
+    await acceptedView;
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    expect(harness.sent).toEqual([]);
+
+    // A subsequent response without usage must not inherit the previous counts.
+    await trigger(harness);
+    expect(harness.widgetLines().join("\n")).not.toContain("Token：");
+  });
+
+  it("shows reported usage for an unusable response and clears it on retry", async () => {
+    const harness = await makeHarness();
+    harness.complete.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Partial result" }], stopReason: "length",
+      usage: { totalTokens: 25 },
+    });
+    await trigger(harness);
+    expect(harness.widgetLines().join("\n")).toContain("Token：总计 25");
+    harness.complete.mockImplementationOnce(() => new Promise(() => {}));
+    await trigger(harness);
+    expect(harness.widgetLines().join("\n")).not.toContain("Token：");
+  });
+
   it("shows a single result surface and toggles reading options without writing or sending", async () => {
     const harness = await makeHarness();
     await trigger(harness);
