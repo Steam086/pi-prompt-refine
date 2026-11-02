@@ -9,6 +9,8 @@ export interface PreviewOptions extends SummaryOptions {
   /** An accepted snapshot is read-only, not an actionable candidate. */
   accepted?: { editorChanged: boolean };
   draftChanged?: boolean;
+  /** Pending metadata, never part of the editable prompt or an accepted snapshot. */
+  sessionTitle?: string;
 }
 
 type PreviewTheme = Pick<Theme, "fg" | "bold" | "italic" | "underline" | "strikethrough">;
@@ -127,6 +129,10 @@ export class PreviewPanel implements Component {
         lines.push("");
       } else if (options.draftChanged) {
         paragraph("主输入框已修改；此候选仍基于触发时草稿。", "warning");
+        lines.push("");
+      }
+      if (!options.accepted && options.sessionTitle) {
+        paragraph(`接受后会话名称：${options.sessionTitle}`, "muted");
         lines.push("");
       }
       const title = options.accepted ? "上次接受的 Prompt · 只读快照" : "优化后的 Prompt";

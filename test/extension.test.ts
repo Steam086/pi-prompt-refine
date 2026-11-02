@@ -34,6 +34,11 @@ interface Harness {
   sent: Array<{ text: string; options?: { deliverAs?: "steer" | "followUp" } }>;
   internalMessages: unknown[];
   sessionWrites: unknown[];
+  setSessionName: ReturnType<typeof vi.fn>;
+  getSessionName(): string | undefined;
+  manualName(name: string): void;
+  sendUserMessage: ReturnType<typeof vi.fn>;
+  reload(): Promise<void>;
   editorWrites: string[];
   getEditor(): string;
   setEditorText(text: string): void;
@@ -50,7 +55,7 @@ interface Harness {
   customCalls(): number;
 }
 
-async function makeHarness(options: { mode?: "tui" | "print"; busy?: boolean; configureModel?: boolean; noAvailableModels?: boolean; reasoning?: boolean; thinkingLevel?: ModelThinkingLevel; config?: Partial<RefineConfig>; useDefaultShortcuts?: boolean } = {}): Promise<Harness> {
+async function makeHarness(options: { sessionName?: string; mode?: "tui" | "print"; busy?: boolean; configureModel?: boolean; noAvailableModels?: boolean; reasoning?: boolean; thinkingLevel?: ModelThinkingLevel; config?: Partial<RefineConfig>; useDefaultShortcuts?: boolean } = {}): Promise<Harness> {
   const agentDir = await mkdtemp(join(tmpdir(), "pi-prompt-refine-agent-"));
   agentDirs.push(agentDir);
   process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -68,7 +73,7 @@ async function makeHarness(options: { mode?: "tui" | "print"; busy?: boolean; co
 
   const model = { provider: "fake-provider", id: "fake-chat", name: "Fake Chat", maxTokens: 4096, reasoning: options.reasoning ?? false } as Model<Api>;
   const complete = vi.fn(async (_model?: Model<Api>, _context?: unknown, _options?: unknown) => ({
-    content: [{ type: "text", text: "Refined prompt" }],
+    content: [{ type: "text", text: JSON.stringify({ prompt: "Refined prompt", title: "Draft refinement workflow" }) }],
     stopReason: "stop",
   }));
   const modelRegistry = {
@@ -91,10 +96,21 @@ async function makeHarness(options: { mode?: "tui" | "print"; busy?: boolean; co
   const internalMessages: unknown[] = [];
   const sessionWrites: unknown[] = [];
   const editorWrites: string[] = [];
+  let sessionName = options.sessionName;
+  const sessionEntries: any[] = options.sessionName ? [{ type: "session_info", name: options.sessionName }] : [];
+  const manualName = (name: string) => {
+    sessionName = name;
+    sessionEntries.push({ type: "session_info", name });
+  };
+  const setSessionName = vi.fn(manualName);
+  const sendUserMessage = vi.fn((text: string, sendOptions?: { deliverAs?: "steer" | "followUp" }) => {
+    sent.push({ text, options: sendOptions });
+  });
   const renderedWidths: Array<{ width: number; lines: string[] }> = [];
   const sessionManager = {
     getSessionId: () => "session-one",
     getLeafId: () => "leaf-one",
+    getEntries: () => sessionEntries,
     getBranch: () => [
       { type: "message", message: { role: "user", content: "earlier requirement" } },
       { type: "message", message: { role: "assistant", content: [{ type: "thinking", thinking: "secret" }, { type: "text", text: "visible answer" }] } },
@@ -195,7 +211,9 @@ async function makeHarness(options: { mode?: "tui" | "print"; busy?: boolean; co
     registerCommand: (_name: string, definition: { handler: (args: string, ctx: ExtensionContext) => unknown }) => {
       command = definition.handler;
     },
-    sendUserMessage: (text: string, sendOptions?: { deliverAs?: "steer" | "followUp" }) => sent.push({ text, options: sendOptions }),
+    sendUserMessage,
+    getSessionName: () => sessionName,
+    setSessionName,
     sendMessage: (...args: unknown[]) => internalMessages.push(args),
     appendEntry: (...args: unknown[]) => sessionWrites.push(args),
   } as unknown as ExtensionAPI;
@@ -215,6 +233,18 @@ async function makeHarness(options: { mode?: "tui" | "print"; busy?: boolean; co
     sent,
     internalMessages,
     sessionWrites,
+    setSessionName,
+    getSessionName: () => sessionName,
+    manualName,
+    sendUserMessage,
+    reload: async () => {
+      handlers.get("session_shutdown")?.[0]?.({ type: "session_shutdown" }, context);
+      handlers.clear();
+      shortcuts.clear();
+      await promptRefineExtension(pi);
+      harness.command = command;
+      handlers.get("session_start")?.[0]?.({ type: "session_start", reason: "reload" }, context);
+    },
     editorWrites,
     getEditor: () => editor,
     setEditorText: (text) => { editor = text; },
@@ -366,6 +396,217 @@ describe("optimizer model picker", () => {
   });
 });
 
+function refinement(prompt: string, title?: unknown) {
+  return { content: [{ type: "text", text: JSON.stringify({ prompt, title }) }], stopReason: "stop" };
+}
+
+async function panelAction(harness: Harness, action: string): Promise<void> {
+  harness.setCustomAction(action);
+  await harness.command("view", harness.context);
+  await flushPromises();
+}
+
+describe("session naming", () => {
+  it("generates a name in the same call, previews it separately, and applies it only on acceptance", async () => {
+    const harness = await makeHarness();
+    harness.complete.mockResolvedValueOnce(refinement("请修复路径解析。", "路径解析修复"));
+    await trigger(harness);
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    const request = (harness.complete.mock.calls[0] as any[])[1];
+    expect(request.systemPrompt).toContain('Also include a "title"');
+    expect(harness.setSessionName).not.toHaveBeenCalled();
+    expect(harness.editorWrites).toEqual([]);
+    await panelAction(harness, "q");
+    expect(harness.panelLines().join("\n")).toContain("接受后会话名称：路径解析修复");
+    expect(harness.panelLines().join("\n")).not.toContain('"prompt":');
+    expect(harness.setSessionName).not.toHaveBeenCalled();
+    await panelAction(harness, "a");
+    expect(harness.editorWrites).toEqual(["请修复路径解析。"]);
+    expect(harness.setSessionName).toHaveBeenCalledExactlyOnceWith("路径解析修复");
+    expect(harness.sent).toEqual([]);
+    expect(harness.internalMessages).toEqual([]);
+    expect(harness.sessionWrites).toEqual([]); // No appendEntry; Pi owns name persistence.
+    await panelAction(harness, "q");
+    expect(harness.panelLines().join("\n")).not.toContain("接受后会话名称");
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not request or apply a title for an already named session, even if the model returns one", async () => {
+    const harness = await makeHarness({ sessionName: "My chosen project" });
+    await trigger(harness);
+    expect((harness.complete.mock.calls[0] as any[])[1].systemPrompt).toContain("Do not generate a title");
+    await panelAction(harness, "q");
+    expect(harness.panelLines().join("\n")).not.toContain("接受后会话名称");
+    await panelAction(harness, "a");
+    expect(harness.getEditor()).toBe("Refined prompt");
+    expect(harness.getSessionName()).toBe("My chosen project");
+    expect(harness.setSessionName).not.toHaveBeenCalled();
+  });
+
+  it.each(["generation", "confirmation", "send"])("preserves a manual name set during %s", async (boundary) => {
+    const harness = await makeHarness();
+    if (boundary === "generation") {
+      let resolve!: (value: any) => void;
+      harness.complete.mockImplementationOnce(() => new Promise((res) => { resolve = res; }));
+      await trigger(harness);
+      harness.manualName("Manual project name");
+      resolve(refinement("Refined prompt", "Generated name"));
+      await flushPromises();
+      await panelAction(harness, "a");
+    } else {
+      await trigger(harness);
+      if (boundary === "confirmation") {
+        harness.setEditorText("Changed draft");
+        harness.deferConfirm();
+        await panelAction(harness, "a");
+        harness.manualName("Manual project name");
+        harness.resolveConfirm(true);
+        await flushPromises();
+        expect(harness.getEditor()).toBe("Refined prompt");
+      } else {
+        await panelAction(harness, "s");
+        harness.manualName("Manual project name");
+        harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Refined prompt" } }, harness.context);
+      }
+    }
+    expect(harness.getSessionName()).toBe("Manual project name");
+    expect(harness.setSessionName).not.toHaveBeenCalled();
+  });
+
+  it("keeps naming disabled across restore, re-optimization, navigation and reload, even after an explicit clear", async () => {
+    const harness = await makeHarness();
+    await trigger(harness);
+    await panelAction(harness, "a");
+    await harness.command("restore", harness.context);
+    expect(harness.getEditor()).toBe("Draft A");
+    harness.manualName("");
+    await trigger(harness);
+    expect((harness.complete.mock.calls.at(-1) as any[])[1].systemPrompt).toContain("Do not generate a title");
+    await panelAction(harness, "a");
+    harness.handlers.get("session_tree")?.[0]?.({ type: "session_tree" }, harness.context);
+    await harness.reload();
+    await trigger(harness);
+    expect((harness.complete.mock.calls.at(-1) as any[])[1].systemPrompt).toContain("Do not generate a title");
+    await panelAction(harness, "a");
+    expect(harness.setSessionName).toHaveBeenCalledTimes(1);
+    expect(harness.getSessionName()).toBe("");
+  });
+
+  it("does not carry a discarded candidate's title into a different task", async () => {
+    const harness = await makeHarness();
+    harness.complete.mockResolvedValueOnce(refinement("Old prompt", "Old task"));
+    await trigger(harness);
+    await panelAction(harness, "x");
+    expect(harness.setSessionName).not.toHaveBeenCalled();
+    harness.setEditorText("New task draft");
+    harness.complete.mockResolvedValueOnce(refinement("New prompt", "New task"));
+    await trigger(harness);
+    expect((harness.complete.mock.calls.at(-1) as any[])[1].systemPrompt).toContain('Also include a "title"');
+    await panelAction(harness, "a");
+    expect(harness.getEditor()).toBe("New prompt");
+    expect(harness.setSessionName).toHaveBeenCalledExactlyOnceWith("New task");
+  });
+
+  it.each([undefined, null, 42, "", "bad\nname", "x".repeat(81)])("accepts prompt with an invalid title %j, then allows a new naming attempt", async (title) => {
+    const harness = await makeHarness();
+    harness.complete.mockResolvedValueOnce(refinement("Valid prompt", title));
+    await trigger(harness);
+    await panelAction(harness, "a");
+    expect(harness.getEditor()).toBe("Valid prompt");
+    expect(harness.setSessionName).not.toHaveBeenCalled();
+    await trigger(harness);
+    expect((harness.complete.mock.calls.at(-1) as any[])[1].systemPrompt).toContain('Also include a "title"');
+    await panelAction(harness, "a");
+    expect(harness.setSessionName).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['{"prompt":"unfinished', '{"title":"No prompt"}', '{"prompt":42}', 'raw text', '```json\n{"prompt":"wrapped"}\n```'])
+    ("rejects malformed responses without exposing JSON as prompt: %s", async (text) => {
+      const harness = await makeHarness();
+      harness.complete.mockResolvedValueOnce({ content: [{ type: "text", text }], stopReason: "stop", usage: { totalTokens: 12 } });
+      await trigger(harness);
+      expect(harness.widgetLines().join("\n")).toContain("返回格式无效");
+      expect(harness.widgetLines().join("\n")).toContain("总计 12");
+      await panelAction(harness, "a");
+      await panelAction(harness, "s");
+      expect(harness.editorWrites).toEqual([]);
+      expect(harness.sent).toEqual([]);
+      expect(harness.setSessionName).not.toHaveBeenCalled();
+    });
+
+  it.each(["stop-error", "length", "toolUse", "cancel", "confirmation-no", "confirmation-stale", "editor-failure"])
+    ("does not name the session on %s", async (failure) => {
+      const harness = await makeHarness();
+      if (failure === "stop-error") harness.complete.mockRejectedValueOnce(new Error("offline"));
+      if (failure === "length" || failure === "toolUse") harness.complete.mockResolvedValueOnce({ ...refinement("Partial prompt", "Task name"), stopReason: failure });
+      await trigger(harness);
+      if (failure === "cancel") await harness.command("cancel", harness.context);
+      if (failure.startsWith("confirmation")) {
+        harness.setEditorText("Changed draft");
+        harness.deferConfirm();
+      }
+      if (failure === "editor-failure") vi.spyOn(harness.context.ui, "setEditorText").mockImplementation(() => { throw new Error("editor unavailable"); });
+      await panelAction(harness, "a");
+      if (failure === "confirmation-stale") harness.handlers.get("session_before_tree")?.[0]?.({}, harness.context);
+      harness.resolveConfirm(failure !== "confirmation-no");
+      await flushPromises();
+      expect(harness.setSessionName).not.toHaveBeenCalled();
+      expect(harness.editorWrites).toEqual([]);
+    });
+
+  it.each(["before_agent_start", "message_start", "followUp"])("names once only after successful %s send acknowledgement", async (ack) => {
+    const harness = await makeHarness({ busy: ack === "followUp" });
+    await trigger(harness);
+    await panelAction(harness, "s");
+    expect(harness.setSessionName).not.toHaveBeenCalled();
+    expect(harness.sent[0]?.text).toBe("Refined prompt");
+    harness.handlers.get("input")?.[0]?.({ text: "Refined prompt", source: "extension" }, harness.context);
+    expect(harness.setSessionName).not.toHaveBeenCalled();
+    const acknowledge = () => {
+      if (ack === "followUp") harness.handlers.get("input")?.[0]?.({ text: "Refined prompt", source: "extension", streamingBehavior: "followUp" }, harness.context);
+      else if (ack === "message_start") harness.handlers.get(ack)?.[0]?.({ message: { role: "user", content: [{ type: "text", text: "Refined prompt" }] } }, harness.context);
+      else harness.handlers.get(ack)?.[0]?.({ messageType: "user", prompt: "Refined prompt" }, harness.context);
+    };
+    acknowledge();
+    acknowledge();
+    expect(harness.setSessionName).toHaveBeenCalledExactlyOnceWith("Draft refinement workflow");
+    expect(harness.editorWrites).toEqual([]);
+  });
+
+  it.each(["throw", "timeout", "cancel", "session", "branch", "other-input", "edit"])
+    ("does not apply a pending send title after %s", async (boundary) => {
+      const harness = await makeHarness();
+      vi.useFakeTimers();
+      await trigger(harness);
+      if (boundary === "throw") harness.sendUserMessage.mockImplementationOnce(() => { throw new Error("send failed"); });
+      await panelAction(harness, "s");
+      if (boundary === "timeout") await vi.advanceTimersByTimeAsync(DEFAULT_CONFIG.timeoutMs);
+      if (boundary === "cancel") await harness.command("cancel", harness.context);
+      if (boundary === "session") {
+        harness.handlers.get("session_before_switch")?.[0]?.({}, harness.context);
+        vi.spyOn(harness.context.sessionManager, "getSessionId").mockReturnValue("session-two");
+        harness.handlers.get("session_start")?.[0]?.({}, harness.context);
+      }
+      if (boundary === "branch") harness.handlers.get("session_before_tree")?.[0]?.({}, harness.context);
+      if (boundary === "other-input") harness.handlers.get("input")?.[0]?.({ text: "Unrelated", source: "interactive" }, harness.context);
+      if (boundary === "edit") await panelAction(harness, "e");
+      harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Refined prompt" } }, harness.context);
+      expect(harness.setSessionName).not.toHaveBeenCalled();
+    });
+
+  it("does not undo prompt acceptance when the naming API fails", async () => {
+    const harness = await makeHarness();
+    harness.setSessionName.mockImplementationOnce(() => { throw new Error("name write failed"); });
+    await trigger(harness);
+    await panelAction(harness, "a");
+    expect(harness.getEditor()).toBe("Refined prompt");
+    expect(harness.notifications.join("\n")).toContain("会话命名失败");
+    await trigger(harness);
+    await panelAction(harness, "a");
+    expect(harness.getSessionName()).toBe("Draft refinement workflow");
+  });
+});
+
 describe("Pi extension integration (mocked TUI and provider)", () => {
   it("registers only Control+backslash by default, without Alt, Fn or occupied Ctrl letters", async () => {
     const harness = await makeHarness({ useDefaultShortcuts: true });
@@ -381,7 +622,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.widgetLines().join("\n")).toContain("含最近 assistant 回复");
     expect(harness.customCalls()).toBe(0);
     harness.setEditorText("Draft B");
-    resolve({ content: [{ type: "text", text: "Automatic visible result" }], stopReason: "stop" });
+    resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "Automatic visible result", title: "Background refinement" }) }], stopReason: "stop" });
     await flushPromises();
     expect(harness.widgetLines().join("\n")).toContain("Automatic visible result");
     expect(harness.customCalls()).toBe(0);
@@ -399,7 +640,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const view = shortcut(harness, "ctrl+\\")(harness.context);
     expect(harness.panelLines().join("\n")).toContain("正在优化");
     expect(harness.complete).toHaveBeenCalledTimes(1);
-    resolve({ content: [{ type: "text", text: "Fresh completed result" }], stopReason: "stop" });
+    resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "Fresh completed result", title: "Live preview" }) }], stopReason: "stop" });
     await flushPromises();
     expect(harness.panelLines().join("\n")).toContain("Fresh completed result");
     expect(harness.customCalls()).toBe(1);
@@ -413,7 +654,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
   it("shows reported usage in the summary and accepted snapshot without extra requests", async () => {
     const harness = await makeHarness();
     harness.complete.mockResolvedValueOnce({
-      content: [{ type: "text", text: "Usage result" }], stopReason: "stop",
+      content: [{ type: "text", text: JSON.stringify({ prompt: "Usage result" }) }], stopReason: "stop",
       usage: { input: 120, output: 30, cacheRead: 40, cacheWrite: 0, reasoning: 10, totalTokens: 190 },
     });
     await trigger(harness);
@@ -482,7 +723,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("q");
     await view;
     expect(harness.widgetLines().join("\n")).toContain("正在优化");
-    resolve({ content: [{ type: "text", text: "Background result" }], stopReason: "stop" });
+    resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "Background result" }) }], stopReason: "stop" });
     await flushPromises();
     expect(harness.widgetLines().join("\n")).toContain("Background result");
     expect(harness.customCalls()).toBe(1);
@@ -498,7 +739,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.handlers.get(event)?.[0]?.({ type: event, text: "Draft B", source: "interactive" }, harness.context);
     await view;
     expect(harness.widgetLines()).toEqual([]);
-    resolve({ content: [{ type: "text", text: "must not reappear" }], stopReason: "stop" });
+    resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "must not reappear", title: "Stale task" }) }], stopReason: "stop" });
     await flushPromises();
     expect(harness.widgetLines()).toEqual([]);
     expect(harness.editorWrites).toEqual([]);
@@ -519,7 +760,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.widgetLines()).toEqual([]);
     expect(harness.panelLines().join("\n")).toContain("超时");
     expect(vi.getTimerCount()).toBe(0);
-    harness.complete.mockImplementation(async () => ({ content: [{ type: "text", text: "retry succeeded" }], stopReason: "stop" }));
+    harness.complete.mockImplementation(async () => ({ content: [{ type: "text", text: JSON.stringify({ prompt: "retry succeeded" }) }], stopReason: "stop" }));
     harness.panelInput("r");
     await view;
     await flushPromises();
@@ -593,7 +834,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.complete).toHaveBeenCalledTimes(1);
     const [_model, completionContext, completionOptions] = harness.complete.mock.calls[0] as any[];
     expect(completionContext.tools).toEqual([]);
-    expect(completionContext.systemPrompt).toContain("output only the final prompt text");
+    expect(completionContext.systemPrompt).toContain("return a single JSON object");
     expect(completionContext.messages[0].content[0].text).toContain("Draft A");
     expect(completionContext.messages[0].content[0].text).toContain("visible answer");
     expect(completionContext.messages[0].content[0].text).not.toContain("secret");
@@ -814,7 +1055,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const inputHandler = harness.handlers.get("input")?.[0];
     inputHandler?.({ type: "input", text: "Draft A", source: "interactive" }, harness.context);
     harness.setEditorText("Draft A");
-    resolve({ content: [{ type: "text", text: "stale result" }], stopReason: "stop" });
+    resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "stale result", title: "Stale task" }) }], stopReason: "stop" });
     await flushPromises();
 
     expect(harness.getEditor()).toBe("Draft A");
@@ -831,7 +1072,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await trigger(harness);
     const eventName = boundary === "tree" ? "session_before_tree" : "session_shutdown";
     harness.handlers.get(eventName)?.[0]?.({ type: eventName }, harness.context);
-    resolve({ content: [{ type: "text", text: "late" }], stopReason: "stop" });
+    resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "late", title: "Stale task" }) }], stopReason: "stop" });
     await flushPromises();
     expect(harness.editorWrites).toEqual([]);
     expect(harness.sent).toEqual([]);
@@ -888,7 +1129,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
   it("keeps a long multibyte preview within narrow and wide terminal widths", async () => {
     const harness = await makeHarness();
     harness.complete.mockImplementation(async () => ({
-      content: [{ type: "text", text: "优化后的 Prompt：" + " 保留用户目标与约束。".repeat(30) }],
+      content: [{ type: "text", text: JSON.stringify({ prompt: "优化后的 Prompt：" + " 保留用户目标与约束。".repeat(30) }) }],
       stopReason: "stop",
     }));
     await trigger(harness);

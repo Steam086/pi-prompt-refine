@@ -12,6 +12,7 @@ export interface RefineRequestInput {
   draft: string;
   model: ModelRef;
   thinkingLevel?: ModelThinkingLevel;
+  generateTitle?: boolean;
   sessionId: string;
   branchLeafId: string | null;
   historyText: string;
@@ -26,12 +27,16 @@ export interface RefineRequest extends RefineRequestInput {
 
 export interface RefineCompletion {
   usage?: TokenUsage;
+  title?: string;
+  invalidOutput?: boolean;
   text: string;
   stopReason: RefineStopReason;
 }
 
 export interface Candidate {
   usage?: TokenUsage;
+  title?: string;
+  generateTitle?: boolean;
   requestId: number;
   version: number;
   generation: number;
@@ -70,7 +75,7 @@ export interface ControllerState {
   phase: RefinePhase;
   requestId: number;
   model?: ModelRef;
-  error?: "timeout" | "failed" | "empty" | "truncated" | "tool-call";
+  error?: "timeout" | "failed" | "empty" | "truncated" | "tool-call" | "invalid-output";
   pendingSend: boolean;
 }
 
@@ -86,6 +91,8 @@ export interface RefineControllerOptions {
   maxOutputChars?: number;
   scheduler?: Scheduler;
   onState(state: ControllerState): void;
+  /** Runs only after a successful editor write or Pi send acknowledgement. */
+  onAccepted?(candidate: Candidate): void;
 }
 
 export type TriggerResult =
@@ -118,7 +125,7 @@ function sameModel(left: ModelRef | undefined, right: ModelRef | undefined): boo
 }
 
 function fingerprint(request: RefineRequestInput): string {
-  return JSON.stringify([request.draft, request.model.provider, request.model.id, request.thinkingLevel, request.sessionId, request.branchLeafId, request.historyText, request.project]);
+  return JSON.stringify([request.draft, request.model.provider, request.model.id, request.thinkingLevel, request.sessionId, request.branchLeafId, request.historyText, request.project, request.generateTitle]);
 }
 
 function cloneCandidate(candidate: Candidate): Candidate {
@@ -132,6 +139,7 @@ export class RefineController {
   private readonly maxDraftChars: number;
   private readonly maxOutputChars: number;
   private readonly onState: RefineControllerOptions["onState"];
+  private readonly onAccepted: RefineControllerOptions["onAccepted"];
   private currentModel?: ModelRef;
   private sessionId?: string;
   private generation = 0;
@@ -155,6 +163,7 @@ export class RefineController {
     this.maxOutputChars = options.maxOutputChars ?? 1_000_000;
     this.scheduler = options.scheduler ?? defaultScheduler;
     this.onState = options.onState;
+    this.onAccepted = options.onAccepted;
     this.currentModel = initialModel ? { ...initialModel } : undefined;
     this.state = { ...this.state, ...(this.currentModel ? { model: { ...this.currentModel } } : {}) };
   }
@@ -272,7 +281,7 @@ export class RefineController {
 
   /** A user message start confirms an idle Pi send after preflight validation. */
   onMessageStarted(text?: string): void {
-    if (this.pendingSend && text === this.pendingSend.text) {
+    if (this.pendingSend && text === this.pendingSend.text && this.isCandidateCurrent(this.pendingSend.token)) {
       this.completeSend();
       return;
     }
@@ -334,6 +343,7 @@ export class RefineController {
 
   updateCandidate(token: CandidateToken, text: string): boolean {
     if (!this.isCandidateCurrent(token) || !text.trim() || text.length > this.maxDraftChars) return false;
+    this.clearPendingSend();
     this.candidate = { ...this.candidate!, text, version: ++this.candidateSequence };
     this.state = { phase: "ready", requestId: this.candidate.requestId, model: { ...this.candidate.model }, pendingSend: false };
     this.emitState();
@@ -356,6 +366,7 @@ export class RefineController {
       return false;
     }
 
+    this.clearPendingSend();
     this.restoreAccepted = this.accepted;
     this.accepted = cloneCandidate(candidate);
     this.restore = {
@@ -367,6 +378,7 @@ export class RefineController {
     };
     this.candidate = undefined;
     this.state = { phase: "idle", requestId: this.requestSequence, pendingSend: false };
+    this.emitAccepted(candidate);
     this.emitState();
     return true;
   }
@@ -426,6 +438,10 @@ export class RefineController {
         this.finishWithError(active, error);
         return;
       }
+      if (result.invalidOutput) {
+        this.finishWithError(active, "invalid-output");
+        return;
+      }
       const textBlocks = result.text;
       if (!textBlocks.trim()) {
         this.finishWithError(active, "empty");
@@ -445,6 +461,8 @@ export class RefineController {
         sessionId: active.request.sessionId,
         draft: active.request.draft,
         text: textBlocks,
+        generateTitle: active.request.generateTitle,
+        ...(active.request.generateTitle && result.title ? { title: result.title } : {}),
         model: { ...active.request.model },
         branchLeafId: active.request.branchLeafId,
         historyText: active.request.historyText,
@@ -499,6 +517,7 @@ export class RefineController {
   }
 
   private completeSend(): void {
+    const candidate = this.candidate;
     this.clearPendingSend();
     this.cancelActive();
     this.generation += 1;
@@ -507,7 +526,16 @@ export class RefineController {
     this.restore = undefined;
     this.restoreAccepted = undefined;
     this.state = { phase: "idle", requestId: this.requestSequence, pendingSend: false };
+    if (candidate) this.emitAccepted(candidate);
     this.emitState();
+  }
+
+  private emitAccepted(candidate: Candidate): void {
+    try {
+      this.onAccepted?.(cloneCandidate(candidate));
+    } catch {
+      // Metadata failure must not undo an accepted prompt or a confirmed send.
+    }
   }
 
   private onSendTimeout(requestId: number, version: number): void {

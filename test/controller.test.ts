@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { RefineController, type RefineRequest, type RefineRequestInput } from "../src/controller.js";
+import { RefineController, type RefineCompletion, type RefineRequest, type RefineRequestInput } from "../src/controller.js";
 import type { ModelRef } from "../src/config.js";
 import { deferred, FakeScheduler, flushPromises, success } from "./helpers.js";
 
@@ -16,8 +16,9 @@ function input(draft: string, overrides: Partial<RefineRequestInput> = {}): Refi
   };
 }
 
-function setup(complete: (request: RefineRequest, signal: AbortSignal) => Promise<{ text: string; stopReason: "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred" | "pending" }> = vi.fn(async () => success("Refined")), scheduler = new FakeScheduler()) {
+function setup(complete: (request: RefineRequest, signal: AbortSignal) => Promise<RefineCompletion> = vi.fn(async () => success("Refined")), scheduler = new FakeScheduler()) {
   const onState = vi.fn();
+  const onAccepted = vi.fn();
   const controller = new RefineController({
     complete,
     timeoutMs: 100,
@@ -25,12 +26,32 @@ function setup(complete: (request: RefineRequest, signal: AbortSignal) => Promis
     maxOutputChars: 200,
     scheduler,
     onState,
+    onAccepted,
   }, model);
   controller.setSession("session-1");
-  return { controller, onState, scheduler };
+  return { controller, onState, onAccepted, scheduler };
 }
 
 describe("RefineController request lifecycle", () => {
+  it("includes title eligibility in deduplication and drops unsolicited titles", async () => {
+    const { controller } = setup(async () => ({ ...success("Prompt"), title: "Project task" }));
+    controller.trigger(input("Draft", { generateTitle: true }));
+    await flushPromises();
+    expect(controller.getCandidate()?.title).toBe("Project task");
+    expect(controller.trigger(input("Draft", { generateTitle: true })).kind).toBe("ready");
+    expect(controller.trigger(input("Draft", { generateTitle: false })).kind).toBe("started");
+    await flushPromises();
+    expect(controller.getCandidate()?.title).toBeUndefined();
+  });
+
+  it("rejects invalid structured output while retaining reported usage", async () => {
+    const { controller, onAccepted } = setup(async () => ({ ...success(""), invalidOutput: true, usage: { totalTokens: 12 } }));
+    controller.trigger(input("Draft", { generateTitle: true }));
+    await flushPromises();
+    expect(controller.getState()).toMatchObject({ phase: "error", error: "invalid-output", usage: { totalTokens: 12 } });
+    expect(controller.getCandidate()).toBeUndefined();
+    expect(onAccepted).not.toHaveBeenCalled();
+  });
   it("includes project resources in deduplication and freezes their source snapshot", async () => {
     const pending = deferred<ReturnType<typeof success>>();
     const requests: RefineRequest[] = [];
@@ -237,6 +258,54 @@ describe("RefineController request lifecycle", () => {
 });
 
 describe("RefineController explicit operations", () => {
+  it.each(["accept", "idle-send", "follow-up"])("commits an independent metadata snapshot exactly once on %s", async (operation) => {
+    const { controller, onAccepted, scheduler } = setup(async () => ({ ...success("Prompt"), title: "Task name" }));
+    controller.trigger(input("Draft", { generateTitle: true }));
+    await flushPromises();
+    const token = controller.getCandidateToken()!;
+    expect(onAccepted).not.toHaveBeenCalled();
+    onAccepted.mockImplementation((candidate) => { candidate.title = "Mutated by observer"; });
+    if (operation === "accept") {
+      const writer = vi.fn(() => { expect(onAccepted).not.toHaveBeenCalled(); });
+      expect(controller.acceptCandidate(token, "Draft", false, writer)).toBe(true);
+      expect(controller.acceptCandidate(token, "Draft", false, writer)).toBe(false);
+      expect(controller.getAccepted()?.title).toBe("Task name");
+      controller.restoreDraft(controller.getRestoreToken()!, "Prompt", false, () => {});
+    } else {
+      controller.beginSend(token);
+      expect(onAccepted).not.toHaveBeenCalled();
+      if (operation === "idle-send") {
+        controller.onSubmittedInput("Prompt", "extension");
+        expect(onAccepted).not.toHaveBeenCalled();
+        controller.onMessageStarted("Prompt");
+      } else controller.onSubmittedInput("Prompt", "extension", "followUp");
+      controller.onMessageStarted("Prompt");
+    }
+    expect(onAccepted).toHaveBeenCalledTimes(1);
+    expect(scheduler.size).toBe(0);
+  });
+
+  it("clears a pending send when accepting, without a second commit on late acknowledgement", async () => {
+    const { controller, onAccepted, scheduler } = setup();
+    controller.trigger(input("Draft"));
+    await flushPromises();
+    const token = controller.getCandidateToken()!;
+    controller.beginSend(token);
+    controller.acceptCandidate(token, "Draft", false, () => {});
+    expect(scheduler.size).toBe(0);
+    controller.onMessageStarted("Refined");
+    expect(onAccepted).toHaveBeenCalledTimes(1);
+  });
+
+  it("isolates metadata callback errors from the committed editor operation", async () => {
+    const { controller, onAccepted } = setup();
+    onAccepted.mockImplementation(() => { throw new Error("metadata unavailable"); });
+    controller.trigger(input("Draft"));
+    await flushPromises();
+    expect(controller.acceptCandidate(controller.getCandidateToken()!, "Draft", false, () => {})).toBe(true);
+    expect(controller.getState().phase).toBe("idle");
+    expect(controller.getAccepted()?.text).toBe("Refined");
+  });
   async function readyController(draft = "original") {
     const { controller } = setup();
     controller.trigger(input(draft));
