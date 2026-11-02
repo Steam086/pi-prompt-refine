@@ -34,6 +34,21 @@ describe("Prompt Refine configuration", () => {
     expect(invalid.warnings.join(" ")).toContain("thinkingLevel");
   });
 
+  it("enables bounded project context by default and validates independent opt-outs and limits", () => {
+    expect(DEFAULT_CONFIG.projectContext.enabled).toBe(true);
+    expect(DEFAULT_CONFIG.projectContext.tree).toMatchObject({ maxDepth: 2, maxEntriesPerDirectory: 20, maxEntries: 120, maxChars: 4000 });
+    const disabled = parseConfig({ version: 1, projectContext: { enabled: false, tree: { enabled: false } } });
+    expect(disabled.warnings).toEqual([]);
+    expect(disabled.config.projectContext.enabled).toBe(false);
+    const invalid = parseConfig({ version: 1, projectContext: { maxChars: 0, skillsMaxChars: -1, enabled: "yes", tree: { maxDepth: 99, timeoutMs: 0, exclude: ["../escape"] } } });
+    expect(invalid.config.projectContext).toEqual(DEFAULT_CONFIG.projectContext);
+    expect(invalid.warnings).toHaveLength(6);
+    const custom = parseConfig({ version: 1, projectContext: { maxChars: 4096, tree: { maxDepth: 3, exclude: ["vendor", "vendor"] } } });
+    expect(custom.warnings).toEqual([]);
+    expect(custom.config.projectContext.maxChars).toBe(4096);
+    expect(custom.config.projectContext.tree.exclude).toEqual(["vendor"]);
+  });
+
   it("migrates only complete legacy default maps and preserves explicit custom bindings", () => {
     const actions = ["optimize", "view", "dismiss", "selectModel", "cycleModel", "restore"];
     for (const keys of [
