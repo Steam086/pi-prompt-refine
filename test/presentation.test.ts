@@ -13,7 +13,7 @@ const options: SummaryOptions = {
 describe("passive result summary", () => {
   it.each([1, 10, 20, 40, 80])("bounds lines and terminal columns at width %i", (width) => {
     const lines = renderSummary(options, width);
-    expect(lines.length).toBeLessThanOrEqual(12);
+    expect(lines.length).toBeLessThanOrEqual(14);
     for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
   });
 
@@ -34,7 +34,7 @@ describe("passive result summary", () => {
   });
 
   it.each([40, 80, 100])("uses compact English chrome without ellipses at %i columns", (width) => {
-    const contextLabel = "⚠1 · 7 msgs/2032 ch · asst · 3 rules/10 skills";
+    const contextLabel = "⚠1 · 7 msgs/2032 ch · asst · 3 rules   ·   10 skills";
     for (const phase of ["generating", "ready", "error"] as const) {
       const lines = renderSummary({ ...options, contextLabel, candidateText: "Refined prompt", state: { ...options.state, phase } }, width);
       const text = lines.join("\n");
@@ -43,6 +43,18 @@ describe("passive result summary", () => {
       if (width >= 80) expect(lines.filter((line) => line.includes(contextLabel))).toHaveLength(1);
       for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }
+  });
+
+  it.each(["generating", "ready", "error"] as const)("separates the %s plugin preview from session content", (phase) => {
+    const colors: string[] = [];
+    const lines = renderSummary({ ...options, state: { ...options.state, phase } }, 80, {
+      fg: (color, text) => { colors.push(color); return text; },
+      bold: (text) => text,
+    });
+    expect(lines[0]).toBe("─".repeat(80));
+    expect(lines.at(-1)).toBe(lines[0]);
+    expect(lines[1]).toContain("Prompt Refine");
+    expect(colors).toContain("borderMuted");
   });
 
   it("normalizes display-only CRLF and tabs without permitting cursor controls", () => {

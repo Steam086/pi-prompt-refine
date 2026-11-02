@@ -157,6 +157,10 @@ pi --extension ./src/extension.ts
 
 `projectContext.maxChars` 是整个项目背景正文（包括标题和告警）的硬字符上限，指令优先于技能及目录列表。默认 28000，另有指令 16000、技能 6000 和所有目录列表合计 4000 的分项上限；总量紧张时目录列表可整体省略并告警。这些都是 JavaScript 字符单元，不是精确 token 计数，也不包含另行限制的草稿、会话历史、外层模板与模型输出。超长告警不增加模型调用或触发自动补读。
 
+`projectContext.instructionsOnFollowUp` 默认 `false`：当前分支已有 user/assistant 消息时，优化请求不再注入 AGENTS.md 等宿主项目指令；首次仍注入，skills 不受影响。判定不受历史选取预算影响，也不以优化次数计数；设为 `true` 可恢复每次注入。此设置不改变主 Agent 自身加载的指令。
+
+完整预览面板中，`Ctrl+\` 与 `Esc` 一样返回编辑器，保留候选结果和后台优化；主编辑器中的原有优化/查看快捷键行为不变。
+
 设置 `projectContext.enabled: false` 可恢复仅草稿加历史的行为；`projectContext.tree.enabled: false` 只关闭默认 tree，`projectContext.referencedDirectories.enabled: false` 单独关闭 `@目录` 收集。要保留项目指令/skills 而关闭所有目录扫描，应同时关闭后两个开关。所选优化 Provider 会收到启用的项目背景，可能与主 Agent Provider 不同。
 
 ### 首次请求的具体结构
@@ -258,6 +262,7 @@ Produce the refined prompt now using the required JSON object format.
   "projectContext": {
     "enabled": true, "maxChars": 28000,
     "instructionsMaxChars": 16000, "skillsMaxChars": 6000,
+    "instructionsOnFollowUp": false,
     "referencedDirectories": { "enabled": true, "maxReferences": 8 },
     "tree": {
       "enabled": true, "maxChars": 4000, "maxDepth": 2,

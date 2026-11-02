@@ -107,7 +107,7 @@ describe("result reading panel", () => {
     const next = panel.render(80).join("\n");
     expect(next).not.toContain("内容 0\n");
     expect(next).toContain("a Accept");
-    expect(next).toContain("q/Esc Back");
+    expect(next).toContain("q/Esc/Ctrl+\\ Back");
     panel.scrollBy(10000);
     expect(panel.render(80).join("\n")).toContain("内容 79");
     panel.scrollBy(-10000);

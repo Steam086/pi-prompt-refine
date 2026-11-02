@@ -59,8 +59,10 @@ export function renderSummary(options: SummaryOptions, width: number, theme: Pre
   lines.push("");
   const hint = options.state.pendingSend ? "View · draft kept" : "View / actions";
   lines.push(`${theme.fg("accent", theme.bold(sanitizeTerminalText(options.openHint)))}  ${theme.fg("muted", hint)}`);
-  return lines.map((line, index) => {
+  const separator = theme.fg("borderMuted", "─".repeat(available));
+  const content = lines.map((line, index) => {
     const prefix = inset ? (index >= 3 && index < lines.length - 2 ? `${theme.fg("borderMuted", "│")} ` : "  ") : "";
     return prefix + truncateToWidth(line, contentWidth, "");
   });
+  return [separator, ...content, separator];
 }
