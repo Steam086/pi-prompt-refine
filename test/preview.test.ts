@@ -22,6 +22,31 @@ function create(overrides: Partial<PreviewOptions> = {}, rows = 40) {
 }
 
 describe("result reading panel", () => {
+  it.each([8, 20, 40])("reserves a stable viewport across content and help at %i rows", (rows) => {
+    const panel = create({ candidateText: undefined }, rows);
+    for (const width of [12, 40, 100]) {
+      const height = Math.max(1, Math.min(34, rows - 4));
+      expect(panel.render(width)).toHaveLength(height);
+      panel.toggleHelp();
+      expect(panel.render(width)).toHaveLength(height);
+      panel.toggleHelp();
+      panel.update({ ...options, candidateText: "Long result\n".repeat(80) });
+      expect(panel.render(width)).toHaveLength(height);
+      panel.update({ ...options, candidateText: undefined });
+    }
+  });
+
+  it("styles help headings and keys without bolding descriptions", () => {
+    const bold = vi.fn((text: string) => `\x1b[1m${text}\x1b[22m`);
+    const theme = { ...plainTheme, bold };
+    const panel = new PreviewPanel(options, theme, () => 40, vi.fn());
+    panel.toggleHelp();
+    const text = panel.render(100).join("\n");
+    expect(text).toContain(theme.bold("Help · Keyboard reference"));
+    expect(text).toContain(theme.bold("Refine & navigate"));
+    expect(text).toContain(theme.bold("a"));
+    expect(text).not.toContain(theme.bold("Accept into editor (no send)"));
+  });
   it("shows pending session metadata separately and hides it in accepted snapshots", () => {
     const panel = create({ sessionTitle: "路径解析修复" });
     const text = panel.render(100).join("\n");
@@ -63,6 +88,22 @@ describe("result reading panel", () => {
     expect(text).toContain(editorChanged ? "excludes later edits" : "no model call");
     panel.toggleHelp();
     expect(panel.render(100).join("\n")).toContain("a/e/s disabled");
+  });
+
+  it("uses fixed tab stops for action rows and highlights the current page", () => {
+    const panel = create({ candidateText: undefined, state: { ...options.state, phase: "idle" } });
+    const lines = panel.render(100);
+    expect(lines[0]).toContain("Main");
+    const footer = lines.slice(lines.findIndex((line) => line.includes("──")) + 1);
+    expect(footer).toEqual([
+      "  r Refine              m Model               x Cancel",
+      "  ? Help                q Back",
+      "  i Input               → Context",
+      "  ↑↓ / PgUp/PgDn   Scroll · Enter won't send",
+    ]);
+    const theme = getThemeByName("dark")!;
+    const styled = new PreviewPanel(options, theme, () => 40, vi.fn()).render(100);
+    expect(styled[0]).toContain(theme.bold("Main"));
   });
 
   it("offers a literal view without modifying the candidate", () => {
@@ -107,7 +148,11 @@ describe("result reading panel", () => {
     const next = panel.render(80).join("\n");
     expect(next).not.toContain("内容 0\n");
     expect(next).toContain("a Accept");
-    expect(next).toContain("q/Esc/Ctrl+\\ Back");
+    expect(next).toContain("q Back");
+    expect(next).not.toContain("q/Esc");
+    expect(next).toContain("i Input");
+    expect(next).toContain("→ Context");
+    expect(next).not.toContain("t Context");
     panel.scrollBy(10000);
     expect(panel.render(80).join("\n")).toContain("内容 79");
     panel.scrollBy(-10000);
