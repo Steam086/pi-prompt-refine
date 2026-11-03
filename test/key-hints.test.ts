@@ -6,17 +6,17 @@ const theme = { fg: (_color: string, text: string) => text, bold: (text: string)
 const hints: KeyHint[] = [["r", "Refine"], ["m", "Model"], ["x", "Cancel"]];
 
 describe("fixed-column key hints", () => {
-  it("emphasizes only keys and uses normal text for all descriptions", () => {
+  it("uses neutral bold keys and muted descriptions", () => {
     const styled = {
-      fg: (color: string, text: string) => `\x1b[${color === "accent" ? 35 : 37}m${text}\x1b[39m`,
+      fg: (color: string, text: string) => `\x1b[${color === "muted" ? 90 : 37}m${text}\x1b[39m`,
       bold: (text: string) => `\x1b[1m${text}\x1b[22m`,
     };
-    const save = "\x1b[35m\x1b[1mEnter\x1b[22m\x1b[39m \x1b[37mSave\x1b[39m";
+    const save = "\x1b[37m\x1b[1mEnter\x1b[22m\x1b[39m \x1b[90mSave\x1b[39m";
     expect(formatKeyHint(["Enter", "Save"], styled)).toBe(save);
     expect(alignedKeyHints([[["Enter", "Save"]]], 40, styled)).toEqual([save]);
     expect(fittingKeyHints([["Enter", "Save"], ["Space", "Toggle"]], 10, styled)).toBe(save);
-    expect(formatKeyHint(["", "Send pending"], styled)).toBe(styled.fg("text", "Send pending"));
-    expect(formatKeyHint(["↑↓", ""], styled)).toBe(styled.fg("accent", styled.bold("↑↓")));
+    expect(formatKeyHint(["", "Send pending"], styled)).toBe(styled.fg("muted", "Send pending"));
+    expect(formatKeyHint(["↑↓", ""], styled)).toBe(styled.fg("text", styled.bold("↑↓")));
   });
 
   it("wraps whole cells at fixed tab stops when resized", () => {

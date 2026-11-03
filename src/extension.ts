@@ -818,6 +818,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         refreshPreview = () => {
           if (closed) return;
           panel.update(snapshot());
+          workspace.refreshSettings();
           tui.requestRender();
         };
         // The full panel replaces the passive card; never show the same result twice.

@@ -36,7 +36,7 @@ function create(rows = 40, themeName = "dark", optimizer = false) {
 const textOf = (lines: string[]) => lines.join("\n");
 
 describe("shared refine workspace", () => {
-  it.each([20, 40, 80])("keeps each instruction mode recognizable at %i columns", (width) => {
+  it.each([20, 40, 80])("keeps instruction values readable at %i columns", (width) => {
     const { workspace } = create();
     for (const [instructions, value] of [["first", "First"], ["always", "Always"], ["off", "Off"]] as const) {
       workspace.openSettings({ instructions, tree: true, skills: false });
@@ -45,14 +45,14 @@ describe("shared refine workspace", () => {
     }
   });
 
-  it.each(["\r", " "])("cycles instruction modes without saving or moving other rows using %j", (key) => {
+  it.each(["\r", " "])("cycles context without saving or moving rows using %j", (key) => {
     const { workspace, actions } = create(40, "dark", true);
     workspace.openSettings({ instructions: "first", tree: true, skills: false });
     const position = () => workspace.render(80).findIndex((line) => line.includes("Directory tree"));
     const originalPosition = position();
     for (const mode of ["Always", "Off", "First request only"]) {
       workspace.handleInput(key);
-      expect(stripVTControlCharacters(textOf(workspace.render(80)))).toContain(`› Project instructions: ${mode}`);
+      expect(stripVTControlCharacters(textOf(workspace.render(80)))).toMatch(new RegExp(`› Project instructions +${mode}`));
       expect(position()).toBe(originalPosition);
       expect(actions.saveContext).not.toHaveBeenCalled();
     }
@@ -60,7 +60,138 @@ describe("shared refine workspace", () => {
     expect(actions.saveContext).toHaveBeenCalledWith({ instructions: "first", tree: true, skills: false });
   });
 
-  it.each(["dark", "light"])("keeps optimizer settings readable across widths in %s", (theme) => {
+  it.each(["dark", "light"])("renders aligned columns, group tabs and full row focus in %s", (name) => {
+    const { workspace, theme } = create(40, name, true);
+    workspace.openSettings();
+    const rendered = workspace.render(100);
+    const lines = rendered.map(stripVTControlCharacters);
+    expect(rendered[1]).toContain(theme.fg("text", theme.bold("Settings")));
+    expect(textOf(rendered)).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Context "))));
+    const rules = lines.find((line) => line.includes("Project instructions"))!;
+    const tree = lines.find((line) => line.includes("Directory tree"))!;
+    const skills = lines.find((line) => line.includes("Skill metadata"))!;
+    expect(rules.indexOf("Always")).toBe(tree.indexOf("[x] On"));
+    expect(tree.indexOf("[x] On")).toBe(skills.indexOf("[ ] Off"));
+    expect(rules.indexOf("Include rules")).toBe(tree.indexOf("Include the default"));
+    expect(tree.indexOf("Include the default")).toBe(skills.indexOf("Include skill"));
+    expect(textOf(lines)).not.toContain("Model");
+    const before = lines.findIndex((line) => line.includes("Directory tree"));
+    workspace.handleInput("\x1b[B");
+    expect(workspace.render(100).findIndex((line) => line.includes("Directory tree"))).toBe(before);
+    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["←/→", "Group"], theme));
+  });
+
+  it.each(["dark", "light"])("keeps a continuous highlight around clipped Unicode values in %s", (name) => {
+    const { workspace, actions, theme } = create(40, name, true);
+    actions.optimizer = () => ({ model: "provider/中文😀é".repeat(12), thinking: "high", thinkingEnabled: true });
+    workspace.openSettings(undefined, 3);
+    for (const width of [40, 80, 100]) {
+      const row = workspace.render(width).find((line) => stripVTControlCharacters(line).includes("› Model"))!;
+      expect(row).toContain("…");
+      expect(row).not.toContain("\x1b[0m");
+      expect(row).toContain(theme.bg("selectedBg", "").split("\x1b[49m")[0]);
+      expect(visibleWidth(row)).toBe(panelLayout(width, 40).innerWidth + panelLayout(width, 40).inset);
+    }
+  });
+
+  it("switches groups without applying pending context and remembers each selection", () => {
+    const { workspace, actions } = create(40, "dark", true);
+    workspace.openSettings();
+    workspace.handleInput("\r");
+    workspace.handleInput("\x1b[B");
+    workspace.handleInput("\x1b[C");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Model");
+    workspace.handleInput("\x1b[B");
+    workspace.handleInput("\x1b[D");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Directory tree");
+    expect(textOf(workspace.render(100))).toContain("Unsaved context changes");
+    workspace.handleInput("\x1b[C");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Thinking");
+    expect(actions.saveContext).not.toHaveBeenCalled();
+    expect(actions.cycleThinking).not.toHaveBeenCalled();
+    expect(actions.chooseModel).not.toHaveBeenCalled();
+  });
+
+  it("wraps up/down within the current group and restores the requested optimizer row", () => {
+    const { workspace } = create(40, "dark", true);
+    workspace.openSettings();
+    workspace.handleInput("\x1b[A");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Skill metadata");
+    workspace.handleInput("\x1b[B");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Project instructions");
+    workspace.openSettings(undefined, 5);
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Optimization prompt");
+    workspace.handleInput("\x1b[B");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Model");
+  });
+
+  it.each(["dark", "light"])("shares title, group strip and key styles between Main and Settings in %s", (name) => {
+    const { workspace, theme } = create(40, name, true);
+    const main = workspace.render(100);
+    workspace.openSettings();
+    const settings = workspace.render(100);
+    expect(main[1]).toContain(theme.fg("text", theme.bold("Prompt refine")));
+    expect(settings[1]).toContain(theme.fg("text", theme.bold("Settings")));
+    expect(main[4]).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Preview "))));
+    expect(settings[4]).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Context "))));
+    expect(main.at(-2)).toContain(formatKeyHint(["a", "Accept"], theme));
+    expect(settings.at(-2)).toContain(formatKeyHint(["Enter", "Change"], theme));
+    expect(main).toHaveLength(settings.length);
+  });
+
+  it("reuses settings frames without re-querying the optimizer on arrow input", () => {
+    const { workspace, actions, theme } = create(40, "dark", true);
+    const optimizer = vi.spyOn(actions, "optimizer");
+    const paint = vi.spyOn(theme, "fg");
+    workspace.openSettings();
+    for (let i = 0; i < 3; i++) { workspace.render(100); workspace.handleInput("\x1b[B"); }
+    paint.mockClear();
+    for (let i = 0; i < 12; i++) { workspace.render(100); workspace.handleInput("\x1b[B"); }
+    expect(paint).not.toHaveBeenCalled();
+    expect(optimizer).toHaveBeenCalledOnce();
+    paint.mockRestore();
+    optimizer.mockReturnValue({ model: "provider/updated-model", thinking: "low", thinkingEnabled: true });
+    workspace.refreshSettings();
+    workspace.handleInput("\x1b[C");
+    expect(textOf(workspace.render(100))).toContain("provider/updated-model");
+    workspace.handleInput("\x1b[D");
+    workspace.handleInput(" ");
+    expect(textOf(workspace.render(100))).toContain("Unsaved context changes");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toMatch(/Project instructions +Off/);
+    optimizer.mockRestore();
+  });
+
+  it.each([80, 100])("only changes the old and new context focus rows at %i columns", (width) => {
+    const { workspace } = create(40, "dark", true);
+    workspace.openSettings();
+    let previous = workspace.render(width);
+    for (let i = 0; i < 6; i++) {
+      workspace.handleInput("\x1b[B");
+      const current = workspace.render(width);
+      expect(current.filter((line, index) => line !== previous[index])).toHaveLength(2);
+      previous = current;
+    }
+  });
+
+  it("refreshes cached settings after theme invalidation and viewport resize", () => {
+    const { workspace, actions, theme } = create(40, "dark", true);
+    workspace.openSettings();
+    const before = workspace.render(100);
+    actions.contextEnabled = () => false;
+    workspace.refreshSettings();
+    expect(textOf(workspace.render(100))).toContain("Disabled by projectContext.enabled=false");
+    const paint = vi.spyOn(theme, "fg");
+    workspace.invalidate();
+    workspace.render(100);
+    expect(paint).toHaveBeenCalled();
+    paint.mockRestore();
+    for (const line of workspace.render(40)) expect(visibleWidth(line)).toBeLessThanOrEqual(40);
+    actions.contextEnabled = () => true;
+    workspace.refreshSettings();
+    expect(workspace.render(100)).toEqual(before);
+  });
+
+  it.each(["dark", "light"])("keeps optimizer values and detail bounded across widths in %s", (theme) => {
     for (const rows of [8, 16, 24, 40]) {
       for (const width of [12, 20, 40, 80, 160]) {
         const { workspace } = create(rows, theme, true);
@@ -70,81 +201,53 @@ describe("shared refine workspace", () => {
           const lines = workspace.render(width);
           expect(lines).toHaveLength(panelLayout(width, rows).height);
           for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(Math.min(width, 100));
-          if (width >= 20) expect(textOf(lines)).toContain(cursor === 3 ? "Model:" : "Thinking");
+          if (width >= 20) expect(textOf(lines)).toContain(cursor === 3 ? "Model" : "Thinking");
         }
       }
     }
   });
 
-  it("keeps tab positions fixed and distinguishes the active page from row focus", () => {
-    const { workspace } = create();
-    const theme = getThemeByName("dark")!;
-    const main = textOf(workspace.render(80));
+  it("shows a full model value below the table and keeps long rows fixed", () => {
+    const { workspace } = create(40, "dark", true);
+    workspace.openSettings(undefined, 3);
+    expect(workspace.render(100).at(-5)).toContain("Model: provider/long-model-identifier-with-extra-details");
+    const lines = workspace.render(40).map(stripVTControlCharacters);
+    const model = lines.findIndex((line) => line.includes("› Model:"));
+    expect(lines[model]).toContain("…");
+    expect(lines[model]?.trimEnd()).toMatch(/›$/);
+    expect(lines[model + 1]).toContain("Thinking:");
+    workspace.handleInput("\x1b[B");
+    expect(workspace.render(40).findIndex((line) => line.includes("Model:"))).toBe(model);
+  });
+
+  it("explains each group's save behavior and keeps dirty context visible in both", () => {
+    const { workspace } = create(40, "dark", true);
+    workspace.openSettings();
+    expect(textOf(workspace.render(100))).toContain("Ctrl+S to save · Applies to future requests");
     workspace.handleInput("\x1b[C");
-    const settings = textOf(workspace.render(80));
-    for (const output of [main, settings]) {
-      const navigation = stripVTControlCharacters(output.split("\n")[1]!);
-      expect(navigation).toContain("Prompt refine");
-      expect(navigation).toContain("Settings");
-      expect(navigation).not.toMatch(/[\[\]]/);
-    }
-    const mainNavigation = stripVTControlCharacters(main.split("\n")[1]!);
-    const settingsNavigation = stripVTControlCharacters(settings.split("\n")[1]!);
-    expect(mainNavigation).toContain("→ Settings");
-    expect(mainNavigation.indexOf("Settings")).toBe(settingsNavigation.indexOf("Settings"));
-    expect(stripVTControlCharacters(workspace.render(80).slice(-2).join("\n"))).not.toContain("→ Settings");
-    expect(main).toContain(theme.fg("accent", theme.underline(theme.bold("Prompt refine"))));
-    expect(settings).toContain(theme.fg("accent", theme.underline(theme.bold("Settings"))));
-    expect(settings.split("\n")[1]).not.toContain("›");
-    expect(settings.split("\n")[1]).not.toContain(theme.bg("selectedBg", "Settings"));
+    expect(textOf(workspace.render(100))).toContain("Changes save on confirmation");
     workspace.handleInput("\x1b[D");
-    expect(workspace.render(80)[1]).toBe(main.split("\n")[1]);
-  });
-  it("prioritizes the active page label in narrow terminals", () => {
-    const { workspace } = create();
-    expect(workspace.render(20)[1]).toContain("Prompt refine");
-    workspace.openSettings();
-    expect(workspace.render(20)[1]).toContain("Settings");
-  });
-
-  it.each(["dark", "light"])("separates optimizer labels, values and selection in %s", (name) => {
-    const { workspace, theme } = create(40, name, true);
-    workspace.openSettings({ instructions: "always", tree: true, skills: false }, 4);
-    const bold = vi.spyOn(theme, "bold");
-    const lines = workspace.render(100);
-    const boldCalls = bold.mock.calls.map(([text]) => text);
-    bold.mockRestore();
-    const thinking = lines.find((line) => line.includes("Thinking:"))!;
-    expect(thinking).toContain(theme.fg("muted", "Thinking:"));
-    expect(thinking).toContain(theme.fg("text", "high · Extension setting"));
-    expect(thinking).toContain(theme.fg("accent", "› "));
-    expect(boldCalls).toEqual(["Settings", "Context", "Optimizer", "Ctrl+S", "Enter", "Esc", "↑↓"]);
-    expect(textOf(lines)).not.toContain("Change");
-    const model = lines.find((line) => line.includes("Model:"))!;
-    expect(model).toContain(theme.fg("muted", "Model:"));
-    expect(model).toContain(theme.fg("text", "provider/long-model-identifier-with-extra-details"));
-    expect(lines.join("\n")).toContain(theme.bold("Optimizer"));
-    expect(lines.join("\n")).not.toContain("Auto-save on change/confirmation");
-    expect(lines.join("\n")).not.toContain("Optimizer only · Main session unchanged");
-  });
-
-  it.each([false, true])("labels manual context saving separately from optimizer auto-save (optimizer: %s)", (optimizer) => {
-    const { workspace } = create(40, "dark", optimizer);
-    workspace.openSettings();
-    const lines = workspace.render(100).map(stripVTControlCharacters);
-    expect(lines[2]?.trim()).toBe("Ctrl+S to save · Applies to future requests");
-    const content = lines.slice(0, -2).join("\n");
-    expect(content).toContain("Context");
-    expect(content).toContain("Ctrl+S to save · Applies to future requests");
-    expect(lines.slice(-2).join("\n")).toContain("Ctrl+S Save context");
-    expect(lines.slice(-2).join("\n")).toContain("Enter Cycle");
     workspace.handleInput(" ");
-    expect(textOf(workspace.render(100))).toContain("Unsaved context changes");
-    expect(textOf(workspace.render(100))).toContain("Discard context changes");
-    expect(textOf(workspace.render(100))).not.toContain("Back (discard)");
+    for (let i = 0; i < 2; i++) {
+      expect(textOf(workspace.render(100))).toContain("Unsaved context changes");
+      expect(textOf(workspace.render(100))).toContain("Discard context changes");
+      workspace.handleInput("\x1b[C");
+    }
   });
 
-  it.each(["dark", "light"])("shares footer key and description styles across all pages in %s", (name) => {
+  it("keeps disabled context warnings visible and omits unavailable groups", () => {
+    const { workspace, actions } = create();
+    actions.contextEnabled = () => false;
+    workspace.openSettings();
+    const before = workspace.render(100);
+    expect(textOf(before)).toContain("Disabled by projectContext.enabled=false");
+    expect(textOf(before)).not.toContain("Optimizer");
+    workspace.handleInput("\x1b[C");
+    workspace.handleInput("\x1b[D");
+    expect(workspace.render(100)).toEqual(before);
+  });
+
+  it.each(["dark", "light"])("shares footer key styles with the reading and input pages in %s", (name) => {
     const { workspace, panel, theme } = create(40, name, true);
     const main = textOf(workspace.render(100));
     for (const hint of [["a", "Accept"], ["e", "Edit"], ["f", "Revise"], ["q", "Back"], ["?", "Help"]] as const) {
@@ -157,95 +260,6 @@ describe("shared refine workspace", () => {
     workspace.handleInput("q");
     workspace.handleInput("i");
     expect(textOf(workspace.render(100))).toContain(formatKeyHint(["Enter", "Refine"], theme));
-    expect(textOf(workspace.render(20))).toContain(formatKeyHint(["↵", "Refine"], theme));
-  });
-
-  it.each(["dark", "light"])("keeps navigation stable and explanations in a fixed area across all selections in %s", (name) => {
-    for (const width of [80, 100]) {
-      const { workspace, theme } = create(40, name, true);
-      workspace.openSettings();
-      let anchors: number[] | undefined;
-      for (let cursor = 0; cursor < 6; cursor++) {
-        const rendered = workspace.render(width);
-        const lines = rendered.map(stripVTControlCharacters);
-        const position = (text: string) => lines.findIndex((line) => line.includes(text));
-        const current = ["Context", "Project instructions", "[x] Directory tree", "Skill metadata", "Optimizer", "Model:", "Thinking:", "Optimization prompt"].map(position);
-        expect(current.every((index) => index >= 0)).toBe(true);
-        if (anchors) expect(current).toEqual(anchors);
-        else anchors = current;
-        const descriptions = ["Include Pi rules (e.g. AGENTS.md) in every refinement and Revise request.", "Default tree only; @directory references are separate.", "Include skill descriptions; never run skills."];
-        if (cursor < 3) {
-          expect(lines.at(-5)).toContain(descriptions[cursor]);
-          expect(rendered.at(-5)).toContain(theme.fg("muted", descriptions[cursor]!));
-        }
-        expect(position("Model:")).toBe(position("Optimizer") + 1);
-        const gaps = lines.flatMap((line, i) => i >= current[0]! && i < position("Model:") && !line.trim() ? [i] : []);
-        expect(gaps).toEqual([position("Optimizer") - 1]);
-        expect(rendered).toHaveLength(panelLayout(width, 40).height);
-        for (const line of rendered) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
-        workspace.handleInput("\x1b[B");
-      }
-    }
-  });
-
-  it("keeps context explanations and disabled warnings inside Context without an optimizer", () => {
-    const { workspace, actions } = create();
-    actions.contextEnabled = () => false;
-    workspace.openSettings();
-    for (let cursor = 0; cursor < 3; cursor++) {
-      const lines = workspace.render(100).map(stripVTControlCharacters);
-      const context = lines.findIndex((line) => line.trim() === "Context");
-      const warning = lines.findIndex((line) => line.includes("Disabled by projectContext.enabled=false"));
-      expect(lines.slice(context, warning + 1).every((line) => line.trim())).toBe(true);
-      expect(lines[warning - 1]).toContain("Skill metadata");
-      expect(lines.join("\n")).not.toContain("Optimizer");
-      workspace.handleInput("\x1b[B");
-    }
-  });
-
-  it("shows the full model value in a fixed detail area without shifting navigation", () => {
-    const { workspace } = create(40, "dark", true);
-    workspace.openSettings({ instructions: "always", tree: true, skills: false }, 3);
-    expect(workspace.render(100).at(-5)).toContain("Model: provider/long-model-identifier-with-extra-details");
-    expect(textOf(workspace.render(40)).match(/Model:/g)).toHaveLength(2);
-    expect(workspace.render(40).at(-5)).toContain("Model:");
-  });
-
-  it("keeps long optimizer identifiers on one navigation row", () => {
-    const { workspace } = create(40, "dark", true);
-    workspace.openSettings({ instructions: "always", tree: true, skills: false }, 3);
-    const lines = workspace.render(40);
-    const modelRow = lines.findIndex((line, index) => index > 2 && line.includes("Model:"));
-    expect(lines[modelRow]).toContain("…");
-    expect(lines[modelRow + 1]).toContain("Thinking:");
-    expect(stripVTControlCharacters(lines[modelRow]!)).toMatch(/›$/);
-    workspace.handleInput("\x1b[B");
-    expect(textOf(workspace.render(40))).toContain("Thinking:");
-  });
-
-  it("keeps narrow optimizer rows in place when focus moves across long values", () => {
-    const { workspace } = create(40, "dark", true);
-    workspace.openSettings();
-    let positions: number[] | undefined;
-    for (let cursor = 0; cursor < 6; cursor++) {
-      const lines = workspace.render(40).map(stripVTControlCharacters);
-      const current = ["Model:", "Thinking:", "Optimization prompt:"].map((label) => lines.findIndex((line, index) => index > 2 && line.includes(label)));
-      expect(current.every((index) => index >= 0)).toBe(true);
-      if (positions) expect(current).toEqual(positions);
-      positions = current;
-      workspace.handleInput("\x1b[B");
-    }
-  });
-
-  it("keeps the viewport still when moving up to an already visible setting", () => {
-    const { workspace } = create(24, "dark", true);
-    workspace.openSettings(undefined, 5);
-    const before = workspace.render(40).map(stripVTControlCharacters);
-    workspace.handleInput("\x1b[A");
-    const after = workspace.render(40).map(stripVTControlCharacters);
-    expect(after[3]).toBe(before[3]);
-    expect(after.findIndex((line) => line.includes("Optimization prompt:"))).toBe(before.findIndex((line) => line.includes("Optimization prompt:")));
-    expect(after.join("\n")).toContain("› Thinking:");
   });
 
   it.each([[24, 16], [32, 21], [40, 24], [60, 24]])("budgets %i terminal rows as %i panel rows", (rows, height) => {
@@ -261,7 +275,7 @@ describe("shared refine workspace", () => {
         const main = workspace.render(width);
         workspace.handleInput("\x1b[C");
         const context = workspace.render(width);
-        workspace.handleInput("\x1b[D");
+        workspace.handleInput("\x1b");
         workspace.handleInput("i");
         const input = workspace.render(width);
         for (const lines of [main, context, input]) {
@@ -286,7 +300,7 @@ describe("shared refine workspace", () => {
     workspace.render(80);
     panel.page(1);
     const before = workspace.render(80);
-    for (const [open, back] of [["\x1b[C", "\x1b[D"], ["i", "\x1b"]]) {
+    for (const [open, back] of [["\x1b[C", "\x1b"], ["i", "\x1b"]]) {
       workspace.handleInput(open!);
       workspace.render(80);
       workspace.handleInput(back!);
@@ -397,14 +411,14 @@ describe("shared refine workspace", () => {
   it("keeps selected settings visible in a tiny viewport and retains their cursor", () => {
     const { workspace } = create(8);
     workspace.handleInput("\x1b[C");
-    for (const label of ["Project instructions: Always", "[x] Directory tree", "[ ] Skill metadata"]) {
+    for (const label of ["Project instructions: Always", "Directory tree: [x] On", "Skill metadata: [ ] Off"]) {
       expect(stripVTControlCharacters(textOf(workspace.render(40)))).toContain(`› ${label}`);
       workspace.handleInput("\x1b[B");
     }
     workspace.handleInput("\x1b[B");
     workspace.handleInput("q");
     workspace.handleInput("\x1b[C");
-    expect(stripVTControlCharacters(textOf(workspace.render(40)))).toContain("› [x] Directory tree");
+    expect(stripVTControlCharacters(textOf(workspace.render(40)))).toContain("› Directory tree: [x] On");
   });
 
   it("does not steal input focus when background results arrive", () => {
@@ -423,8 +437,9 @@ describe("shared refine workspace", () => {
     workspace.openSettings();
     workspace.handleInput("\r");
     expect(actions.saveContext).not.toHaveBeenCalled();
-    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Project instructions: Off");
-    for (let i = 0; i < cursor; i++) workspace.handleInput("\x1b[B");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toMatch(/› Project instructions +Off/);
+    if (cursor >= 3) workspace.handleInput("\x1b[C");
+    for (let i = 0; i < cursor % 3; i++) workspace.handleInput("\x1b[B");
     expect(textOf(workspace.render(100))).toContain("Ctrl+S");
     workspace.handleInput("\x13");
     expect(actions.saveContext).toHaveBeenCalledExactlyOnceWith({ instructions: "off", tree: true, skills: false });
@@ -434,14 +449,14 @@ describe("shared refine workspace", () => {
     await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain("Context saved"));
   });
 
-  it.each(["\x1b", "q", "\x1b[D", "\x1c"])("discards only pending context when returning with %j", (key) => {
+  it.each(["\x1b", "q", "\x1c"])("discards only pending context when returning with %j", (key) => {
     const { workspace, actions } = create(40, "dark", true);
     workspace.openSettings();
     workspace.handleInput("\r");
     workspace.handleInput(key);
     expect(textOf(workspace.render(100))).not.toContain("Ctrl+S to save");
     workspace.openSettings();
-    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Project instructions: Always");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toMatch(/› Project instructions +Always/);
     expect(textOf(workspace.render(100))).not.toContain("Unsaved context changes");
     expect(actions.saveContext).not.toHaveBeenCalled();
   });
@@ -453,7 +468,7 @@ describe("shared refine workspace", () => {
     workspace.handleInput("\r");
     workspace.handleInput("\x13");
     await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain("Could not save context"));
-    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Project instructions: Off");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toMatch(/› Project instructions +Off/);
     workspace.handleInput("\x13");
     await vi.waitFor(() => expect(actions.saveContext).toHaveBeenCalledTimes(2));
     expect(actions.saveContext).toHaveBeenLastCalledWith({ instructions: "off", tree: true, skills: false });
@@ -471,7 +486,8 @@ describe("shared refine workspace", () => {
     actions.optimizer = () => ({ model: "Not configured", thinking: "Unavailable — select model first", thinkingEnabled: false });
     workspace.openSettings(undefined, 4);
     const output = textOf(workspace.render(100));
-    expect(output).toContain(theme.fg("dim", "Unavailable — select model first"));
+    expect(stripVTControlCharacters(output)).toContain("Unavailable — select model first");
+    expect(output).toContain(theme.fg("dim", "Thinking              "));
     expect(output).toContain("Enter");
     expect(output).not.toContain("Cycle");
     for (const key of ["\r", " ", "\x1b[C", "\x1b[Z"]) workspace.handleInput(key);
@@ -484,9 +500,9 @@ describe("shared refine workspace", () => {
     workspace.openSettings();
     const bg = vi.spyOn(theme, "bg");
     workspace.render(100);
-    expect(bg.mock.calls).toHaveLength(1);
-    expect(bg.mock.calls[0]![0]).toBe("selectedBg");
-    expect(visibleWidth(bg.mock.calls[0]![1])).toBe(panelLayout(100, 40).innerWidth);
+    const focus = bg.mock.calls.filter(([color]) => color === "selectedBg");
+    expect(focus).toHaveLength(1);
+    expect(visibleWidth(focus[0]![1])).toBe(panelLayout(100, 40).innerWidth);
     bg.mockRestore();
   });
 
@@ -494,7 +510,7 @@ describe("shared refine workspace", () => {
     const { workspace } = create(12, "dark", true);
     workspace.openSettings(undefined, 2);
     const output = stripVTControlCharacters(textOf(workspace.render(80)));
-    expect(output).toContain("› [ ] Skill metadata");
+    expect(output).toContain("› Skill metadata");
     expect(output).toContain("Include skill descriptions; never run skills.");
   });
 
