@@ -405,6 +405,81 @@ describe("shared refine workspace", () => {
     }
   });
 
+  it.each([0, 3])("aligns Settings action and navigation rows at cursor %i", (cursor) => {
+    const { workspace } = create(40, "dark", true);
+    workspace.openSettings(undefined, cursor);
+    const [top, bottom] = workspace.render(100).slice(-2).map((line) => stripVTControlCharacters(line).trim());
+    expect(top).toBe(`Ctrl+S Save context · Enter Change${cursor === 0 ? " · Space Change" : ""}`);
+    expect(bottom!.split(" · ")).toEqual([
+      "Esc Back".padEnd(19), "Tab Group".padEnd(12),
+      cursor === 0 ? "← Usage".padEnd(12) : "← Context",
+      cursor === 0 ? "→ Optimizer" : "→ Preview", "↑↓ Select",
+    ]);
+  });
+
+  it.each(["dark", "light"])("aligns Settings footers across groups, dirty/disabled states and resize in %s", (name) => {
+    const starts = (line: string) => {
+      let column = 0;
+      return line.split(" · ").map((cell) => {
+        const start = column;
+        column += visibleWidth(cell) + 3;
+        return start;
+      });
+    };
+    for (const optimizer of [false, true]) {
+      const { workspace, actions, theme } = create(40, name, optimizer);
+      if (optimizer) actions.optimizer = () => ({ model: "Not configured", thinking: "Unavailable", thinkingEnabled: false });
+      for (const dirty of [false, true]) for (const cursor of optimizer ? [0, 3, 4, 5] : [0, 1, 2]) {
+        workspace.openSettings({ ...actions.context(), tree: !dirty }, cursor);
+        for (const width of [34, 40, 60, 80, 100, 160]) {
+          const lines = workspace.render(width);
+          const footer = lines.slice(-2);
+          const [top, bottom] = footer.map(stripVTControlCharacters);
+          const count = Math.min(starts(top!).length, starts(bottom!).length);
+          expect(starts(top!).slice(0, count)).toEqual(starts(bottom!).slice(0, count));
+          expect(top).toContain("Ctrl+S Save context");
+          expect(bottom).toContain(dirty ? "Esc Discard context changes" : "Esc Back");
+          expect(footer[0]).toContain(formatKeyHint(["Ctrl+S", "Save context"], theme));
+          expect(footer[1]).toContain(formatKeyHint(["Esc", dirty ? "Discard context changes" : "Back"], theme));
+          expect(footer.join("\n")).not.toContain("\t");
+          expect(lines).toHaveLength(panelLayout(width, 40).height);
+          for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(Math.min(width, 100));
+          if (width >= 100) {
+            expect(top).toContain(`Enter ${cursor === 4 ? "Unavailable" : "Change"}`);
+            expect(top!.includes("Space Change")).toBe(cursor < 3);
+            expect(bottom!.includes("Tab Group")).toBe(optimizer);
+            expect(bottom).toContain(optimizer && cursor >= 3 ? "← Context" : "← Usage");
+            expect(bottom).toContain(optimizer && cursor < 3 ? "→ Optimizer" : "→ Preview");
+          }
+          // Cache hits must retain the aligned frame unchanged.
+          expect(workspace.render(width)).toEqual(lines);
+        }
+      }
+      expect(actions.saveContext).not.toHaveBeenCalled();
+      expect(actions.submit).not.toHaveBeenCalled();
+    }
+  });
+
+  it("preserves compact and single-line Settings footer fallbacks", () => {
+    const { workspace, terminal } = create(40, "dark", true);
+    for (const cursor of [0, 3]) {
+      workspace.openSettings(undefined, cursor);
+      for (const width of [12, 20, 24, 30]) {
+        const footer = workspace.render(width).slice(-2).map(stripVTControlCharacters);
+        expect(footer[0]).toContain("^S Context");
+        expect(footer[1]).toContain("Esc Back");
+        for (const line of footer) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      }
+      workspace.openSettings({ instructions: "always", tree: false, skills: false }, cursor);
+      expect(stripVTControlCharacters(workspace.render(24).at(-1)!)).toContain("Esc Discard context");
+    }
+    terminal.rows = 8;
+    expect(stripVTControlCharacters(workspace.render(100).at(-1)!).trim()).toBe("^S Context · Esc Discard context · ↵ Change");
+    workspace.openSettings();
+    expect(stripVTControlCharacters(workspace.render(100).at(-1)!).trim()).toBe("^S Context · Esc Back · ↵ Change");
+    expect(stripVTControlCharacters(workspace.render(12).at(-1)!).trim()).toBe("^S Context");
+  });
+
   it("keeps disabled context warnings visible and omits unavailable groups", () => {
     const { workspace, actions } = create();
     actions.contextEnabled = () => false;
