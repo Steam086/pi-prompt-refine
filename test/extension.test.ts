@@ -1062,7 +1062,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.panelLines().join("\n")).toContain("empty");
     harness.panelInput("irq"); // Letters are text, never main-page actions.
     harness.panelInput("\x1b");
-    expect(harness.panelLines()[1]).toContain("› Prompt refine");
+    expect(harness.panelLines()[1]).toContain("Prompt refine");
     harness.panelInput("i");
     expect(harness.panelLines().join("\n")).toContain("irq");
     expect(harness.complete).not.toHaveBeenCalled();
@@ -1079,14 +1079,14 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const view = harness.command("view", harness.context);
     const main = harness.panelLines();
     expect(main[0]).toMatch(/^  ─+$/);
-    expect(main[1]).toContain("› Prompt refine");
+    expect(main[1]).toContain("Prompt refine");
     harness.panelInput("t");
     harness.panelInput("\x1b[D");
     expect(harness.panelLines()).toEqual(main);
     harness.panelInput("\x1b[C");
     await flushPromises();
     const settings = harness.panelLines();
-    expect(settings[1]).toContain("› Settings");
+    expect(settings[1]).toContain("Settings");
     expect(settings).toHaveLength(main.length);
     expect(settings[0]).toBe(main[0]);
     expect(settings.at(-3)).toBe(main.at(-3));
@@ -1119,13 +1119,13 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\x1b[C");
     await flushPromises();
     const lines = harness.panelLines();
-    expect(lines.filter((line) => /\[[x ]\]/.test(line))).toEqual(["  › [x] AGENTS.md", "    [x] tree", "    [ ] skills"]);
+    expect(lines.filter((line) => /\[[x ]\]/.test(line)).map((line) => line.trimEnd())).toEqual(["  › [x] Include project instructions", "    [x] Directory tree", "    [ ] Skill metadata"]);
     harness.panelInput(" ");
     harness.panelInput("\x1b[B");
     harness.panelInput(" ");
     harness.panelInput("\x1b[B");
     harness.panelInput(" ");
-    harness.panelInput("\r");
+    harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved"));
     harness.panelInput("q");
     await view;
@@ -1201,7 +1201,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const view = harness.command("view", harness.context);
     harness.panelInput("\x1b[C");
     harness.panelInput(" ");
-    harness.panelInput("\r");
+    harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Not persisted"));
     expect(harness.panelLines().join("\n")).not.toContain("Context saved");
     harness.panelInput("q");
@@ -1335,7 +1335,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await vi.waitFor(() => expect(harness.customCalls()).toBe(2));
     expect(harness.context.ui.editor).toHaveBeenCalledWith(expect.any(String), original);
     expect(harness.context.ui.confirm).toHaveBeenCalledTimes(typeof choice === "boolean" ? 1 : 0);
-    expect(harness.panelLines().join("\n")).toContain("Unsaved changes");
+    expect(harness.panelLines().join("\n")).toContain("Unsaved context changes");
     harness.panelInput("\x1b[D");
     harness.panelInput("q");
     await view;
@@ -1360,8 +1360,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Choose optimizer model"));
     harness.panelInput("\x1b");
-    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Unsaved changes"));
-    expect(harness.panelLines().join("\n")).toContain("[ ] AGENTS.md");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Unsaved context changes"));
+    expect(harness.panelLines().join("\n")).toContain("[ ] Include project instructions");
     harness.panelInput("\x1b[B");
     expect(harness.panelLines().join("\n")).toContain("Thinking: medium");
     harness.panelInput("\r");
@@ -1375,6 +1375,44 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("q");
     await view;
     expect(harness.editorWrites).toEqual([]);
+  });
+
+  it.each([
+    { configureModel: false, reason: "select an available model first" },
+    { noAvailableModels: true, reason: "select an available model first" },
+    { reasoning: false, reason: "fixed for this model" },
+  ])("disables unavailable or fixed thinking in Settings: $reason", async (options) => {
+    const harness = await makeHarness(options);
+    const before = await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8");
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("\x1b[C");
+    for (let i = 0; i < 4; i++) harness.panelInput("\x1b[B");
+    expect(harness.panelLines().join("\n")).toContain(`Unavailable — ${options.reason}`);
+    for (const key of ["\r", " ", "\x1b[C", "\x1b[Z"]) harness.panelInput(key);
+    await flushPromises();
+    expect(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8")).toBe(before);
+    expect(harness.panelLines().join("\n")).not.toContain("Thinking level saved");
+    harness.panelInput("\x1b");
+    harness.panelInput("q");
+    await view;
+  });
+
+  it("saves pending Context from an Optimizer row without opening its action", async () => {
+    const harness = await makeHarness();
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("\x1b[C");
+    harness.panelInput("\r");
+    expect(harness.panelLines().join("\n")).toContain("Unsaved context changes");
+    for (let i = 0; i < 3; i++) harness.panelInput("\x1b[B");
+    harness.panelInput("\x13");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved"));
+    expect(harness.customCalls()).toBe(1);
+    const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
+    expect(saved.projectContext.instructionsEnabled).toBe(false);
+    harness.panelInput("q");
+    await view;
   });
 
   it("presents a compact model picker without changing the model on cancel", async () => {

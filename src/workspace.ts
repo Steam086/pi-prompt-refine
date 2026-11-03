@@ -9,7 +9,7 @@ import { sanitizeTerminalText } from "./presentation.js";
 interface WorkspaceActions {
   context(): boolean[];
   contextEnabled(): boolean;
-  optimizer?(): { model: string; thinking: string };
+  optimizer?(): { model: string; thinking: string; thinkingEnabled: boolean };
   chooseModel?(context: boolean[]): void;
   editSystemPrompt?(context: boolean[]): void;
   cycleThinking?(): Promise<string>;
@@ -79,11 +79,12 @@ export class RefineWorkspace implements Component, Focusable {
     this.original = this.actions.context();
     this.selected = [...selected];
     this.cursor = cursor;
+    this.settingsNotice = "";
     this.switchMode("context");
   }
 
   private cycleThinking(): void {
-    if (!this.actions.cycleThinking) return;
+    if (!this.actions.cycleThinking || !this.actions.optimizer?.().thinkingEnabled) return;
     this.saving = true;
     void this.actions.cycleThinking().then((notice) => { this.settingsNotice = notice; })
       .catch(() => { this.settingsNotice = "Could not save thinking level."; })
@@ -110,13 +111,7 @@ export class RefineWorkspace implements Component, Focusable {
       if (this.saving) return true;
       if (key === "left" || key === "q" || key === "ctrl+\\" || this.keys.matches(data, "tui.select.cancel")) {
         this.switchMode("main");
-      } else if (this.actions.optimizer && this.keys.matches(data, "app.thinking.cycle")) {
-        this.cycleThinking();
-      } else if (this.cursor >= 3 && (this.keys.matches(data, "tui.input.submit") || key === "space" || key === "right")) {
-        if (this.cursor === 3) this.actions.chooseModel?.([...this.selected]);
-        else if (this.cursor === 5) this.actions.editSystemPrompt?.([...this.selected]);
-        else this.cycleThinking();
-      } else if (this.keys.matches(data, "tui.input.submit")) {
+      } else if (key === "ctrl+s") {
         this.saving = true;
         this.tui.requestRender();
         void this.actions.saveContext([...this.selected]).then((notice) => {
@@ -125,17 +120,25 @@ export class RefineWorkspace implements Component, Focusable {
           this.switchMode("main");
         }).catch(() => {
           if (this.disposed) return;
-          this.panel.setNotice("Could not save context. Check configuration.");
-          this.switchMode("main");
+          this.settingsNotice = "Could not save context. Retry with Ctrl+S.";
         }).finally(() => {
           this.saving = false;
           if (!this.disposed) this.tui.requestRender();
         });
+      } else if (this.actions.optimizer && this.keys.matches(data, "app.thinking.cycle")) {
+        this.cycleThinking();
+      } else if (this.keys.matches(data, "tui.input.submit") || key === "space" || (key === "right" && this.cursor >= 3)) {
+        if (this.cursor < 3) {
+          this.selected[this.cursor] = !this.selected[this.cursor];
+          this.settingsNotice = "";
+          this.tui.requestRender();
+        } else if (this.cursor === 3) this.actions.chooseModel?.([...this.selected]);
+        else if (this.cursor === 5) this.actions.editSystemPrompt?.([...this.selected]);
+        else this.cycleThinking();
       } else {
         const count = this.actions.optimizer ? (this.actions.editSystemPrompt ? 6 : 5) : 3;
         if (this.keys.matches(data, "tui.select.up")) this.cursor = (this.cursor + count - 1) % count;
         else if (this.keys.matches(data, "tui.select.down")) this.cursor = (this.cursor + 1) % count;
-        else if (key === "space" && this.cursor < 3) this.selected[this.cursor] = !this.selected[this.cursor];
         this.tui.requestRender();
       }
       return true;
@@ -155,10 +158,9 @@ export class RefineWorkspace implements Component, Focusable {
     if (width < 1) return [];
     const tabItems = ([ ["main", "Prompt refine"], ["context", "Settings"] ] as const).map(([mode, label]) => {
       const active = this.mode === mode;
-      const text = `${active ? "›" : " "} ${label}`;
       return active
-        ? this.theme.bg("selectedBg", this.theme.fg("accent", this.theme.bold(text)))
-        : this.theme.fg("muted", text);
+        ? this.theme.fg("accent", this.theme.underline(this.theme.bold(label)))
+        : this.theme.fg("muted", label);
     });
     const fullTabs = tabItems.join("   ");
     const tabs = visibleWidth(fullTabs) <= panelLayout(width, this.tui.terminal.rows).innerWidth
@@ -182,60 +184,67 @@ export class RefineWorkspace implements Component, Focusable {
       if (this.inputError && layout.headerHeight < 2 && layout.footerHeight > 1) footer[1] = theme.fg("warning", sanitizeTerminalText(this.inputError));
     } else {
       const dirty = this.selected.some((value, i) => value !== this.original[i]);
-      const notice = [this.saving ? "Saving..." : this.settingsNotice, dirty ? "Unsaved changes" : ""].filter(Boolean).join(" · ");
-      header = [tabs, theme.fg(dirty ? "warning" : "muted", sanitizeTerminalText(notice))];
+      const notice = [this.saving ? "Saving..." : this.settingsNotice, dirty ? "Unsaved context changes" : ""].filter(Boolean).join(" · ");
+      const status = theme.fg(dirty ? "warning" : "muted", sanitizeTerminalText(notice));
+      // Short screens have only one header row; never scroll save feedback out of view.
+      header = [layout.headerHeight === 1 && notice ? status : tabs, status];
       const optimizer = this.actions.optimizer?.();
-      const rows: string[] = [theme.fg("muted", "Context")];
+      const rows: string[] = [theme.bold("Context")];
       let focusStart = 0;
       let focusEnd = 0;
-      let detail = "";
       const hint = (text: string, color: "muted" | "warning" = "muted") => {
         const inset = innerWidth >= 4 ? 2 : 0;
         rows.push(...wrapTextWithAnsi(sanitizeTerminalText(text), innerWidth - inset)
           .map((line) => " ".repeat(inset) + theme.fg(color, line)));
       };
-      const add = (index: number, text: string, value?: string) => {
+      const add = (index: number, text: string, value?: string, affordance = "", disabled = false) => {
         const active = index === this.cursor;
         if (active) focusStart = rows.length;
         const label = sanitizeTerminalText(text);
         const content = value === undefined
           ? theme.fg("text", label)
-          : `${theme.fg("muted", `${label}:`)} ${theme.fg("text", sanitizeTerminalText(value))}`;
-        // One row per option; reveal full values only when the selected row truncates.
-        if (active && value !== undefined && visibleWidth(content) > innerWidth - 2) detail = `${label}: ${value}`;
-        const line = truncateToWidth(content, Math.max(1, innerWidth - 2), "…");
-        const rendered = `${theme.fg("accent", active ? "› " : "  ")}${line}`;
-        rows.push(active ? theme.bg("selectedBg", rendered) : rendered);
+          : `${theme.fg(disabled ? "dim" : "muted", `${label}:`)} ${theme.fg(disabled ? "dim" : "text", sanitizeTerminalText(value))}`;
+        const suffix = affordance && !disabled ? ` ${affordance}` : "";
+        const available = Math.max(1, innerWidth - 2 - visibleWidth(suffix));
+        const line = truncateToWidth(content, available, "…");
+        const rendered = truncateToWidth(`${theme.fg("accent", active ? "› " : "  ")}${line}${theme.fg("muted", suffix)}`, innerWidth, "");
+        rows.push(active ? theme.bg("selectedBg", rendered + " ".repeat(Math.max(0, innerWidth - visibleWidth(rendered)))) : rendered);
+        // Keep a truncated value beside its focused row, including in short viewports.
+        if (active && value !== undefined && visibleWidth(content) > available) hint(`${label}: ${value}`);
         if (active) focusEnd = rows.length;
       };
       // Keep explanations with their owners, not in a selection-dependent block
       // after both sections. Only section boundaries introduce an empty row.
+      hint("Manual save · Next refinement only");
       [
-        ["AGENTS.md", "Loaded project instructions."],
-        ["tree", "Default tree; explicit @dirs unchanged."],
-        ["skills", "Skill metadata; no automatic invocation."],
+        ["Include project instructions", "Use rules supplied by Pi (e.g. AGENTS.md)."],
+        ["Directory tree", "Default tree only; @directory references are separate."],
+        ["Skill metadata", "Include skill descriptions; never run skills."],
       ].forEach(([label, description], i) => {
         add(i, `[${this.selected[i] ? "x" : " "}] ${label}`);
         hint(description!);
+        if (i === this.cursor) focusEnd = rows.length;
       });
       if (!this.actions.contextEnabled()) hint("Disabled by projectContext.enabled=false", "warning");
       if (optimizer) {
-        rows.push("", theme.fg("muted", "Optimizer"));
-        add(3, "Model", optimizer.model);
-        add(4, "Thinking", optimizer.thinking);
-        if (this.actions.editSystemPrompt) add(5, "Optimization prompt");
+        rows.push("", theme.bold("Optimizer"));
+        hint("Auto-save on change/confirmation");
         hint("Optimizer only · Main session unchanged");
-        if (detail) hint(detail);
+        add(3, "Model", optimizer.model, "›");
+        add(4, "Thinking", optimizer.thinking, "↻", !optimizer.thinkingEnabled);
+        if (this.actions.editSystemPrompt) add(5, "Optimization prompt", "Edit…", "›");
       }
-      if (notice && layout.headerHeight < 2) rows.push(theme.fg(dirty ? "warning" : "muted", sanitizeTerminalText(notice)));
       const start = Math.min(focusStart, Math.max(0, focusEnd - bodyHeight));
       body = rows.slice(start, start + bodyHeight);
-      const action = this.cursor === 3 ? "Choose" : this.cursor === 4 ? "Cycle" : this.cursor === 5 ? "Edit" : "Save";
-      footer = alignedKeyHints(innerWidth < 30
-        ? [[["↵", this.cursor >= 3 ? "Change" : "Save"], ...(this.cursor < 3 ? [["␣", "Toggle"] as const] : [])], [["←", "Back"], ["↑↓", "Select"]]]
-        : [[["Enter", action], ...(this.cursor < 3 ? [["Space", "Toggle"] as const] : [])],
-          [["↑↓", "Select"], ["←/Esc", innerWidth < 50 ? "Back" : "Back (discard)"]]], innerWidth, theme);
-      if (layout.footerHeight === 1) footer = [fittingKeyHints([["↵", this.cursor >= 3 ? "Change" : "Save"], ["←", "Back"]], innerWidth, theme)];
+      const action = this.cursor === 3 ? "Choose" : this.cursor === 4 ? (optimizer?.thinkingEnabled ? "Cycle" : "Unavailable") : this.cursor === 5 ? "Edit" : "Toggle";
+      // Saving has a fixed key and an explicit scope, independent of row focus.
+      footer = [
+        fittingKeyHints(innerWidth < 30
+          ? [["^S", "Context"], ["↵", action]]
+          : [["Ctrl+S", "Save context"], ["Enter", action], ...(this.cursor < 3 ? [["Space", "Toggle"] as const] : [])], innerWidth, theme),
+        fittingKeyHints([["Esc", dirty ? (innerWidth >= 30 ? "Discard context changes" : "Discard context") : "Back"], ["↑↓", "Select"]], innerWidth, theme),
+      ];
+      if (layout.footerHeight === 1) footer = [fittingKeyHints([["^S", "Context"], ["Esc", dirty ? "Discard context" : "Back"], ["↵", action]], innerWidth, theme)];
     }
     return panelFrame(layout, header, body, footer, (text) => theme.fg("borderMuted", text));
   }
