@@ -14,12 +14,12 @@ export function renderModelChoices(
   for (let i = start; i < start + count; i++) {
     const item = items[i]!;
     const active = i === selected;
-    const prefix = active ? "→ " : "  ";
+    const prefix = active ? "› " : "  ";
     const badges = `${item.label?.includes(" [thinking]") ? " · Thinking capable" : ""}${item.label?.endsWith(" (current)") ? " · Current" : ""}`;
     // On narrow terminals keep badges separate so they never consume the model name's space.
     const name = item.description || item.value;
     const compact = visibleWidth(prefix + name + badges) > width;
-    const primary = prefix + theme.bold(truncateToWidth(name, Math.max(1, width - 2)));
+    const primary = theme.fg("accent", prefix) + theme.fg("text", truncateToWidth(name, Math.max(1, width - 2)));
     const entry = [compact ? primary : primary + theme.fg("muted", badges),
       theme.fg("muted", `  ${item.value}`)];
     if (compact && badges) entry.push(theme.fg("muted", `  ${badges.slice(3)}`));

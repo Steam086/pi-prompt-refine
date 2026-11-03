@@ -1032,7 +1032,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const height = harness.panelLines().length;
     harness.panelInput("i");
     expect(harness.panelLines()).toHaveLength(height);
-    expect(harness.panelLines()[0]).toContain("Input");
+    expect(harness.panelLines()[1]).toContain("Input");
     expect(harness.context.ui.input).not.toHaveBeenCalled();
     expect(harness.complete).not.toHaveBeenCalled();
     harness.panelInput("New input prompt");
@@ -1058,11 +1058,11 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("i");
     harness.panelInput("   ");
     harness.panelInput("\r");
-    expect(harness.panelLines()[0]).toContain("Input");
+    expect(harness.panelLines()[1]).toContain("Input");
     expect(harness.panelLines().join("\n")).toContain("empty");
     harness.panelInput("irq"); // Letters are text, never main-page actions.
     harness.panelInput("\x1b");
-    expect(harness.panelLines()[0]).toContain("[Prompt refine]");
+    expect(harness.panelLines()[1]).toContain("› Prompt refine");
     harness.panelInput("i");
     expect(harness.panelLines().join("\n")).toContain("irq");
     expect(harness.complete).not.toHaveBeenCalled();
@@ -1078,17 +1078,19 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     const main = harness.panelLines();
-    expect(main[0]).toContain("[Prompt refine]");
+    expect(main[0]).toMatch(/^  ─+$/);
+    expect(main[1]).toContain("› Prompt refine");
     harness.panelInput("t");
     harness.panelInput("\x1b[D");
     expect(harness.panelLines()).toEqual(main);
     harness.panelInput("\x1b[C");
     await flushPromises();
     const settings = harness.panelLines();
-    expect(settings[0]).toContain("[Settings]");
+    expect(settings[1]).toContain("› Settings");
     expect(settings).toHaveLength(main.length);
-    expect(settings.findIndex((line) => line.includes("──"))).toBe(main.findIndex((line) => line.includes("──")));
-    expect(settings[0]?.startsWith("  ")).toBe(true);
+    expect(settings[0]).toBe(main[0]);
+    expect(settings.at(-3)).toBe(main.at(-3));
+    expect(settings[1]?.startsWith("  ")).toBe(true);
     harness.panelInput(" ");
     const edited = harness.panelLines();
     harness.panelInput("\x1b[C");
@@ -1150,7 +1152,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const text = "retained prompt ".repeat(10);
     harness.panelInput(text);
     harness.panelInput("\r");
-    expect(harness.panelLines()[0]).toContain("Input");
+    expect(harness.panelLines()[1]).toContain("Input");
     expect(harness.panelLines().join("\n")).toContain(options.error);
     expect(harness.panelLines().join("\n")).toContain("retained prompt");
     expect(harness.editorWrites).toEqual([]);
@@ -1327,12 +1329,13 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\x1b[C");
     harness.panelInput(" ");
     for (let i = 0; i < 5; i++) harness.panelInput("\x1b[B");
-    expect(harness.panelLines().join("\n")).toContain("Optimization prompt: View / Edit");
+    expect(harness.panelLines().join("\n")).toContain("› Optimization prompt");
+    expect(harness.panelLines().join("\n")).toContain("Enter Edit");
     harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.customCalls()).toBe(2));
     expect(harness.context.ui.editor).toHaveBeenCalledWith(expect.any(String), original);
     expect(harness.context.ui.confirm).toHaveBeenCalledTimes(typeof choice === "boolean" ? 1 : 0);
-    expect(harness.panelLines().join("\n")).toContain("Unsaved context changes");
+    expect(harness.panelLines().join("\n")).toContain("Unsaved changes");
     harness.panelInput("\x1b[D");
     harness.panelInput("q");
     await view;
@@ -1357,7 +1360,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Choose optimizer model"));
     harness.panelInput("\x1b");
-    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Unsaved context changes"));
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Unsaved changes"));
     expect(harness.panelLines().join("\n")).toContain("[ ] AGENTS.md");
     harness.panelInput("\x1b[B");
     expect(harness.panelLines().join("\n")).toContain("Thinking: medium");
@@ -1379,7 +1382,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.setCustomAction("\x1b");
     await harness.command("model", harness.context);
     expect(harness.panelLines().join("\n")).toContain("Choose optimizer model");
-    expect(harness.panelLines().join("\n")).toContain("does not change the main session model");
+    expect(harness.panelLines().join("\n")).toContain("Optimizer only · Main session unchanged");
+    expect(harness.panelLines().join("\n")).toContain("↑↓ Select · Shift+Tab Thinking · Enter Confirm · Esc Cancel");
     for (const { width, lines } of harness.renderedWidths) {
       for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }

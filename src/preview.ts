@@ -1,7 +1,7 @@
-import { Markdown, ScrollView, Text, truncateToWidth, wrapTextWithAnsi, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
+import { Markdown, ScrollView, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import type { KeyHint } from "./key-hints.js";
-import { alignedHints, fittingHints, panelFrame, panelLayout } from "./panel-layout.js";
+import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
+import { panelFrame, panelLayout } from "./panel-layout.js";
 import { formatTokenUsage } from "./usage.js";
 import { resultHeading, sanitizeTerminalText, type SummaryOptions } from "./presentation.js";
 
@@ -107,6 +107,11 @@ export class PreviewPanel implements Component {
     this.cachedBody = undefined;
   }
 
+  private isEmptyState(): boolean {
+    return this.options.state.phase === "idle" && this.options.candidateText === undefined &&
+      !this.options.accepted && !this.options.state.pendingSend && !this.helpVisible;
+  }
+
   private renderBody(width: number): string[] {
     if (this.cachedBody?.width === width) return this.cachedBody.lines;
     const { theme, options } = this;
@@ -122,15 +127,14 @@ export class PreviewPanel implements Component {
     if (this.helpVisible) {
       lines.push(theme.fg("accent", theme.bold("Help · Keyboard reference")), "");
       if (options.accepted) paragraph("Read-only snapshot; a/e/s disabled.\nEdit or send from the main editor.");
-      const hint = (key: string, label: string) => `${theme.fg("accent", theme.bold(key))} ${theme.fg("text", label)}`;
-      const helpLine = (...items: KeyHint[]) => lines.push(...wrapTextWithAnsi(items.map(([key, label]) => hint(key, label)).join(theme.fg("muted", " · ")), width));
+      const helpLine = (...items: KeyHint[]) => lines.push(...wrapTextWithAnsi(items.map((hint) => formatKeyHint(hint, theme)).join(" · "), width));
       if (!options.accepted) {
         helpLine(["a", "Accept into editor (no send)"], ["e", "Edit candidate"]);
         helpLine(["s", "Send (follow-up if busy; draft kept)"]);
       }
       helpLine(["x/d", "Break / cancel (stops the running request)"]);
       helpLine(["z", "Restore draft before acceptance"]);
-      lines.push("", theme.bold("Refine & navigate"));
+      lines.push("", theme.fg("muted", "Refine & navigate"));
       helpLine(["r", "Refine current draft (model call)"]);
       helpLine(["m", "Model"], ["c", "Cycle favorites"]);
       helpLine(["o", "Original"], ["v", "Formatted/source"]);
@@ -177,11 +181,13 @@ export class PreviewPanel implements Component {
     } else if (options.state.phase === "error") {
       paragraph(options.errorLabel ?? "Request failed. Retry.", "warning");
       lines.push("");
-      paragraph("Draft unchanged. r Retry · m Model", "muted");
+      paragraph("Draft unchanged.", "muted");
     } else {
       paragraph("No result yet.");
-      lines.push("");
-      paragraph("r Refine current draft · m Model", "muted");
+      if (this.isEmptyState()) {
+        const model = options.state.model;
+        paragraph(model ? `${model.provider}/${model.id}` : "No model selected", "muted");
+      }
     }
     if (options.state.pendingSend) {
       lines.push("");
@@ -198,28 +204,33 @@ export class PreviewPanel implements Component {
     const layout = panelLayout(width, this.rows());
     const { innerWidth, bodyHeight } = layout;
     const heading = options.accepted
-      ? `${theme.fg("success", theme.bold(`✓ Accepted · ${options.elapsedSeconds}s`))}  ${theme.fg("muted", "Prompt Refine")}`
-      : resultHeading(options, theme);
-    const header = [truncateToWidth(tabs ?? `${theme.fg("accent", theme.bold("Main"))}  ${heading}`, innerWidth, "")];
+      ? theme.fg("success", theme.bold(`✓ Accepted · ${options.elapsedSeconds}s`))
+      : options.state.phase === "idle" ? "" : resultHeading(options, theme, false);
+    const header = [truncateToWidth(tabs ?? theme.fg("accent", theme.bold("Prompt Refine")), innerWidth, "")];
     const model = options.state.model;
-    const metadata = sanitizeTerminalText(options.notice ?? `${model ? `${model.provider}/${model.id}` : "No model"} · ${options.contextLabel}`);
-    header.push(theme.fg("muted", metadata));
+    // Idle has no request context to describe; details remain available in Help.
+    const metadata = sanitizeTerminalText([
+      model ? `${model.provider}/${model.id}` : "No model",
+      ...(options.state.phase !== "idle" || options.accepted ? [options.contextLabel] : []),
+    ].join(" · "));
+    const status = this.isEmptyState() ? "" : [heading, theme.fg("muted", metadata)].filter(Boolean).join(" · ");
+    header.push(options.notice ? theme.fg("muted", sanitizeTerminalText(options.notice)) : status);
     const ready = options.candidateText !== undefined;
     const primary: KeyHint[] = options.accepted
       ? [["r", "Refine draft"], ...(options.canRestore ? [["z", "Restore"] as KeyHint] : [])]
       : ready
         ? [["a", "Accept"], ["e", "Edit"], options.state.pendingSend ? ["", "Send pending"] : ["s", "Send"], ["x", "Cancel"]]
-        : [["r", options.state.phase === "generating" ? "Restart" : "Refine"], ["m", "Model"], ["x", options.state.phase === "generating" ? "Break" : "Cancel"]];
-    const hint = ([key, label]: KeyHint) => `${theme.fg("accent", theme.bold(key))}${key ? " " : ""}${label}`;
+        : [["r", options.state.phase === "generating" ? "Restart" : options.state.phase === "error" ? "Retry" : "Refine"], ["m", "Model"],
+          ...(options.state.phase === "generating" ? [["x", "Break"] as KeyHint] : [])];
     const secondary: KeyHint[] = [
       ["q", "Back"], ["?", this.helpVisible ? "Hide help" : "Help"], ["i", "Input"], ["→", "Settings"],
       ...(ready ? [["o", this.originalVisible ? "Hide original" : "Original"] as KeyHint] : []),
     ];
-    const footer = alignedHints([
-      [...primary.map(hint), "Enter won't send"],
-      secondary.map(hint),
-    ], innerWidth);
-    if (layout.footerHeight === 1) footer[0] = fittingHints(["q Back", "i Input", "→ Settings", "? Help"], innerWidth);
+    const footer = alignedKeyHints([
+      [...primary, ...(ready && !options.accepted ? [["", "Enter won't send"] as KeyHint] : [])],
+      secondary,
+    ], innerWidth, theme);
+    if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["q", "Back"], ["i", "Input"], ["→", "Settings"], ["?", "Help"]], innerWidth, theme);
     // ScrollView owns offsets/clamping. Explicit viewport composition also works in regular
     // mode, where ScrollView.render() alone returns the entire document without clipping.
     const body = this.scroll.render(innerWidth);
@@ -229,15 +240,21 @@ export class PreviewPanel implements Component {
       this.revealOriginal = false;
     }
     const start = this.scroll.scrollTop;
-    const visible = body.slice(start, start + bodyHeight);
+    let visible = body.slice(start, start + bodyHeight);
+    if (this.isEmptyState() && body.length <= bodyHeight) {
+      // Treat the empty message and its model as one quiet block, away from navigation.
+      visible = [
+        ...Array<string>(Math.floor((bodyHeight - body.length) / 2)).fill(""),
+        ...visible.map((line) => " ".repeat(Math.max(0, Math.floor((innerWidth - visibleWidth(line)) / 2))) + line),
+      ];
+    }
     if (body.length > bodyHeight) {
       const position = `↑↓ ${start + 1}–${Math.min(body.length, start + bodyHeight)}/${body.length}`;
       // Position is secondary to notices; scrolling must not hide request feedback.
       header[1] = options.notice
         ? theme.fg("muted", `${sanitizeTerminalText(options.notice)} · ${position}`)
-        : theme.fg("muted", `${position} · ${metadata}`);
+        : [theme.fg("muted", position), status].filter(Boolean).join(" · ");
     }
-    if (tabs) header[1] = `${heading} · ${header[1]}`;
     if (options.state.pendingSend) {
       // Delivery is not completion. Keep this visible even at the end of a long result.
       header[1] = `${theme.fg("warning", "Send pending · draft kept")} · ${header[1]}`;

@@ -1,7 +1,8 @@
 import { parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type Focusable, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { PreviewPanel } from "./preview.js";
-import { alignedHints, fittingHints, panelFrame, panelLayout } from "./panel-layout.js";
+import { panelFrame, panelLayout } from "./panel-layout.js";
+import { alignedKeyHints, fittingKeyHints } from "./key-hints.js";
 import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
 
@@ -154,12 +155,12 @@ export class RefineWorkspace implements Component, Focusable {
     if (width < 1) return [];
     const tabItems = ([ ["main", "Prompt refine"], ["context", "Settings"] ] as const).map(([mode, label]) => {
       const active = this.mode === mode;
-      const text = `${active ? "›" : " "}[${label}]`;
+      const text = `${active ? "›" : " "} ${label}`;
       return active
-        ? this.theme.bg("selectedBg", this.theme.fg("text", this.theme.bold(text)))
+        ? this.theme.bg("selectedBg", this.theme.fg("accent", this.theme.bold(text)))
         : this.theme.fg("muted", text);
     });
-    const fullTabs = tabItems.join(" ");
+    const fullTabs = tabItems.join("   ");
     const tabs = visibleWidth(fullTabs) <= panelLayout(width, this.tui.terminal.rows).innerWidth
       ? fullTabs : tabItems[this.mode === "context" ? 1 : 0];
     if (this.mode === "main") return this.panel.render(width, tabs);
@@ -171,71 +172,70 @@ export class RefineWorkspace implements Component, Focusable {
     let footer: string[];
     if (this.mode === "input") {
       const cursor = this.input.editor.getCursor();
-      header = [theme.fg("accent", theme.bold("Input · Prompt Refine")),
-        theme.fg(this.inputError ? "warning" : "muted", sanitizeTerminalText(this.inputError || `Prompt · Line ${cursor.line + 1} · Not sent to main agent`))];
+      header = [theme.fg("accent", theme.bold("Input")),
+        theme.fg(this.inputError ? "warning" : "muted", sanitizeTerminalText(this.inputError || `Line ${cursor.line + 1} · Not sent to main agent`))];
       body = this.input.render(innerWidth, bodyHeight);
-      footer = innerWidth < 30
-        ? ["↵ Refine ⇧↵ NL", "Esc Back"]
-        : alignedHints([["Enter Refine", "Shift+Enter Newline"],
-          ["Esc Back", "Draft kept on Back"]], innerWidth);
-      if (layout.footerHeight === 1) footer = [fittingHints(["Esc Back", "↵ Refine"], innerWidth)];
+      footer = alignedKeyHints(innerWidth < 30
+        ? [[["↵", "Refine"], ["⇧↵", "NL"]], [["Esc", "Back"]]]
+        : [[["Enter", "Refine"], ["Shift+Enter", "Newline"]], [["Esc", "Back"]]], innerWidth, theme);
+      if (layout.footerHeight === 1) footer = [fittingKeyHints([["Esc", "Back"], ["↵", "Refine"]], innerWidth, theme)];
       if (this.inputError && layout.headerHeight < 2 && layout.footerHeight > 1) footer[1] = theme.fg("warning", sanitizeTerminalText(this.inputError));
     } else {
       const dirty = this.selected.some((value, i) => value !== this.original[i]);
-      header = [tabs,
-        theme.fg(dirty ? "warning" : "muted", this.saving ? "Saving..." : dirty ? "Unsaved changes · Enter Save" : "Next refinement only · Enter Save")];
-      const items = ["AGENTS.md", "tree", "skills"].map((label, i) => {
-        const text = `${i === this.cursor ? "›" : " "} [${this.selected[i] ? "x" : " "}] ${label}`;
-        return theme.fg(i === this.cursor ? "accent" : "text", i === this.cursor ? theme.bold(text) : text);
+      const notice = [this.saving ? "Saving..." : this.settingsNotice, dirty ? "Unsaved changes" : ""].filter(Boolean).join(" · ");
+      header = [tabs, theme.fg(dirty ? "warning" : "muted", sanitizeTerminalText(notice))];
+      const optimizer = this.actions.optimizer?.();
+      const rows: string[] = [theme.fg("muted", "Context")];
+      let focusStart = 0;
+      let focusEnd = 0;
+      let detail = "";
+      const hint = (text: string, color: "muted" | "warning" = "muted") => {
+        const inset = innerWidth >= 4 ? 2 : 0;
+        rows.push(...wrapTextWithAnsi(sanitizeTerminalText(text), innerWidth - inset)
+          .map((line) => " ".repeat(inset) + theme.fg(color, line)));
+      };
+      const add = (index: number, text: string, value?: string) => {
+        const active = index === this.cursor;
+        if (active) focusStart = rows.length;
+        const label = sanitizeTerminalText(text);
+        const content = value === undefined
+          ? theme.fg("text", label)
+          : `${theme.fg("muted", `${label}:`)} ${theme.fg("text", sanitizeTerminalText(value))}`;
+        // One row per option; reveal full values only when the selected row truncates.
+        if (active && value !== undefined && visibleWidth(content) > innerWidth - 2) detail = `${label}: ${value}`;
+        const line = truncateToWidth(content, Math.max(1, innerWidth - 2), "…");
+        const rendered = `${theme.fg("accent", active ? "› " : "  ")}${line}`;
+        rows.push(active ? theme.bg("selectedBg", rendered) : rendered);
+        if (active) focusEnd = rows.length;
+      };
+      // Keep explanations with their owners, not in a selection-dependent block
+      // after both sections. Only section boundaries introduce an empty row.
+      [
+        ["AGENTS.md", "Loaded project instructions."],
+        ["tree", "Default tree; explicit @dirs unchanged."],
+        ["skills", "Skill metadata; no automatic invocation."],
+      ].forEach(([label, description], i) => {
+        add(i, `[${this.selected[i] ? "x" : " "}] ${label}`);
+        hint(description!);
       });
-      const description = ["Project instructions; retains first-prompt rules.", "Default tree; explicit @dirs unchanged.", "Available skills; no automatic skill invocation."][this.cursor] ?? "";
-      body = [...items, "", ...wrapTextWithAnsi(description, innerWidth).map((text) => theme.fg("muted", text)),
-        ...(!this.actions.contextEnabled() ? [theme.fg("warning", "Disabled by projectContext.enabled=false")] : [])];
-      if (bodyHeight < items.length) body = items.slice(Math.max(0, this.cursor - bodyHeight + 1));
-      footer = innerWidth < 30
-        ? ["↵ Save ␣ Toggle", "← Discard ↑↓"]
-        : alignedHints([["Enter Save", "Space Toggle"],
-          ["←/q/Esc Back (discard)", "↑↓ Select"]], innerWidth);
-      if (this.actions.optimizer) {
-        const optimizer = this.actions.optimizer();
-        const rows: string[] = [];
-        let focusStart = 0;
-        let focusEnd = 0;
-        const add = (index: number, text: string, value?: string) => {
-          if (index === this.cursor) focusStart = rows.length;
-          const active = index === this.cursor;
-          // Keep option anchors stable: long model identifiers belong in details,
-          // not in variable-height navigation rows.
-          const label = sanitizeTerminalText(text);
-          const content = value === undefined
-            ? theme.fg("text", active ? theme.bold(label) : label)
-            : `${theme.fg("muted", `${label}:`)} ${theme.fg("text", active ? theme.bold(sanitizeTerminalText(value)) : sanitizeTerminalText(value))}`;
-          const line = truncateToWidth(content, Math.max(1, innerWidth - 2), "…");
-          const rendered = `${theme.fg("accent", active ? "› " : "  ")}${line}`;
-          rows.push(active ? theme.bg("selectedBg", rendered) : rendered);
-          if (active) focusEnd = rows.length;
-        };
-        rows.push(theme.fg("accent", theme.bold("Context · Enter Save")));
-        ["AGENTS.md", "tree", "skills"].forEach((label, i) => add(i, `[${this.selected[i] ? "x" : " "}] ${label}`));
-        rows.push("", theme.fg("accent", theme.bold("Optimizer")));
+      if (!this.actions.contextEnabled()) hint("Disabled by projectContext.enabled=false", "warning");
+      if (optimizer) {
+        rows.push("", theme.fg("muted", "Optimizer"));
         add(3, "Model", optimizer.model);
         add(4, "Thinking", optimizer.thinking);
-        if (this.actions.editSystemPrompt) add(5, "Optimization prompt", "View / Edit");
-        rows.push("", ...wrapTextWithAnsi("Only used by Prompt Refine; does not change the main session model or its thinking settings", innerWidth).map((line) => theme.fg("muted", line)));
-        const detail = this.cursor === 3 ? `Model: ${optimizer.model}` : this.cursor === 4 ? `Thinking: ${optimizer.thinking}` : description;
-        if (detail) rows.push(...wrapTextWithAnsi(sanitizeTerminalText(detail), innerWidth).map((line) => theme.fg("muted", line)));
-        if (!this.actions.contextEnabled()) rows.push(theme.fg("warning", "Disabled by projectContext.enabled=false"));
-        if (this.settingsNotice) rows.push(...wrapTextWithAnsi(this.settingsNotice, innerWidth).map((line) => theme.fg("warning", line)));
-        const start = Math.min(focusStart, Math.max(0, focusEnd - bodyHeight));
-        body = rows.slice(start, start + bodyHeight);
-        const action = this.cursor === 3 ? "Enter Choose model" : this.cursor === 4 ? "Enter Cycle thinking" : this.cursor === 5 ? "Enter Edit prompt" : "Enter Save context";
-        header[1] = theme.fg(dirty ? "warning" : "muted", this.saving ? "Saving..." : this.settingsNotice || (dirty ? "Unsaved context changes" : "Prompt Refine settings"));
-        footer = innerWidth < 30
-          ? alignedHints([[this.cursor >= 3 ? "↵ Change" : "↵ Save", "␣"], ["← Back", "↑↓"]], innerWidth)
-          : alignedHints([[action, this.cursor < 3 ? "Space Toggle" : "Space/→ Change"],
-            ["↑↓ Select", innerWidth < 50 ? "←/Esc Back" : "←/Esc Back (discard context)"]], innerWidth);
-        if (layout.footerHeight === 1) footer = [fittingHints([this.cursor >= 3 ? "↵ Change" : "↵ Save", "← Back"], innerWidth)];
-      } else if (layout.footerHeight === 1) footer = [fittingHints(["← Discard", "↵ Save"], innerWidth)];
+        if (this.actions.editSystemPrompt) add(5, "Optimization prompt");
+        hint("Optimizer only · Main session unchanged");
+        if (detail) hint(detail);
+      }
+      if (notice && layout.headerHeight < 2) rows.push(theme.fg(dirty ? "warning" : "muted", sanitizeTerminalText(notice)));
+      const start = Math.min(focusStart, Math.max(0, focusEnd - bodyHeight));
+      body = rows.slice(start, start + bodyHeight);
+      const action = this.cursor === 3 ? "Choose" : this.cursor === 4 ? "Cycle" : this.cursor === 5 ? "Edit" : "Save";
+      footer = alignedKeyHints(innerWidth < 30
+        ? [[["↵", this.cursor >= 3 ? "Change" : "Save"], ...(this.cursor < 3 ? [["␣", "Toggle"] as const] : [])], [["←", "Back"], ["↑↓", "Select"]]]
+        : [[["Enter", action], ...(this.cursor < 3 ? [["Space", "Toggle"] as const] : [])],
+          [["↑↓", "Select"], ["←/Esc", innerWidth < 50 ? "Back" : "Back (discard)"]]], innerWidth, theme);
+      if (layout.footerHeight === 1) footer = [fittingKeyHints([["↵", this.cursor >= 3 ? "Change" : "Save"], ["←", "Back"]], innerWidth, theme)];
     }
     return panelFrame(layout, header, body, footer, (text) => theme.fg("borderMuted", text));
   }
