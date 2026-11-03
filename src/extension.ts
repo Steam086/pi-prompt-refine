@@ -108,6 +108,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   let interacting = false;
   // Session-wide, not branch/workflow state. Rebuilt from Pi metadata on resume/reload.
   const namedSessions = new Set<string>();
+  const previewPositions = new Map<string, number>();
   const openHint = config.shortcuts.view ?? config.shortcuts.optimize ?? "/refine view";
 
   const controller = new RefineController({
@@ -126,14 +127,15 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
 
       const systemPrompt = request.systemPrompt;
       let projectText = "";
-      if (request.project) {
+      const projectConfig = structuredClone(config.projectContext);
+      if (request.project && request.preparedInput === undefined) {
         // History gates only the default tree; explicit @directories are independent.
         const tree = await collectDirectoryContext(
           request.project.cwd, request.revision ? `${request.draft}\n${request.revision.instruction}` : request.draft,
-          config.projectContext, !request.history.text, signal,
+          projectConfig, !request.history.text, signal,
         );
         if (signal.aborted) throw new Error("Context collection cancelled");
-        const project = assembleProjectContext(request.project.snapshot, tree, config.projectContext);
+        const project = assembleProjectContext(request.project.snapshot, tree, projectConfig);
         projectText = project.text;
         if (controller.getState().requestId === request.requestId && controller.getGeneration() === request.generation) {
           projectWarnings = project.warnings;
@@ -145,9 +147,11 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         }
       }
 
+      const preparedInput = request.preparedInput ?? buildRefineInput(request.draft, request.history, projectText, request.revision);
+      controller.capturePreparedInput(request.requestId, request.generation, preparedInput);
       const userMessage: UserMessage = {
         role: "user",
-        content: [{ type: "text", text: buildRefineInput(request.draft, request.history, projectText, request.revision) }],
+        content: [{ type: "text", text: preparedInput }],
         timestamp: Date.now(),
       };
       const response = await ctx.modelRegistry.streamSimple(
@@ -194,16 +198,19 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
   }
 
-  function contextLabel(): string {
-    if (!historySnapshot) return "Context: not captured";
-    const warning = projectWarnings.length ? `⚠${projectWarnings.length} · ` : "";
-    const history = !historySnapshot.messageCount
-      ? (projectLabel ? "No history" : "Draft only")
-      : `${historySnapshot.messageCount} msgs · ${historySnapshot.characterCount} char · ${historySnapshot.latestAssistantIncluded ? "assistant" : "no assistant"}${historySnapshot.truncated ? " · trimmed" : ""}`;
-    const completeness = historySnapshot.status === "disabled_by_policy"
+  function contextLabel(source?: Candidate): string {
+    const snapshot = source?.history ?? historySnapshot;
+    if (!snapshot) return "Context: not captured";
+    const project = source ? (source.project ? `${source.project.snapshot.instructionCount} rules · ${source.project.snapshot.skillCount} skills` : "") : projectLabel;
+    const warnings = source ? source.project?.snapshot.warnings ?? [] : projectWarnings;
+    const warning = warnings.length ? `⚠${warnings.length} · ` : "";
+    const history = !snapshot.messageCount
+      ? (project ? "No history" : "Draft only")
+      : `${snapshot.messageCount} msgs · ${snapshot.characterCount} char · ${snapshot.latestAssistantIncluded ? "assistant" : "no assistant"}${snapshot.truncated ? " · trimmed" : ""}`;
+    const completeness = snapshot.status === "disabled_by_policy"
       ? " · history off"
-      : `${historySnapshot.omittedMessageCount ? ` · ${historySnapshot.omittedMessageCount} omitted` : ""}${historySnapshot.excerptedMessageCount ? ` · ${historySnapshot.excerptedMessageCount} excerpted` : ""}`;
-    return `${warning}${history}${completeness}${projectLabel ? ` · ${projectLabel}` : ""}`;
+      : `${snapshot.omittedMessageCount ? ` · ${snapshot.omittedMessageCount} omitted` : ""}${snapshot.excerptedMessageCount ? ` · ${snapshot.excerptedMessageCount} excerpted` : ""}`;
+    return `${warning}${history}${completeness}${project ? ` · ${project}` : ""}`;
   }
 
   function updatePresentation(state: ControllerState): void {
@@ -225,14 +232,15 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       projectLabel = "";
       projectWarnings = [];
       ctx.ui.setWidget(STATUS_KEY, undefined);
-      closePreview?.();
+      if (controller.getTaskInput()) refreshPreview?.();
+      else closePreview?.();
     } else {
       const candidateText = controller.getCandidate()?.text;
       ctx.ui.setWidget(STATUS_KEY, interacting || closePreview ? undefined : (_tui, theme) => ({
         render: (width) => renderSummary({
           state, candidateText, contextLabel: contextLabel(), openHint,
           elapsedSeconds: state.elapsedSeconds ?? 0,
-          errorLabel: state.phase === "error" && candidateText ? `Revision failed; previous result kept. ${errorStatus(state)}` : errorStatus(state),
+          errorLabel: state.phase === "error" && candidateText ? `Request failed; previous result kept. ${errorStatus(state)}` : errorStatus(state),
         }, width, theme),
         invalidate() {},
       }), { placement: "aboveEditor" });
@@ -286,7 +294,12 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       return;
     }
 
-    const available = registeredModels(ctx);
+    if (modelSwitchBlocked(ctx)) return;
+    const taskModels = controller.getTaskModels().map(modelKey);
+    const available = registeredModels(ctx).slice().sort((a, b) => {
+      const rank = (model: ModelRef) => taskModels.includes(modelKey(model)) ? 0 : config.favorites.some((favorite) => modelKey(favorite) === modelKey(model)) ? 1 : 2;
+      return rank(a) - rank(b);
+    });
     if (available.length === 0) {
       notify(ctx, "No authorized text-generation models are available. Configure a model and authentication in Pi first.", "warning");
       return;
@@ -331,7 +344,9 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         container.addChild(new Text(theme.fg("accent", theme.bold("Choose optimizer model")), 1, 0));
         container.addChild(new Text(theme.fg("muted", "Optimizer only · Main session unchanged"), 1, 0));
         container.addChild(new Text(`${theme.fg("muted", "Search:")} ${query ? theme.fg("text", query) : theme.fg("muted", "provider/model, name, or thinking")}`, 1, 1));
-        const items = modelPickerItems(available, query, controller.getModel());
+        const items = modelPickerItems(available, query, controller.getModel()).map((item) => ({
+          ...item, description: `${taskModels.includes(item.value) ? "This task · " : ""}${item.description ?? ""}`,
+        }));
         list = new SelectList(items, Math.min(10, Math.max(1, items.length)), {
           selectedPrefix: (text) => theme.fg("accent", text),
           selectedText: (text) => theme.fg("accent", text),
@@ -416,6 +431,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       return;
     }
 
+    if (modelSwitchBlocked(ctx)) return;
     const firstSelection = !controller.getModel();
     const selected = modelRef(model);
     let changed = controller.setModel(selected);
@@ -459,17 +475,26 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     notify(ctx, persisted ? "Optimization prompt saved · Applies to future requests." : "Optimization prompt applied · Not persisted.");
   }
 
+  function modelSwitchBlocked(ctx: ExtensionContext): boolean {
+    const state = controller.getState();
+    if (state.phase !== "generating" && !state.pendingSend) return false;
+    notify(ctx, "Model/candidate switching is paused while generating or sending. Wait, or stop the request first.", "info");
+    return true;
+  }
+
   async function cycleModel(ctx: ExtensionContext): Promise<void> {
     useContext(ctx);
     if (ctx.mode !== "tui") {
       notify(ctx, "Favorite model cycling is only available in TUI mode.", "warning");
       return;
     }
-    const available = registeredModels(ctx);
-    const byKey = new Map(available.map((model) => [displayModel(modelRef(model)), model]));
-    const usable = config.favorites.filter((favorite) => byKey.has(displayModel(favorite)));
-    if (usable.length === 0) {
-      notify(ctx, "No available text-generation models are in favorites; edit the favorites list in prompt-refine.json.", "warning");
+    if (modelSwitchBlocked(ctx)) return;
+    const available = new Set(registeredModels(ctx).map(modelKey));
+    const refs = [...controller.getTaskModels(), ...config.favorites.filter((favorite) => available.has(modelKey(favorite))),
+      ...(controller.getModel() ? [controller.getModel()!] : [])];
+    const usable = [...new Map(refs.map((ref) => [modelKey(ref), ref])).values()];
+    if (usable.length < 2) {
+      notify(ctx, "Use m to choose another model; c cycles this task's models and favorites.", "info");
       return;
     }
     const current = controller.getModel();
@@ -549,6 +574,32 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     else if (result.kind === "started") {
       // A synchronously completed adapter is still handled without opening any UI.
     }
+  }
+
+  function generateSameInput(ctx: ExtensionContext): void {
+    useContext(ctx);
+    if (modelSwitchBlocked(ctx)) return;
+    const input = controller.getTaskInput();
+    if (!input?.preparedInput) {
+      notify(ctx, "No frozen input is available. Use r to refine the current editor first.", "info");
+      return;
+    }
+    if (input.sessionId !== ctx.sessionManager.getSessionId() || input.branchLeafId !== ctx.sessionManager.getLeafId()) {
+      notify(ctx, "The session branch changed; use r to capture a new input.", "warning");
+      return;
+    }
+    const error = optimizationError(ctx, input.draft);
+    if (error) { notify(ctx, error, "warning"); return; }
+    const selected = controller.getModel()!;
+    const model = ctx.modelRegistry.find(selected.provider, selected.id)!;
+    completionContext = ctx;
+    historySnapshot = input.history;
+    projectLabel = "Frozen input";
+    projectWarnings = [];
+    const result = controller.trigger({ ...input, model: selected,
+      thinkingLevel: effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel),
+    }, { force: true, sameTask: true });
+    if (result.kind !== "started") notify(ctx, "Same-input generation was not started; current results kept.", "warning");
   }
 
   async function confirmCurrentDraft(ctx: ExtensionContext, currentDraft: string, purpose: string): Promise<boolean> {
@@ -660,11 +711,11 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
   }
 
-  async function showPreview(ctx: ExtensionContext): Promise<void> {
+  async function showPreview(ctx: ExtensionContext, initialPage?: "history" | "usage"): Promise<void> {
     if (interacting || ctx.mode !== "tui") return;
     interacting = true;
     ctx.ui.setFooter(() => ({ render: () => [], invalidate() {} }));
-    try { await showPreviewContent(ctx); }
+    try { await showPreviewContent(ctx, undefined, 3, initialPage); }
     finally {
       interacting = false;
       ctx.ui.setFooter(undefined);
@@ -707,7 +758,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     return undefined;
   }
 
-  async function showPreviewContent(ctx: ExtensionContext, settingsContext?: ContextSettings, settingsCursor = 3): Promise<void> {
+  async function showPreviewContent(ctx: ExtensionContext, settingsContext?: ContextSettings, settingsCursor = 3, initialPage?: "history" | "usage"): Promise<void> {
     useContext(ctx);
     if (ctx.mode !== "tui") {
       notify(ctx, "Preview requires TUI mode.", "warning");
@@ -723,7 +774,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         const snapshot = (): PreviewOptions => {
           const state = controller.getState();
           const candidate = controller.getCandidate();
-          const accepted = state.phase === "idle" ? controller.getAccepted() : undefined;
+          const accepted = state.phase === "idle" ? controller.getViewedAccepted() : undefined;
           const displayed = candidate ?? accepted;
           const source = controller.getRequestSource();
           const draft = displayed?.draft ?? source?.draft;
@@ -737,14 +788,18 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             accepted: accepted ? { editorChanged: ctx.ui.getEditorText() !== accepted.text } : undefined,
             draftChanged: draft !== undefined && ctx.ui.getEditorText() !== draft,
             canRestore: !!controller.getRestore(),
-            contextLabel: accepted ? "Accepted snapshot · no model call" : contextLabel(), openHint,
+            contextLabel: accepted ? "Accepted snapshot · no model call" : contextLabel(displayed), openHint,
             elapsedSeconds: (state.phase === "error" ? state.elapsedSeconds : displayed?.elapsedSeconds ?? state.elapsedSeconds) ?? 0,
             errorLabel: errorStatus(state),
+            navigation: controller.getCandidatePosition(),
+            viewKey: displayed?.recordId ? `record-${displayed.recordId}` : `request-${state.requestId}-${controller.getModel()?.id ?? "none"}`,
+            thinkingLevel: displayed?.thinkingLevel,
           };
         };
-        const panel = new PreviewPanel(snapshot(), theme, () => tui.terminal.rows, () => tui.requestRender());
+        const panel = new PreviewPanel(snapshot(), theme, () => tui.terminal.rows, () => tui.requestRender(), previewPositions);
         let closed = false;
         const workspace = new RefineWorkspace(panel, tui, theme, keybindings, {
+          history: () => controller.getHistory(),
           context: () => ({
             instructions: !config.projectContext.instructionsEnabled ? "off" : config.projectContext.instructionsOnFollowUp ? "always" : "first",
             tree: config.projectContext.tree.enabled,
@@ -808,12 +863,14 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         const finish = (value?: Selection) => {
           if (closed) return;
           closed = true;
+          panel.rememberPosition();
           workspace.dispose();
           refreshPreview = undefined;
           closePreview = undefined;
           done(value);
         };
         if (settingsContext) workspace.openSettings(settingsContext, settingsCursor);
+        if (initialPage) workspace.openHistory(initialPage === "usage");
         closePreview = () => finish();
         refreshPreview = () => {
           if (closed) return;
@@ -831,7 +888,6 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           handleInput(data) {
             if (workspace.handleInput(data)) return;
             const navigationKey = parseKey(data);
-            if (navigationKey === "left") return;
             if (keybindings.matches(data, "tui.select.cancel") || navigationKey === "ctrl+\\") { finish(); return; }
             if (keybindings.matches(data, "tui.input.submit")) return;
             if (keybindings.matches(data, "tui.editor.cursorUp")) panel.scrollBy(-1);
@@ -840,6 +896,19 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             else if (keybindings.matches(data, "tui.editor.pageDown")) panel.page(1);
             else {
               const key = parseKey(data)?.toLocaleLowerCase();
+              if (key === "[" || key === "]") {
+                if (!modelSwitchBlocked(ctx)) controller.cycleCandidate(key === "[" ? -1 : 1);
+                return;
+              }
+              if ((key === "x" || key === "d") && controller.getState().phase === "generating") {
+                controller.stopRequest();
+                return;
+              }
+              if (key === "g") { generateSameInput(ctx); return; }
+              if (key === "c") {
+                void cycleModel(ctx).catch(() => notifyCurrent("Could not switch optimizer model.", "warning"));
+                return;
+              }
               if (key === "o" || key === "?" || key === "v") {
                 if (key === "o") panel.toggleOriginal();
                 else if (key === "?") panel.toggleHelp();
@@ -928,10 +997,14 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   }
 
   pi.registerCommand("refine", {
-    description: "Prompt Refine: /refine <text> or optimize [text], view, cancel, model, cycle, restore",
+    description: "Prompt Refine: /refine <text> or optimize [text], view, history, usage, cancel, model, cycle, restore",
     handler: async (args, ctx) => {
       const text = args.trim();
       const action = text.toLocaleLowerCase();
+      if (action === "history" || action === "usage") {
+        await showPreview(ctx, action);
+        return;
+      }
       const mapping: Record<string, ShortcutAction> = {
         optimize: "optimize",
         view: "view",

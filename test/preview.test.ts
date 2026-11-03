@@ -23,6 +23,23 @@ function create(overrides: Partial<PreviewOptions> = {}, rows = 40) {
 }
 
 describe("result reading panel", () => {
+  it("remembers candidate reading positions across navigation and model-picker reopen", () => {
+    const positions = new Map<string, number>();
+    const first = { ...options, viewKey: "record-1", candidateText: Array.from({ length: 100 }, (_, i) => `A line ${i}`).join("\n") };
+    const second = { ...options, viewKey: "record-2", candidateText: "B result" };
+    const panel = new PreviewPanel(first, plainTheme, () => 40, vi.fn(), positions);
+    panel.render(80);
+    panel.scrollBy(25);
+    const scrolled = panel.render(80);
+    panel.update(second);
+    expect(panel.render(80).join("\n")).toContain("B result");
+    panel.update(first);
+    expect(panel.render(80)).toEqual(scrolled);
+    panel.rememberPosition();
+    const reopened = new PreviewPanel(first, plainTheme, () => 40, vi.fn(), positions);
+    expect(reopened.render(80)).toEqual(scrolled);
+  });
+
   it("shows the literal submitted source while generating, then defaults to the result", () => {
     const draft = "## 原文\n保留 **字面符号** 与 `命令`。";
     const pending = { ...options, state: { ...options.state, phase: "generating" as const }, candidateText: undefined, draft };
@@ -270,7 +287,7 @@ describe("result reading panel", () => {
     const first = panel.render(100).join("\n");
     panel.page(1);
     const text = first + "\n" + panel.render(100).join("\n");
-    for (const hint of ["follow-up", "Edit candidate (no model call)", "x/d Stop request / discard result", "z Restore", "r Refine", "m Model", "c Cycle favorites", "o Original", "v Formatted/source", "i Input", "→ Settings", "Enter won't send", "Nothing to restore"]) {
+    for (const hint of ["follow-up", "Edit candidate (no model call)", "x/d Stop request / discard result", "z Restore", "r Refine", "m Model", "c Cycle task models + favorites", "o Original", "v Formatted/source", "i Input", "←/→ Page", "Tab Settings group", "Enter won't send", "Nothing to restore"]) {
       expect(text).toContain(hint);
     }
     panel.toggleHelp();
@@ -301,7 +318,9 @@ describe("result reading panel", () => {
     expect(next).toContain("e Edit");
     expect(next).toContain("f Revise");
     expect(next).not.toContain("i Input");
-    expect(next).toContain("→ Settings");
+    expect(next).toContain("Settings");
+    expect(next).toContain("←");
+    expect(next).toContain("→");
     expect(next).not.toContain("t Context");
     panel.scrollBy(10000);
     expect(panel.render(80).join("\n")).toContain("内容 79");

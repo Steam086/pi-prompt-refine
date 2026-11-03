@@ -158,7 +158,7 @@ describe("candidate revisions", () => {
     expect(controller.getCandidate()?.text).toBe("Previous");
   });
 
-  it.each(["cancel", "session", "model", "new-draft"])("does not resurrect a revision source after %s", async (change) => {
+  it.each(["cancel", "session", "new-draft"])("does not resurrect a revision source after %s", async (change) => {
     const pending = deferred<RefineCompletion>();
     let calls = 0;
     const { controller } = setup(() => ++calls === 1 ? Promise.resolve(success("Previous")) : pending.promise);
@@ -167,7 +167,6 @@ describe("candidate revisions", () => {
     controller.trigger(input("Draft", { revision: { previousCandidate: "Previous", instruction: "Shorter" } }), { revisionToken: controller.getCandidateToken()! });
     if (change === "cancel") controller.cancelAndDismiss();
     if (change === "session") controller.setSession("other");
-    if (change === "model") controller.setModel({ provider: "other", id: "model" });
     if (change === "new-draft") controller.trigger(input("New draft"));
     pending.reject(new Error("Late failure"));
     await flushPromises();
@@ -466,18 +465,140 @@ describe("RefineController request lifecycle", () => {
     expect(controller.isCandidateCurrent(token)).toBe(true);
   });
 
-  it.each(["model", "session", "branch", "reload", "shutdown"] as const)("invalidates late output after %s changes", async (boundary) => {
+  it.each(["session", "branch", "reload", "shutdown"] as const)("invalidates late output after %s changes", async (boundary) => {
     const pending = deferred<ReturnType<typeof success>>();
     const { controller } = setup(() => pending.promise);
     controller.trigger(input("A"));
-    if (boundary === "model") controller.setModel({ provider: "provider-b", id: "another" });
-    else if (boundary === "session") controller.setSession("session-2");
+    if (boundary === "session") controller.setSession("session-2");
     else if (boundary === "branch") controller.invalidateLifecycle(true);
     else if (boundary === "reload" || boundary === "shutdown") controller.setSession("session-1");
     pending.resolve(success("late"));
     await flushPromises();
     expect(controller.getCandidate()).toBeUndefined();
     expect(controller.getState().phase).toBe("idle");
+  });
+});
+
+describe("multi-model task history", () => {
+  const other = { provider: "provider-b", id: "second-model" };
+
+  it("retains models and candidate selection without calls or stale-token resurrection", async () => {
+    const complete = vi.fn(async (request: RefineRequest) => success(`${request.model.id}-${request.requestId}`));
+    const { controller } = setup(complete);
+    controller.trigger(input("Draft"));
+    await flushPromises();
+    const firstToken = controller.getCandidateToken()!;
+    const first = controller.getCandidate()!.text;
+    controller.trigger(controller.getTaskInput()!, { force: true, sameTask: true });
+    await flushPromises();
+    const second = controller.getCandidate()!.text;
+    expect(controller.getCandidatePosition()).toMatchObject({ index: 2, count: 2 });
+    controller.cycleCandidate(-1);
+    expect(controller.getCandidate()?.text).toBe(first);
+    expect(controller.isCandidateCurrent(firstToken)).toBe(false);
+    controller.setModel(other);
+    expect(controller.getCandidate()).toBeUndefined();
+    expect(controller.getCandidatePosition()).toMatchObject({ index: 0, count: 0 });
+    expect(controller.shouldOpenPanel("Draft")).toBe(true);
+    controller.trigger({ ...controller.getTaskInput()!, model: other }, { force: true, sameTask: true });
+    await flushPromises();
+    controller.setModel(model);
+    expect(controller.getCandidate()?.text).toBe(first);
+    controller.cycleCandidate(1);
+    expect(controller.getCandidate()?.text).toBe(second);
+    expect(complete).toHaveBeenCalledTimes(3);
+    expect(controller.getTaskModels()).toEqual([model, other]);
+  });
+
+  it("freezes final input and keeps it independent of revisions and journal copies", async () => {
+    const { controller } = setup();
+    controller.trigger(input("Original"));
+    controller.capturePreparedInput(controller.getState().requestId, controller.getGeneration(), '{"draft":"Original","project":"snapshot"}');
+    await flushPromises();
+    const frozen = controller.getTaskInput()!;
+    expect(controller.getCandidate()?.preparedInput).toBe(frozen.preparedInput);
+    frozen.draft = "Mutated";
+    controller.trigger(input("Original", { revision: { previousCandidate: "Refined", instruction: "Shorter" } }), { revisionToken: controller.getCandidateToken()! });
+    controller.capturePreparedInput(controller.getState().requestId, controller.getGeneration(), "revision packet");
+    await flushPromises();
+    expect(controller.getTaskInput()?.preparedInput).toContain('"draft":"Original"');
+    const history = controller.getHistory();
+    history[0]!.candidate!.text = "mutated";
+    expect(controller.getHistory()[0]?.candidate?.text).toBe("Refined");
+    expect(history[1]).toMatchObject({ kind: "revise", parentId: history[0]!.id, taskId: history[0]!.taskId });
+  });
+
+  it("archives manual edits without losing raw model output or inventing request usage", async () => {
+    const { controller } = setup(async () => ({ ...success("Raw model output"), usage: { totalTokens: 17 } }));
+    controller.trigger(input("Draft"));
+    await flushPromises();
+    controller.updateCandidate(controller.getCandidateToken()!, "Edited text");
+    const records = controller.getHistory();
+    expect(records).toHaveLength(2);
+    expect(records[0]).toMatchObject({ kind: "refine", candidate: { text: "Raw model output" }, usage: { totalTokens: 17 } });
+    expect(records[1]).toMatchObject({ kind: "edit", parentId: records[0]!.id, candidate: { text: "Edited text" } });
+    expect(records[1]?.usage).toBeUndefined();
+    controller.cycleCandidate(-1);
+    expect(controller.getCandidate()?.text).toBe("Raw model output");
+  });
+
+  it("keeps accepted records read-only while other models remain usable", async () => {
+    const { controller } = setup();
+    controller.trigger(input("Draft"));
+    await flushPromises();
+    controller.acceptCandidate(controller.getCandidateToken()!, "Draft", false, () => {});
+    controller.setModel(other);
+    expect(controller.getViewedAccepted()).toBeUndefined();
+    expect(controller.getCandidate()).toBeUndefined();
+    controller.trigger({ ...controller.getTaskInput()!, model: other }, { force: true, sameTask: true });
+    await flushPromises();
+    expect(controller.getCandidate()).toBeDefined();
+    controller.setModel(model);
+    expect(controller.getCandidateToken()).toBeUndefined();
+    expect(controller.getViewedAccepted()?.text).toBe("Refined");
+    expect(controller.getHistory()[0]?.acceptedAt).toEqual(expect.any(Number));
+  });
+
+  it("pauses switching in flight, stops without losing the task, and ignores late output", async () => {
+    const pending = deferred<RefineCompletion>();
+    const complete = vi.fn().mockResolvedValueOnce(success("First")).mockImplementationOnce(() => pending.promise);
+    const { controller } = setup(complete);
+    controller.trigger(input("Draft"));
+    await flushPromises();
+    controller.trigger(controller.getTaskInput()!, { force: true, sameTask: true });
+    expect(controller.setModel(other)).toBe(false);
+    expect(controller.cycleCandidate(1)).toBe(false);
+    expect(controller.trigger(controller.getTaskInput()!, { sameTask: true }).kind).toBe("busy");
+    controller.stopRequest();
+    expect(controller.getCandidate()?.text).toBe("First");
+    expect(controller.getTaskInput()?.draft).toBe("Draft");
+    expect(controller.setModel(other)).toBe(true);
+    pending.resolve(success("Late"));
+    await flushPromises();
+    expect(controller.getCandidate()).toBeUndefined();
+    expect(controller.getHistory().map((record) => record.status)).toEqual(["generated", "cancelled"]);
+  });
+
+  it("records failures, acceptance and acknowledged sends separately, scoped by session", async () => {
+    const complete = vi.fn().mockResolvedValueOnce({ ...success(""), invalidOutput: true, usage: { totalTokens: 5 } }).mockResolvedValue(success("Ready"));
+    const { controller } = setup(complete);
+    controller.trigger(input("Draft"));
+    await flushPromises();
+    controller.trigger(controller.getTaskInput()!, { force: true, sameTask: true });
+    await flushPromises();
+    controller.beginSend(controller.getCandidateToken()!);
+    expect(controller.setModel(other)).toBe(false);
+    expect(controller.getHistory()[1]?.sentAt).toBeUndefined();
+    controller.onSubmittedInput("Ready", "extension", "followUp");
+    expect(controller.getTaskInput()).toBeUndefined();
+    expect(controller.getHistory()[0]).toMatchObject({ status: "error", error: "invalid-output", usage: { totalTokens: 5 } });
+    expect(controller.getHistory()[1]?.sentAt).toEqual(expect.any(Number));
+    expect(controller.getHistory()[1]?.acceptedAt).toBeUndefined();
+    controller.setSession("other-session");
+    expect(controller.getHistory()).toEqual([]);
+    controller.setSession("session-1");
+    expect(controller.getHistory()).toHaveLength(2);
+    expect(controller.getTaskInput()).toBeUndefined();
   });
 });
 

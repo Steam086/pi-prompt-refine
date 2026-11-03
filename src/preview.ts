@@ -1,7 +1,7 @@
 import { Markdown, ScrollView, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
-import { panelFrame, panelLayout, panelTabs } from "./panel-layout.js";
+import { panelFrame, panelLayout, workspaceTabs } from "./panel-layout.js";
 import { formatTokenUsage } from "./usage.js";
 import { resultHeading, sanitizeTerminalText, type SummaryOptions } from "./presentation.js";
 
@@ -15,6 +15,9 @@ export interface PreviewOptions extends SummaryOptions {
   /** Pending metadata, never part of the editable prompt or an accepted snapshot. */
   sessionTitle?: string;
   notice?: string;
+  navigation?: { index: number; count: number; label: string };
+  viewKey?: string;
+  thinkingLevel?: string;
 }
 
 type PreviewTheme = Pick<Theme, "bg" | "fg" | "bold" | "italic" | "underline" | "strikethrough">;
@@ -40,6 +43,7 @@ function markdownTheme(theme: PreviewTheme): MarkdownTheme {
 
 /** Read-only result view. Actions and candidate/session guards remain in the extension. */
 export class PreviewPanel implements Component {
+  private restorePosition?: number;
   private originalVisible = false;
   private helpVisible = false;
   private sourceVisible = false;
@@ -56,12 +60,20 @@ export class PreviewPanel implements Component {
     private readonly theme: PreviewTheme,
     private readonly rows: () => number,
     private readonly requestRender: () => void,
+    private readonly positions = new Map<string, number>(),
   ) {
+    this.restorePosition = options.viewKey ? positions.get(options.viewKey) : undefined;
     this.scroll = new ScrollView({ render: (width) => this.renderBody(width), invalidate: () => this.invalidate() }, { scrollbar: "hidden" });
     this.rebuildDocument();
   }
 
   update(options: PreviewOptions): void {
+    if (options.viewKey !== this.options.viewKey) {
+      this.rememberPosition();
+      this.restorePosition = options.viewKey ? this.positions.get(options.viewKey) ?? 0 : 0;
+      this.originalVisible = false;
+      this.revealOriginal = false;
+    }
     const changed = options.state.requestId !== this.options.state.requestId || options.state.phase !== this.options.state.phase ||
       options.candidateText !== this.options.candidateText;
     const textChanged = options.candidateText !== this.options.candidateText || options.draft !== this.options.draft ||
@@ -74,7 +86,8 @@ export class PreviewPanel implements Component {
     }
     // Elapsed time and notices affect chrome, not document layout. Keep the long
     // body cached during progress ticks and background refreshes while scrolling.
-    const bodyChanged = textChanged || changed || options.state.pendingSend !== this.options.state.pendingSend ||
+    const bodyChanged = textChanged || changed || options.viewKey !== this.options.viewKey ||
+      JSON.stringify(options.navigation) !== JSON.stringify(this.options.navigation) || options.state.pendingSend !== this.options.state.pendingSend ||
       options.draftChanged !== this.options.draftChanged || options.sessionTitle !== this.options.sessionTitle ||
       options.errorLabel !== this.options.errorLabel || !!options.accepted !== !!this.options.accepted ||
       options.accepted?.editorChanged !== this.options.accepted?.editorChanged ||
@@ -86,6 +99,11 @@ export class PreviewPanel implements Component {
     if (textChanged) this.rebuildDocument();
     else if (bodyChanged) this.cachedBody = undefined;
     if (changed) this.scroll.scrollToStart();
+  }
+
+  rememberPosition(): void {
+    if (this.options.viewKey) this.positions.set(this.options.viewKey, this.originalVisible || this.helpVisible ? 0 : this.scroll.scrollTop);
+    if (this.positions.size > 100) this.positions.delete(this.positions.keys().next().value!);
   }
 
   setNotice(notice: string): void { this.options = { ...this.options, notice }; }
@@ -166,10 +184,14 @@ export class PreviewPanel implements Component {
       helpLine(["z", "Restore draft before acceptance"]);
       lines.push("", theme.fg("muted", "Refine & navigate"));
       helpLine(["r", "Refine current draft (model call)"]);
-      helpLine(["m", "Model"], ["c", "Cycle favorites"]);
+      helpLine(["g", "Generate from the same frozen input (model call)"]);
+      helpLine(["m", "Model"], ["c", "Cycle task models + favorites"]);
+      helpLine(["[ / ]", "Previous / next candidate for this model"]);
+      helpLine(["←/→", "Page: Preview / History / Usage / Settings"]);
+      paragraph("While generating or sending, model/candidate switching is paused. Stop first or wait.", "muted");
       helpLine(["o", "Original"], ["v", "Formatted/source"]);
       helpLine(["↑↓", "Scroll"], ["PgUp/PgDn", "Page"]);
-      helpLine(["i", "Input"], ["→", "Settings (Esc discards unsaved context)"]);
+      helpLine(["i", "Input"], ["Tab", "Settings group (Context / Optimizer)"]);
       helpLine(["q", "Back"], ["?", "Hide help"]);
       paragraph("Enter won't send", "muted");
       if (!options.canRestore) paragraph("Nothing to restore.", "muted");
@@ -180,7 +202,7 @@ export class PreviewPanel implements Component {
     }
     if (options.candidateText !== undefined) {
       if (options.state.phase === "error") {
-        paragraph(`Revision failed; previous result kept. ${options.errorLabel ?? "Try again with f Revise."}`, "warning");
+        paragraph(`Request failed; previous result kept. ${options.errorLabel ?? "Use g to generate again, or f to revise."}`, "warning");
         lines.push("");
       }
       if (options.accepted) {
@@ -240,7 +262,8 @@ export class PreviewPanel implements Component {
       }
     } else {
       const needsModel = this.isEmptyState() && !options.state.model;
-      paragraph(needsModel ? "No model selected" : "No result yet.");
+      paragraph(needsModel ? "No model selected" : options.navigation ? "No candidate for this model." : "No result yet.");
+      if (options.navigation) paragraph("g generates from the same frozen input; r reads the current editor.", "muted");
       if (this.isEmptyState()) {
         const model = options.state.model;
         paragraph(model ? `${model.provider}/${model.id}` : "Choose one with m or /refine model.", "muted");
@@ -260,7 +283,13 @@ export class PreviewPanel implements Component {
     const { theme, options } = this;
     const layout = panelLayout(width, this.rows());
     const { innerWidth } = layout;
-    const navigation = panelTabs(layout, ["Preview", "→ Settings"], 0, theme);
+    const navigation = workspaceTabs(layout, "Preview", theme);
+    if (options.navigation && layout.bodyHeight - navigation.length >= 4) {
+      const position = options.navigation;
+      navigation.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(
+        `${position.index}/${position.count} · ${position.label}${options.thinkingLevel ? ` · ${options.thinkingLevel}` : ""} · [ / ] Candidates · m Model · c Cycle · g Generate`,
+      ), innerWidth)));
+    }
     const bodyHeight = layout.bodyHeight - navigation.length;
     const heading = options.accepted
       ? theme.fg("success", theme.bold(`✓ Accepted · ${options.elapsedSeconds}s`))
@@ -272,7 +301,7 @@ export class PreviewPanel implements Component {
       model ? `${model.provider}/${model.id}` : "No model",
       ...(options.state.phase !== "idle" || options.accepted ? [options.contextLabel] : []),
     ].join(" · "));
-    const status = this.isEmptyState() ? "" : [heading, theme.fg("muted", metadata)].filter(Boolean).join(" · ");
+    const status = this.isEmptyState() && !options.navigation ? "" : [heading, theme.fg("muted", metadata)].filter(Boolean).join(" · ");
     header.push(options.notice ? theme.fg("muted", sanitizeTerminalText(options.notice)) : status);
     // Keep the main decision visible; secondary actions remain available in Help.
     // Pending/generating states take priority even if a previous candidate is retained.
@@ -286,13 +315,20 @@ export class PreviewPanel implements Component {
             ? [["a", "Accept"], ["e", "Edit"], ["f", "Revise"]]
             : [["r", options.state.phase === "error" ? "Retry" : "Refine"], ["m", "Model"], ["i", "Input"]];
     const secondary: KeyHint[] = [["q", "Back"], ["?", this.helpVisible ? "Hide help" : "Help"]];
+    if (options.navigation && options.state.phase !== "generating" && !options.state.pendingSend) {
+      secondary.push(["m", "Model"], ["c", "Cycle"], ["g", "Same input"], ["←/→", "Page"]);
+    }
     // Independent rows keep long primary labels from crowding out Back/Help.
     const footer = [fittingKeyHints(primary, innerWidth, theme), fittingKeyHints(secondary, innerWidth, theme)];
-    if (layout.footerHeight === 1) footer[0] = fittingKeyHints([...secondary, ...primary], innerWidth, theme);
+    if (layout.footerHeight === 1) footer[0] = fittingKeyHints([...secondary.slice(0, 2), ...primary, ...secondary.slice(2)], innerWidth, theme);
     // ScrollView owns offsets/clamping. Explicit viewport composition also works in regular
     // mode, where ScrollView.render() alone returns the entire document without clipping.
     const body = this.scroll.render(innerWidth);
     this.scroll.updateLayout(body.length, bodyHeight, this.requestRender);
+    if (this.restorePosition !== undefined) {
+      this.scroll.scrollTo(this.restorePosition);
+      this.restorePosition = undefined;
+    }
     if (this.revealOriginal) {
       this.scroll.scrollTo(this.originalLine);
       this.revealOriginal = false;

@@ -6,6 +6,8 @@ import { PreviewPanel, type PreviewOptions } from "../src/preview.js";
 import { RefineWorkspace } from "../src/workspace.js";
 import { panelLayout } from "../src/panel-layout.js";
 import { formatKeyHint } from "../src/key-hints.js";
+import type { RefineRecord } from "../src/history.js";
+import { selectHistory } from "../src/context.js";
 
 const options: PreviewOptions = {
   state: { phase: "ready", requestId: 1, pendingSend: false },
@@ -19,6 +21,7 @@ function create(rows = 40, themeName = "dark", optimizer = false) {
   const theme = getThemeByName(themeName)!;
   const panel = new PreviewPanel(options, theme, () => terminal.rows, () => tui.requestRender());
   const actions = {
+    history: vi.fn((): RefineRecord[] => []),
     context: () => ({ instructions: "always" as const, tree: true, skills: false }), contextEnabled: () => true,
     ...(optimizer ? {
       optimizer: () => ({ model: "provider/long-model-identifier-with-extra-details", thinking: "high · Extension setting", thinkingEnabled: true }),
@@ -36,6 +39,94 @@ function create(rows = 40, themeName = "dark", optimizer = false) {
 const textOf = (lines: string[]) => lines.join("\n");
 
 describe("shared refine workspace", () => {
+  it.each(["dark", "light"])("cycles all four top-level pages in both directions with shared chrome in %s", (name) => {
+    const { workspace, actions, theme } = create(40, name, true);
+    const height = workspace.render(100).length;
+    for (const [key, pages] of [
+      ["\x1b[C", ["History", "Usage", "Settings", "Preview"]],
+      ["\x1b[D", ["Settings", "Usage", "History", "Preview"]],
+    ] as const) {
+      for (const page of pages) {
+        expect(workspace.handleInput(key)).toBe(true);
+        const lines = workspace.render(100);
+        expect(lines).toHaveLength(height);
+        const strip = lines[4]!;
+        expect(strip).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(` ${page} `))));
+        for (const label of ["Preview", "History", "Usage", "Settings", "←", "→"]) expect(strip).toContain(label);
+        expect(strip).not.toMatch(/h History|u Usage|→ Settings/);
+        expect(stripVTControlCharacters(lines[1]!)).toContain(page === "Preview" ? "Prompt refine" : page);
+        for (const obsolete of ["h", "u"]) {
+          workspace.handleInput(obsolete);
+          expect(workspace.render(100)).toEqual(lines);
+        }
+      }
+    }
+    expect(actions.submit).not.toHaveBeenCalled();
+    expect(actions.saveContext).not.toHaveBeenCalled();
+    expect(actions.chooseModel).not.toHaveBeenCalled();
+    expect(actions.cycleThinking).not.toHaveBeenCalled();
+  });
+
+  it("preserves unsaved Context across page arrows, but Esc from Settings still discards it", () => {
+    const { workspace, actions } = create(40, "dark", true);
+    workspace.handleInput("\x1b[D"); // Preview -> Settings, wrapping left.
+    workspace.handleInput(" ");
+    workspace.handleInput("\t");
+    workspace.handleInput("\x1b[B");
+    const settings = workspace.render(100);
+    for (let i = 0; i < 4; i++) workspace.handleInput("\x1b[C");
+    expect(workspace.render(100)).toEqual(settings);
+    expect(textOf(settings)).toContain("Unsaved context changes");
+    expect(stripVTControlCharacters(textOf(settings))).toContain("› Thinking");
+    expect(actions.saveContext).not.toHaveBeenCalled();
+    workspace.handleInput("\x1b");
+    workspace.handleInput("\x1b[D");
+    expect(textOf(workspace.render(100))).not.toContain("Unsaved context changes");
+    workspace.handleInput("\t");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toMatch(/Project instructions +Always/);
+  });
+
+  it("switches away from History details with arrows and keeps Preview's reading state", () => {
+    const { workspace, actions, panel } = create(40, "dark", true);
+    const input = { draft: "Original", model: { provider: "p", id: "m" }, sessionId: "session", branchLeafId: "leaf", systemPrompt: "Policy", history: selectHistory([], 12, 100) };
+    const records: RefineRecord[] = [{ id: 1, taskId: 1, kind: "refine", createdAt: 1, status: "generated", input,
+      candidate: { ...input, requestId: 1, version: 1, generation: 0, text: "Historical candidate" } }];
+    actions.history.mockReturnValue(records);
+    panel.toggleSource();
+    workspace.render(100);
+    panel.scrollBy(20);
+    const preview = workspace.render(100);
+    workspace.handleInput("\x1b[C");
+    workspace.handleInput("\r");
+    expect(textOf(workspace.render(100))).toContain("Historical candidate");
+    workspace.handleInput("\x1b[C");
+    expect(stripVTControlCharacters(workspace.render(100)[1]!)).toContain("Usage");
+    workspace.handleInput("\x1b[C");
+    expect(stripVTControlCharacters(workspace.render(100)[1]!)).toContain("Settings");
+    workspace.handleInput("\x1b[C");
+    expect(workspace.render(100)).toEqual(preview);
+    expect(actions.submit).not.toHaveBeenCalled();
+    expect(actions.saveContext).not.toHaveBeenCalled();
+  });
+
+  it.each(["dark", "light"])("bounds every top-level page and retains compact active tabs in %s", (name) => {
+    for (const rows of [5, 8, 12, 16, 24, 40]) {
+      for (const width of [1, 8, 12, 20, 40, 100]) {
+        const { workspace } = create(rows, name, true);
+        for (const page of ["History", "Usage", "Settings", "Preview"]) {
+          workspace.handleInput("\x1b[C");
+          const lines = workspace.render(width);
+          expect(lines).toHaveLength(panelLayout(width, rows).height);
+          for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+          if (width >= 20 && rows >= 16) {
+            const strip = lines.map(stripVTControlCharacters).find((line) => line.includes("←") && line.includes(page));
+            expect(strip).toBeDefined();
+          }
+        }
+      }
+    }
+  });
+
   it.each([20, 40, 80])("keeps instruction values readable at %i columns", (width) => {
     const { workspace } = create();
     for (const [instructions, value] of [["first", "First"], ["always", "Always"], ["off", "Off"]] as const) {
@@ -78,7 +169,7 @@ describe("shared refine workspace", () => {
     const before = lines.findIndex((line) => line.includes("Directory tree"));
     workspace.handleInput("\x1b[B");
     expect(workspace.render(100).findIndex((line) => line.includes("Directory tree"))).toBe(before);
-    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["←/→", "Group"], theme));
+    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["Tab", "Group"], theme));
   });
 
   it.each(["dark", "light"])("keeps a continuous highlight around clipped Unicode values in %s", (name) => {
@@ -99,13 +190,13 @@ describe("shared refine workspace", () => {
     workspace.openSettings();
     workspace.handleInput("\r");
     workspace.handleInput("\x1b[B");
-    workspace.handleInput("\x1b[C");
+    workspace.handleInput("\t");
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Model");
     workspace.handleInput("\x1b[B");
-    workspace.handleInput("\x1b[D");
+    workspace.handleInput("\t");
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Directory tree");
     expect(textOf(workspace.render(100))).toContain("Unsaved context changes");
-    workspace.handleInput("\x1b[C");
+    workspace.handleInput("\t");
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Thinking");
     expect(actions.saveContext).not.toHaveBeenCalled();
     expect(actions.cycleThinking).not.toHaveBeenCalled();
@@ -133,7 +224,8 @@ describe("shared refine workspace", () => {
     expect(main[1]).toContain(theme.fg("text", theme.bold("Prompt refine")));
     expect(settings[1]).toContain(theme.fg("text", theme.bold("Settings")));
     expect(main[4]).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Preview "))));
-    expect(settings[4]).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Context "))));
+    expect(settings[4]).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Settings "))));
+    expect(textOf(settings)).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Context "))));
     expect(main.at(-2)).toContain(formatKeyHint(["a", "Accept"], theme));
     expect(settings.at(-2)).toContain(formatKeyHint(["Enter", "Change"], theme));
     expect(main).toHaveLength(settings.length);
@@ -152,9 +244,9 @@ describe("shared refine workspace", () => {
     paint.mockRestore();
     optimizer.mockReturnValue({ model: "provider/updated-model", thinking: "low", thinkingEnabled: true });
     workspace.refreshSettings();
-    workspace.handleInput("\x1b[C");
+    workspace.handleInput("\t");
     expect(textOf(workspace.render(100))).toContain("provider/updated-model");
-    workspace.handleInput("\x1b[D");
+    workspace.handleInput("\t");
     workspace.handleInput(" ");
     expect(textOf(workspace.render(100))).toContain("Unsaved context changes");
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toMatch(/Project instructions +Off/);
@@ -224,14 +316,14 @@ describe("shared refine workspace", () => {
     const { workspace } = create(40, "dark", true);
     workspace.openSettings();
     expect(textOf(workspace.render(100))).toContain("Ctrl+S to save · Applies to future requests");
-    workspace.handleInput("\x1b[C");
+    workspace.handleInput("\t");
     expect(textOf(workspace.render(100))).toContain("Changes save on confirmation");
-    workspace.handleInput("\x1b[D");
+    workspace.handleInput("\t");
     workspace.handleInput(" ");
     for (let i = 0; i < 2; i++) {
       expect(textOf(workspace.render(100))).toContain("Unsaved context changes");
       expect(textOf(workspace.render(100))).toContain("Discard context changes");
-      workspace.handleInput("\x1b[C");
+      workspace.handleInput("\t");
     }
   });
 
@@ -242,8 +334,7 @@ describe("shared refine workspace", () => {
     const before = workspace.render(100);
     expect(textOf(before)).toContain("Disabled by projectContext.enabled=false");
     expect(textOf(before)).not.toContain("Optimizer");
-    workspace.handleInput("\x1b[C");
-    workspace.handleInput("\x1b[D");
+    workspace.handleInput("\t");
     expect(workspace.render(100)).toEqual(before);
   });
 
@@ -273,7 +364,7 @@ describe("shared refine workspace", () => {
         const { workspace, terminal } = create(rows, theme);
         const layout = panelLayout(width, rows);
         const main = workspace.render(width);
-        workspace.handleInput("\x1b[C");
+        workspace.handleInput("\x1b[D");
         const context = workspace.render(width);
         workspace.handleInput("\x1b");
         workspace.handleInput("i");
@@ -300,7 +391,7 @@ describe("shared refine workspace", () => {
     workspace.render(80);
     panel.page(1);
     const before = workspace.render(80);
-    for (const [open, back] of [["\x1b[C", "\x1b"], ["i", "\x1b"]]) {
+    for (const [open, back] of [["\x1b[D", "\x1b"], ["i", "\x1b"]]) {
       workspace.handleInput(open!);
       workspace.render(80);
       workspace.handleInput(back!);
@@ -308,7 +399,7 @@ describe("shared refine workspace", () => {
     }
     panel.toggleOriginal();
     const original = workspace.render(80);
-    workspace.handleInput("\x1b[C");
+    workspace.handleInput("\x1b[D");
     workspace.handleInput("q");
     expect(workspace.render(80)).toEqual(original);
   });
@@ -410,14 +501,14 @@ describe("shared refine workspace", () => {
 
   it("keeps selected settings visible in a tiny viewport and retains their cursor", () => {
     const { workspace } = create(8);
-    workspace.handleInput("\x1b[C");
+    workspace.handleInput("\x1b[D");
     for (const label of ["Project instructions: Always", "Directory tree: [x] On", "Skill metadata: [ ] Off"]) {
       expect(stripVTControlCharacters(textOf(workspace.render(40)))).toContain(`› ${label}`);
       workspace.handleInput("\x1b[B");
     }
     workspace.handleInput("\x1b[B");
     workspace.handleInput("q");
-    workspace.handleInput("\x1b[C");
+    workspace.handleInput("\x1b[D");
     expect(stripVTControlCharacters(textOf(workspace.render(40)))).toContain("› Directory tree: [x] On");
   });
 
@@ -438,7 +529,7 @@ describe("shared refine workspace", () => {
     workspace.handleInput("\r");
     expect(actions.saveContext).not.toHaveBeenCalled();
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toMatch(/› Project instructions +Off/);
-    if (cursor >= 3) workspace.handleInput("\x1b[C");
+    if (cursor >= 3) workspace.handleInput("\t");
     for (let i = 0; i < cursor % 3; i++) workspace.handleInput("\x1b[B");
     expect(textOf(workspace.render(100))).toContain("Ctrl+S");
     workspace.handleInput("\x13");
@@ -490,7 +581,7 @@ describe("shared refine workspace", () => {
     expect(output).toContain(theme.fg("dim", "Thinking              "));
     expect(output).toContain("Enter");
     expect(output).not.toContain("Cycle");
-    for (const key of ["\r", " ", "\x1b[C", "\x1b[Z"]) workspace.handleInput(key);
+    for (const key of ["\r", " ", "\x1b[Z"]) workspace.handleInput(key);
     expect(actions.cycleThinking).not.toHaveBeenCalled();
     expect(actions.saveContext).not.toHaveBeenCalled();
   });
@@ -518,7 +609,7 @@ describe("shared refine workspace", () => {
     const { workspace, actions } = create();
     let resolve!: (notice: string) => void;
     actions.saveContext.mockImplementation(() => new Promise((done) => { resolve = done; }));
-    workspace.handleInput("\x1b[C");
+    workspace.handleInput("\x1b[D");
     workspace.handleInput(" ");
     expect(textOf(workspace.render(80))).toContain("Unsaved context changes");
     workspace.handleInput("\x13");
