@@ -209,6 +209,12 @@ describe("buildRefineInput", () => {
     "unverified claims", "Historical assistant proposals are not user-approved requirements",
     "Retain applicable earlier user constraints", "unambiguously", "Do not alter literal content",
     "Never add unauthorized tasks",
+    "Supplied context may be extensive and noisy, with repeated, outdated, or irrelevant information",
+    "Use the current draft as the focus",
+    "select only the context needed to understand the current intent, resolve references, and preserve applicable constraints",
+    "Do not incorporate information into the rewrite merely because it was supplied",
+    "When recent context is sufficient, do not bring in older unrelated material",
+    "still retain earlier constraints that remain applicable",
   ])("includes the default semantic fidelity contract: %s", (rule) => {
     expect(REFINE_SYSTEM_PROMPT).toContain(rule);
   });
