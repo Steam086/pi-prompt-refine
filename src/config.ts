@@ -15,6 +15,7 @@ export interface ProjectContextConfig {
   enabled: boolean;
   maxChars: number;
   instructionsMaxChars: number;
+  /** Include rules in Revise requests; new refinement tasks always start fresh. */
   instructionsOnFollowUp: boolean;
   instructionsEnabled: boolean;
   skillsEnabled: boolean;

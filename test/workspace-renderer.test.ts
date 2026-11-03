@@ -27,7 +27,7 @@ describe("workspace terminal rendering", () => {
       candidateText: "A short result", contextLabel: "Draft only", elapsedSeconds: 0, openHint: "ctrl+\\", canRestore: false,
     }, theme, () => terminal.rows, () => tui.requestRender());
     const workspace = new RefineWorkspace(panel, tui, theme, getKeybindings(), {
-      context: () => [true, true, false], contextEnabled: () => true,
+      context: () => ({ instructions: "always" as const, tree: true, skills: false }), contextEnabled: () => true,
       optimizer: () => ({ model: "provider/long-model-identifier-with-extra-details", thinking: "high · Extension setting", thinkingEnabled: true }),
       chooseModel() {}, editSystemPrompt() {},
       saveContext: async () => "Saved", submit: () => undefined,

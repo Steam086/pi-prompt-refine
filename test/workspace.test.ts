@@ -19,7 +19,7 @@ function create(rows = 40, themeName = "dark", optimizer = false) {
   const theme = getThemeByName(themeName)!;
   const panel = new PreviewPanel(options, theme, () => terminal.rows, () => tui.requestRender());
   const actions = {
-    context: () => [true, true, false], contextEnabled: () => true,
+    context: () => ({ instructions: "always" as const, tree: true, skills: false }), contextEnabled: () => true,
     ...(optimizer ? {
       optimizer: () => ({ model: "provider/long-model-identifier-with-extra-details", thinking: "high · Extension setting", thinkingEnabled: true }),
       chooseModel: vi.fn(), editSystemPrompt: vi.fn(), cycleThinking: vi.fn(async () => "Thinking level saved"),
@@ -36,11 +36,35 @@ function create(rows = 40, themeName = "dark", optimizer = false) {
 const textOf = (lines: string[]) => lines.join("\n");
 
 describe("shared refine workspace", () => {
+  it.each([20, 40, 80])("keeps each instruction mode recognizable at %i columns", (width) => {
+    const { workspace } = create();
+    for (const [instructions, value] of [["first", "First"], ["always", "Always"], ["off", "Off"]] as const) {
+      workspace.openSettings({ instructions, tree: true, skills: false });
+      const selected = workspace.render(width).map(stripVTControlCharacters).find((line) => line.includes("› "));
+      expect(selected).toContain(value);
+    }
+  });
+
+  it.each(["\r", " "])("cycles instruction modes without saving or moving other rows using %j", (key) => {
+    const { workspace, actions } = create(40, "dark", true);
+    workspace.openSettings({ instructions: "first", tree: true, skills: false });
+    const position = () => workspace.render(80).findIndex((line) => line.includes("Directory tree"));
+    const originalPosition = position();
+    for (const mode of ["Always", "Off", "First request only"]) {
+      workspace.handleInput(key);
+      expect(stripVTControlCharacters(textOf(workspace.render(80)))).toContain(`› Project instructions: ${mode}`);
+      expect(position()).toBe(originalPosition);
+      expect(actions.saveContext).not.toHaveBeenCalled();
+    }
+    workspace.handleInput("\x13");
+    expect(actions.saveContext).toHaveBeenCalledWith({ instructions: "first", tree: true, skills: false });
+  });
+
   it.each(["dark", "light"])("keeps optimizer settings readable across widths in %s", (theme) => {
     for (const rows of [8, 16, 24, 40]) {
       for (const width of [12, 20, 40, 80, 160]) {
         const { workspace } = create(rows, theme, true);
-        workspace.openSettings([false, true, false], 3);
+        workspace.openSettings({ instructions: "off", tree: true, skills: false }, 3);
         for (const cursor of [3, 4]) {
           if (cursor === 4) workspace.handleInput("\x1b[B");
           const lines = workspace.render(width);
@@ -85,7 +109,7 @@ describe("shared refine workspace", () => {
 
   it.each(["dark", "light"])("separates optimizer labels, values and selection in %s", (name) => {
     const { workspace, theme } = create(40, name, true);
-    workspace.openSettings([true, true, false], 4);
+    workspace.openSettings({ instructions: "always", tree: true, skills: false }, 4);
     const bold = vi.spyOn(theme, "bold");
     const lines = workspace.render(100);
     const boldCalls = bold.mock.calls.map(([text]) => text);
@@ -108,12 +132,12 @@ describe("shared refine workspace", () => {
     const { workspace } = create(40, "dark", optimizer);
     workspace.openSettings();
     const lines = workspace.render(100).map(stripVTControlCharacters);
-    expect(lines[2]?.trim()).toBe("Manual save · Next refinement only");
+    expect(lines[2]?.trim()).toBe("Ctrl+S to save · Applies to future requests");
     const content = lines.slice(0, -2).join("\n");
     expect(content).toContain("Context");
-    expect(content).toContain("Manual save · Next refinement only");
+    expect(content).toContain("Ctrl+S to save · Applies to future requests");
     expect(lines.slice(-2).join("\n")).toContain("Ctrl+S Save context");
-    expect(lines.slice(-2).join("\n")).toContain("Enter Toggle");
+    expect(lines.slice(-2).join("\n")).toContain("Enter Cycle");
     workspace.handleInput(" ");
     expect(textOf(workspace.render(100))).toContain("Unsaved context changes");
     expect(textOf(workspace.render(100))).toContain("Discard context changes");
@@ -145,11 +169,11 @@ describe("shared refine workspace", () => {
         const rendered = workspace.render(width);
         const lines = rendered.map(stripVTControlCharacters);
         const position = (text: string) => lines.findIndex((line) => line.includes(text));
-        const current = ["Context", "Include project instructions", "[x] Directory tree", "Skill metadata", "Optimizer", "Model:", "Thinking:", "Optimization prompt"].map(position);
+        const current = ["Context", "Project instructions", "[x] Directory tree", "Skill metadata", "Optimizer", "Model:", "Thinking:", "Optimization prompt"].map(position);
         expect(current.every((index) => index >= 0)).toBe(true);
         if (anchors) expect(current).toEqual(anchors);
         else anchors = current;
-        const descriptions = ["Use rules supplied by Pi (e.g. AGENTS.md).", "Default tree only; @directory references are separate.", "Include skill descriptions; never run skills."];
+        const descriptions = ["Include Pi rules (e.g. AGENTS.md) in every refinement and Revise request.", "Default tree only; @directory references are separate.", "Include skill descriptions; never run skills."];
         if (cursor < 3) {
           expect(lines.at(-5)).toContain(descriptions[cursor]);
           expect(rendered.at(-5)).toContain(theme.fg("muted", descriptions[cursor]!));
@@ -181,7 +205,7 @@ describe("shared refine workspace", () => {
 
   it("shows the full model value in a fixed detail area without shifting navigation", () => {
     const { workspace } = create(40, "dark", true);
-    workspace.openSettings([true, true, false], 3);
+    workspace.openSettings({ instructions: "always", tree: true, skills: false }, 3);
     expect(workspace.render(100).at(-5)).toContain("Model: provider/long-model-identifier-with-extra-details");
     expect(textOf(workspace.render(40)).match(/Model:/g)).toHaveLength(2);
     expect(workspace.render(40).at(-5)).toContain("Model:");
@@ -189,7 +213,7 @@ describe("shared refine workspace", () => {
 
   it("keeps long optimizer identifiers on one navigation row", () => {
     const { workspace } = create(40, "dark", true);
-    workspace.openSettings([true, true, false], 3);
+    workspace.openSettings({ instructions: "always", tree: true, skills: false }, 3);
     const lines = workspace.render(40);
     const modelRow = lines.findIndex((line, index) => index > 2 && line.includes("Model:"));
     expect(lines[modelRow]).toContain("…");
@@ -373,8 +397,8 @@ describe("shared refine workspace", () => {
   it("keeps selected settings visible in a tiny viewport and retains their cursor", () => {
     const { workspace } = create(8);
     workspace.handleInput("\x1b[C");
-    for (const label of ["Include project instructions", "Directory tree", "Skill metadata"]) {
-      expect(stripVTControlCharacters(textOf(workspace.render(40)))).toContain(`› [${label === "Skill metadata" ? " " : "x"}] ${label}`);
+    for (const label of ["Project instructions: Always", "[x] Directory tree", "[ ] Skill metadata"]) {
+      expect(stripVTControlCharacters(textOf(workspace.render(40)))).toContain(`› ${label}`);
       workspace.handleInput("\x1b[B");
     }
     workspace.handleInput("\x1b[B");
@@ -399,11 +423,11 @@ describe("shared refine workspace", () => {
     workspace.openSettings();
     workspace.handleInput("\r");
     expect(actions.saveContext).not.toHaveBeenCalled();
-    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› [ ] Include project instructions");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Project instructions: Off");
     for (let i = 0; i < cursor; i++) workspace.handleInput("\x1b[B");
     expect(textOf(workspace.render(100))).toContain("Ctrl+S");
     workspace.handleInput("\x13");
-    expect(actions.saveContext).toHaveBeenCalledExactlyOnceWith([false, true, false]);
+    expect(actions.saveContext).toHaveBeenCalledExactlyOnceWith({ instructions: "off", tree: true, skills: false });
     expect(actions.chooseModel).not.toHaveBeenCalled();
     expect(actions.cycleThinking).not.toHaveBeenCalled();
     expect(actions.editSystemPrompt).not.toHaveBeenCalled();
@@ -415,9 +439,9 @@ describe("shared refine workspace", () => {
     workspace.openSettings();
     workspace.handleInput("\r");
     workspace.handleInput(key);
-    expect(textOf(workspace.render(100))).not.toContain("Manual save");
+    expect(textOf(workspace.render(100))).not.toContain("Ctrl+S to save");
     workspace.openSettings();
-    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› [x] Include project instructions");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Project instructions: Always");
     expect(textOf(workspace.render(100))).not.toContain("Unsaved context changes");
     expect(actions.saveContext).not.toHaveBeenCalled();
   });
@@ -429,10 +453,10 @@ describe("shared refine workspace", () => {
     workspace.handleInput("\r");
     workspace.handleInput("\x13");
     await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain("Could not save context"));
-    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› [ ] Include project instructions");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Project instructions: Off");
     workspace.handleInput("\x13");
     await vi.waitFor(() => expect(actions.saveContext).toHaveBeenCalledTimes(2));
-    expect(actions.saveContext).toHaveBeenLastCalledWith([false, true, false]);
+    expect(actions.saveContext).toHaveBeenLastCalledWith({ instructions: "off", tree: true, skills: false });
   });
 
   it("keeps thinking save feedback visible above a short viewport", async () => {

@@ -14,7 +14,7 @@ import { buildRefineInput, buildRefineSystemPrompt, parseRefineOutput, selectHis
 import { renderSummary } from "./presentation.js";
 import { renderModelChoices } from "./model-picker.js";
 import { formatKeyHint, type KeyHint } from "./key-hints.js";
-import { RefineWorkspace } from "./workspace.js";
+import { RefineWorkspace, type ContextSettings } from "./workspace.js";
 import { PreviewPanel, type PreviewOptions } from "./preview.js";
 import { RefineController, type Candidate, type CandidateToken, type ControllerState, type RefineRequest } from "./controller.js";
 
@@ -457,7 +457,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     if (!confirmed || !isCurrent()) return;
     config.systemPrompt = edited;
     const persisted = await persistConfig(ctx);
-    notify(ctx, persisted ? "Optimization prompt saved · Next refinement only." : "Optimization prompt applied · Not persisted.");
+    notify(ctx, persisted ? "Optimization prompt saved · Applies to future requests." : "Optimization prompt applied · Not persisted.");
   }
 
   async function cycleModel(ctx: ExtensionContext): Promise<void> {
@@ -517,8 +517,6 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
 
     completionContext = ctx;
     const branch = ctx.sessionManager.getBranch();
-    const followUp = branch.some((entry) => entry.type === "message" &&
-      (entry.message.role === "user" || entry.message.role === "assistant"));
     const history = selectHistory(
       branch,
       config.context.maxMessages,
@@ -526,7 +524,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     );
     const previousContext = { historySnapshot, projectLabel, projectWarnings };
     historySnapshot = history;
-    const project = config.projectContext.enabled ? captureProjectContext(ctx, config.projectContext, draft, followUp) : undefined;
+    const project = config.projectContext.enabled ? captureProjectContext(ctx, config.projectContext, draft) : undefined;
     projectLabel = project ? `${project.instructionCount} rules · ${project.skillCount} skills${config.projectContext.tree.enabled && !history.text ? " · tree" : ""}` : "";
     projectWarnings = project?.warnings ?? [];
     const generateTitle = canNameSession(ctx);
@@ -684,10 +682,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     if (error) return error;
     const model = ctx.modelRegistry.find(source.model.provider, source.model.id)!;
     const generateTitle = canNameSession(ctx);
-    const followUp = ctx.sessionManager.getBranch().some((entry) => entry.type === "message" &&
-      (entry.message.role === "user" || entry.message.role === "assistant"));
     const project = config.projectContext.enabled
-      ? captureProjectContext(ctx, config.projectContext, `${source.draft}\n${instruction}`, followUp) : undefined;
+      ? captureProjectContext(ctx, config.projectContext, `${source.draft}\n${instruction}`, true) : undefined;
     const previousContext = { historySnapshot, projectLabel, projectWarnings };
     historySnapshot = source.history;
     projectLabel = project ? `${project.instructionCount} rules · ${project.skillCount} skills${config.projectContext.tree.enabled && !source.history.text ? " · tree" : ""}` : "";
@@ -712,7 +708,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     return undefined;
   }
 
-  async function showPreviewContent(ctx: ExtensionContext, settingsContext?: boolean[], settingsCursor = 3): Promise<void> {
+  async function showPreviewContent(ctx: ExtensionContext, settingsContext?: ContextSettings, settingsCursor = 3): Promise<void> {
     useContext(ctx);
     if (ctx.mode !== "tui") {
       notify(ctx, "Preview requires TUI mode.", "warning");
@@ -720,7 +716,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
     if (closePreview) return; // One user-opened panel; never stack dialogs on repeated shortcuts.
     const sessionId = controller.getSessionId();
-    type Selection = { action: PreviewAction; generation: number; token?: CandidateToken; settingsContext?: boolean[] };
+    type Selection = { action: PreviewAction; generation: number; token?: CandidateToken; settingsContext?: ContextSettings };
     let selection: Selection | undefined;
     try {
       selection = await ctx.ui.custom<Selection | undefined>((tui, theme, keybindings, done) => {
@@ -747,7 +743,11 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         const panel = new PreviewPanel(snapshot(), theme, () => tui.terminal.rows, () => tui.requestRender());
         let closed = false;
         const workspace = new RefineWorkspace(panel, tui, theme, keybindings, {
-          context: () => [config.projectContext.instructionsEnabled, config.projectContext.tree.enabled, config.projectContext.skillsEnabled],
+          context: () => ({
+            instructions: !config.projectContext.instructionsEnabled ? "off" : config.projectContext.instructionsOnFollowUp ? "always" : "first",
+            tree: config.projectContext.tree.enabled,
+            skills: config.projectContext.skillsEnabled,
+          }),
           contextEnabled: () => config.projectContext.enabled,
           optimizer: () => {
             const ref = controller.getModel();
@@ -776,10 +776,12 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           },
           saveContext: async (selected) => {
             if (closed || ctx.sessionManager.getSessionId() !== sessionId) return "Session changed; settings not saved.";
-            config.projectContext.instructionsEnabled = selected[0]!;
-            config.projectContext.tree.enabled = selected[1]!;
-            config.projectContext.skillsEnabled = selected[2]!;
-            return await persistConfig(ctx) ? "Context saved · Next refinement only" : "Context applied · Not persisted; check configuration";
+            config.projectContext.instructionsEnabled = selected.instructions !== "off";
+            // Off leaves the saved follow-up preference intact.
+            if (selected.instructions !== "off") config.projectContext.instructionsOnFollowUp = selected.instructions === "always";
+            config.projectContext.tree.enabled = selected.tree;
+            config.projectContext.skillsEnabled = selected.skills;
+            return await persistConfig(ctx) ? "Context saved · Applies to future requests" : "Context applied · Not persisted; check configuration";
           },
           revision: () => {
             const token = controller.getCandidateToken();
