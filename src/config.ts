@@ -38,7 +38,7 @@ export interface RefineConfig {
   model?: ModelRef;
   /** Explicit optimizer override; omitted means inherit the active Pi session level. */
   thinkingLevel?: ModelThinkingLevel;
-  /** Custom optimization instructions; omitted uses the built-in prompt. */
+  /** Custom editing policy; the fixed refiner protocol is always added. */
   systemPrompt?: string;
   favorites: ModelRef[];
   shortcuts: ShortcutConfig;
@@ -77,7 +77,7 @@ export const DEFAULT_CONFIG: RefineConfig = {
     enabled: true,
     maxChars: 28_000,
     instructionsMaxChars: 16_000,
-    instructionsOnFollowUp: false,
+    instructionsOnFollowUp: true,
     instructionsEnabled: true,
     skillsEnabled: false,
     skillsMaxChars: 6_000,

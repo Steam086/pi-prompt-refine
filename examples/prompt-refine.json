@@ -29,7 +29,7 @@
     "enabled": true,
     "maxChars": 28000,
     "instructionsMaxChars": 16000,
-    "instructionsOnFollowUp": false,
+    "instructionsOnFollowUp": true,
     "instructionsEnabled": true,
     "skillsEnabled": false,
     "skillsMaxChars": 6000,

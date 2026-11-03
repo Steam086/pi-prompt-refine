@@ -313,9 +313,8 @@ describe("slash command drafts", () => {
     await flushPromises();
     expect(harness.shortcuts.size).toBe(0);
     expect(harness.complete).toHaveBeenCalledTimes(1);
-    expect(harness.complete.mock.calls[0]?.[1]).toMatchObject({
-      messages: [{ content: [{ text: expect.stringContaining(draft) }] }],
-    });
+    const request = harness.complete.mock.calls[0]?.[1] as any;
+    expect(JSON.parse(request.messages[0].content[0].text).draft).toBe(draft);
     expect(harness.getEditor()).toBe(draft);
     expect(harness.sent).toEqual([]);
     harness.setCustomAction("a");
@@ -381,7 +380,7 @@ describe("project context injection", () => {
     await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
     const request = (harness.complete.mock.calls[0] as any[])[1];
     const input = request.messages[0].content[0].text;
-    expect(input).toContain('REFERENCED DIRECTORY: "src"');
+    expect(JSON.parse(input).project_context).toContain('REFERENCED DIRECTORY: "src"');
     expect(input.match(/target\.ts/g)).toHaveLength(1);
     expect(input).toContain("Use the project venv.");
     expect(input).toContain("Extract PDF tables");
@@ -466,19 +465,31 @@ describe("project context injection", () => {
     expect(harness.notifications).toEqual(["Refinement cancelled. Editor unchanged."]);
   });
 
-  it.each([false, true])("defaults to first-prompt-only instructions with followUp=%s, independent of history budget", async (followUp) => {
+  it.each([false, true])("defaults to per-request instructions with followUp=%s, independent of history budget", async (followUp) => {
     const config = structuredClone(DEFAULT_CONFIG.projectContext);
     config.tree.enabled = false;
-    expect(config.instructionsOnFollowUp).toBe(false);
+    expect(config.instructionsOnFollowUp).toBe(true);
     const harness = await makeHarness({ config: { projectContext: config, context: { maxMessages: 0, maxChars: 0 } } });
     vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue(followUp
       ? [{ type: "message", message: { role: "user", content: "Earlier prompt" } }] as any : []);
     vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
     await trigger(harness);
     const input = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
-    expect(input.includes("Use the project venv.")).toBe(!followUp);
-    expect(input.includes("/repo/AGENTS.md")).toBe(!followUp);
+    expect(input).toContain("Use the project venv.");
+    expect(input).toContain("/repo/AGENTS.md");
     expect(input).not.toContain("Extract PDF tables");
+  });
+
+  it("preserves explicit follow-up instruction opt-outs", async () => {
+    const config = projectConfig(false);
+    config.instructionsOnFollowUp = false;
+    const harness = await makeHarness({ config: { projectContext: config } });
+    vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
+    await trigger(harness);
+    const input = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
+    expect(input).not.toContain("Use the project venv.");
+    expect(input).not.toContain("/repo/AGENTS.md");
+    expect(input).toContain("Extract PDF tables");
   });
 
   it("injects skills, applicable instructions and a real bounded tree on the first shortcut in an empty session", async () => {
@@ -511,7 +522,9 @@ describe("project context injection", () => {
     vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
     await trigger(harness);
     const input = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
-    expect(input).toContain(`[${role}]\nSelected visible history`);
+    expect(JSON.parse(input).conversation.items).toEqual([
+      expect.objectContaining({ role, text: "Selected visible history", status: "complete" }),
+    ]);
     expect(input).toContain("/repo/AGENTS.md");
     expect(input).toContain("Use the project venv.");
     expect(input).toContain("Extract PDF tables");
@@ -548,7 +561,7 @@ describe("project context injection", () => {
     await trigger(harness);
     await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
     const input = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
-    expect(input).toContain("(no visible conversation context selected)");
+    expect(JSON.parse(input).conversation.items).toEqual([]);
     expect(input).toContain("Use the project venv.");
     expect(input).toContain("Extract PDF tables");
     expect(input).toContain("PROJECT TREE");
@@ -594,7 +607,7 @@ describe("project context injection", () => {
     await trigger(harness);
     const text = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
     expect(text).toContain("CONTEXT WARNINGS");
-    expect(text).toContain('"complete":false');
+    expect(JSON.parse(text).project_context).toContain('"complete":false');
     expect(harness.notifications.join(" ")).toContain("Project instructions are incomplete");
     expect(harness.notifications.join(" ")).toContain("skills catalog is incomplete");
     expect(harness.widgetLines().join("\n")).toContain("⚠2");
@@ -1388,6 +1401,38 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(unavailable.notifications.join(" ")).toContain("No authorized text-generation models are available");
   });
 
+  it("accepts an unchanged draft as a successful refinement without retrying or sending it", async () => {
+    const harness = await makeHarness();
+    const draft = "把标题改成“运行结果”，其他内容保持不变。";
+    harness.setEditorText(draft);
+    harness.complete.mockResolvedValueOnce({ content: [{ type: "text", text: JSON.stringify({ prompt: draft }) }], stopReason: "stop" });
+    await trigger(harness);
+    harness.setCustomAction("a");
+    await harness.command("view", harness.context);
+    expect(harness.getEditor()).toBe(draft);
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    expect(harness.sent).toEqual([]);
+    expect(harness.notifications.join(" ")).not.toContain("failed");
+  });
+
+  it("sends the selected user correction and omission metadata to the optimizer, not just the UI", async () => {
+    const harness = await makeHarness({ config: { context: { maxMessages: 1, maxChars: 100 } } });
+    vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([
+      { type: "message", id: "proposal", message: { role: "assistant", content: "Implement with a new dependency" } },
+      { type: "message", id: "correction", message: { role: "user", content: "不要新增依赖，先只解释方案。" } },
+    ] as any);
+    harness.setEditorText("继续看这个方案");
+    await trigger(harness);
+    const packet = JSON.parse((harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
+    expect(packet.conversation).toMatchObject({
+      status: "partial", total_message_count: 2, omitted_message_count: 1, excerpted_message_count: 0,
+      items: [{ id: "correction", role: "user", status: "complete", text: "不要新增依赖，先只解释方案。" }],
+    });
+    expect(packet.draft).toBe("继续看这个方案");
+    expect(harness.widgetLines(200).join("\n")).toContain("1 omitted");
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+  });
+
   it("runs the optimizer in the background without writing the editor or session", async () => {
     const harness = await makeHarness();
     await trigger(harness);
@@ -1395,7 +1440,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.complete).toHaveBeenCalledTimes(1);
     const [_model, completionContext, completionOptions] = harness.complete.mock.calls[0] as any[];
     expect(completionContext.tools).toEqual([]);
-    expect(completionContext.systemPrompt).toContain("return a single JSON object");
+    expect(completionContext.systemPrompt).toContain("Return exactly one JSON object");
     expect(completionContext.messages[0].content[0].text).toContain("Draft A");
     expect(completionContext.messages[0].content[0].text).toContain("visible answer");
     expect(completionContext.messages[0].content[0].text).not.toContain("secret");
@@ -1408,8 +1453,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.context.sessionManager.getBranch()).toHaveLength(3);
   });
 
-  it("actually sends the last visible assistant to the optimizer even with a one-message budget", async () => {
-    const harness = await makeHarness({ config: { context: { maxMessages: 1, maxChars: 100 } } });
+  it("sends the last visible assistant alongside a newer user message when two slots are available", async () => {
+    const harness = await makeHarness({ config: { context: { maxMessages: 2, maxChars: 100 } } });
     vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([
       { type: "message", message: { role: "assistant", content: [{ type: "text", text: "Use the existing parser, not a new dependency." }, { type: "thinking", thinking: "hidden" }] } },
       { type: "message", message: { role: "user", content: "Follow up" } },
@@ -1428,6 +1473,9 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await trigger(harness);
     const context = (harness.complete.mock.calls[0] as any[])[1];
     expect(context.messages[0].content[0].text).not.toContain("visible answer");
+    expect(JSON.parse(context.messages[0].content[0].text).conversation).toMatchObject({
+      status: "disabled_by_policy", omitted_message_count: 2, selected_message_count: 0,
+    });
     expect(harness.widgetLines().join("\n")).toContain("Draft only");
   });
 
