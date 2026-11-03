@@ -3,7 +3,7 @@ import { parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Compone
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { PreviewPanel } from "./preview.js";
 import { panelFrame, panelLayout, panelTabs, workspaceTabs, WORKSPACE_PAGES, type WorkspacePage } from "./panel-layout.js";
-import { alignedKeyHints, fittingKeyHints } from "./key-hints.js";
+import { alignedKeyHints, fittingKeyHints, type KeyHint } from "./key-hints.js";
 import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { TaskPanel, type TaskPanelActions, type TaskPanelPosition } from "./task-panel.js";
@@ -455,13 +455,16 @@ export class RefineWorkspace implements Component, Focusable {
         i === detailHeight - 1 && details.length > detailHeight ? truncateToWidth(line + "…", innerWidth, "…") : line)));
       const action = this.cursor === 4 && !optimizer?.thinkingEnabled ? "Unavailable" : "Change";
       // Saving has a fixed key and an explicit scope, independent of row focus.
-      footer = [
-        fittingKeyHints(innerWidth < 30
-          ? [["^S", "Context"], ["↵", action]]
-          : [["Ctrl+S", "Save context"], ["Enter", action], ...(this.cursor < 3 ? [["Space", action] as const] : [])], innerWidth, theme),
-        fittingKeyHints([["Esc", dirty ? (innerWidth >= 30 ? "Discard context changes" : "Discard context") : "Back"], ...(optimizer ? [["Tab", "Group"] as const] : []),
-          ["←", optimizer && this.cursor >= 3 ? "Context" : "Usage"], ["→", optimizer && this.cursor < 3 ? "Optimizer" : "Preview"], ["↑↓", "Select"]], innerWidth, theme),
-      ];
+      const primary: KeyHint[] = innerWidth < 30
+        ? [["^S", "Context"], ["↵", action]]
+        : [["Ctrl+S", "Save context"], ["Enter", action], ...(this.cursor < 3 ? [["Space", action] as const] : [])];
+      const secondary: KeyHint[] = [["Esc", dirty ? (innerWidth >= 30 ? "Discard context changes" : "Discard context") : "Back"], ...(optimizer ? [["Tab", "Group"] as const] : []),
+        ["←", optimizer && this.cursor >= 3 ? "Context" : "Usage"], ["→", optimizer && this.cursor < 3 ? "Optimizer" : "Preview"], ["↑↓", "Select"]];
+      // Share column stops with Tasks/Preview; retain independent compact rows
+      // so the longer save/discard labels do not crowd out narrow-screen hints.
+      footer = innerWidth < 30
+        ? [fittingKeyHints(primary, innerWidth, theme), fittingKeyHints(secondary, innerWidth, theme)]
+        : alignedKeyHints([primary, secondary], innerWidth, theme);
       if (layout.footerHeight === 1) footer = [fittingKeyHints([["^S", "Context"], ["Esc", dirty ? "Discard context" : "Back"], ["↵", action]], innerWidth, theme)];
     }
     const lines = panelFrame(layout, header, body, footer, (text) => theme.fg("borderMuted", text));
