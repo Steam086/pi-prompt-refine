@@ -30,7 +30,7 @@ it.skipIf(!process.env.REFINE_BENCHMARK)("measures Settings navigation latency a
         contextLabel: "", elapsedSeconds: 0, openHint: "", canRestore: false,
       }, theme, () => rows, () => tui.requestRender());
       const workspace = new RefineWorkspace(panel, tui, theme, getKeybindings(), {
-        context: () => [true, true, false], contextEnabled: () => true,
+        context: () => ({ instructions: "always" as const, tree: true, skills: false }), contextEnabled: () => true,
         optimizer: () => ({ model: "provider/long-model-identifier-with-extra-details", thinking: "high · Extension setting", thinkingEnabled: true }),
         chooseModel() {}, editSystemPrompt() {}, saveContext: async () => "Saved", submit: () => undefined,
       });

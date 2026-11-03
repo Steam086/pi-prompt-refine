@@ -6,14 +6,28 @@ import { alignedKeyHints, fittingKeyHints } from "./key-hints.js";
 import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
 
+export interface ContextSettings {
+  instructions: "first" | "always" | "off";
+  tree: boolean;
+  skills: boolean;
+}
+
+const instructionModes = ["first", "always", "off"] as const;
+const instructionLabels = { first: "First request only", always: "Always", off: "Off" };
+const instructionDescriptions = {
+  first: "Pi rules (e.g. AGENTS.md): first request per task; omitted from Revise.",
+  always: "Include Pi rules (e.g. AGENTS.md) in every refinement and Revise request.",
+  off: "Do not include Pi rules (e.g. AGENTS.md) in refinement requests.",
+};
+
 interface WorkspaceActions {
-  context(): boolean[];
+  context(): ContextSettings;
   contextEnabled(): boolean;
   optimizer?(): { model: string; thinking: string; thinkingEnabled: boolean };
-  chooseModel?(context: boolean[]): void;
-  editSystemPrompt?(context: boolean[]): void;
+  chooseModel?(context: ContextSettings): void;
+  editSystemPrompt?(context: ContextSettings): void;
   cycleThinking?(): Promise<string>;
-  saveContext(selected: boolean[]): Promise<string>;
+  saveContext(selected: ContextSettings): Promise<string>;
   /** Undefined means the request was accepted; errors stay beside the retained input. */
   submit(text: string): string | undefined;
   /** Captures one actionable candidate; the callback rejects stale targets. */
@@ -24,8 +38,8 @@ interface WorkspaceActions {
 export class RefineWorkspace implements Component, Focusable {
   private mode: "main" | "context" | "input" = "main";
   private hasFocus = false;
-  private selected: boolean[] = [];
-  private original: boolean[] = [];
+  private selected: ContextSettings = { instructions: "always", tree: false, skills: false };
+  private original: ContextSettings = { ...this.selected };
   private cursor = 0;
   private settingsScrollTop = 0;
   private saving = false;
@@ -93,7 +107,7 @@ export class RefineWorkspace implements Component, Focusable {
 
   openSettings(selected = this.actions.context(), cursor = this.cursor): void {
     this.original = this.actions.context();
-    this.selected = [...selected];
+    this.selected = { ...selected };
     this.cursor = cursor;
     this.settingsScrollTop = 0;
     this.settingsNotice = "";
@@ -131,7 +145,7 @@ export class RefineWorkspace implements Component, Focusable {
       } else if (key === "ctrl+s") {
         this.saving = true;
         this.tui.requestRender();
-        void this.actions.saveContext([...this.selected]).then((notice) => {
+        void this.actions.saveContext({ ...this.selected }).then((notice) => {
           if (this.disposed) return;
           this.panel.setNotice(notice);
           this.switchMode("main");
@@ -146,11 +160,16 @@ export class RefineWorkspace implements Component, Focusable {
         this.cycleThinking();
       } else if (this.keys.matches(data, "tui.input.submit") || key === "space" || (key === "right" && this.cursor >= 3)) {
         if (this.cursor < 3) {
-          this.selected[this.cursor] = !this.selected[this.cursor];
+          if (this.cursor === 0) {
+            this.selected.instructions = instructionModes[(instructionModes.indexOf(this.selected.instructions) + 1) % instructionModes.length]!;
+          } else {
+            const field = this.cursor === 1 ? "tree" : "skills";
+            this.selected[field] = !this.selected[field];
+          }
           this.settingsNotice = "";
           this.tui.requestRender();
-        } else if (this.cursor === 3) this.actions.chooseModel?.([...this.selected]);
-        else if (this.cursor === 5) this.actions.editSystemPrompt?.([...this.selected]);
+        } else if (this.cursor === 3) this.actions.chooseModel?.({ ...this.selected });
+        else if (this.cursor === 5) this.actions.editSystemPrompt?.({ ...this.selected });
         else this.cycleThinking();
       } else {
         const count = this.actions.optimizer ? (this.actions.editSystemPrompt ? 6 : 5) : 3;
@@ -220,9 +239,9 @@ export class RefineWorkspace implements Component, Focusable {
       if (layout.footerHeight === 1) footer = [fittingKeyHints([["Esc", "Back"], ["↵", action]], innerWidth, theme)];
       if (this.inputError && layout.headerHeight < 2 && layout.footerHeight > 1) footer[1] = theme.fg("warning", sanitizeTerminalText(this.inputError));
     } else {
-      const dirty = this.selected.some((value, i) => value !== this.original[i]);
+      const dirty = this.selected.instructions !== this.original.instructions || this.selected.tree !== this.original.tree || this.selected.skills !== this.original.skills;
       const notice = [this.saving ? "Saving..." : this.settingsNotice, dirty ? "Unsaved context changes" : ""].filter(Boolean).join(" · ");
-      const status = theme.fg(dirty ? "warning" : "muted", sanitizeTerminalText(notice || "Manual save · Next refinement only"));
+      const status = theme.fg(dirty ? "warning" : "muted", sanitizeTerminalText(notice || "Ctrl+S to save · Applies to future requests"));
       // Short screens have only one header row; never scroll save feedback out of view.
       header = [layout.headerHeight === 1 && notice ? status : tabs, status];
       const optimizer = this.actions.optimizer?.();
@@ -247,13 +266,17 @@ export class RefineWorkspace implements Component, Focusable {
       };
       // Navigation rows have fixed heights; explanations live in a reserved
       // area below the list so changing focus never inserts or removes rows.
-      [
-        ["Include project instructions", "Use rules supplied by Pi (e.g. AGENTS.md)."],
-        ["Directory tree", "Default tree only; @directory references are separate."],
-        ["Skill metadata", "Include skill descriptions; never run skills."],
-      ].forEach(([label, description], i) => {
-        add(i, `[${this.selected[i] ? "x" : " "}] ${label}`);
-        if (i === this.cursor) focusedDetail = description!;
+      const instructionLabel = innerWidth < 32 ? "Rules" : "Project instructions";
+      const instructionValue = this.selected.instructions === "first" && innerWidth < 46
+        ? innerWidth < 20 ? "First" : "First only" : instructionLabels[this.selected.instructions];
+      add(0, instructionLabel, instructionValue, innerWidth < 20 ? "" : "↻");
+      if (this.cursor === 0) focusedDetail = instructionDescriptions[this.selected.instructions];
+      ([
+        ["tree", "Directory tree", "Default tree only; @directory references are separate."],
+        ["skills", "Skill metadata", "Include skill descriptions; never run skills."],
+      ] as const).forEach(([field, label, description], i) => {
+        add(i + 1, `[${this.selected[field] ? "x" : " "}] ${label}`);
+        if (i + 1 === this.cursor) focusedDetail = description;
       });
       if (!this.actions.contextEnabled()) rows.push(theme.fg("warning", "Disabled by projectContext.enabled=false"));
       if (optimizer) {
@@ -273,12 +296,12 @@ export class RefineWorkspace implements Component, Focusable {
       const details = wrapTextWithAnsi(sanitizeTerminalText(focusedDetail), innerWidth);
       body.push(...details.slice(0, detailHeight).map((line, i) => theme.fg("muted",
         i === detailHeight - 1 && details.length > detailHeight ? truncateToWidth(line + "…", innerWidth, "…") : line)));
-      const action = this.cursor === 3 ? "Choose" : this.cursor === 4 ? (optimizer?.thinkingEnabled ? "Cycle" : "Unavailable") : this.cursor === 5 ? "Edit" : "Toggle";
+      const action = this.cursor === 0 ? "Cycle" : this.cursor === 3 ? "Choose" : this.cursor === 4 ? (optimizer?.thinkingEnabled ? "Cycle" : "Unavailable") : this.cursor === 5 ? "Edit" : "Toggle";
       // Saving has a fixed key and an explicit scope, independent of row focus.
       footer = [
         fittingKeyHints(innerWidth < 30
           ? [["^S", "Context"], ["↵", action]]
-          : [["Ctrl+S", "Save context"], ["Enter", action], ...(this.cursor < 3 ? [["Space", "Toggle"] as const] : [])], innerWidth, theme),
+          : [["Ctrl+S", "Save context"], ["Enter", action], ...(this.cursor < 3 ? [["Space", action] as const] : [])], innerWidth, theme),
         fittingKeyHints([["Esc", dirty ? (innerWidth >= 30 ? "Discard context changes" : "Discard context") : "Back"], ["↑↓", "Select"]], innerWidth, theme),
       ];
       if (layout.footerHeight === 1) footer = [fittingKeyHints([["^S", "Context"], ["Esc", dirty ? "Discard context" : "Back"], ["↵", action]], innerWidth, theme)];

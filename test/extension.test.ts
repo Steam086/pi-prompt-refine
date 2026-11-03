@@ -706,17 +706,46 @@ describe("project context injection", () => {
     expect(input).not.toContain("Extract PDF tables");
   });
 
-  it("preserves explicit follow-up instruction opt-outs", async () => {
-    const config = projectConfig(false);
-    config.instructionsOnFollowUp = false;
-    const harness = await makeHarness({ config: { projectContext: config } });
-    vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
-    await trigger(harness);
-    const input = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
-    expect(input).not.toContain("Use the project venv.");
-    expect(input).not.toContain("/repo/AGENTS.md");
-    expect(input).toContain("Extract PDF tables");
-  });
+  it.each([false, true].flatMap((hasHistory) =>
+    ([["Always", 0], ["Off", 1], ["First request only", 2]] as const).map(([mode, presses]) => ({ hasHistory, mode, presses }))))
+    ("persists $mode for new tasks and Revise independently of main history (history: $hasHistory)", async ({ hasHistory, mode, presses }) => {
+      const config = projectConfig(false);
+      const harness = await makeHarness({ config: { projectContext: config } });
+      if (!hasHistory) vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([]);
+      vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
+      harness.holdPanel();
+      const settings = harness.command("view", harness.context);
+      harness.panelInput("\x1b[C");
+      for (let i = 0; i < presses; i++) harness.panelInput(" ");
+      expect(harness.panelLines().join("\n")).toContain(`Project instructions: ${mode}`);
+      harness.panelInput("\x13");
+      await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved · Applies to future requests"));
+      harness.panelInput("q");
+      await settings;
+      const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
+      expect(saved.projectContext.instructionsEnabled).toBe(mode !== "Off");
+      expect(saved.projectContext.instructionsOnFollowUp).toBe(mode !== "First request only");
+      await harness.reload();
+      await trigger(harness);
+      const inputAt = (index: number) => (harness.complete.mock.calls[index] as any[])[1].messages[0].content[0].text as string;
+      expect(inputAt(0).includes("Use the project venv.")).toBe(mode !== "Off");
+      const view = harness.command("view", harness.context);
+      for (let i = 1; i <= 2; i++) {
+        harness.panelInput("f");
+        harness.panelInput("Make it shorter");
+        harness.panelInput("\r");
+        await flushPromises();
+        expect(harness.complete).toHaveBeenCalledTimes(i + 1);
+        expect(inputAt(i).includes("Use the project venv.")).toBe(mode === "Always");
+        expect(inputAt(i)).toContain("Extract PDF tables");
+      }
+      harness.panelInput("q");
+      await view;
+      await harness.command("optimize A new task", harness.context);
+      await flushPromises();
+      expect(inputAt(3).includes("Use the project venv.")).toBe(mode !== "Off");
+      expect(harness.editorWrites).toEqual([]);
+    });
 
   it("injects skills, applicable instructions and a real bounded tree on the first shortcut in an empty session", async () => {
     const harness = await makeHarness({ config: { projectContext: projectConfig(true) } });
@@ -1351,7 +1380,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\x1b[C");
     await flushPromises();
     const lines = harness.panelLines();
-    expect(lines.filter((line) => /\[[x ]\]/.test(line)).map((line) => line.trimEnd())).toEqual(["  › [x] Include project instructions", "    [x] Directory tree", "    [ ] Skill metadata"]);
+    expect(lines.filter((line) => /\[[x ]\]/.test(line)).map((line) => line.trimEnd())).toEqual(["    [x] Directory tree", "    [ ] Skill metadata"]);
     harness.panelInput(" ");
     harness.panelInput("\x1b[B");
     harness.panelInput(" ");
@@ -1369,6 +1398,27 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(input).not.toContain("Use the project venv.");
     expect(input).not.toContain("PROJECT TREE");
     expect(input).toContain("Extract PDF tables");
+  });
+
+  it.each([
+    [true, true, "Always"], [true, false, "First request only"],
+    [false, true, "Off"], [false, false, "Off"],
+  ] as const)("loads existing instruction flags (%s, %s) as %s and preserves them on save", async (enabled, followUp, label) => {
+    const config = structuredClone(DEFAULT_CONFIG.projectContext);
+    config.instructionsEnabled = enabled;
+    config.instructionsOnFollowUp = followUp;
+    const harness = await makeHarness({ config: { projectContext: config } });
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("\x1b[C");
+    expect(harness.panelLines().join("\n")).toContain(`Project instructions: ${label}`);
+    harness.panelInput("\x13");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved"));
+    const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
+    expect(saved.projectContext.instructionsEnabled).toBe(enabled);
+    expect(saved.projectContext.instructionsOnFollowUp).toBe(followUp);
+    harness.panelInput("q");
+    await view;
   });
 
   it.each([
@@ -1587,13 +1637,14 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const view = harness.command("view", harness.context);
     harness.panelInput("\x1b[C");
     harness.panelInput(" ");
+    harness.panelInput(" ");
     for (let i = 0; i < 3; i++) harness.panelInput("\x1b[B");
     expect(harness.panelLines().join("\n")).toContain("Model:");
     harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Choose optimizer model"));
     harness.panelInput("\x1b");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Unsaved context changes"));
-    expect(harness.panelLines().join("\n")).toContain("[ ] Include project instructions");
+    expect(harness.panelLines().join("\n")).toContain("Project instructions: First request only");
     harness.panelInput("\x1b[B");
     expect(harness.panelLines().join("\n")).toContain("Thinking: medium");
     harness.panelInput("\r");
