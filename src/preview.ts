@@ -1,6 +1,6 @@
 import { Markdown, ScrollView, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
+import { fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
 import { panelFrame, panelLayout } from "./panel-layout.js";
 import { formatTokenUsage } from "./usage.js";
 import { resultHeading, sanitizeTerminalText, type SummaryOptions } from "./presentation.js";
@@ -112,6 +112,11 @@ export class PreviewPanel implements Component {
       !this.options.accepted && !this.options.state.pendingSend && !this.helpVisible;
   }
 
+  private hasActionableCandidate(): boolean {
+    return this.options.candidateText !== undefined && !this.options.accepted &&
+      !this.options.state.pendingSend && this.options.state.phase !== "generating";
+  }
+
   private renderBody(width: number): string[] {
     if (this.cachedBody?.width === width) return this.cachedBody.lines;
     const { theme, options } = this;
@@ -126,14 +131,14 @@ export class PreviewPanel implements Component {
     }
     if (this.helpVisible) {
       lines.push(theme.fg("accent", theme.bold("Help · Keyboard reference")), "");
-      if (options.accepted) paragraph("Read-only snapshot; a/e/s disabled.\nEdit or send from the main editor.");
+      if (options.accepted) paragraph("Read-only snapshot; a/e/f/s disabled.\nEdit or send from the main editor.");
       const helpLine = (...items: KeyHint[]) => lines.push(...wrapTextWithAnsi(items.map((hint) => formatKeyHint(hint, theme)).join(" · "), width));
-      if (!options.accepted) {
-        helpLine(["a", "Accept into editor (no send)"], ["e", "Edit candidate"]);
+      if (this.hasActionableCandidate()) {
+        helpLine(["a", "Accept into editor (no send)"], ["e", "Edit candidate (no model call)"]);
         helpLine(["f", "Revise current result with new instructions (model call)"]);
         helpLine(["s", "Send (follow-up if busy; draft kept)"]);
       }
-      helpLine(["x/d", "Break / cancel (stops the running request)"]);
+      helpLine(["x/d", "Stop request / discard result (not just close)"]);
       helpLine(["z", "Restore draft before acceptance"]);
       lines.push("", theme.fg("muted", "Refine & navigate"));
       helpLine(["r", "Refine current draft (model call)"]);
@@ -167,6 +172,9 @@ export class PreviewPanel implements Component {
       if (!options.accepted && options.sessionTitle) {
         paragraph(`Title on accept: ${options.sessionTitle}`, "muted");
         lines.push("");
+      }
+      if (this.hasActionableCandidate() && !this.helpVisible) {
+        paragraph("Accept puts the result in the editor; s sends directly.", "muted");
       }
       const title = options.accepted ? "Accepted prompt · read-only" : "Refined prompt";
       lines.push(theme.fg("accent", theme.bold(`${title}${this.sourceVisible ? " · source" : ""}`)), "");
@@ -221,22 +229,21 @@ export class PreviewPanel implements Component {
     ].join(" · "));
     const status = this.isEmptyState() ? "" : [heading, theme.fg("muted", metadata)].filter(Boolean).join(" · ");
     header.push(options.notice ? theme.fg("muted", sanitizeTerminalText(options.notice)) : status);
-    const ready = options.candidateText !== undefined;
-    const primary: KeyHint[] = options.accepted
-      ? [["r", "Refine draft"], ...(options.canRestore ? [["z", "Restore"] as KeyHint] : [])]
-      : ready
-        ? [["a", "Accept"], ["e", "Edit"], ...(!options.state.pendingSend ? [["f", "Revise"] as KeyHint] : []), options.state.pendingSend ? ["", "Send pending"] : ["s", "Send"], ["x", "Cancel"]]
-        : [["r", options.state.phase === "generating" ? "Restart" : options.state.phase === "error" ? "Retry" : "Refine"], ["m", "Model"],
-          ...(options.state.phase === "generating" ? [["x", "Break"] as KeyHint] : [])];
-    const secondary: KeyHint[] = [
-      ["q", "Back"], ["?", this.helpVisible ? "Hide help" : "Help"], ["i", "Input"], ["→", "Settings"],
-      ...(ready ? [["o", this.originalVisible ? "Hide original" : "Original"] as KeyHint] : []),
-    ];
-    const footer = alignedKeyHints([
-      [...primary, ...(ready && !options.accepted ? [["", "Enter won't send"] as KeyHint] : [])],
-      secondary,
-    ], innerWidth, theme);
-    if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["q", "Back"], ["i", "Input"], ["→", "Settings"], ["?", "Help"]], innerWidth, theme);
+    // Keep the main decision visible; secondary actions remain available in Help.
+    // Pending/generating states take priority even if a previous candidate is retained.
+    const primary: KeyHint[] = options.state.pendingSend
+      ? [["", "Send pending"]]
+      : options.state.phase === "generating"
+        ? [["x", "Stop"]]
+        : options.accepted
+          ? [["r", "Refine draft"], ...(options.canRestore ? [["z", "Restore"] as KeyHint] : [])]
+          : this.hasActionableCandidate()
+            ? [["a", "Accept"], ["e", "Edit"], ["f", "Revise"]]
+            : [["r", options.state.phase === "error" ? "Retry" : "Refine"], ["m", "Model"], ["i", "Input"]];
+    const secondary: KeyHint[] = [["q", "Back"], ["?", this.helpVisible ? "Hide help" : "Help"]];
+    // Independent rows keep long primary labels from crowding out Back/Help.
+    const footer = [fittingKeyHints(primary, innerWidth, theme), fittingKeyHints(secondary, innerWidth, theme)];
+    if (layout.footerHeight === 1) footer[0] = fittingKeyHints([...secondary, ...primary], innerWidth, theme);
     // ScrollView owns offsets/clamping. Explicit viewport composition also works in regular
     // mode, where ScrollView.render() alone returns the entire document without clipping.
     const body = this.scroll.render(innerWidth);

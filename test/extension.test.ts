@@ -1440,7 +1440,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await view;
   });
 
-  it("x Break aborts the provider request and ignores late output", async () => {
+  it("x Stop aborts the provider request and ignores late output", async () => {
     const harness = await makeHarness();
     let resolve!: (value: any) => void;
     harness.complete.mockImplementation(() => new Promise((res) => { resolve = res; }));
@@ -1448,7 +1448,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const signal = (harness.complete.mock.calls[0] as any[])[2].signal as AbortSignal;
     harness.holdPanel();
     const view = harness.command("view", harness.context);
-    expect(harness.panelLines().join("\n")).toContain("x Break");
+    expect(harness.panelLines().join("\n")).toContain("x Stop");
     harness.panelInput("x");
     await view;
     expect(signal.aborted).toBe(true);
