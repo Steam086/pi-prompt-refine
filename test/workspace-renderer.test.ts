@@ -10,9 +10,9 @@ import { selectHistory } from "../src/context.js";
 // is captured, so these tests make no claims about a physical terminal's latency/IME.
 describe("workspace terminal rendering", () => {
   it.each([
-    ["regular", 20, 12], ["regular", 40, 24], ["regular", 80, 40],
-    ["fullscreen", 20, 12], ["fullscreen", 40, 24], ["fullscreen", 80, 40],
-  ] as const)("switches without full redraw or screen clearing in %s at %ix%i", (mode, columns, rows) => {
+    ["regular", 20, 12, "dark"], ["regular", 40, 24, "dark"], ["regular", 80, 40, "dark"], ["regular", 100, 40, "light"],
+    ["fullscreen", 20, 12, "dark"], ["fullscreen", 40, 24, "dark"], ["fullscreen", 80, 40, "dark"], ["fullscreen", 100, 40, "light"],
+  ] as const)("switches without full redraw or screen clearing in %s at %ix%i (%s)", (mode, columns, rows, themeName) => {
     vi.useFakeTimers();
     let input = (_data: string) => {};
     const writes: string[] = [];
@@ -23,7 +23,7 @@ describe("workspace terminal rendering", () => {
       clearScreen: vi.fn(), setTitle() {}, setProgress() {}, setProgramStatus() {},
     };
     const tui = mode === "regular" ? new TuiMainScreen(terminal) : new TuiAltScreen(terminal);
-    const theme = getThemeByName("dark")!;
+    const theme = getThemeByName(themeName)!;
     const panel = new PreviewPanel({
       state: { phase: "ready", requestId: 1, pendingSend: false },
       candidateText: "A short result", contextLabel: "Draft only", elapsedSeconds: 0, openHint: "ctrl+\\", canRestore: false,

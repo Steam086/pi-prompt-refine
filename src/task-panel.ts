@@ -3,7 +3,7 @@ import { parseKey, Text, truncateToWidth, visibleWidth, type KeybindingsManager 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { RefineRecord } from "./history.js";
 import { panelFrame, panelLayout, workspaceTabs } from "./panel-layout.js";
-import { fittingKeyHints } from "./key-hints.js";
+import { alignedKeyHints, fittingKeyHints } from "./key-hints.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { formatTokenUsage } from "./usage.js";
 
@@ -108,6 +108,47 @@ export class TaskPanel {
     if (record.id === this.actions.appliedId()) return "✓ Applied";
     return record.kind === "edit" ? "✓ Edited" : "✓ Done";
   }
+  private detailDocument(record: RefineRecord, width: number): string {
+    const { theme } = this;
+    // Sanitize external text before adding our own theme escapes.
+    const text = (value: string) => theme.fg("text", sanitizeTerminalText(value));
+    const heading = (value: string) => theme.fg("text", theme.bold(sanitizeTerminalText(value)));
+    const metadata = (...items: string[]): string[] => {
+      const lines: string[] = [];
+      let line = "";
+      // Keep each metadata item (especially a token label and its count) together.
+      // Text still wraps an individual item if even that cannot fit a narrow pane.
+      for (const value of items) {
+        const item = sanitizeTerminalText(value);
+        const next = line ? `${line} · ${item}` : item;
+        if (line && visibleWidth(next) > width) { lines.push(line); line = item; }
+        else line = next;
+      }
+      if (line) lines.push(line);
+      return lines.map((line) => theme.fg("muted", line));
+    };
+    const statusColor = record.status === "error" ? "error"
+      : record.status === "unsent" || record.status === "cancelled" ? "warning"
+        : record.status === "generating" || record.status === "queued" ? "accent" : "success";
+    const original = this.original || !record.candidate;
+    const usage = record.kind === "edit" ? "Manual edit · no model call" : record.status === "unsent" ? "Not sent to optimizer"
+      : `${record.elapsedSeconds ?? "—"}s · ${formatTokenUsage(record.usage) ?? "Tokens: unknown"}`;
+    return [
+      heading(`Round ${record.input.roundId ?? "?"} · Task ${record.taskId} · #${record.id} ${record.kind}${record.parentId ? ` from #${record.parentId}` : ""}`),
+      ...metadata(`${record.input.model.provider}/${record.input.model.id}`, `thinking ${record.input.thinkingLevel ?? "default"}`),
+      theme.fg(statusColor, this.badge(record)) + theme.fg("muted", record.archivedAt !== undefined ? " · Earlier context · Archived" : " · Frozen context"),
+      ...metadata(new Date(record.createdAt).toLocaleTimeString(), `Branch: ${record.input.branchLeafId ?? "root"}`),
+      ...(record.error ? [theme.fg("error", sanitizeTerminalText(`Error: ${record.error}`))] : []),
+      ...(record.input.projectDiagnostics?.warnings ?? record.input.project?.snapshot.warnings ?? [])
+        .map((warning) => theme.fg("warning", sanitizeTerminalText(`Context warning: ${warning}`))),
+      ...(record.acceptedAt !== undefined ? metadata(`Accepted into Pi editor: ${new Date(record.acceptedAt).toLocaleTimeString()}`) : []),
+      ...(record.sentAt !== undefined ? metadata(`Pi started send: ${new Date(record.sentAt).toLocaleTimeString()}`) : []),
+      ...metadata(...usage.split(" · ")),
+      ...(record.input.revision ? metadata(`Revision: ${record.input.revision.instruction}`) : []),
+      "", heading(original ? "Original prompt" : "Result"), "",
+      text(original ? record.input.draft : record.candidate!.text),
+    ].join("\n");
+  }
   render(width: number, empty?: () => string[]): string[] {
     if (width < 1) return [];
     const layout = panelLayout(width, this.rows());
@@ -144,21 +185,8 @@ export class TaskPanel {
     if (!records.length) list.push(this.theme.fg("muted", "No tasks yet. Use i or r."));
     this.top = Math.max(0, Math.min(this.top, selectedLine, list.length - height));
     if (selectedLine >= this.top + height) this.top = selectedLine - height + 1;
-    const document = selected ? [
-      `Round ${selected.input.roundId ?? "?"} · Task ${selected.taskId} · #${selected.id} ${selected.kind}${selected.parentId ? ` from #${selected.parentId}` : ""}`,
-      `${selected.input.model.provider}/${selected.input.model.id} · thinking ${selected.input.thinkingLevel ?? "default"}`,
-      `${this.badge(selected)}${selected.archivedAt !== undefined ? " · Earlier context · Archived" : " · Frozen context"}`,
-      `${new Date(selected.createdAt).toLocaleTimeString()} · Branch: ${selected.input.branchLeafId ?? "root"}`,
-      ...(selected.error ? [`Error: ${selected.error}`] : []),
-      ...(selected.input.projectDiagnostics?.warnings ?? selected.input.project?.snapshot.warnings ?? []).map((warning) => `Context warning: ${warning}`),
-      ...(selected.acceptedAt !== undefined ? [`Accepted into Pi editor: ${new Date(selected.acceptedAt).toLocaleTimeString()}`] : []),
-      ...(selected.sentAt !== undefined ? [`Pi started send: ${new Date(selected.sentAt).toLocaleTimeString()}`] : []),
-      selected.kind === "edit" ? "Manual edit · no model call" : selected.status === "unsent" ? "Not sent to optimizer" :
-        `${selected.elapsedSeconds ?? "—"}s · ${formatTokenUsage(selected.usage) ?? "Tokens: unknown"}`,
-      ...(selected.input.revision ? [`Revision: ${selected.input.revision.instruction}`] : []),
-      "", this.original || !selected.candidate ? "Original prompt" : "Result",
-      this.original || !selected.candidate ? selected.input.draft : selected.candidate.text,
-    ].map(clean).join("\n") : "Select a task. Enter refines an unsent prompt or applies a completed result. Apply never writes to Pi.";
+    const document = selected ? this.detailDocument(selected, rightWidth)
+      : this.theme.fg("muted", "Select a task. Enter refines an unsent prompt or applies a completed result. Apply never writes to Pi.");
     const cacheKey = JSON.stringify([document, rightWidth]);
     if (this.cached?.key !== cacheKey) this.cached = { key: cacheKey, lines: new Text(document, 0, 0).render(rightWidth) };
     this.position.scroll = Math.min(this.position.scroll ?? 0, Math.max(0, this.cached.lines.length - height));
@@ -168,14 +196,20 @@ export class TaskPanel {
       const left = list[this.top + i] ?? "";
       return left + " ".repeat(Math.max(0, leftWidth - visibleWidth(left))) + this.theme.fg("borderMuted", " │ ") + (detail[i] ?? "");
     });
-    const action = selected?.status === "unsent" ? (selected.archivedAt !== undefined ? "Refine (old context)" : "Refine") : selected?.candidate ? "Apply result" : "No result yet";
-    const footer = [
-      fittingKeyHints([["Enter", action], ["Tab", this.reading ? "Select" : "Read"], ["g", "Run with model"], ["x", "Stop"]], layout.innerWidth, this.theme),
-      fittingKeyHints([["Esc", "Back"], ["m", "Model"], ["i", "Input"], ["n", "Copy to round"], ["o", "Original"], ...(!this.usage ? [["h", "Earlier"] as const] : [])], layout.innerWidth, this.theme),
-    ];
-    if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["Esc", "Back"], ["Enter", action], ["Tab", "Read/select"]], layout.innerWidth, this.theme);
+    const compact = layout.innerWidth < 80;
+    const action = selected?.status === "unsent"
+      ? (selected.archivedAt !== undefined ? (layout.innerWidth >= 60 ? "Refine (old context)" : "Refine old") : "Refine")
+      : selected?.candidate ? (compact ? "Apply" : "Apply result") : (compact ? "No result" : "No result yet");
+    // Pair the two rows into shared terminal-column tab stops, never literal tabs.
+    // Shorter labels keep the same columns useful on medium/narrow terminals.
+    const confirm = layout.innerWidth < 30 ? "↵" : "Enter";
+    const footer = alignedKeyHints([
+      [[confirm, action], ["Tab", this.reading ? "Select" : "Read"], ["g", compact ? "Run" : "Run with model"], ["x", "Stop"], ["o", "Original"]],
+      [["Esc", "Back"], ["m", "Model"], ["i", "Input"], ["n", compact ? "Copy" : "Copy to round"], ...(!this.usage ? [["h", "Earlier"] as const] : [])],
+    ], layout.innerWidth, this.theme);
+    if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["Esc", "Back"], [confirm, action], ["Tab", this.reading ? "Select" : "Read"]], layout.innerWidth, this.theme);
     return panelFrame(layout, [this.theme.fg("text", this.theme.bold(this.usage ? "Usage · All rounds" : "Prompt refine · Tasks")),
-      this.theme.fg("muted", this.notice || `${records.length} entries · ${this.reading ? "Reading · ↑↓ scroll" : "↑↓ select"} · Run: ${this.actions.launchModel?.() ?? "selected model"}`)],
+      this.theme.fg("muted", clean(this.notice || `${records.length} ${records.length === 1 ? "entry" : "entries"} · ${this.reading ? "Reading · ↑↓ scroll" : "↑↓ select"} · Run: ${this.actions.launchModel?.() ?? "selected model"}`))],
     [...tabs, ...body], footer, (text) => this.theme.fg("borderMuted", text));
   }
 }
