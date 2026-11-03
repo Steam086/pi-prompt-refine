@@ -1,6 +1,6 @@
 import { Markdown, ScrollView, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
+import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
 import { panelFrame, panelLayout, workspaceTabs } from "./panel-layout.js";
 import { formatTokenUsage } from "./usage.js";
 import { resultHeading, sanitizeTerminalText, type SummaryOptions } from "./presentation.js";
@@ -319,8 +319,11 @@ export class PreviewPanel implements Component {
       if (!primary.some(([key]) => key === "m")) secondary.push(["m", "Model"]);
       if (options.navigation) secondary.push(["g", "Same input"]);
     }
-    // Independent rows keep long primary labels from crowding out Back/Help.
-    const footer = [fittingKeyHints(primary, innerWidth, theme), fittingKeyHints(secondary, innerWidth, theme)];
+    // Match Tasks/Usage's shared column stops. Very narrow terminals keep rows
+    // independent so long status/action labels cannot crowd out Back/Help.
+    const footer = innerWidth < 30
+      ? [fittingKeyHints(primary, innerWidth, theme), fittingKeyHints(secondary, innerWidth, theme)]
+      : alignedKeyHints([primary, secondary], innerWidth, theme);
     if (layout.footerHeight === 1) footer[0] = fittingKeyHints([...secondary.slice(0, 2), ...primary, ...secondary.slice(2)], innerWidth, theme);
     // ScrollView owns offsets/clamping. Explicit viewport composition also works in regular
     // mode, where ScrollView.render() alone returns the entire document without clipping.

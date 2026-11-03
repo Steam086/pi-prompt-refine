@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 // Test-only access to the installed Pi palettes; production uses the injected theme.
 import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
@@ -217,7 +218,7 @@ describe("result reading panel", () => {
     expect(text).not.toContain("Accept puts the result in the editor; s sends directly.");
     expect(panel.render(100).slice(-2)).toEqual([
       "  a Accept · e Edit · f Revise · s Send",
-      "  q Back · ? Help · i Input · m Model",
+      "  q Back   · ? Help · i Input  · m Model",
     ]);
     expect(text.match(/Prompt refine/g)).toHaveLength(1);
     panel.toggleOriginal();
@@ -256,7 +257,7 @@ describe("result reading panel", () => {
     expect(lines[emptyRow]).toBe(" ".repeat(layout.inset + Math.floor((layout.innerWidth - "No result yet.".length) / 2)) + "No result yet.");
     expect(lines.slice(-2)).toEqual([
       "  r Refine · m Model · i Input",
-      "  q Back · ? Help",
+      "  q Back   · ? Help",
     ]);
     const text = lines.join("\n");
     expect(text.match(/r Refine/g)).toHaveLength(1);
@@ -451,6 +452,68 @@ describe("result reading panel", () => {
     expect(text).toContain("previous result kept");
     expect(panel.render(100).slice(-2).join("\n")).toContain("a Accept · e Edit · f Revise");
     expect(text).not.toContain("r Retry");
+  });
+
+  it("aligns result actions with navigation using the same column stops as Tasks", () => {
+    const panel = create({ navigation: { index: 1, count: 1, label: "#1 refine" } });
+    expect(panel.render(100).slice(-2).map((line) => line.trim())).toEqual([
+      "a Accept · e Edit · f Revise · s Send",
+      "q Back   · ? Help · i Input  · m Model · g Same input",
+    ]);
+  });
+
+  it.each(["dark", "light"])("keeps themed footer columns aligned across states, help and resize in %s", (name) => {
+    const theme = getThemeByName(name)!;
+    const states: Partial<PreviewOptions>[] = [
+      {},
+      { state: { ...options.state, phase: "generating" }, candidateText: undefined },
+      { state: { ...options.state, phase: "error" }, candidateText: undefined },
+      { state: { ...options.state, phase: "idle" }, candidateText: undefined },
+      { state: { ...options.state, pendingSend: true } },
+      { accepted: { editorChanged: false }, canRestore: true },
+    ];
+    const starts = (line: string) => {
+      let column = 0;
+      return line.split(" · ").map((cell) => {
+        const start = column;
+        column += visibleWidth(cell) + 3;
+        return start;
+      });
+    };
+    for (const state of states) {
+      const panel = new PreviewPanel({ ...options, navigation: { index: 1, count: 1, label: "#1 refine" }, ...state },
+        theme, () => 40, vi.fn());
+      for (const helpVisible of [false, true]) {
+        if (helpVisible) panel.toggleHelp();
+        for (const width of [40, 60, 80, 100, 200]) {
+          const footer = panel.render(width).slice(-2);
+          const [top, bottom] = footer.map(stripVTControlCharacters);
+          const count = Math.min(starts(top!).length, starts(bottom!).length);
+          expect(starts(top!).slice(0, count)).toEqual(starts(bottom!).slice(0, count));
+          expect(bottom).toContain("q Back");
+          expect(bottom).toContain(helpVisible ? "? Hide help" : "? Help");
+          expect(footer[1]).toContain(theme.fg("text", theme.bold("q")));
+          expect(footer[1]).toContain(theme.fg("muted", "Back"));
+          expect(footer.join("\n")).not.toContain("\t");
+          for (const line of footer) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+        }
+      }
+    }
+  });
+
+  it("keeps Back/Help on narrow screens even with long primary labels", () => {
+    for (const state of [
+      { accepted: { editorChanged: false }, canRestore: true },
+      { state: { ...options.state, pendingSend: true } },
+    ]) {
+      const panel = create(state);
+      for (const width of [12, 20, 24, 30]) {
+        const footer = panel.render(width).slice(-2);
+        expect(footer[1]).toContain("q Back");
+        if (width >= 20) expect(footer[1]).toContain("? Help");
+        for (const line of footer) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      }
+    }
   });
 
   it("prioritizes return and help in the single-line footer, then fits primary actions", () => {
