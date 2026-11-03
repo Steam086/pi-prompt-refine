@@ -317,9 +317,9 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         if (!model) return theme.fg("muted", statusFor(model));
         return [
           theme.fg("muted", "Selected model"),
-          theme.fg("text", model.name),
+          theme.fg("text", theme.bold(model.name)),
           theme.fg("muted", displayModel(modelRef(model))),
-          theme.fg("text", statusFor(model)),
+          theme.fg("text", theme.bold(statusFor(model))),
         ].join("\n");
       };
       const updateThinkingStatus = (model?: Model<Api>) => {
@@ -874,7 +874,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     else if (action === "restore") await restoreDraft(ctx);
     else if (action === "model") {
       await selectModel(ctx);
-      if (selection.settingsContext && ctx.sessionManager.getSessionId() === sessionId) {
+      if (ctx.sessionManager.getSessionId() === sessionId) {
         await showPreviewContent(ctx, selection.settingsContext);
       }
     }
