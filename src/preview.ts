@@ -130,6 +130,7 @@ export class PreviewPanel implements Component {
       const helpLine = (...items: KeyHint[]) => lines.push(...wrapTextWithAnsi(items.map((hint) => formatKeyHint(hint, theme)).join(" · "), width));
       if (!options.accepted) {
         helpLine(["a", "Accept into editor (no send)"], ["e", "Edit candidate"]);
+        helpLine(["f", "Revise current result with new instructions (model call)"]);
         helpLine(["s", "Send (follow-up if busy; draft kept)"]);
       }
       helpLine(["x/d", "Break / cancel (stops the running request)"]);
@@ -149,6 +150,10 @@ export class PreviewPanel implements Component {
       lines.push("");
     }
     if (options.candidateText !== undefined) {
+      if (options.state.phase === "error") {
+        paragraph(`Revision failed; previous result kept. ${options.errorLabel ?? "Try again with f Revise."}`, "warning");
+        lines.push("");
+      }
       if (options.accepted) {
         paragraph(options.accepted.editorChanged
           ? "Editor changed; this snapshot excludes later edits."
@@ -183,10 +188,11 @@ export class PreviewPanel implements Component {
       lines.push("");
       paragraph("Draft unchanged.", "muted");
     } else {
-      paragraph("No result yet.");
+      const needsModel = this.isEmptyState() && !options.state.model;
+      paragraph(needsModel ? "No model selected" : "No result yet.");
       if (this.isEmptyState()) {
         const model = options.state.model;
-        paragraph(model ? `${model.provider}/${model.id}` : "No model selected", "muted");
+        paragraph(model ? `${model.provider}/${model.id}` : "Choose one with m or /refine model.", "muted");
       }
     }
     if (options.state.pendingSend) {
@@ -219,7 +225,7 @@ export class PreviewPanel implements Component {
     const primary: KeyHint[] = options.accepted
       ? [["r", "Refine draft"], ...(options.canRestore ? [["z", "Restore"] as KeyHint] : [])]
       : ready
-        ? [["a", "Accept"], ["e", "Edit"], options.state.pendingSend ? ["", "Send pending"] : ["s", "Send"], ["x", "Cancel"]]
+        ? [["a", "Accept"], ["e", "Edit"], ...(!options.state.pendingSend ? [["f", "Revise"] as KeyHint] : []), options.state.pendingSend ? ["", "Send pending"] : ["s", "Send"], ["x", "Cancel"]]
         : [["r", options.state.phase === "generating" ? "Restart" : options.state.phase === "error" ? "Retry" : "Refine"], ["m", "Model"],
           ...(options.state.phase === "generating" ? [["x", "Break"] as KeyHint] : [])];
     const secondary: KeyHint[] = [
