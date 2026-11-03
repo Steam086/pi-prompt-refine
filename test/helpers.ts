@@ -17,9 +17,8 @@ export function deferred<T>(): Deferred<T> {
 }
 
 export async function flushPromises(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  // Drain shared context preparation, provider completion and queued-run continuations.
+  for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
 export function success(text: string): RefineCompletion {

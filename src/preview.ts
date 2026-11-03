@@ -184,12 +184,12 @@ export class PreviewPanel implements Component {
       helpLine(["x/d", "Stop request / discard result (not just close)"]);
       helpLine(["z", "Restore draft before acceptance"]);
       lines.push("", theme.fg("muted", "Refine & navigate"));
-      helpLine(["r", "Refine current draft (model call)"]);
+      helpLine(["r", "Refine current draft in this round (model call)"]);
       helpLine(["g", "Generate from the same frozen input (model call)"]);
       helpLine(["m", "Model"], ["c", "Cycle task models + favorites"]);
       helpLine(["[ / ]", "Previous / next candidate for this model"]);
-      helpLine(["←/→", "Page: Preview / History / Usage / Settings"]);
-      paragraph("While generating or sending, model/candidate switching is paused. Stop first or wait.", "muted");
+      helpLine(["←/→", "Page: Preview / Usage / Settings"]);
+      paragraph("Requests can run in parallel. Switching is paused only while a Pi send is pending. Usage Enter applies a result here; it never writes to Pi.", "muted");
       helpLine(["o", "Original"], ["v", "Formatted/source"]);
       helpLine(["↑↓", "Scroll"], ["PgUp/PgDn", "Page"]);
       helpLine(["i", "Input"], ["Tab", "Settings group (Context / Optimizer)"]);

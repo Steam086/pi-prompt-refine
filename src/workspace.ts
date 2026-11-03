@@ -6,7 +6,7 @@ import { panelFrame, panelLayout, panelTabs, workspaceTabs, WORKSPACE_PAGES, typ
 import { alignedKeyHints, fittingKeyHints } from "./key-hints.js";
 import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
-import { HistoryPanel } from "./history-panel.js";
+import { TaskPanel, type TaskPanelActions, type TaskPanelPosition } from "./task-panel.js";
 import type { RefineRecord } from "./history.js";
 
 export interface ContextSettings {
@@ -27,7 +27,11 @@ const instructionDescriptions = {
 interface WorkspaceActions {
   /** Session-owned text, independent of request snapshots and revision feedback. */
   inputDraft?: { text: string; save(text: string): void };
+  inputCaptureOnly?(): boolean;
   history?(): RefineRecord[];
+  tasks?: TaskPanelActions;
+  taskPosition?: TaskPanelPosition;
+  usagePosition?: TaskPanelPosition;
   context(): ContextSettings;
   contextEnabled(): boolean;
   optimizer?(): { model: string; thinking: string; thinkingEnabled: boolean };
@@ -43,8 +47,11 @@ interface WorkspaceActions {
 
 /** One custom UI lifetime: internal navigation never restores the host editor/card. */
 export class RefineWorkspace implements Component, Focusable {
-  private mode: "main" | "context" | "input" | "history" | "usage" = "main";
-  private historyPanel?: HistoryPanel;
+  private mode: "main" | "result" | "context" | "input" | "usage" = "main";
+  private historyPanel?: TaskPanel;
+  private taskPanel?: TaskPanel;
+  private returnToTasks = false;
+  private inputReturnMode: "main" | "result" = "main";
   private settingsInitialized = false;
   private hasFocus = false;
   private selected: ContextSettings = { instructions: "always", tree: false, skills: false };
@@ -75,6 +82,14 @@ export class RefineWorkspace implements Component, Focusable {
     private readonly keys: KeybindingsManager,
     private readonly actions: WorkspaceActions,
   ) {
+    if (actions.tasks) {
+      const taskActions: TaskPanelActions = { ...actions.tasks, activate: (id) => {
+        const applied = actions.tasks!.activate(id);
+        if (applied) this.showApplied(id);
+        return applied;
+      } };
+      this.taskPanel = new TaskPanel(taskActions, theme, () => tui.terminal.rows, keys, false, actions.taskPosition);
+    }
     const makeInput = () => new PromptInput(tui, {
       borderColor: (text) => theme.fg("borderMuted", text),
       selectList: {
@@ -98,7 +113,7 @@ export class RefineWorkspace implements Component, Focusable {
           this.inputError = error;
         } else {
           this.inputError = "";
-          this.switchMode("main");
+          this.switchMode(input === this.revisionInput ? "result" : "main");
         }
       };
     }
@@ -115,6 +130,7 @@ export class RefineWorkspace implements Component, Focusable {
   invalidate(): void {
     this.panel.invalidate();
     this.historyPanel?.invalidate();
+    this.taskPanel?.invalidate();
     this.input.editor.invalidate();
     this.revisionInput.editor.invalidate();
     this.settingsFrames.clear();
@@ -128,25 +144,48 @@ export class RefineWorkspace implements Component, Focusable {
     this.settingsContextEnabled = this.actions.contextEnabled();
   }
 
-  private switchMode(mode: "main" | "context" | "input" | "history" | "usage"): void {
+  private switchMode(mode: "main" | "result" | "context" | "input" | "usage"): void {
     this.mode = mode;
     this.focused = this.hasFocus;
     this.tui.requestRender();
   }
 
-  openHistory(usage = false): void {
-    this.historyPanel = new HistoryPanel(this.actions.history?.() ?? [], this.theme, () => this.tui.terminal.rows, this.keys, () => this.switchMode("main"), usage);
-    this.switchMode(usage ? "usage" : "history");
+  openUsage(): void {
+    const actions = this.actions.tasks;
+    this.historyPanel = new TaskPanel({
+      records: () => this.actions.history?.() ?? [],
+      appliedId: () => actions?.appliedId(),
+      activate: (id) => {
+        const applied = actions?.activate(id) ?? false;
+        if (applied) this.showApplied(id);
+        return applied;
+      },
+      run: (id) => actions?.run(id), stop: (id) => actions?.stop(id), copy: (id) => actions?.copy(id), launchModel: () => actions?.launchModel?.() ?? "No model",
+    }, this.theme, () => this.tui.terminal.rows, this.keys, true, this.actions.usagePosition);
+    this.switchMode("usage");
   }
 
+  private showApplied(id: number): void {
+    if (this.actions.taskPosition) {
+      this.actions.taskPosition.selectedId = id;
+      this.actions.taskPosition.scroll = 0;
+    }
+    this.openResult(true);
+  }
+
+  isUsage(): boolean { return this.mode === "usage"; }
+  openTasks(): void { this.switchMode("main"); }
+
+  openResult(fromTasks = false): void { this.returnToTasks = fromTasks; this.switchMode("result"); }
+
   private navigatePage(direction: number): void {
-    const page: WorkspacePage = this.mode === "context" ? "Settings" : this.mode === "history" ? "History" : this.mode === "usage" ? "Usage" : "Preview";
+    const page: WorkspacePage = this.mode === "context" ? "Settings" : this.mode === "usage" ? "Usage" : "Preview";
     const next = WORKSPACE_PAGES[(WORKSPACE_PAGES.indexOf(page) + direction + WORKSPACE_PAGES.length) % WORKSPACE_PAGES.length];
     if (next === "Settings") {
       if (!this.settingsInitialized) this.openSettings();
       else { this.switchMode("context"); this.refreshSettings(); }
     } else if (next === "Preview") this.switchMode("main");
-    else this.openHistory(next === "Usage");
+    else this.openUsage();
   }
 
   openSettings(selected = this.actions.context(), cursor = this.cursor): void {
@@ -189,7 +228,7 @@ export class RefineWorkspace implements Component, Focusable {
     const key = parseKey(data);
     if (this.mode === "input") {
       if (this.keys.matches(data, "tui.select.cancel") || key === "ctrl+\\") {
-        this.switchMode("main"); // Back never discards the independent input draft.
+        this.switchMode(this.inputReturnMode); // Back never discards the independent input draft.
       } else {
         this.beforeInput = this.activeInput.editor.getExpandedText();
         this.inputError = "";
@@ -213,9 +252,18 @@ export class RefineWorkspace implements Component, Focusable {
       } else this.navigatePage(key === "left" ? -1 : 1);
       return true;
     }
-    if (this.mode === "history" || this.mode === "usage") {
-      this.historyPanel?.handleInput(data);
-      this.tui.requestRender();
+    if (this.mode === "usage" || (this.mode === "main" && this.taskPanel)) {
+      if (this.mode === "usage" && (key === "q" || key === "ctrl+\\" || this.keys.matches(data, "tui.select.cancel"))) {
+        this.switchMode("main");
+        return true;
+      }
+      if ((this.mode === "usage" ? this.historyPanel : this.taskPanel)?.handleInput(data)) {
+        this.tui.requestRender();
+        return true;
+      }
+    }
+    if (this.mode === "result" && this.returnToTasks && (key === "q" || this.keys.matches(data, "tui.select.cancel"))) {
+      this.switchMode("main");
       return true;
     }
     if (this.mode === "context") {
@@ -230,6 +278,7 @@ export class RefineWorkspace implements Component, Focusable {
         void this.actions.saveContext({ ...this.selected }).then((notice) => {
           if (this.disposed) return;
           this.panel.setNotice(notice);
+          this.taskPanel?.setNotice(notice);
           this.settingsInitialized = false;
           this.switchMode("main");
         }).catch(() => {
@@ -270,6 +319,7 @@ export class RefineWorkspace implements Component, Focusable {
         if (target.key !== this.revisionTarget?.key) this.revisionInput.editor.setText("");
         this.revisionTarget = target;
         this.inputKind = "revision";
+        this.inputReturnMode = this.mode === "result" ? "result" : "main";
         this.inputError = "";
         this.switchMode("input");
       }
@@ -277,6 +327,7 @@ export class RefineWorkspace implements Component, Focusable {
     }
     if (key?.toLowerCase() === "i") {
       this.inputKind = "draft";
+      this.inputReturnMode = this.mode === "result" ? "result" : "main";
       this.inputError = "";
       this.switchMode("input");
       return true;
@@ -286,8 +337,9 @@ export class RefineWorkspace implements Component, Focusable {
 
   render(width: number): string[] {
     if (width < 1) return [];
-    if (this.mode === "main") return this.panel.render(width);
-    if (this.mode === "history" || this.mode === "usage") return this.historyPanel?.render(width) ?? [];
+    if (this.mode === "result") return this.panel.render(width);
+    if (this.mode === "main") return this.taskPanel?.render(width, () => this.panel.render(width)) ?? this.panel.render(width);
+    if (this.mode === "usage") return this.historyPanel?.render(width) ?? [];
     const layout = panelLayout(width, this.tui.terminal.rows);
     const { innerWidth, bodyHeight } = layout;
     const { theme } = this;
@@ -309,7 +361,7 @@ export class RefineWorkspace implements Component, Focusable {
     if (this.mode === "input") {
       const cursor = this.activeInput.editor.getCursor();
       const revising = this.inputKind === "revision";
-      const action = revising ? "Revise" : "Refine";
+      const action = revising ? "Revise" : this.actions.inputCaptureOnly?.() ? "Add unsent" : "Refine";
       header = [theme.fg("text", theme.bold(revising ? "Revise current result" : "Input")),
         theme.fg(this.inputError ? "warning" : "muted", sanitizeTerminalText(this.inputError || (revising
           ? "Describe changes · Original task kept · Not sent"

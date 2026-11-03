@@ -35,7 +35,7 @@ function setup(complete: (request: RefineRequest, signal: AbortSignal) => Promis
 }
 
 describe("request source and shortcut routing", () => {
-  it("captures only started requests, supersedes A with B and ignores late A", async () => {
+  it("preserves A while B runs and keeps B as the explicit foreground", async () => {
     const a = deferred<RefineCompletion>();
     const b = deferred<RefineCompletion>();
     const complete = vi.fn().mockImplementationOnce(() => a.promise).mockImplementationOnce(() => b.promise);
@@ -46,11 +46,11 @@ describe("request source and shortcut routing", () => {
     expect(controller.getRequestSource()).toEqual({ draft: "A" });
     controller.getRequestSource()!.draft = "mutated";
     expect(controller.shouldOpenPanel("A")).toBe(true);
-    expect(controller.shouldOpenPanel("B")).toBe(false);
+    expect(controller.shouldOpenPanel("B")).toBe(true);
     expect(controller.trigger(input("x".repeat(101))).kind).toBe("too-long");
     expect(controller.getRequestSource()).toEqual({ draft: "A" });
     controller.trigger(input("B"));
-    expect(complete.mock.calls[0]![1].aborted).toBe(true);
+    expect(complete.mock.calls[0]![1].aborted).toBe(false);
     expect(controller.getRequestSource()).toEqual({ draft: "B" });
     a.resolve(success("Late A"));
     await flushPromises();
@@ -59,11 +59,13 @@ describe("request source and shortcut routing", () => {
     await flushPromises();
     expect(controller.getCandidate()?.text).toBe("Result B");
     expect(controller.shouldOpenPanel("B")).toBe(true);
-    expect(controller.shouldOpenPanel("A")).toBe(false);
+    expect(controller.shouldOpenPanel("A")).toBe(true);
     controller.beginSend(controller.getCandidateToken()!);
     expect(controller.shouldOpenPanel("C")).toBe(true);
     controller.onSubmittedInput("Result B", "extension", "followUp");
-    expect(controller.getRequestSource()).toBeUndefined();
+    controller.onMessageStarted("Result B");
+    expect(controller.getHistory().every((record) => record.archivedAt !== undefined)).toBe(true);
+    expect(controller.getRequestSource()).toEqual({ draft: "B" });
   });
 
   it.each(["failure", "timeout"])("retains the source after %s but clears it on invalidation", async (outcome) => {
@@ -77,7 +79,7 @@ describe("request source and shortcut routing", () => {
     expect(controller.getState()).toMatchObject({ phase: "error", thinkingLevel: "high" });
     expect(controller.getRequestSource()).toEqual({ draft: "A" });
     expect(controller.shouldOpenPanel("A")).toBe(true);
-    expect(controller.shouldOpenPanel("B")).toBe(false);
+    expect(controller.shouldOpenPanel("B")).toBe(true);
     controller.invalidateLifecycle(true);
     expect(controller.getRequestSource()).toBeUndefined();
   });
@@ -234,7 +236,7 @@ describe("RefineController request lifecycle", () => {
     }
   });
 
-  it("freezes history metadata and includes it and the system prompt in active/ready deduplication", async () => {
+  it("freezes round history and system prompt until a committed send", async () => {
     const pending = deferred<RefineCompletion>();
     const complete = vi.fn(() => pending.promise);
     const { controller } = setup(complete);
@@ -243,11 +245,11 @@ describe("RefineController request lifecycle", () => {
     request.history.items[0]!.text = "mutated outside request";
     expect(controller.trigger(input("Draft", { thinkingLevel: "high" })).kind).toBe("duplicate");
     const updated = input("Draft", { thinkingLevel: "high", systemPrompt: buildRefineSystemPrompt(false, "Be brief") });
-    expect(controller.trigger(updated).kind).toBe("started");
+    expect(controller.trigger(updated).kind).toBe("duplicate");
     pending.resolve(success("Refined"));
     await flushPromises();
     expect(controller.getCandidate()?.history.items[0]?.text).toBe("Keep it concise");
-    expect(controller.getCandidate()?.systemPrompt).toBe(updated.systemPrompt);
+    expect(controller.getCandidate()?.systemPrompt).toBe(request.systemPrompt);
     expect(controller.trigger(updated).kind).toBe("ready");
     const copy = controller.getCandidate()!;
     copy.history.items[0]!.text = "mutated copy";
@@ -255,15 +257,19 @@ describe("RefineController request lifecycle", () => {
     const changed = structuredClone(updated);
     changed.history.status = "partial";
     changed.history.omittedMessageCount = 1;
+    expect(controller.trigger(changed).kind).toBe("ready");
+    controller.onMessageStarted("Sent prompt");
     expect(controller.trigger(changed).kind).toBe("started");
   });
 
-  it("includes title eligibility in deduplication and drops unsolicited titles", async () => {
+  it("freezes title eligibility per round and drops unsolicited titles in the next", async () => {
     const { controller } = setup(async () => ({ ...success("Prompt"), title: "Project task" }));
     controller.trigger(input("Draft", { generateTitle: true }));
     await flushPromises();
     expect(controller.getCandidate()?.title).toBe("Project task");
     expect(controller.trigger(input("Draft", { generateTitle: true })).kind).toBe("ready");
+    expect(controller.trigger(input("Draft", { generateTitle: false })).kind).toBe("ready");
+    controller.onMessageStarted("Prompt");
     expect(controller.trigger(input("Draft", { generateTitle: false })).kind).toBe("started");
     await flushPromises();
     expect(controller.getCandidate()?.title).toBeUndefined();
@@ -277,7 +283,7 @@ describe("RefineController request lifecycle", () => {
     expect(controller.getCandidate()).toBeUndefined();
     expect(onAccepted).not.toHaveBeenCalled();
   });
-  it("includes project resources in deduplication and freezes their source snapshot", async () => {
+  it("freezes project resources for the whole round", async () => {
     const pending = deferred<ReturnType<typeof success>>();
     const requests: RefineRequest[] = [];
     const complete = vi.fn((request: RefineRequest) => { requests.push(request); return pending.promise; });
@@ -287,10 +293,10 @@ describe("RefineController request lifecycle", () => {
     expect(controller.trigger(input("draft", { project })).kind).toBe("duplicate");
     project.snapshot.text = "Updated rules";
     expect(requests[0]?.project?.snapshot.text).toBe("Original rules");
-    expect(controller.trigger(input("draft", { project })).kind).toBe("started");
+    expect(controller.trigger(input("draft", { project })).kind).toBe("duplicate");
     pending.resolve(success("Refined"));
     await flushPromises();
-    expect(controller.getCandidate()?.project?.snapshot.text).toBe("Updated rules");
+    expect(controller.getCandidate()?.project?.snapshot.text).toBe("Original rules");
     expect(controller.trigger(input("draft", { project })).kind).toBe("ready");
   });
 
@@ -321,7 +327,7 @@ describe("RefineController request lifecycle", () => {
 
     controller.trigger(input("A"));
     controller.trigger(input("B"));
-    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[0]?.aborted).toBe(false);
     expect(signals[1]?.aborted).toBe(false);
     b.resolve(success("B refined"));
     await flushPromises();
@@ -334,7 +340,7 @@ describe("RefineController request lifecycle", () => {
     expect(scheduler.size).toBe(0);
   });
 
-  it("invalidates a submitted draft even when the same text is typed again", async () => {
+  it("creates a new round for explicitly requested identical text after a committed send", async () => {
     const a = deferred<ReturnType<typeof success>>();
     const replacement = deferred<ReturnType<typeof success>>();
     const signals: AbortSignal[] = [];
@@ -345,9 +351,10 @@ describe("RefineController request lifecycle", () => {
     const { controller } = setup(complete);
 
     controller.trigger(input("same A"));
-    expect(controller.onSubmittedInput("same A", "interactive")).toBe("invalidated");
+    expect(controller.onSubmittedInput("same A", "interactive")).toBe("pending");
+    controller.onMessageStarted("same A");
     controller.trigger(input("same A"));
-    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[0]?.aborted).toBe(false);
     expect(complete).toHaveBeenCalledTimes(2);
     replacement.resolve(success("new A"));
     await flushPromises();
@@ -356,7 +363,7 @@ describe("RefineController request lifecycle", () => {
     expect(controller.getCandidate()?.text).toBe("new A");
   });
 
-  it("does not revive a result when a user submits B while A is pending", async () => {
+  it("archives A without cancelling it when user message B starts", async () => {
     const pending = deferred<ReturnType<typeof success>>();
     let signal: AbortSignal | undefined;
     const { controller } = setup((_request, requestSignal) => {
@@ -366,11 +373,12 @@ describe("RefineController request lifecycle", () => {
 
     controller.trigger(input("A"));
     controller.onSubmittedInput("B", "interactive");
-    expect(signal?.aborted).toBe(true);
-    pending.resolve(success("stale A"));
+    controller.onMessageStarted("B");
+    expect(signal?.aborted).toBe(false);
+    pending.resolve(success("Archived A"));
     await flushPromises();
-    expect(controller.getCandidate()).toBeUndefined();
-    expect(controller.getState().phase).toBe("idle");
+    expect(controller.getHistory()[0]).toMatchObject({ status: "generated", candidate: { text: "Archived A" }, archivedAt: expect.any(Number) });
+    expect(controller.getRoundId()).toBeUndefined();
   });
 
   it.each(["resolve", "reject"] as const)("drops provider callbacks after cancel (%s)", async (callback) => {
@@ -493,18 +501,21 @@ describe("multi-model task history", () => {
     const first = controller.getCandidate()!.text;
     controller.trigger(controller.getTaskInput()!, { force: true, sameTask: true });
     await flushPromises();
+    expect(controller.getCandidate()?.text).toBe(first);
+    controller.applyResult(controller.getHistory().at(-1)!.id);
     const second = controller.getCandidate()!.text;
     expect(controller.getCandidatePosition()).toMatchObject({ index: 2, count: 2 });
     controller.cycleCandidate(-1);
     expect(controller.getCandidate()?.text).toBe(first);
     expect(controller.isCandidateCurrent(firstToken)).toBe(false);
     controller.setModel(other);
-    expect(controller.getCandidate()).toBeUndefined();
-    expect(controller.getCandidatePosition()).toMatchObject({ index: 0, count: 0 });
+    expect(controller.getCandidate()?.text).toBe(first);
+    expect(controller.getCandidatePosition()).toMatchObject({ index: 1, count: 2 });
     expect(controller.shouldOpenPanel("Draft")).toBe(true);
     controller.trigger({ ...controller.getTaskInput()!, model: other }, { force: true, sameTask: true });
     await flushPromises();
     controller.setModel(model);
+    controller.applyResult(controller.getHistory()[0]!.id);
     expect(controller.getCandidate()?.text).toBe(first);
     controller.cycleCandidate(1);
     expect(controller.getCandidate()?.text).toBe(second);
@@ -544,40 +555,43 @@ describe("multi-model task history", () => {
     expect(controller.getCandidate()?.text).toBe("Raw model output");
   });
 
-  it("keeps accepted records read-only while other models remain usable", async () => {
+  it("retains accepted snapshots while other models run and permits explicit historical Apply", async () => {
     const { controller } = setup();
     controller.trigger(input("Draft"));
     await flushPromises();
     controller.acceptCandidate(controller.getCandidateToken()!, "Draft", false, () => {});
     controller.setModel(other);
-    expect(controller.getViewedAccepted()).toBeUndefined();
+    expect(controller.getViewedAccepted()?.text).toBe("Refined");
     expect(controller.getCandidate()).toBeUndefined();
     controller.trigger({ ...controller.getTaskInput()!, model: other }, { force: true, sameTask: true });
     await flushPromises();
+    expect(controller.getCandidate()).toBeUndefined();
+    controller.applyResult(controller.getHistory().at(-1)!.id);
     expect(controller.getCandidate()).toBeDefined();
     controller.setModel(model);
-    expect(controller.getCandidateToken()).toBeUndefined();
-    expect(controller.getViewedAccepted()?.text).toBe("Refined");
+    expect(controller.getCandidateToken()).toBeDefined();
+    expect(controller.applyResult(controller.getHistory()[0]!.id)).toBe(true);
+    expect(controller.getCandidate()?.text).toBe("Refined");
     expect(controller.getHistory()[0]?.acceptedAt).toEqual(expect.any(Number));
   });
 
-  it("pauses switching in flight, stops without losing the task, and ignores late output", async () => {
+  it("allows switching in flight, stops one background run, and ignores late output", async () => {
     const pending = deferred<RefineCompletion>();
     const complete = vi.fn().mockResolvedValueOnce(success("First")).mockImplementationOnce(() => pending.promise);
     const { controller } = setup(complete);
     controller.trigger(input("Draft"));
     await flushPromises();
     controller.trigger(controller.getTaskInput()!, { force: true, sameTask: true });
-    expect(controller.setModel(other)).toBe(false);
-    expect(controller.cycleCandidate(1)).toBe(false);
-    expect(controller.trigger(controller.getTaskInput()!, { sameTask: true }).kind).toBe("busy");
-    controller.stopRequest();
+    expect(controller.setModel(other)).toBe(true);
+    expect(controller.cycleCandidate(1)).toBe(true);
+    expect(controller.trigger(controller.getTaskInput()!, { sameTask: true }).kind).toBe("duplicate");
+    controller.stopRequest(controller.getHistory().at(-1)!.id);
     expect(controller.getCandidate()?.text).toBe("First");
     expect(controller.getTaskInput()?.draft).toBe("Draft");
-    expect(controller.setModel(other)).toBe(true);
+    expect(controller.setModel(model)).toBe(true);
     pending.resolve(success("Late"));
     await flushPromises();
-    expect(controller.getCandidate()).toBeUndefined();
+    expect(controller.getCandidate()?.text).toBe("First");
     expect(controller.getHistory().map((record) => record.status)).toEqual(["generated", "cancelled"]);
   });
 
@@ -588,11 +602,13 @@ describe("multi-model task history", () => {
     await flushPromises();
     controller.trigger(controller.getTaskInput()!, { force: true, sameTask: true });
     await flushPromises();
+    controller.applyResult(controller.getHistory().at(-1)!.id);
     controller.beginSend(controller.getCandidateToken()!);
     expect(controller.setModel(other)).toBe(false);
     expect(controller.getHistory()[1]?.sentAt).toBeUndefined();
     controller.onSubmittedInput("Ready", "extension", "followUp");
-    expect(controller.getTaskInput()).toBeUndefined();
+    controller.onMessageStarted("Ready");
+    expect(controller.getTaskInput()?.draft).toBe("Draft");
     expect(controller.getHistory()[0]).toMatchObject({ status: "error", error: "invalid-output", usage: { totalTokens: 5 } });
     expect(controller.getHistory()[1]?.sentAt).toEqual(expect.any(Number));
     expect(controller.getHistory()[1]?.acceptedAt).toBeUndefined();
@@ -680,8 +696,8 @@ describe("RefineController explicit operations", () => {
     expect(controller.acceptCandidate(edited, "original", false, () => {})).toBe(true);
     expect(controller.shouldOpenPanel("manually refined")).toBe(true);
     expect(controller.shouldOpenPanel("original")).toBe(true);
-    expect(controller.shouldOpenPanel("changed draft")).toBe(false);
-    expect(controller.getRequestSource()).toBeUndefined();
+    expect(controller.shouldOpenPanel("changed draft")).toBe(true);
+    expect(controller.getRequestSource()).toEqual({ draft: "original" });
     expect(controller.getCandidateToken()).toBeUndefined();
     expect(controller.isCandidateCurrent(edited)).toBe(false);
     expect(controller.getAccepted()).toMatchObject({ text: "manually refined", draft: "original", model });
@@ -696,12 +712,12 @@ describe("RefineController explicit operations", () => {
     controller.acceptCandidate(token, "original", false, () => {});
     if (boundary === "dismiss") controller.cancelAndDismiss();
     if (boundary === "model") controller.setModel({ provider: "another", id: "chat" });
-    if (boundary === "submission") controller.onSubmittedInput("manually edited", "interactive");
+    if (boundary === "submission") controller.onMessageStarted("manually edited");
     if (boundary === "session") controller.setSession("session-2");
     if (boundary === "branch") controller.invalidateLifecycle(true);
     if (boundary === "restore") controller.restoreDraft(controller.getRestoreToken()!, "Refined", false, () => {});
-    const retained = boundary === "dismiss" || boundary === "model";
-    expect(controller.shouldOpenPanel("Refined")).toBe(retained);
+    const retained = boundary === "dismiss" || boundary === "model" || boundary === "submission";
+    expect(controller.shouldOpenPanel("Refined")).toBe(boundary !== "session");
     expect(!!controller.getAccepted()).toBe(retained);
   });
 
@@ -717,7 +733,7 @@ describe("RefineController explicit operations", () => {
     expect(write).toHaveBeenCalledWith("Refined with edits");
     expect(controller.getAccepted()?.text).toBe("Refined");
     expect(controller.shouldOpenPanel("Refined")).toBe(true);
-    expect(controller.shouldOpenPanel("Refined with edits")).toBe(false);
+    expect(controller.shouldOpenPanel("Refined with edits")).toBe(true);
     expect(controller.getCandidate()).toBeUndefined();
   });
 
@@ -730,7 +746,7 @@ describe("RefineController explicit operations", () => {
     expect(controller.shouldOpenPanel("draft")).toBe(true);
   });
 
-  it("restoring an accepted draft cancels a newer refinement and rejects late results", async () => {
+  it("restoring a draft prevents newer background completion from replacing the restored preview", async () => {
     const pending = deferred<ReturnType<typeof success>>();
     const complete = vi.fn().mockResolvedValueOnce(success("accepted")).mockImplementation(() => pending.promise);
     const { controller } = setup(complete);
@@ -741,7 +757,7 @@ describe("RefineController explicit operations", () => {
     const write = vi.fn();
     expect(controller.restoreDraft(controller.getRestoreToken()!, "accepted with edits", true, write)).toBe(true);
     expect(write).toHaveBeenCalledWith("original");
-    expect(controller.shouldOpenPanel("original")).toBe(false);
+    expect(controller.shouldOpenPanel("original")).toBe(true);
     pending.resolve(success("stale"));
     await flushPromises();
     expect(controller.getCandidate()).toBeUndefined();
@@ -783,14 +799,16 @@ describe("RefineController explicit operations", () => {
     expect(controller.getRestore()).toBeUndefined();
   });
 
-  it("consumes a busy follow-up only at Pi's input boundary and restores retry after send timeout", async () => {
+  it("consumes a busy follow-up only at message start and restores retry after send timeout", async () => {
     const scheduler = new FakeScheduler();
     const { controller } = setup(undefined, scheduler);
     controller.trigger(input("original"));
     await flushPromises();
     const token = controller.getCandidateToken()!;
     const send = controller.beginSend(token, 100)!;
-    expect(controller.onSubmittedInput(send.text, "extension", "followUp")).toBe("sent");
+    expect(controller.onSubmittedInput(send.text, "extension", "followUp")).toBe("pending");
+    expect(controller.getCandidate()).toBeDefined();
+    controller.onMessageStarted(send.text);
     expect(controller.getCandidate()).toBeUndefined();
 
     controller.trigger(input("again"));
@@ -806,10 +824,12 @@ describe("RefineController explicit operations", () => {
   it("invalidates the restore snapshot on user submission but preserves it through ignore", async () => {
     const { controller, token } = await readyController();
     expect(controller.acceptCandidate(token, "original", false, () => undefined)).toBe(true);
-    const restoreToken = controller.getRestoreToken()!;
     controller.cancelAndDismiss();
-    expect(controller.isRestoreCurrent(controller.getRestoreToken()!)).toBe(true);
+    const restoreToken = controller.getRestoreToken()!;
+    expect(controller.isRestoreCurrent(restoreToken)).toBe(true);
     controller.onSubmittedInput("new prompt", "interactive");
+    expect(controller.isRestoreCurrent(restoreToken)).toBe(true);
+    controller.onMessageStarted("new prompt");
     expect(controller.isRestoreCurrent(restoreToken)).toBe(false);
   });
 });

@@ -16,10 +16,11 @@ import { renderModelChoices } from "./model-picker.js";
 import { formatKeyHint, type KeyHint } from "./key-hints.js";
 import { RefineWorkspace, type ContextSettings } from "./workspace.js";
 import { PreviewPanel, type PreviewOptions } from "./preview.js";
-import { RefineController, type Candidate, type CandidateToken, type ControllerState, type RefineRequest } from "./controller.js";
+import { RefineController, type Candidate, type CandidateToken, type ControllerState, type RefineRequest, type RefineRequestInput, type TriggerResult } from "./controller.js";
+import type { TaskPanelPosition } from "./task-panel.js";
 
 import { readTokenUsage } from "./usage.js";
-import { assembleProjectContext, captureProjectContext, collectDirectoryContext } from "./project-context.js";
+import { assembleProjectContext, captureProjectContext, collectDirectoryContext, type TreeSnapshot } from "./project-context.js";
 
 const STATUS_KEY = "prompt-refine";
 
@@ -111,6 +112,33 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   const previewPositions = new Map<string, number>();
   // Extension-runtime memory only; never coupled to candidate/request invalidation.
   const inputDrafts = new Map<string, string>();
+  const taskPositions = new Map<string, TaskPanelPosition>();
+  const usagePositions = new Map<string, TaskPanelPosition>();
+  // Shared collection is independent of any one model's cancellation signal.
+  const contextJobs = new Map<string, { abort: AbortController; promise: Promise<TreeSnapshot>; settled: boolean }>();
+  function directorySnapshot(key: string, collect: (signal: AbortSignal) => Promise<TreeSnapshot>): Promise<TreeSnapshot> {
+    const existing = contextJobs.get(key);
+    if (existing) return existing.promise;
+    if (contextJobs.size >= 200) {
+      const retained = new Set(controller.getHistory().flatMap(({ input }) => {
+        const prefix = JSON.stringify([input.sessionId, input.roundId]) + ":";
+        const source = input.revision ? `${input.draft}\n${input.revision.instruction}` : input.draft;
+        return [prefix + "base", prefix + JSON.stringify(source)];
+      }));
+      for (const [jobKey, job] of contextJobs) {
+        if (job.settled && !retained.has(jobKey)) contextJobs.delete(jobKey);
+      }
+    }
+    const abort = new AbortController();
+    const job = { abort, settled: false, promise: collect(abort.signal) };
+    void job.promise.then(() => { job.settled = true; }, () => { job.settled = true; });
+    contextJobs.set(key, job);
+    return job.promise;
+  }
+  function clearContextJobs(): void {
+    for (const job of contextJobs.values()) job.abort.abort();
+    contextJobs.clear();
+  }
   const openHint = config.shortcuts.view ?? config.shortcuts.optimize ?? "/refine view";
 
   const controller = new RefineController({
@@ -129,19 +157,35 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
 
       const systemPrompt = request.systemPrompt;
       let projectText = "";
-      const projectConfig = structuredClone(config.projectContext);
+      let diagnostics = request.projectDiagnostics;
+      const projectConfig = structuredClone(request.project?.config ?? config.projectContext);
       if (request.project && request.preparedInput === undefined) {
         // History gates only the default tree; explicit @directories are independent.
-        const tree = await collectDirectoryContext(
-          request.project.cwd, request.revision ? `${request.draft}\n${request.revision.instruction}` : request.draft,
-          projectConfig, !request.history.text, signal,
-        );
+        const project = request.project;
+        const roundKey = JSON.stringify([request.sessionId, request.roundId]);
+        const source = request.revision ? `${request.draft}\n${request.revision.instruction}` : request.draft;
+        // Reserve fixed shares so a frozen default tree and prompt-specific references
+        // cannot double the configured per-request listing budgets. Both scopes run
+        // under the same wall-clock collection deadline (in parallel).
+        const sharedTreeBudget = !request.history.text && projectConfig.tree.enabled && projectConfig.referencedDirectories.enabled;
+        const directoryConfig = sharedTreeBudget ? { ...projectConfig, tree: { ...projectConfig.tree,
+          maxChars: Math.max(0, Math.floor((projectConfig.tree.maxChars - 2) / 2)),
+          maxEntries: Math.floor(projectConfig.tree.maxEntries / 2),
+          maxScannedEntries: Math.floor(projectConfig.tree.maxScannedEntries / 2),
+        } } : projectConfig;
+        const [base, references] = await Promise.all([
+          directorySnapshot(`${roundKey}:base`, (sharedSignal) => collectDirectoryContext(project.cwd, "", directoryConfig, !request.history.text, sharedSignal)),
+          directorySnapshot(`${roundKey}:${JSON.stringify(source)}`, (sharedSignal) => collectDirectoryContext(project.cwd, source, directoryConfig, false, sharedSignal)),
+        ]);
+        const tree: TreeSnapshot = { text: [base.text, references.text].filter(Boolean).join("\n\n"),
+          warnings: [...new Set([...base.warnings, ...references.warnings])], referencedDirectoryCount: references.referencedDirectoryCount };
         if (signal.aborted) throw new Error("Context collection cancelled");
-        const project = assembleProjectContext(request.project.snapshot, tree, projectConfig);
-        projectText = project.text;
+        const assembled = assembleProjectContext(request.project.snapshot, tree, projectConfig);
+        projectText = assembled.text;
+        diagnostics = { warnings: assembled.warnings, referencedDirectoryCount: assembled.text.includes("REFERENCED DIRECTORY:") ? tree.referencedDirectoryCount ?? 0 : 0 };
         if (controller.getState().requestId === request.requestId && controller.getGeneration() === request.generation) {
-          projectWarnings = project.warnings;
-          if (tree.referencedDirectoryCount && project.text.includes("REFERENCED DIRECTORY:")) {
+          projectWarnings = assembled.warnings;
+          if (tree.referencedDirectoryCount && assembled.text.includes("REFERENCED DIRECTORY:")) {
             projectLabel += ` · @dirs ${tree.referencedDirectoryCount}`;
           }
           if (projectWarnings.length) notify(ctx, projectWarnings.join("\n"), "warning");
@@ -150,7 +194,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       }
 
       const preparedInput = request.preparedInput ?? buildRefineInput(request.draft, request.history, projectText, request.revision);
-      controller.capturePreparedInput(request.requestId, request.generation, preparedInput);
+      controller.capturePreparedInput(request.requestId, request.generation, preparedInput, diagnostics);
       const userMessage: UserMessage = {
         role: "user",
         content: [{ type: "text", text: preparedInput }],
@@ -200,11 +244,11 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
   }
 
-  function contextLabel(source?: Candidate): string {
+  function contextLabel(source?: RefineRequestInput): string {
     const snapshot = source?.history ?? historySnapshot;
     if (!snapshot) return "Context: not captured";
-    const project = source ? (source.project ? `${source.project.snapshot.instructionCount} rules · ${source.project.snapshot.skillCount} skills` : "") : projectLabel;
-    const warnings = source ? source.project?.snapshot.warnings ?? [] : projectWarnings;
+    const project = source ? (source.project ? `${source.project.snapshot.instructionCount} rules · ${source.project.snapshot.skillCount} skills${source.project.config?.tree.enabled && !source.history.text ? " · tree" : ""}${source.projectDiagnostics?.referencedDirectoryCount ? ` · @dirs ${source.projectDiagnostics.referencedDirectoryCount}` : ""}` : "") : projectLabel;
+    const warnings = source ? source.projectDiagnostics?.warnings ?? source.project?.snapshot.warnings ?? [] : projectWarnings;
     const warning = warnings.length ? `⚠${warnings.length} · ` : "";
     const history = !snapshot.messageCount
       ? (project ? "No history" : "Draft only")
@@ -216,7 +260,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   }
 
   function updatePresentation(state: ControllerState): void {
-    if (state.phase !== "generating") {
+    if (!state.runningCount && !state.queuedCount) {
       if (progressTimer) clearInterval(progressTimer);
       progressTimer = undefined;
       generatingRequestId = undefined;
@@ -229,18 +273,18 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const ctx = currentUiContext;
     if (ctx?.mode !== "tui") return;
     ctx.ui.setStatus(STATUS_KEY, undefined);
-    if (state.phase === "idle") {
+    if (state.phase === "idle" && !state.runningCount && !state.queuedCount) {
       historySnapshot = undefined;
       projectLabel = "";
       projectWarnings = [];
       ctx.ui.setWidget(STATUS_KEY, undefined);
-      if (controller.getTaskInput()) refreshPreview?.();
+      if (controller.hasWorkspaceContent()) refreshPreview?.();
       else closePreview?.();
     } else {
       const candidateText = controller.getCandidate()?.text;
       ctx.ui.setWidget(STATUS_KEY, interacting || closePreview ? undefined : (_tui, theme) => ({
         render: (width) => renderSummary({
-          state, candidateText, contextLabel: contextLabel(), openHint,
+          state, candidateText, contextLabel: contextLabel(controller.getDisplayedInput()), openHint,
           elapsedSeconds: state.elapsedSeconds ?? 0,
           errorLabel: state.phase === "error" && candidateText ? `Request failed; previous result kept. ${errorStatus(state)}` : errorStatus(state),
         }, width, theme),
@@ -470,17 +514,17 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       return;
     }
     const confirmed = await ctx.ui.confirm("Apply optimization prompt changes?",
-      "Use the edited instructions for future refinements and save them to prompt-refine.json? Existing results and running requests are unchanged. The fixed refiner role, JSON output contract and session title rules are added automatically.");
+      "Use the edited instructions for the next round and save them to prompt-refine.json? Existing results and running requests are unchanged. The fixed refiner role, JSON output contract and session title rules are added automatically.");
     if (!confirmed || !isCurrent()) return;
     config.systemPrompt = edited;
     const persisted = await persistConfig(ctx);
-    notify(ctx, persisted ? "Optimization prompt saved · Applies to future requests." : "Optimization prompt applied · Not persisted.");
+    notify(ctx, persisted ? "Optimization prompt saved · Applies to next round." : "Optimization prompt applied · Not persisted.");
   }
 
   function modelSwitchBlocked(ctx: ExtensionContext): boolean {
     const state = controller.getState();
-    if (state.phase !== "generating" && !state.pendingSend) return false;
-    notify(ctx, "Model/candidate switching is paused while generating or sending. Wait, or stop the request first.", "info");
+    if (!state.pendingSend) return false;
+    notify(ctx, "Wait for Pi send acknowledgement before switching results or models.", "info");
     return true;
   }
 
@@ -512,10 +556,9 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     notifyCurrent(`Optimizer model switched to ${displayModel(next)}; the main session model is unchanged.`, "info");
   }
 
-  function optimizationError(ctx: ExtensionContext, draft: string): string | undefined {
+  function optimizationError(ctx: ExtensionContext, draft: string, selected = controller.getModel()): string | undefined {
     if (!draft.trim()) return "The editor is empty; no refinement request was sent.";
     if (draft.length > config.maxDraftChars) return `The draft exceeds ${config.maxDraftChars} characters; no request was sent, and the existing result was kept.`;
-    const selected = controller.getModel();
     if (!selected) return "No optimizer model is configured; use /refine model to select a text-generation model first.";
     if (!ctx.modelRegistry.find(selected.provider, selected.id) || !ctx.modelRegistry.getAvailable().some((candidate) => sameModel(candidate, selected))) {
       return `Optimizer model is missing or unavailable: ${displayModel(selected)}; no request was sent, and the existing result was kept.`;
@@ -523,7 +566,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     return undefined;
   }
 
-  function triggerOptimize(ctx: ExtensionContext, force = false, suppliedDraft?: string, keepEditor = false): void {
+  function triggerOptimize(ctx: ExtensionContext, force = false, suppliedDraft?: string, keepEditor = false, captureOnly = false, copyToRound = false): TriggerResult | undefined {
     useContext(ctx);
     if (ctx.mode !== "tui") {
       notify(ctx, "Background prompt refinement is only available in TUI mode; no model request was sent.", "warning");
@@ -554,7 +597,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     projectLabel = project ? `${project.instructionCount} rules · ${project.skillCount} skills${config.projectContext.tree.enabled && !history.text ? " · tree" : ""}` : "";
     projectWarnings = project?.warnings ?? [];
     const generateTitle = canNameSession(ctx);
-    const result = controller.trigger({
+    const input = {
       draft,
       model: selected,
       thinkingLevel: effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel),
@@ -563,8 +606,10 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       sessionId: ctx.sessionManager.getSessionId(),
       branchLeafId: ctx.sessionManager.getLeafId(),
       history,
-      ...(project ? { project: { cwd: ctx.cwd, snapshot: project } } : {}),
-    }, { force });
+      ...(project ? { project: { cwd: ctx.cwd, snapshot: project,
+        revisionSnapshot: captureProjectContext(ctx, config.projectContext, draft, true), config: structuredClone(config.projectContext) } } : {}),
+    };
+    const result = captureOnly ? controller.capture(input, copyToRound) : controller.trigger(input, { force });
     if (result.kind !== "started") {
       ({ historySnapshot, projectLabel, projectWarnings } = previousContext);
     }
@@ -573,20 +618,19 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     else if (result.kind === "duplicate" || result.kind === "ready") {
       void showPreview(ctx).catch(() => notifyCurrent("Could not open the refinement panel; the main draft was not changed.", "warning"));
     }
-    else if (result.kind === "started") {
-      // A synchronously completed adapter is still handled without opening any UI.
-    }
+    else if (result.kind === "busy") notify(ctx, "Work is pending or the 100-entry journal is full. Existing work kept.", "warning");
+    return result;
   }
 
   function generateSameInput(ctx: ExtensionContext): void {
     useContext(ctx);
     if (modelSwitchBlocked(ctx)) return;
     const input = controller.getTaskInput();
-    if (!input?.preparedInput) {
+    if (!input) {
       notify(ctx, "No frozen input is available. Use r to refine the current editor first.", "info");
       return;
     }
-    if (input.sessionId !== ctx.sessionManager.getSessionId() || input.branchLeafId !== ctx.sessionManager.getLeafId()) {
+    if (input.sessionId !== ctx.sessionManager.getSessionId()) {
       notify(ctx, "The session branch changed; use r to capture a new input.", "warning");
       return;
     }
@@ -713,11 +757,11 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
   }
 
-  async function showPreview(ctx: ExtensionContext, initialPage?: "history" | "usage"): Promise<void> {
+  async function showPreview(ctx: ExtensionContext, initialPage?: "usage", resultView = false): Promise<void> {
     if (interacting || ctx.mode !== "tui") return;
     interacting = true;
     ctx.ui.setFooter(() => ({ render: () => [], invalidate() {} }));
-    try { await showPreviewContent(ctx, undefined, 3, initialPage); }
+    try { await showPreviewContent(ctx, undefined, 3, initialPage, resultView); }
     finally {
       interacting = false;
       ctx.ui.setFooter(undefined);
@@ -730,12 +774,11 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     if (!instruction.trim()) return "Enter revision instructions; the current result is unchanged.";
     if (instruction.length > config.maxDraftChars) return `Revision instructions exceed ${config.maxDraftChars} characters; the current result is unchanged.`;
     const source = controller.getCandidate()!;
-    const error = optimizationError(ctx, source.draft);
+    const error = optimizationError(ctx, source.draft, source.model);
     if (error) return error;
     const model = ctx.modelRegistry.find(source.model.provider, source.model.id)!;
-    const generateTitle = canNameSession(ctx);
-    const project = config.projectContext.enabled
-      ? captureProjectContext(ctx, config.projectContext, `${source.draft}\n${instruction}`, true) : undefined;
+    const generateTitle = source.generateTitle;
+    const project = source.project?.revisionSnapshot ?? source.project?.snapshot;
     const previousContext = { historySnapshot, projectLabel, projectWarnings };
     historySnapshot = source.history;
     projectLabel = project ? `${project.instructionCount} rules · ${project.skillCount} skills${config.projectContext.tree.enabled && !source.history.text ? " · tree" : ""}` : "";
@@ -747,11 +790,12 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       model: source.model,
       thinkingLevel: effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel),
       generateTitle,
-      systemPrompt: buildRefineSystemPrompt(generateTitle, config.systemPrompt),
+      systemPrompt: source.systemPrompt,
+      roundId: source.roundId,
       sessionId: source.sessionId,
       branchLeafId: source.branchLeafId,
       history: source.history,
-      ...(project ? { project: { cwd: ctx.cwd, snapshot: project } } : {}),
+      ...(source.project ? { project: { ...source.project, snapshot: project! } } : {}),
     }, { force: true, revisionToken: token });
     if (result.kind !== "started") {
       ({ historySnapshot, projectLabel, projectWarnings } = previousContext);
@@ -760,7 +804,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     return undefined;
   }
 
-  async function showPreviewContent(ctx: ExtensionContext, settingsContext?: ContextSettings, settingsCursor = 3, initialPage?: "history" | "usage"): Promise<void> {
+  async function showPreviewContent(ctx: ExtensionContext, settingsContext?: ContextSettings, settingsCursor = 3, initialPage?: "usage", resultView = false): Promise<void> {
     useContext(ctx);
     if (ctx.mode !== "tui") {
       notify(ctx, "Preview requires TUI mode.", "warning");
@@ -768,7 +812,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
     if (closePreview) return; // One user-opened panel; never stack dialogs on repeated shortcuts.
     const sessionId = ctx.sessionManager.getSessionId();
-    type Selection = { action: PreviewAction; generation: number; token?: CandidateToken; settingsContext?: ContextSettings };
+    type Selection = { action: PreviewAction; generation: number; token?: CandidateToken; settingsContext?: ContextSettings; returnUsage?: boolean };
     let selection: Selection | undefined;
     try {
       selection = await ctx.ui.custom<Selection | undefined>((tui, theme, keybindings, done) => {
@@ -796,17 +840,35 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             accepted: accepted ? { editorChanged: ctx.ui.getEditorText() !== accepted.text } : undefined,
             draftChanged: draft !== undefined && ctx.ui.getEditorText() !== draft,
             canRestore: !!controller.getRestore(),
-            contextLabel: accepted ? "Accepted snapshot · no model call" : contextLabel(displayed), openHint,
+            contextLabel: accepted ? "Accepted snapshot · no model call" : contextLabel(controller.getDisplayedInput()), openHint,
             elapsedSeconds: (state.phase === "error" ? state.elapsedSeconds : displayed?.elapsedSeconds ?? state.elapsedSeconds) ?? 0,
             errorLabel: errorStatus(state),
             navigation: controller.getCandidatePosition(),
-            viewKey: displayed?.recordId ? `record-${displayed.recordId}` : `request-${state.requestId}-${controller.getModel()?.id ?? "none"}`,
+            viewKey: (displayed?.recordId ?? state.recordId) ? `record-${displayed?.recordId ?? state.recordId}` : `idle-${controller.getModel()?.id ?? "none"}`,
             thinkingLevel,
           };
         };
         const panel = new PreviewPanel(snapshot(), theme, () => tui.terminal.rows, () => tui.requestRender(), previewPositions);
         let closed = false;
+        const position = taskPositions.get(sessionId) ?? {};
+        taskPositions.set(sessionId, position);
+        const usagePosition = usagePositions.get(sessionId) ?? {};
+        usagePositions.set(sessionId, usagePosition);
+        const runRecord = (id: number, retry = false) => {
+          if (closed || ctx.sessionManager.getSessionId() !== sessionId) return;
+          const record = controller.getRecord(id);
+          if (!record) return;
+          const error = optimizationError(ctx, record.input.draft);
+          if (error) { notify(ctx, error, "warning"); return; }
+          const selected = controller.getModel()!;
+          const model = ctx.modelRegistry.find(selected.provider, selected.id)!;
+          completionContext = ctx;
+          const thinking = effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel);
+          const result = retry && record.status !== "unsent" ? controller.rerunRecord(id, selected, thinking) : controller.startRecord(id, selected, thinking);
+          if (result.kind !== "started") notify(ctx, `Request not started (${result.kind}); existing work kept.`, "info");
+        };
         const workspace = new RefineWorkspace(panel, tui, theme, keybindings, {
+          inputCaptureOnly: () => controller.hasWorkspaceContent(),
           inputDraft: {
             text: inputDrafts.get(sessionId) ?? "",
             save: (text) => {
@@ -816,6 +878,24 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             },
           },
           history: () => controller.getHistory(),
+          taskPosition: position,
+          usagePosition,
+          tasks: {
+            records: () => controller.getHistory(),
+            launchModel: () => controller.getModel() ? displayModel(controller.getModel()!) : "No model",
+            appliedId: () => controller.getAppliedRecordId(),
+            activate: (id) => {
+              const record = controller.getRecord(id);
+              if (record?.status === "unsent") { runRecord(id); return false; }
+              return controller.applyResult(id);
+            },
+            run: (id) => runRecord(id, true),
+            stop: (id) => controller.stopRequest(id),
+            copy: (id) => {
+              const record = controller.getRecord(id);
+              if (record) triggerOptimize(ctx, false, record.input.draft, true, true, true);
+            },
+          },
           context: () => ({
             instructions: !config.projectContext.instructionsEnabled ? "off" : config.projectContext.instructionsOnFollowUp ? "always" : "first",
             tree: config.projectContext.tree.enabled,
@@ -854,7 +934,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             if (selected.instructions !== "off") config.projectContext.instructionsOnFollowUp = selected.instructions === "always";
             config.projectContext.tree.enabled = selected.tree;
             config.projectContext.skillsEnabled = selected.skills;
-            return await persistConfig(ctx) ? "Context saved · Applies to future requests" : "Context applied · Not persisted; check configuration";
+            return await persistConfig(ctx) ? "Context saved · Applies to next round" : "Context applied · Not persisted; check configuration";
           },
           revision: () => {
             const token = controller.getCandidateToken();
@@ -872,8 +952,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             if (closed || ctx.sessionManager.getSessionId() !== sessionId) return "Session changed; no request sent.";
             const error = optimizationError(ctx, text);
             if (error) return error;
-            triggerOptimize(ctx, true, text, true);
-            return undefined;
+            const result = triggerOptimize(ctx, true, text, true, controller.hasWorkspaceContent());
+            return result && ["started", "captured", "duplicate", "ready"].includes(result.kind) ? undefined : "Could not add input; existing work kept.";
           },
         });
         const finish = (value?: Selection) => {
@@ -883,10 +963,11 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           workspace.dispose();
           refreshPreview = undefined;
           closePreview = undefined;
-          done(value);
+          done(value ? { ...value, returnUsage: workspace.isUsage() } : undefined);
         };
         if (settingsContext) workspace.openSettings(settingsContext, settingsCursor);
-        if (initialPage) workspace.openHistory(initialPage === "usage");
+        if (initialPage) workspace.openUsage();
+        else if (resultView) workspace.openResult();
         closePreview = () => finish();
         refreshPreview = () => {
           if (closed) return;
@@ -920,7 +1001,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
                 controller.stopRequest();
                 return;
               }
-              if (key === "g") { generateSameInput(ctx); return; }
+              if (key === "g") { generateSameInput(ctx); workspace.openTasks(); return; }
               if (key === "c") {
                 void cycleModel(ctx).catch(() => notifyCurrent("Could not switch optimizer model.", "warning"));
                 return;
@@ -960,7 +1041,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     else if (action === "model") {
       await selectModel(ctx);
       if (ctx.sessionManager.getSessionId() === sessionId) {
-        await showPreviewContent(ctx, selection.settingsContext);
+        await showPreviewContent(ctx, selection.settingsContext, 3, selection.returnUsage ? "usage" : undefined);
       }
     }
     else if (action === "system-prompt") {
@@ -978,7 +1059,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         await editCandidate(ctx, token);
         if (ctx.sessionManager.getSessionId() === sessionId &&
           controller.getSessionId() === sessionId && controller.getGeneration() === selection.generation) {
-          await showPreviewContent(ctx);
+          await showPreviewContent(ctx, undefined, 3, undefined, true);
         }
       }
       else if (action === "send") sendCandidate(ctx, token);
@@ -987,13 +1068,18 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
 
   const actions: Record<ShortcutAction, (ctx: ExtensionContext) => void | Promise<void>> = {
     optimize: (ctx) => {
-      if (ctx.mode !== "tui") return triggerOptimize(ctx);
+      if (ctx.mode !== "tui") { triggerOptimize(ctx); return; }
       if (interacting) return;
       useContext(ctx);
-      if (controller.shouldOpenPanel(ctx.ui.getEditorText()) || !controller.getModel()) return showPreview(ctx);
+      const draft = ctx.ui.getEditorText();
+      if (!controller.getModel() || !draft.trim()) return showPreview(ctx);
+      if (controller.hasWorkspaceContent()) {
+        if (!controller.hasCapturedDraft(draft)) triggerOptimize(ctx, false, draft, true, true);
+        return showPreview(ctx);
+      }
       triggerOptimize(ctx);
     },
-    view: (ctx) => showPreview(ctx),
+    view: (ctx) => showPreview(ctx, undefined, true),
     dismiss: (ctx) => {
       useContext(ctx);
       controller.cancelAndDismiss();
@@ -1018,7 +1104,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       const text = args.trim();
       const action = text.toLocaleLowerCase();
       if (action === "history" || action === "usage") {
-        await showPreview(ctx, action);
+        await showPreview(ctx, "usage");
         return;
       }
       const mapping: Record<string, ShortcutAction> = {
@@ -1055,11 +1141,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     useContext(ctx);
     if (event.message.role === "user") controller.onMessageStarted(userMessageText(event.message));
   });
-  pi.on("before_agent_start", (event, ctx) => {
-    useContext(ctx);
-    const text = event.messageType === "user" ? event.prompt : userMessageText(event.message);
-    controller.onMessageStarted(text);
-  });
+  // before_agent_start and input are preflight hooks; only message_start commits a round boundary.
   pi.on("session_start", (event, ctx) => {
     currentUiContext = ctx;
     // Include abandoned branches: session names are session-wide. A later explicit
@@ -1079,6 +1161,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   });
   pi.on("session_before_tree", (_event, ctx) => {
     currentUiContext = ctx;
+    closePreview?.();
     controller.invalidateLifecycle(true);
     currentUiContext = undefined;
   });
@@ -1088,18 +1171,22 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   });
   pi.on("session_before_switch", (_event, ctx) => {
     currentUiContext = ctx;
+    closePreview?.();
     controller.invalidateLifecycle(true);
     currentUiContext = undefined;
   });
   pi.on("session_before_fork", (_event, ctx) => {
     currentUiContext = ctx;
+    closePreview?.();
     controller.invalidateLifecycle(true);
     currentUiContext = undefined;
   });
   pi.on("session_shutdown", (_event, ctx) => {
     currentUiContext = ctx;
+    closePreview?.();
     controller.invalidateLifecycle(true);
     currentUiContext = undefined;
     completionContext = undefined;
+    clearContextJobs();
   });
 }

@@ -1,17 +1,14 @@
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type { ModelRef } from "./config.js";
+import type { ModelRef, ProjectContextConfig } from "./config.js";
 import type { HistorySnapshot, RevisionInput } from "./context.js";
 import type { TokenUsage } from "./usage.js";
 import type { ProjectSnapshot } from "./project-context.js";
 import { RefineHistory, type RefineRecord } from "./history.js";
 
-interface RequestProjectContext { cwd: string; snapshot: ProjectSnapshot }
-
+interface RequestProjectContext { cwd: string; snapshot: ProjectSnapshot; revisionSnapshot?: ProjectSnapshot; config?: ProjectContextConfig }
 export type RefinePhase = "idle" | "generating" | "ready" | "error";
 export type RefineStopReason = "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred" | "pending";
-
 export interface RefineRequestInput {
-  /** Original task, unchanged across explicit candidate revisions. */
   draft: string;
   revision?: RevisionInput;
   model: ModelRef;
@@ -21,18 +18,16 @@ export interface RefineRequestInput {
   branchLeafId: string | null;
   history: HistorySnapshot;
   systemPrompt: string;
-  /** Final JSON input, frozen after project directory collection. */
   preparedInput?: string;
   project?: RequestProjectContext;
+  projectDiagnostics?: { warnings: string[]; referencedDirectoryCount: number };
+  roundId?: number;
 }
-
 export interface RefineRequest extends RefineRequestInput {
   requestId: number;
   generation: number;
-  modelVersion: number;
   recordId: number;
 }
-
 export interface RefineCompletion {
   usage?: TokenUsage;
   title?: string;
@@ -40,10 +35,8 @@ export interface RefineCompletion {
   text: string;
   stopReason: RefineStopReason;
 }
-
 export interface Candidate extends RefineRequestInput {
   recordId?: number;
-  /** Frozen request duration, retained in accepted/restored snapshots. */
   elapsedSeconds?: number;
   usage?: TokenUsage;
   title?: string;
@@ -52,688 +45,500 @@ export interface Candidate extends RefineRequestInput {
   generation: number;
   text: string;
 }
-
-export interface CandidateToken {
-  requestId: number;
-  version: number;
-  generation: number;
-  sessionId: string;
-}
-
-export interface RestoreSnapshot {
-  id: number;
-  generation: number;
-  sessionId: string;
-  before: string;
-  applied: string;
-}
-
-export interface RestoreToken {
-  id: number;
-  generation: number;
-  sessionId: string;
-}
-
-/** Literal source captured only when a request starts; retained on failure for inspection. */
-export interface RequestSource {
-  draft: string;
-  revisionInstruction?: string;
-}
-
+export interface CandidateToken { requestId: number; version: number; generation: number; sessionId: string }
+export interface RestoreSnapshot { id: number; generation: number; sessionId: string; before: string; applied: string }
+export interface RestoreToken { id: number; generation: number; sessionId: string }
+export interface RequestSource { draft: string; revisionInstruction?: string }
 export interface ControllerState {
   elapsedSeconds?: number;
   usage?: TokenUsage;
   phase: RefinePhase;
   requestId: number;
+  recordId?: number;
   model?: ModelRef;
-  /** Frozen reasoning effort for a running or failed request. */
   thinkingLevel?: ModelThinkingLevel;
   error?: "timeout" | "failed" | "empty" | "truncated" | "tool-call" | "invalid-output";
   pendingSend: boolean;
+  runningCount?: number;
+  queuedCount?: number;
 }
-
-export interface Scheduler {
-  setTimeout(callback: () => void, delayMs: number): unknown;
-  clearTimeout(handle: unknown): void;
-}
-
+export interface Scheduler { setTimeout(callback: () => void, delayMs: number): unknown; clearTimeout(handle: unknown): void }
 export interface RefineControllerOptions {
   complete(request: RefineRequest, signal: AbortSignal): Promise<RefineCompletion>;
   timeoutMs: number;
   maxDraftChars: number;
   maxOutputChars?: number;
+  maxConcurrent?: number;
   scheduler?: Scheduler;
   onState(state: ControllerState): void;
-  /** Runs only after a successful editor write or Pi send acknowledgement. */
   onAccepted?(candidate: Candidate): void;
 }
-
 export type TriggerResult =
   | { kind: "started"; requestId: number }
-  | { kind: "duplicate" }
-  | { kind: "ready" }
-  | { kind: "empty" }
-  | { kind: "too-long" }
-  | { kind: "no-model" }
-  | { kind: "stale-source" }
-  | { kind: "busy" };
-
+  | { kind: "captured"; recordId: number }
+  | { kind: "duplicate" | "ready" | "empty" | "too-long" | "no-model" | "stale-source" | "busy" };
 interface ActiveRequest {
-  /** Roll back a failed revision without making the old result actionable in flight. */
   previousCandidate?: Candidate;
-  startedAt: number;
+  startedAt?: number;
   request: RefineRequest;
   controller: AbortController;
-  timeout: unknown;
+  timeout?: unknown;
 }
-
-interface PendingSend {
-  token: CandidateToken;
-  text: string;
-  timeout: unknown;
-}
-
+interface PendingSend { token: CandidateToken; text: string; timeout: unknown }
 const defaultScheduler: Scheduler = {
   setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
   clearTimeout: (handle) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
-
-function sameModel(left: ModelRef | undefined, right: ModelRef | undefined): boolean {
-  return left?.provider === right?.provider && left?.id === right?.id;
+function sameModel(a: ModelRef | undefined, b: ModelRef | undefined): boolean { return a?.provider === b?.provider && a?.id === b?.id; }
+function fingerprint(input: RefineRequestInput): string {
+  return JSON.stringify([input.draft, input.model, input.thinkingLevel, input.sessionId, input.roundId, input.revision]);
 }
+function elapsed(active: ActiveRequest): number { return active.startedAt === undefined ? 0 : Math.max(0, Math.floor((Date.now() - active.startedAt) / 1000)); }
 
-function fingerprint(request: RefineRequestInput): string {
-  return JSON.stringify([request.draft, request.model.provider, request.model.id, request.thinkingLevel, request.sessionId, request.branchLeafId, request.history, request.project, request.generateTitle, request.systemPrompt, request.revision]);
-}
-
-function elapsedSeconds(active: ActiveRequest): number {
-  return Math.max(0, Math.floor((Date.now() - active.startedAt) / 1_000));
-}
-
-function cloneCandidate(candidate: Candidate): Candidate {
-  return { ...candidate, ...(candidate.revision ? { revision: { ...candidate.revision } } : {}), history: structuredClone(candidate.history), ...(candidate.project ? { project: structuredClone(candidate.project) } : {}), ...(candidate.usage ? { usage: { ...candidate.usage } } : {}), model: { ...candidate.model } };
-}
-
+/** Journal entries own requests. The applied preview is independent of background completion. */
 export class RefineController {
   private readonly scheduler: Scheduler;
-  private readonly complete: RefineControllerOptions["complete"];
-  private readonly timeoutMs: number;
-  private readonly maxDraftChars: number;
-  private readonly maxOutputChars: number;
-  private readonly onState: RefineControllerOptions["onState"];
-  private readonly onAccepted: RefineControllerOptions["onAccepted"];
   private readonly journal = new RefineHistory();
+  private readonly active = new Map<number, ActiveRequest>();
+  private round?: { id: number; input: RefineRequestInput };
+  private roundSequence = 0;
   private taskSequence = 0;
-  private task?: { id: number; input: RefineRequestInput; selected: Map<string, number> };
-  private viewedAccepted?: Candidate;
-  private currentModel?: ModelRef;
+  private taskId?: number;
+  private lastCapturedDraft?: string;
+  private foregroundId?: number;
   private sessionId?: string;
+  private currentModel?: ModelRef;
   private generation = 0;
   private requestSequence = 0;
   private candidateSequence = 0;
   private restoreSequence = 0;
-  private modelVersion = 0;
-  private active?: ActiveRequest;
-  private requestSource?: RequestSource;
   private candidate?: Candidate;
-  /** Read-only provenance after acceptance, independent of the editable main draft. */
   private accepted?: Candidate;
+  private viewedAccepted?: Candidate;
   private restore?: RestoreSnapshot;
   private restoreAccepted?: Candidate;
   private pendingSend?: PendingSend;
+  private requestSource?: RequestSource;
   private state: ControllerState = { phase: "idle", requestId: 0, pendingSend: false };
 
-  constructor(options: RefineControllerOptions, initialModel?: ModelRef) {
-    this.complete = options.complete;
-    this.timeoutMs = options.timeoutMs;
-    this.maxDraftChars = options.maxDraftChars;
-    this.maxOutputChars = options.maxOutputChars ?? 1_000_000;
+  constructor(private readonly options: RefineControllerOptions, initialModel?: ModelRef) {
     this.scheduler = options.scheduler ?? defaultScheduler;
-    this.onState = options.onState;
-    this.onAccepted = options.onAccepted;
     this.currentModel = initialModel ? { ...initialModel } : undefined;
-    this.state = { ...this.state, ...(this.currentModel ? { model: { ...this.currentModel } } : {}) };
   }
-
   getState(): ControllerState {
-    const usage = this.state.phase === "error" ? this.state.usage : this.candidate?.usage ?? this.state.usage;
-    const elapsed = this.active ? elapsedSeconds(this.active) : this.state.phase === "error" ? this.state.elapsedSeconds : this.candidate?.elapsedSeconds ?? this.state.elapsedSeconds;
-    return { ...this.state, ...(elapsed !== undefined ? { elapsedSeconds: elapsed } : {}), ...(usage ? { usage: { ...usage } } : {}), ...(this.state.model ? { model: { ...this.state.model } } : {}) };
+    const running = [...this.active.values()].filter((item) => item.startedAt !== undefined);
+    const active = this.foregroundId === undefined ? undefined : this.active.get(this.foregroundId);
+    return structuredClone({ ...this.state,
+      ...(active ? { elapsedSeconds: elapsed(active) } : {}),
+      runningCount: running.length, queuedCount: this.active.size - running.length,
+    });
   }
-
-  getModel(): ModelRef | undefined {
-    return this.currentModel ? { ...this.currentModel } : undefined;
-  }
-
-  getGeneration(): number {
-    return this.generation;
-  }
-
-  getSessionId(): string | undefined {
-    return this.sessionId;
-  }
-
-  getCandidate(): Candidate | undefined {
-    return this.candidate ? cloneCandidate(this.candidate) : undefined;
-  }
-
-  getAccepted(): Candidate | undefined {
-    return this.accepted ? cloneCandidate(this.accepted) : undefined;
-  }
-
-  getViewedAccepted(): Candidate | undefined {
-    const accepted = this.task ? this.viewedAccepted : this.accepted;
-    return accepted ? cloneCandidate(accepted) : undefined;
-  }
-
-  getTaskInput(): RefineRequestInput | undefined {
-    return this.task ? structuredClone(this.task.input) : undefined;
-  }
-
+  getModel(): ModelRef | undefined { return this.currentModel ? { ...this.currentModel } : undefined; }
+  getGeneration(): number { return this.generation; }
+  getSessionId(): string | undefined { return this.sessionId; }
+  getRoundId(): number | undefined { return this.round?.id; }
+  getCandidate(): Candidate | undefined { return this.candidate ? structuredClone(this.candidate) : undefined; }
+  getAppliedRecordId(): number | undefined { return (this.candidate ?? this.viewedAccepted)?.recordId; }
+  getAccepted(): Candidate | undefined { return this.accepted ? structuredClone(this.accepted) : undefined; }
+  getViewedAccepted(): Candidate | undefined { return this.viewedAccepted ? structuredClone(this.viewedAccepted) : undefined; }
   getHistory(): RefineRecord[] {
-    return this.journal.list(this.sessionId ?? "");
+    const records = this.journal.list(this.sessionId ?? "");
+    const running = new Map([...this.active.values()].map((run) => [run.request.recordId, run]));
+    for (const record of records) {
+      const run = running.get(record.id);
+      if (run?.startedAt !== undefined) record.elapsedSeconds = elapsed(run);
+    }
+    return records;
   }
-
+  getCurrentRecords(): RefineRecord[] { return this.getHistory().filter((record) => record.archivedAt === undefined); }
+  getRecord(id: number): RefineRecord | undefined { return this.journal.get(id, this.sessionId ?? ""); }
+  hasWorkspaceContent(): boolean { return !!(this.journal.has(this.sessionId ?? "") || this.candidate || this.accepted || this.requestSource); }
+  hasCapturedDraft(draft: string): boolean {
+    return draft === this.lastCapturedDraft || this.getCurrentRecords().some((record) => record.input.draft === draft);
+  }
+  shouldOpenPanel(draft: string): boolean { return !draft.trim() || this.hasWorkspaceContent(); }
+  getTaskInput(): RefineRequestInput | undefined {
+    const record = this.getHistory().find((item) => item.taskId === this.taskId && !item.input.revision);
+    return record?.input;
+  }
   getTaskModels(): ModelRef[] {
-    const models = new Map<string, ModelRef>();
-    for (const record of this.taskRecords()) models.set(JSON.stringify(record.input.model), record.input.model);
-    return [...models.values()];
+    return [...new Map(this.getHistory().filter((record) => record.taskId === this.taskId)
+      .map((record) => [JSON.stringify(record.input.model), record.input.model])).values()];
   }
-
-  private taskRecords(): RefineRecord[] {
-    return this.task ? this.journal.list(this.sessionId ?? "", this.task.id) : [];
-  }
-
-  private modelCandidates(): RefineRecord[] {
-    return this.taskRecords().filter((record) => record.candidate && sameModel(record.input.model, this.currentModel));
-  }
-
   getCandidatePosition(): { index: number; count: number; label: string } | undefined {
-    if (!this.task) return undefined;
+    if (this.taskId === undefined) return undefined;
     const records = this.modelCandidates();
-    const id = this.candidate?.recordId ?? this.viewedAccepted?.recordId;
-    const index = records.findIndex((record) => record.id === id);
-    const record = records[index];
-    return { index: index + 1, count: records.length, label: record
-      ? `#${record.id} ${record.kind}${record.parentId ? ` from #${record.parentId}` : ""}${record.acceptedAt !== undefined ? " · accepted" : ""}`
-      : "No candidate for this model" };
+    const record = records.find((item) => item.id === (this.candidate ?? this.viewedAccepted)?.recordId);
+    return { index: record ? records.indexOf(record) + 1 : 0, count: records.length,
+      label: record ? `#${record.id} ${record.kind}${record.archivedAt !== undefined ? " · Earlier context" : ""}` : "No candidate for this model" };
   }
-
+  private modelCandidates(): RefineRecord[] {
+    const model = (this.candidate ?? this.viewedAccepted)?.model ?? this.currentModel;
+    return this.getHistory().filter((item) => item.taskId === this.taskId && item.candidate && sameModel(item.input.model, model));
+  }
   cycleCandidate(direction: number): boolean {
-    if (this.active || this.pendingSend) return false;
     const records = this.modelCandidates();
-    if (!records.length) return false;
-    const id = this.candidate?.recordId ?? this.viewedAccepted?.recordId;
-    const index = records.findIndex((record) => record.id === id);
-    this.showRecord(records[(index + direction + records.length) % records.length]!);
-    this.emitState();
-    return true;
+    if (!records.length || this.pendingSend) return false;
+    const index = records.findIndex((item) => item.id === (this.candidate ?? this.viewedAccepted)?.recordId);
+    return this.applyResult(records[(index + direction + records.length) % records.length]!.id);
   }
-
-  private showRecord(record?: RefineRecord): void {
-    this.generation += 1;
-    if (this.restore) this.restore = { ...this.restore, generation: this.generation };
-    this.candidate = undefined;
+  /** Apply changes only the Refine preview, never the Pi editor or current round. */
+  applyResult(id: number): boolean {
+    const record = this.getRecord(id);
+    if (!record?.candidate || this.pendingSend) return false;
+    this.rebase();
+    this.foregroundId = undefined;
+    this.taskId = record.taskId;
+    this.candidate = { ...record.candidate, generation: this.generation, version: ++this.candidateSequence };
     this.viewedAccepted = undefined;
-    this.requestSource = this.task ? { draft: this.task.input.draft } : undefined;
-    if (record?.candidate) {
-      const candidate = { ...cloneCandidate(record.candidate), version: ++this.candidateSequence, generation: this.generation };
-      if (record.acceptedAt !== undefined || record.sentAt !== undefined) this.viewedAccepted = candidate;
-      else this.candidate = candidate;
-      this.task?.selected.set(JSON.stringify(candidate.model), record.id);
-      this.requestSource = { draft: candidate.draft, ...(candidate.revision ? { revisionInstruction: candidate.revision.instruction } : {}) };
-    }
-    this.state = { phase: this.candidate ? "ready" : "idle", requestId: record?.candidate?.requestId ?? this.requestSequence,
-      model: this.currentModel ? { ...this.currentModel } : undefined, pendingSend: false };
-  }
-
-  /** Called by the adapter once the final, directory-enriched packet is ready. */
-  capturePreparedInput(requestId: number, generation: number, text: string): void {
-    const request = this.active?.request;
-    if (!request || request.requestId !== requestId || request.generation !== generation) return;
-    request.preparedInput = text;
-    this.journal.captureInput(request.recordId, text);
-    if (this.task && !request.revision && this.task.input.preparedInput === undefined) this.task.input.preparedInput = text;
-  }
-
-  getRequestSource(): RequestSource | undefined {
-    return this.requestSource ? { ...this.requestSource } : undefined;
-  }
-
-  /** Viewing never calls the model; a changed non-empty draft is a new optimization. */
-  shouldOpenPanel(draft: string): boolean {
-    // Sending has crossed a delivery boundary; don't replace it while awaiting acknowledgement.
-    if (!draft.trim() || this.pendingSend) return true;
-    if (this.task && draft === this.task.input.draft) return true;
-    if (this.state.phase !== "idle") return draft === this.requestSource?.draft;
-    return !!this.accepted && (draft === this.accepted.text || draft === this.accepted.draft);
-  }
-
-  getCandidateToken(): CandidateToken | undefined {
-    if (!this.candidate) return undefined;
-    return {
-      requestId: this.candidate.requestId,
-      version: this.candidate.version,
-      generation: this.candidate.generation,
-      sessionId: this.candidate.sessionId,
-    };
-  }
-
-  getRestore(): RestoreSnapshot | undefined {
-    return this.restore ? { ...this.restore } : undefined;
-  }
-
-  getRestoreToken(): RestoreToken | undefined {
-    if (!this.restore) return undefined;
-    return { id: this.restore.id, generation: this.restore.generation, sessionId: this.restore.sessionId };
-  }
-
-  isCandidateCurrent(token: CandidateToken): boolean {
-    return Boolean(
-      this.candidate &&
-      this.candidate.requestId === token.requestId &&
-      this.candidate.version === token.version &&
-      this.candidate.generation === token.generation &&
-      this.candidate.sessionId === token.sessionId &&
-      this.candidate.generation === this.generation &&
-      this.candidate.sessionId === this.sessionId,
-    );
-  }
-
-  isRestoreCurrent(token: RestoreToken): boolean {
-    return Boolean(
-      this.restore &&
-      this.restore.id === token.id &&
-      this.restore.generation === token.generation &&
-      this.restore.sessionId === token.sessionId &&
-      this.restore.generation === this.generation &&
-      this.restore.sessionId === this.sessionId,
-    );
-  }
-
-  setSession(sessionId: string): void {
-    this.invalidateLifecycle(true);
-    this.sessionId = sessionId;
-  }
-
-  ensureSession(sessionId: string): void {
-    if (this.sessionId !== sessionId) this.setSession(sessionId);
-  }
-
-  setModel(model: ModelRef | undefined): boolean {
-    if (sameModel(this.currentModel, model) || this.active || this.pendingSend) return false;
-    this.modelVersion += 1;
-    this.currentModel = model ? { ...model } : undefined;
-    const records = this.modelCandidates();
-    const selected = this.task?.selected.get(JSON.stringify(model));
-    this.showRecord(records.find((record) => record.id === selected) ?? records.at(-1));
+    this.requestSource = this.source(record.input);
+    this.journal.update(id, { appliedAt: Date.now() });
+    this.state = this.candidateState(this.candidate);
     this.emitState();
     return true;
   }
-
-  /** Called synchronously at Pi's input boundary before normal delivery/queue handling. */
-  onSubmittedInput(text: string, source: string, streamingBehavior?: "steer" | "followUp"): "sent" | "pending" | "invalidated" {
-    const pending = this.pendingSend;
-    if (pending && source === "extension" && text === pending.text && this.isCandidateCurrent(pending.token)) {
-      if (streamingBehavior === "followUp") {
-        this.completeSend();
-        return "sent";
-      }
-      this.emitState();
-      return "pending";
-    }
-    this.invalidateLifecycle(true);
-    return "invalidated";
+  capturePreparedInput(requestId: number, generation: number, text: string, diagnostics?: RefineRequestInput["projectDiagnostics"]): void {
+    const active = this.active.get(requestId);
+    if (!active || active.request.generation !== generation) return;
+    active.request.preparedInput = text;
+    if (diagnostics) active.request.projectDiagnostics = structuredClone(diagnostics);
+    this.journal.captureInput(active.request.recordId, text, diagnostics);
   }
-
-  /** A user message start confirms an idle Pi send after preflight validation. */
+  getRequestSource(): RequestSource | undefined { return this.requestSource ? { ...this.requestSource } : undefined; }
+  getDisplayedInput(): RefineRequestInput | undefined {
+    const source = this.candidate ?? this.viewedAccepted;
+    return source ? structuredClone(source) : this.state.recordId === undefined ? undefined : this.getRecord(this.state.recordId)?.input;
+  }
+  getCandidateToken(): CandidateToken | undefined {
+    const c = this.candidate;
+    return c ? { requestId: c.requestId, version: c.version, generation: c.generation, sessionId: c.sessionId } : undefined;
+  }
+  getRestore(): RestoreSnapshot | undefined { return this.restore ? { ...this.restore } : undefined; }
+  getRestoreToken(): RestoreToken | undefined {
+    const r = this.restore;
+    return r ? { id: r.id, generation: r.generation, sessionId: r.sessionId } : undefined;
+  }
+  isCandidateCurrent(token: CandidateToken): boolean {
+    const c = this.candidate;
+    return !!c && c.requestId === token.requestId && c.version === token.version && c.generation === token.generation &&
+      c.sessionId === token.sessionId && c.generation === this.generation && c.sessionId === this.sessionId;
+  }
+  isRestoreCurrent(token: RestoreToken): boolean {
+    const r = this.restore;
+    return !!r && r.id === token.id && r.generation === token.generation && r.sessionId === token.sessionId &&
+      r.generation === this.generation && r.sessionId === this.sessionId;
+  }
+  setSession(sessionId: string): void { this.invalidateLifecycle(true); this.sessionId = sessionId; this.lastCapturedDraft = undefined; }
+  ensureSession(sessionId: string): void { if (this.sessionId !== sessionId) this.setSession(sessionId); }
+  setModel(model: ModelRef | undefined): boolean {
+    if (sameModel(this.currentModel, model) || this.pendingSend) return false;
+    this.currentModel = model ? { ...model } : undefined;
+    // Choosing a launch model does not replace an applied result or cancel any run.
+    this.emitState();
+    return true;
+  }
+  /** Input is preflight, not acknowledgement: other extensions can handle/reject it. */
+  onSubmittedInput(_text: string, _source: string, _streamingBehavior?: "steer" | "followUp"): "pending" {
+    return "pending";
+  }
+  /** Called only for committed user messages, not before_agent_start or raw input. */
   onMessageStarted(text?: string): void {
     if (this.pendingSend && text === this.pendingSend.text && this.isCandidateCurrent(this.pendingSend.token)) {
-      this.completeSend();
-      return;
+      const candidate = this.candidate!;
+      if (candidate.recordId) this.journal.update(candidate.recordId, { sentAt: Date.now() });
+      this.accepted = structuredClone(candidate);
+      this.viewedAccepted = structuredClone(candidate);
+      this.candidate = undefined;
+      this.state = { ...this.candidateState(candidate), phase: "idle" };
+      this.emitAccepted(candidate);
     }
-    if (this.task || this.active || this.candidate || this.accepted || this.restore || this.pendingSend) this.invalidateLifecycle(true);
-  }
-
-  invalidateLifecycle(clearRestore = false): void {
-    this.generation += 1;
-    this.cancelActive();
     this.clearPendingSend();
+    this.archiveRound();
+    this.restore = undefined;
+    this.restoreAccepted = undefined;
+    this.rebase();
+    if (this.candidate) this.candidate = { ...this.candidate, generation: this.generation };
+    this.state.pendingSend = false;
+    this.emitState();
+  }
+  private archiveRound(): void {
+    if (this.round) this.journal.archive(this.sessionId ?? "", this.round.id);
+    this.round = undefined;
+  }
+  invalidateLifecycle(clearRestore = false): void {
+    this.archiveRound();
+    for (const active of [...this.active.values()]) this.cancelRun(active);
+    this.clearPendingSend();
+    this.rebase();
     this.candidate = undefined;
-    this.task = undefined;
+    this.taskId = undefined;
+    this.foregroundId = undefined;
     this.viewedAccepted = undefined;
     this.requestSource = undefined;
-    if (clearRestore) {
-      this.restore = undefined;
-      this.restoreAccepted = undefined;
-      this.accepted = undefined;
-    } else if (this.restore) this.restore = { ...this.restore, generation: this.generation };
+    if (clearRestore) { this.restore = undefined; this.restoreAccepted = undefined; this.accepted = undefined; }
     this.state = { phase: "idle", requestId: this.requestSequence, pendingSend: false };
     this.emitState();
   }
-
+  private validate(input: RefineRequestInput): TriggerResult | undefined {
+    if (!input.draft.trim() || (input.revision && !input.revision.instruction.trim())) return { kind: "empty" };
+    if (input.draft.length > this.options.maxDraftChars || (input.revision &&
+      (input.revision.instruction.length > this.options.maxDraftChars || input.revision.previousCandidate.length > (this.options.maxOutputChars ?? 1_000_000)))) return { kind: "too-long" };
+    if (!input.model.provider || !input.model.id) return { kind: "no-model" };
+    return undefined;
+  }
+  private freezeRound(input: RefineRequestInput): RefineRequestInput {
+    if (!this.round) this.round = { id: ++this.roundSequence, input: structuredClone(input) };
+    const snapshot = this.round.input;
+    return structuredClone({ ...input, roundId: this.round.id, history: snapshot.history, project: snapshot.project,
+      systemPrompt: snapshot.systemPrompt, generateTitle: snapshot.generateTitle, branchLeafId: snapshot.branchLeafId });
+  }
+  /** Capture is a zero-call operation and never changes the applied preview. */
+  capture(input: RefineRequestInput, copyToRound = false): TriggerResult {
+    const invalid = this.validate(input);
+    if (invalid) return invalid;
+    this.ensureSession(input.sessionId);
+    if (copyToRound ? this.getCurrentRecords().some((record) => record.input.draft === input.draft) : this.hasCapturedDraft(input.draft)) return { kind: "duplicate" };
+    if (!this.journal.canStart()) return { kind: "busy" };
+    const frozen = this.freezeRound(input);
+    const recordId = this.journal.start(++this.taskSequence, frozen, undefined, "refine", "unsent");
+    this.lastCapturedDraft = input.draft;
+    this.emitState();
+    return { kind: "captured", recordId };
+  }
   trigger(input: RefineRequestInput, options: { force?: boolean; revisionToken?: CandidateToken; sameTask?: boolean } = {}): TriggerResult {
-    if ((!input.revision && this.pendingSend) || (options.sameTask && this.active)) return { kind: "busy" };
-    if (options.sameTask && (!this.task || input.sessionId !== this.sessionId || input.draft !== this.task.input.draft || input.branchLeafId !== this.task.input.branchLeafId)) return { kind: "stale-source" };
-    if (input.revision && (!options.revisionToken || !this.isCandidateCurrent(options.revisionToken) || this.pendingSend ||
+    if (this.pendingSend) return { kind: input.revision ? "stale-source" : "busy" };
+    const invalid = this.validate(input);
+    if (invalid) return invalid;
+    if (input.revision && (!options.revisionToken || !this.isCandidateCurrent(options.revisionToken) ||
       input.sessionId !== this.sessionId || input.branchLeafId !== this.candidate!.branchLeafId ||
       input.draft !== this.candidate!.draft || input.revision.previousCandidate !== this.candidate!.text)) return { kind: "stale-source" };
+    const source = this.getTaskInput();
+    if (options.sameTask && (!source || input.sessionId !== this.sessionId || input.draft !== source.draft)) return { kind: "stale-source" };
     this.ensureSession(input.sessionId);
-    if (!input.draft.trim() || (input.revision && !input.revision.instruction.trim())) return { kind: "empty" };
-    if (input.draft.length > this.maxDraftChars || (input.revision &&
-      (input.revision.instruction.length > this.maxDraftChars || input.revision.previousCandidate.length > this.maxOutputChars))) return { kind: "too-long" };
-    if (!input.model.provider || !input.model.id) return { kind: "no-model" };
-
-    const requestFingerprint = fingerprint(input);
-    if (this.active && this.active.request.generation === this.generation && fingerprint(this.active.request) === requestFingerprint) {
-      return { kind: "duplicate" };
-    }
-    if (!options.force && this.candidate && this.isCandidateCurrent(this.getCandidateToken()!) && fingerprint(this.candidate) === requestFingerprint) {
-      return { kind: "ready" };
-    }
-
-    const parentId = input.revision ? this.candidate?.recordId : undefined;
-    const previousCandidate = (input.revision || options.sameTask) && this.candidate ? cloneCandidate(this.candidate) : undefined;
-    this.cancelActive();
-    this.clearPendingSend();
-    if (!this.task || (!input.revision && !options.sameTask)) {
-      this.task = { id: ++this.taskSequence, input: structuredClone(input), selected: new Map() };
-    }
-    this.viewedAccepted = undefined;
-    this.candidate = undefined;
-    const recordId = this.journal.start(this.task.id, input, parentId);
+    const frozen = input.revision ? structuredClone({ ...input, roundId: this.candidate!.roundId })
+      : options.sameTask ? structuredClone({ ...source!, model: input.model, thinkingLevel: input.thinkingLevel }) : this.freezeRound(input);
+    if ([...this.active.values()].some((run) => fingerprint(run.request) === fingerprint(frozen))) return { kind: "duplicate" };
+    if (!options.force && this.candidate && fingerprint(this.candidate) === fingerprint(frozen)) return { kind: "ready" };
+    if (!this.journal.canStart()) return { kind: "busy" };
+    const taskId = (input.revision || options.sameTask) ? this.taskId! : ++this.taskSequence;
+    const previous = (input.revision || options.sameTask) ? this.getCandidate() : undefined;
+    const recordId = this.journal.start(taskId, frozen, input.revision ? this.candidate?.recordId : undefined);
+    this.lastCapturedDraft = input.draft;
+    if (frozen.roundId !== this.round?.id) this.journal.update(recordId, { archivedAt: Date.now() });
+    return this.launch(recordId, !options.sameTask, previous);
+  }
+  startRecord(id: number, model = this.currentModel, thinkingLevel?: ModelThinkingLevel): TriggerResult {
+    const record = this.getRecord(id);
+    if (!record || !model) return { kind: "stale-source" };
+    if (this.pendingSend) return { kind: "busy" };
+    if (record.status !== "unsent") return { kind: "duplicate" };
+    this.journal.setModel(id, model, thinkingLevel);
+    // Starting another item never steals the applied preview.
+    return this.launch(id, !this.candidate && !this.viewedAccepted && this.foregroundId === undefined);
+  }
+  /** Explicit retry / another-model run; source and earlier result are immutable. */
+  rerunRecord(id: number, model = this.currentModel, thinkingLevel?: ModelThinkingLevel): TriggerResult {
+    const record = this.getRecord(id);
+    if (!record || !model) return { kind: "stale-source" };
+    if (this.pendingSend || !this.journal.canStart()) return { kind: "busy" };
+    const input = { ...record.input, model, thinkingLevel };
+    if ([...this.active.values()].some((run) => fingerprint(run.request) === fingerprint(input))) return { kind: "duplicate" };
+    const recordId = this.journal.start(record.taskId, input, record.parentId, record.kind === "edit" ? "refine" : record.kind);
+    if (record.archivedAt !== undefined) this.journal.update(recordId, { archivedAt: record.archivedAt });
+    return this.launch(recordId, false);
+  }
+  private launch(recordId: number, foreground: boolean, previousCandidate?: Candidate): TriggerResult {
+    const record = this.getRecord(recordId)!;
     const requestId = ++this.requestSequence;
-    const request: RefineRequest = {
-      ...input,
-      ...(input.revision ? { revision: { ...input.revision } } : {}),
-      history: structuredClone(input.history),
-      ...(input.project ? { project: structuredClone(input.project) } : {}),
-      model: { ...input.model },
-      requestId,
-      recordId,
-      generation: this.generation,
-      modelVersion: this.modelVersion,
-    };
-    const controller = new AbortController();
-    const timeout = this.scheduler.setTimeout(() => this.onTimeout(requestId), this.timeoutMs);
-    this.requestSource = { draft: request.draft, ...(request.revision ? { revisionInstruction: request.revision.instruction } : {}) };
-    this.active = { request, controller, timeout, previousCandidate, startedAt: Date.now() };
-    this.state = { phase: "generating", requestId, model: { ...input.model }, thinkingLevel: request.thinkingLevel, pendingSend: false };
+    if (foreground) {
+      this.rebase();
+      this.taskId = record.taskId;
+      this.foregroundId = requestId;
+      this.candidate = undefined;
+      this.viewedAccepted = undefined;
+      this.requestSource = this.source(record.input);
+      this.state = { phase: "generating", requestId, recordId, model: record.input.model, thinkingLevel: record.input.thinkingLevel, pendingSend: false };
+    }
+    const request: RefineRequest = { ...record.input, requestId, recordId, generation: this.generation };
+    this.active.set(requestId, { request, controller: new AbortController(), previousCandidate });
+    this.journal.update(recordId, { status: "queued" });
+    this.pump();
     this.emitState();
-    void this.run(this.active).catch(() => undefined);
     return { kind: "started", requestId };
   }
-
-  cancelAndDismiss(): void {
-    this.invalidateLifecycle();
+  private pump(): void {
+    let running = [...this.active.values()].filter((item) => item.startedAt !== undefined).length;
+    for (const active of this.active.values()) {
+      if (running >= (this.options.maxConcurrent ?? 4)) break;
+      if (active.startedAt !== undefined) continue;
+      running++;
+      active.startedAt = Date.now();
+      this.journal.update(active.request.recordId, { status: "generating" });
+      active.timeout = this.scheduler.setTimeout(() => this.finishError(active, "timeout"), this.options.timeoutMs);
+      void this.run(active);
+    }
   }
-
-  /** Stop only the in-flight request; keep this task available for comparison/retry. */
-  stopRequest(): void {
-    if (!this.active) return;
-    this.cancelActive();
-    const records = this.modelCandidates();
-    const selected = this.task?.selected.get(JSON.stringify(this.currentModel));
-    this.showRecord(records.find((record) => record.id === selected) ?? records.at(-1));
+  cancelAndDismiss(): void {
+    // Dismiss the preview, not unrelated tasks or their results.
+    this.stopRequest();
+    this.rebase();
+    this.clearPendingSend();
+    this.foregroundId = undefined;
+    this.candidate = undefined;
+    this.viewedAccepted = undefined;
+    this.requestSource = undefined;
+    this.taskId = undefined;
+    this.state = { phase: "idle", requestId: this.requestSequence, pendingSend: false };
     this.emitState();
   }
-
+  stopRequest(recordId?: number): void {
+    const active = recordId === undefined ? this.active.get(this.foregroundId ?? -1)
+      : [...this.active.values()].find((item) => item.request.recordId === recordId);
+    if (!active) return;
+    this.cancelRun(active);
+    if (this.foregroundId === active.request.requestId) {
+      this.foregroundId = undefined;
+      this.state = { phase: "idle", requestId: active.request.requestId, pendingSend: false };
+    }
+    this.pump();
+    this.emitState();
+  }
   updateCandidate(token: CandidateToken, text: string): boolean {
-    if (!this.isCandidateCurrent(token) || !text.trim() || text.length > this.maxOutputChars) return false;
+    if (!this.isCandidateCurrent(token) || !text.trim() || text.length > (this.options.maxOutputChars ?? 1_000_000) || !this.journal.canStart()) return false;
     this.clearPendingSend();
     const source = this.candidate!;
-    const recordId = this.journal.start(this.task!.id, source, source.recordId, "edit");
+    const recordId = this.journal.start(this.taskId!, source, source.recordId, "edit");
     this.candidate = { ...source, recordId, text, version: ++this.candidateSequence };
-    this.journal.update(recordId, { status: "generated", candidate: this.candidate });
-    this.task!.selected.set(JSON.stringify(source.model), recordId);
-    this.state = { phase: "ready", requestId: this.candidate.requestId, model: { ...this.candidate.model }, pendingSend: false };
+    this.journal.update(recordId, { status: "generated", candidate: this.candidate,
+      ...(source.roundId !== this.round?.id ? { archivedAt: Date.now() } : {}) });
+    this.state = this.candidateState(this.candidate);
     this.emitState();
     return true;
   }
-
-  acceptCandidate(
-    token: CandidateToken,
-    currentDraft: string,
-    confirmedOverwrite: boolean,
-    writeEditor: (text: string) => void,
-  ): boolean {
+  acceptCandidate(token: CandidateToken, currentDraft: string, confirmedOverwrite: boolean, writeEditor: (text: string) => void): boolean {
     if (!this.isCandidateCurrent(token)) return false;
     const candidate = this.candidate!;
     if (currentDraft !== candidate.draft && !confirmedOverwrite) return false;
-
-    try {
-      writeEditor(candidate.text);
-    } catch {
-      return false;
-    }
-
+    try { writeEditor(candidate.text); } catch { return false; }
     this.clearPendingSend();
     this.restoreAccepted = this.accepted;
-    this.accepted = cloneCandidate(candidate);
-    this.viewedAccepted = cloneCandidate(candidate);
+    this.lastCapturedDraft = candidate.text;
+    this.accepted = structuredClone(candidate);
+    this.viewedAccepted = structuredClone(candidate);
     if (candidate.recordId) this.journal.update(candidate.recordId, { acceptedAt: Date.now() });
-    this.restore = {
-      id: ++this.restoreSequence,
-      generation: this.generation,
-      sessionId: candidate.sessionId,
-      before: currentDraft,
-      applied: candidate.text,
-    };
+    this.restore = { id: ++this.restoreSequence, generation: this.generation, sessionId: candidate.sessionId, before: currentDraft, applied: candidate.text };
     this.candidate = undefined;
-    this.requestSource = undefined;
-    this.state = { phase: "idle", requestId: this.requestSequence, pendingSend: false };
+    this.state = { ...this.candidateState(candidate), phase: "idle" };
     this.emitAccepted(candidate);
     this.emitState();
     return true;
   }
-
-  restoreDraft(
-    token: RestoreToken,
-    currentDraft: string,
-    confirmedOverwrite: boolean,
-    writeEditor: (text: string) => void,
-  ): boolean {
+  restoreDraft(token: RestoreToken, currentDraft: string, confirmedOverwrite: boolean, writeEditor: (text: string) => void): boolean {
     if (!this.isRestoreCurrent(token)) return false;
     const restore = this.restore!;
     if (currentDraft !== restore.applied && !confirmedOverwrite) return false;
-
-    try {
-      writeEditor(restore.before);
-    } catch {
-      return false;
-    }
-
-    // Restoring an earlier optimized draft must restore its provenance too, otherwise
-    // the next shortcut would mistake it for a fresh draft and silently call the model.
-    const previousAccepted = this.restoreAccepted;
-    this.invalidateLifecycle(true);
-    this.accepted = previousAccepted;
-    if (previousAccepted) this.emitState();
+    try { writeEditor(restore.before); } catch { return false; }
+    this.lastCapturedDraft = restore.before;
+    this.accepted = this.restoreAccepted;
+    this.viewedAccepted = this.accepted;
+    this.restore = undefined;
+    this.restoreAccepted = undefined;
+    this.rebase();
+    this.candidate = undefined;
+    this.foregroundId = undefined;
+    this.requestSource = undefined;
+    this.state = { phase: "idle", requestId: this.requestSequence, pendingSend: false };
+    this.emitState();
     return true;
   }
-
-  beginSend(token: CandidateToken, sendTimeoutMs = this.timeoutMs): { text: string; requestId: number } | undefined {
+  beginSend(token: CandidateToken, sendTimeoutMs = this.options.timeoutMs): { text: string; requestId: number } | undefined {
     if (!this.isCandidateCurrent(token) || this.pendingSend) return undefined;
     const candidate = this.candidate!;
-    const timeout = this.scheduler.setTimeout(() => this.onSendTimeout(candidate.requestId, token.version), sendTimeoutMs);
+    const timeout = this.scheduler.setTimeout(() => this.failSend(candidate.requestId), sendTimeoutMs);
     this.pendingSend = { token: { ...token }, text: candidate.text, timeout };
-    this.state = { phase: "ready", requestId: candidate.requestId, model: { ...candidate.model }, pendingSend: true };
+    this.state = { ...this.candidateState(candidate), pendingSend: true };
     this.emitState();
     return { text: candidate.text, requestId: candidate.requestId };
   }
-
   failSend(requestId: number): void {
-    if (!this.pendingSend || this.pendingSend.token.requestId !== requestId) return;
+    if (this.pendingSend?.token.requestId !== requestId) return;
     this.clearPendingSend();
-    const candidate = this.candidate;
-    if (!candidate) return;
-    this.state = { phase: "ready", requestId: candidate.requestId, model: { ...candidate.model }, pendingSend: false };
+    this.state.pendingSend = false;
     this.emitState();
   }
-
   private async run(active: ActiveRequest): Promise<void> {
     try {
-      const result = await this.complete(active.request, active.controller.signal);
-      if (!this.isActiveCurrent(active.request)) {
-        // Accounting may arrive after cancellation; never resurrect a result or UI state.
+      const result = await this.options.complete(active.request, active.controller.signal);
+      if (!this.isActive(active)) {
         if (result.usage) this.journal.update(active.request.recordId, { usage: result.usage });
         return;
       }
-      // Retain reported usage even when the completed response is unusable.
-      this.state = { ...this.state, usage: result.usage ? { ...result.usage } : undefined };
-      if (result.stopReason !== "stop") {
-        const error = result.stopReason === "length" ? "truncated" : result.stopReason === "toolUse" ? "tool-call" : "failed";
-        this.finishWithError(active, error);
-        return;
-      }
-      if (result.invalidOutput) {
-        this.finishWithError(active, "invalid-output");
-        return;
-      }
-      const textBlocks = result.text;
-      if (!textBlocks.trim()) {
-        this.finishWithError(active, "empty");
-        return;
-      }
-      if (textBlocks.length > this.maxOutputChars) {
-        this.finishWithError(active, "truncated");
-        return;
-      }
-
-      this.clearActive(active);
-      const candidate: Candidate = {
-        recordId: active.request.recordId,
-        preparedInput: active.request.preparedInput,
-        elapsedSeconds: elapsedSeconds(active),
-        ...(result.usage ? { usage: { ...result.usage } } : {}),
-        requestId: active.request.requestId,
-        version: ++this.candidateSequence,
-        generation: active.request.generation,
-        sessionId: active.request.sessionId,
-        draft: active.request.draft,
-        ...(active.request.revision ? { revision: { ...active.request.revision } } : {}),
-        text: textBlocks,
-        generateTitle: active.request.generateTitle,
-        ...(active.request.generateTitle && result.title ? { title: result.title } : {}),
-        model: { ...active.request.model },
-        branchLeafId: active.request.branchLeafId,
-        history: structuredClone(active.request.history),
-        systemPrompt: active.request.systemPrompt,
-        thinkingLevel: active.request.thinkingLevel,
-        ...(active.request.project ? { project: structuredClone(active.request.project) } : {}),
-      };
-      this.candidate = candidate;
+      this.journal.update(active.request.recordId, { usage: result.usage });
+      const error = result.stopReason !== "stop" ? (result.stopReason === "length" ? "truncated" : result.stopReason === "toolUse" ? "tool-call" : "failed")
+        : result.invalidOutput ? "invalid-output" : !result.text.trim() ? "empty"
+          : result.text.length > (this.options.maxOutputChars ?? 1_000_000) ? "truncated" : undefined;
+      if (error) { this.finishError(active, error); return; }
+      this.release(active);
+      const candidate: Candidate = { ...structuredClone(active.request), text: result.text, version: ++this.candidateSequence,
+        elapsedSeconds: elapsed(active), usage: result.usage,
+        ...(active.request.generateTitle && result.title ? { title: result.title } : {}) };
       this.journal.update(active.request.recordId, { status: "generated", candidate, usage: result.usage, elapsedSeconds: candidate.elapsedSeconds });
-      this.task?.selected.set(JSON.stringify(candidate.model), active.request.recordId);
-      this.state = { phase: "ready", requestId: candidate.requestId, model: { ...candidate.model }, pendingSend: false };
+      if (this.foregroundId === active.request.requestId) {
+        this.foregroundId = undefined;
+        this.candidate = { ...candidate, generation: this.generation };
+        this.state = this.candidateState(this.candidate);
+      }
+      this.pump();
       this.emitState();
-    } catch {
-      if (this.isActiveCurrent(active.request)) this.finishWithError(active, "failed");
-    } finally {
-      // An older request must never clear the timer or status of a newer request.
-      if (this.active?.request.requestId === active.request.requestId) this.clearActive(active);
-    }
+    } catch { if (this.isActive(active)) this.finishError(active, "failed"); }
   }
-
-  private isActiveCurrent(request: RefineRequest): boolean {
-    return Boolean(
-      this.active &&
-      this.active.request.requestId === request.requestId &&
-      this.active.request.generation === request.generation &&
-      this.active.request.modelVersion === request.modelVersion &&
-      this.generation === request.generation &&
-      this.modelVersion === request.modelVersion &&
-      this.sessionId === request.sessionId,
-    );
-  }
-
-  private finishWithError(active: ActiveRequest, error: ControllerState["error"]): void {
-    if (!this.isActiveCurrent(active.request)) return;
-    this.clearActive(active);
-    this.journal.update(active.request.recordId, { status: "error", error, usage: this.state.usage, elapsedSeconds: elapsedSeconds(active) });
-    this.generation += 1;
-    this.candidate = active.previousCandidate ? { ...cloneCandidate(active.previousCandidate), generation: this.generation } : undefined;
-    if (this.restore) this.restore = { ...this.restore, generation: this.generation };
-    this.clearPendingSend();
-    this.state = { phase: "error", requestId: active.request.requestId, model: { ...active.request.model }, thinkingLevel: active.request.thinkingLevel, error, pendingSend: false, usage: this.state.usage, elapsedSeconds: elapsedSeconds(active) };
-    this.emitState();
-  }
-
-  private onTimeout(requestId: number): void {
-    const active = this.active;
-    if (!active || active.request.requestId !== requestId || !this.isActiveCurrent(active.request)) return;
-    this.active = undefined;
-    this.scheduler.clearTimeout(active.timeout);
-    this.journal.update(active.request.recordId, { status: "error", error: "timeout", elapsedSeconds: elapsedSeconds(active) });
-    this.generation += 1;
-    this.candidate = active.previousCandidate ? { ...cloneCandidate(active.previousCandidate), generation: this.generation } : undefined;
-    if (this.restore) this.restore = { ...this.restore, generation: this.generation };
-    this.clearPendingSend();
+  private finishError(active: ActiveRequest, error: ControllerState["error"]): void {
+    if (!this.isActive(active)) return;
+    this.release(active);
+    const usage = this.getRecord(active.request.recordId)?.usage;
+    this.journal.update(active.request.recordId, { status: "error", error, elapsedSeconds: elapsed(active) });
     active.controller.abort();
-    this.state = { phase: "error", requestId, model: { ...active.request.model }, thinkingLevel: active.request.thinkingLevel, error: "timeout", pendingSend: false, elapsedSeconds: elapsedSeconds(active) };
-    this.emitState();
-  }
-
-  private completeSend(): void {
-    const candidate = this.candidate;
-    if (candidate?.recordId) this.journal.update(candidate.recordId, { sentAt: Date.now() });
-    this.task = undefined;
-    this.viewedAccepted = undefined;
-    this.clearPendingSend();
-    this.cancelActive();
-    this.generation += 1;
-    this.candidate = undefined;
-    this.accepted = undefined;
-    this.requestSource = undefined;
-    this.restore = undefined;
-    this.restoreAccepted = undefined;
-    this.state = { phase: "idle", requestId: this.requestSequence, pendingSend: false };
-    if (candidate) this.emitAccepted(candidate);
-    this.emitState();
-  }
-
-  private emitAccepted(candidate: Candidate): void {
-    try {
-      this.onAccepted?.(cloneCandidate(candidate));
-    } catch {
-      // Metadata failure must not undo an accepted prompt or a confirmed send.
+    if (this.foregroundId === active.request.requestId) {
+      this.foregroundId = undefined;
+      this.rebase();
+      this.candidate = active.previousCandidate ? { ...active.previousCandidate, generation: this.generation } : undefined;
+      this.state = { phase: "error", requestId: active.request.requestId, recordId: active.request.recordId, model: active.request.model,
+        thinkingLevel: active.request.thinkingLevel, error, pendingSend: false, usage, elapsedSeconds: elapsed(active) };
     }
-  }
-
-  private onSendTimeout(requestId: number, version: number): void {
-    if (!this.pendingSend || this.pendingSend.token.requestId !== requestId || this.pendingSend.token.version !== version) return;
-    this.clearPendingSend();
-    if (!this.candidate || this.candidate.requestId !== requestId) return;
-    this.state = { phase: "ready", requestId, model: { ...this.candidate.model }, pendingSend: false };
+    this.pump();
     this.emitState();
   }
-
-  private cancelActive(): void {
-    const active = this.active;
-    if (!active) return;
-    this.active = undefined;
-    this.scheduler.clearTimeout(active.timeout);
-    this.journal.update(active.request.recordId, { status: "cancelled", elapsedSeconds: elapsedSeconds(active) });
+  private isActive(active: ActiveRequest): boolean {
+    return this.active.get(active.request.requestId) === active && active.request.sessionId === this.sessionId;
+  }
+  private release(active: ActiveRequest): void {
+    this.active.delete(active.request.requestId);
+    if (active.timeout !== undefined) this.scheduler.clearTimeout(active.timeout);
+  }
+  private cancelRun(active: ActiveRequest): void {
+    this.release(active);
+    this.journal.update(active.request.recordId, { status: "cancelled", elapsedSeconds: elapsed(active) });
     active.controller.abort();
   }
-
-  private clearActive(active: ActiveRequest): void {
-    if (this.active?.request.requestId !== active.request.requestId) return;
-    this.active = undefined;
-    this.scheduler.clearTimeout(active.timeout);
-  }
-
   private clearPendingSend(): void {
-    if (!this.pendingSend) return;
-    this.scheduler.clearTimeout(this.pendingSend.timeout);
+    if (this.pendingSend) this.scheduler.clearTimeout(this.pendingSend.timeout);
     this.pendingSend = undefined;
   }
-
+  private source(input: RefineRequestInput): RequestSource {
+    return { draft: input.draft, ...(input.revision ? { revisionInstruction: input.revision.instruction } : {}) };
+  }
+  private candidateState(candidate: Candidate): ControllerState {
+    return { phase: "ready", requestId: candidate.requestId, recordId: candidate.recordId, model: candidate.model, thinkingLevel: candidate.thinkingLevel,
+      usage: candidate.usage, elapsedSeconds: candidate.elapsedSeconds, pendingSend: false };
+  }
+  private rebase(): void {
+    this.generation++;
+    if (this.restore) this.restore = { ...this.restore, generation: this.generation };
+  }
+  private emitAccepted(candidate: Candidate): void {
+    try { this.options.onAccepted?.(structuredClone(candidate)); } catch { /* Metadata cannot undo acceptance. */ }
+  }
   private emitState(): void {
-    try {
-      this.onState(this.getState());
-    } catch {
-      // A status-bar adapter must not turn a completed or cancelled request into an unhandled error.
-    }
+    try { this.options.onState(this.getState()); } catch { /* UI failures must not break request cleanup. */ }
   }
 }
