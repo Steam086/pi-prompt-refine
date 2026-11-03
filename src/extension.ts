@@ -109,6 +109,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   // Session-wide, not branch/workflow state. Rebuilt from Pi metadata on resume/reload.
   const namedSessions = new Set<string>();
   const previewPositions = new Map<string, number>();
+  // Extension-runtime memory only; never coupled to candidate/request invalidation.
+  const inputDrafts = new Map<string, string>();
   const openHint = config.shortcuts.view ?? config.shortcuts.optimize ?? "/refine view";
 
   const controller = new RefineController({
@@ -765,7 +767,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       return;
     }
     if (closePreview) return; // One user-opened panel; never stack dialogs on repeated shortcuts.
-    const sessionId = controller.getSessionId();
+    const sessionId = ctx.sessionManager.getSessionId();
     type Selection = { action: PreviewAction; generation: number; token?: CandidateToken; settingsContext?: ContextSettings };
     let selection: Selection | undefined;
     try {
@@ -799,6 +801,14 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         const panel = new PreviewPanel(snapshot(), theme, () => tui.terminal.rows, () => tui.requestRender(), previewPositions);
         let closed = false;
         const workspace = new RefineWorkspace(panel, tui, theme, keybindings, {
+          inputDraft: {
+            text: inputDrafts.get(sessionId) ?? "",
+            save: (text) => {
+              if (closed || ctx.sessionManager.getSessionId() !== sessionId) return;
+              if (text) inputDrafts.set(sessionId, text);
+              else inputDrafts.delete(sessionId);
+            },
+          },
           history: () => controller.getHistory(),
           context: () => ({
             instructions: !config.projectContext.instructionsEnabled ? "off" : config.projectContext.instructionsOnFollowUp ? "always" : "first",

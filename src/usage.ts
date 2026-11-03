@@ -18,12 +18,14 @@ export function readTokenUsage(value: unknown): TokenUsage | undefined {
   return Object.keys(usage).length ? usage : undefined;
 }
 
-export function formatTokenUsage(usage: TokenUsage | undefined): string | undefined {
+export function formatTokenUsage(usage: TokenUsage | undefined, detail: "full" | "summary" = "full"): string | undefined {
   if (!usage) return undefined;
   const labels = [
     ["totalTokens", "total"], ["input", "in"], ["output", "out"],
     ["cacheRead", "read"], ["cacheWrite", "write"], ["reasoning", "think(out)"],
   ] as const;
-  const parts = labels.flatMap(([key, label]) => usage[key] === undefined ? [] : [`${label} ${usage[key]}`]);
-  return parts.length ? `Tokens: ${parts.join(" · ")}` : undefined;
+  const visible = detail === "summary" ? labels.slice(0, 3) : labels;
+  const parts = visible.flatMap(([key, label]) => usage[key] === undefined ? [] : [`${label} ${usage[key]}`]);
+  return parts.length ? `Tokens: ${parts.join(" · ")}`
+    : detail === "summary" && labels.some(([key]) => usage[key] !== undefined) ? "Tokens: details in Usage" : undefined;
 }

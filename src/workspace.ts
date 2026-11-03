@@ -25,6 +25,8 @@ const instructionDescriptions = {
 };
 
 interface WorkspaceActions {
+  /** Session-owned text, independent of request snapshots and revision feedback. */
+  inputDraft?: { text: string; save(text: string): void };
   history?(): RefineRecord[];
   context(): ContextSettings;
   contextEnabled(): boolean;
@@ -82,18 +84,19 @@ export class RefineWorkspace implements Component, Focusable {
       },
     });
     this.input = makeInput();
+    this.input.editor.setText(actions.inputDraft?.text ?? "");
     this.revisionInput = makeInput();
     for (const input of [this.input, this.revisionInput]) {
       input.editor.onSubmit = () => {
         const text = this.beforeInput;
         const error = input === this.input ? this.actions.submit(text)
           : this.revisionTarget ? this.revisionTarget.submit(text) : "No current result to revise.";
+        // Native Editor clears on submit. Submission reads our draft; it never consumes it.
+        // Revision feedback is also kept until its candidate identity changes.
+        input.editor.setText(text);
         if (error) {
-          input.editor.setText(text);
           this.inputError = error;
         } else {
-          // Keep feedback for a failed request; a new candidate key clears it on entry.
-          if (input === this.revisionInput) input.editor.setText(text);
           this.inputError = "";
           this.switchMode("main");
         }
@@ -177,11 +180,16 @@ export class RefineWorkspace implements Component, Focusable {
     const key = parseKey(data);
     if (this.mode === "input") {
       if (this.keys.matches(data, "tui.select.cancel") || key === "ctrl+\\") {
-        this.switchMode("main"); // Keep unsubmitted text until this workspace closes.
+        this.switchMode("main"); // Back never discards the independent input draft.
       } else {
         this.beforeInput = this.activeInput.editor.getExpandedText();
         this.inputError = "";
-        this.activeInput.editor.handleInput(data);
+        const input = this.activeInput;
+        input.editor.handleInput(data);
+        // Observe the final expanded value, not Editor's transient empty onSubmit value
+        // or collapsed paste markers. Cursor movement and request refreshes do not save.
+        const text = input.editor.getExpandedText();
+        if (input === this.input && text !== this.beforeInput) this.actions.inputDraft?.save(text);
         this.tui.requestRender();
       }
       return true;
