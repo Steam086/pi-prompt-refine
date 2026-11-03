@@ -23,6 +23,89 @@ function create(overrides: Partial<PreviewOptions> = {}, rows = 40) {
 }
 
 describe("result reading panel", () => {
+  it("shows the literal submitted source while generating, then defaults to the result", () => {
+    const draft = "## 原文\n保留 **字面符号** 与 `命令`。";
+    const pending = { ...options, state: { ...options.state, phase: "generating" as const }, candidateText: undefined, draft };
+    const panel = create(pending);
+    const text = panel.render(80).join("\n");
+    expect(text).toContain("Submitted original");
+    expect(text).toContain(`${draft.length} chars`);
+    expect(text).toContain("## 原文");
+    expect(text).toContain("**字面符号**");
+    panel.toggleOriginal(); // Already visible; must not queue a jump on completion.
+    panel.update({ ...pending, draft: "B" });
+    expect(panel.render(80).join("\n")).not.toContain("字面符号");
+    panel.update({ ...options, draft, candidateText: "Completed result" });
+    expect(panel.render(80).join("\n")).toContain("Completed result");
+    expect(panel.render(80).join("\n")).not.toContain("字面符号");
+    panel.toggleOriginal();
+    expect(panel.render(80).join("\n")).toContain("**字面符号**");
+  });
+
+  it.each(["dark", "light"])("bounds and scrolls long submitted sources across resize in %s", (name) => {
+    const draft = "START 中文😀 é 👩‍💻\n" + "一段很长的原文😀".repeat(1000) + "\n\nLAST 原文终点";
+    let rows = 40;
+    const panel = new PreviewPanel({ ...options, state: { ...options.state, phase: "generating" }, candidateText: undefined, draft },
+      getThemeByName(name)!, () => rows, vi.fn());
+    for (rows of [40, 16, 8, 5]) {
+      for (const width of [1, 12, 20, 40, 100]) {
+        panel.scrollBy(-100000);
+        const lines = panel.render(width);
+        expect(lines).toHaveLength(panelLayout(width, rows).height);
+        for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+        panel.scrollBy(100000);
+        const end = panel.render(width);
+        for (const line of end) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+        if (rows >= 16 && width >= 40) {
+          expect(lines.join("\n")).toContain("START");
+          expect(lines.join("\n")).not.toContain("LAST");
+          expect(end.join("\n")).toContain("LAST");
+          expect(end.join("\n")).toContain("↑↓");
+          expect(end.join("\n")).toContain("Refining");
+          for (const label of ["Stop", "Back"]) expect(end.slice(-2).join("\n")).toContain(label);
+        }
+      }
+    }
+    rows = 40;
+    panel.toggleHelp();
+    panel.update({ ...options, state: { ...options.state, requestId: 2, phase: "generating" }, candidateText: undefined, draft: "New source B" });
+    const fresh = panel.render(80).join("\n");
+    expect(fresh).toContain("New source B");
+    expect(fresh).not.toContain("LAST");
+    expect(fresh).not.toContain("Keyboard reference");
+  });
+
+  it("distinguishes unsent editor edits and includes the actual revision instruction", () => {
+    const panel = create({ state: { ...options.state, phase: "generating" }, candidateText: undefined,
+      draft: "Original A", draftChanged: true, revisionInstruction: "Keep **literal** instructions\x1b[2J\x07" });
+    const text = panel.render(100).join("\n");
+    expect(text).toContain("Main editor differs");
+    expect(text).toContain("Original task");
+    expect(text).toContain("Original A");
+    expect(text).toContain("Submitted revision instruction");
+    expect(text).toContain("**literal**");
+    expect(text).not.toMatch(/[\x00-\x09\x0b-\x1f\x7f-\x9f]/);
+  });
+
+  it("returns to failure feedback instead of leaving a long source scrolled to its end", () => {
+    const pending = { ...options, state: { ...options.state, phase: "generating" as const }, candidateText: undefined, draft: "Source A\n".repeat(100) };
+    const panel = create(pending);
+    panel.render(80);
+    panel.scrollBy(10000);
+    panel.render(80);
+    panel.update({ ...pending, state: { ...pending.state, phase: "error" }, errorLabel: "Request timed out. Retry." });
+    const text = panel.render(80).join("\n");
+    expect(text).toContain("Request timed out");
+    expect(text).toContain("Submitted original");
+    expect(text).toContain("Source A");
+  });
+
+  it("keeps the source readable at narrow widths without the long waiting message", () => {
+    const panel = create({ state: { ...options.state, phase: "generating" }, candidateText: undefined, draft: "A 原文", draftChanged: true }, 24);
+    expect(panel.render(20).join("\n")).toContain("A 原文");
+    expect(panel.render(20).join("\n")).not.toContain("work continues");
+  });
+
   it.each([8, 20, 40])("reserves a stable viewport across content and help at %i rows", (rows) => {
     const panel = create({ candidateText: undefined }, rows);
     for (const width of [12, 40, 100]) {

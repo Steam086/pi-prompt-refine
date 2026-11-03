@@ -492,7 +492,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const selected = controller.getModel();
     if (!selected) return "No optimizer model is configured; use /refine model to select a text-generation model first.";
     if (!ctx.modelRegistry.find(selected.provider, selected.id) || !ctx.modelRegistry.getAvailable().some((candidate) => sameModel(candidate, selected))) {
-      return `Optimizer model is missing or unavailable: ${displayModel(selected)}; no automatic model switch was made.`;
+      return `Optimizer model is missing or unavailable: ${displayModel(selected)}; no request was sent, and the existing result was kept.`;
     }
     return undefined;
   }
@@ -726,14 +726,17 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           const candidate = controller.getCandidate();
           const accepted = state.phase === "idle" ? controller.getAccepted() : undefined;
           const displayed = candidate ?? accepted;
+          const source = controller.getRequestSource();
+          const draft = displayed?.draft ?? source?.draft;
           displayedToken = controller.getCandidateToken();
           return {
             state: { ...state, usage: state.phase === "error" ? state.usage : displayed?.usage ?? state.usage, model: displayed?.model ?? state.model ?? controller.getModel() },
             candidateText: displayed?.text,
             sessionTitle: candidate?.title && canNameSession(ctx) ? candidate.title : undefined,
-            draft: displayed?.draft,
+            draft,
+            revisionInstruction: source?.revisionInstruction,
             accepted: accepted ? { editorChanged: ctx.ui.getEditorText() !== accepted.text } : undefined,
-            draftChanged: !!candidate && ctx.ui.getEditorText() !== candidate.draft,
+            draftChanged: draft !== undefined && ctx.ui.getEditorText() !== draft,
             canRestore: !!controller.getRestore(),
             contextLabel: accepted ? "Accepted snapshot · no model call" : contextLabel(), openHint,
             elapsedSeconds: (state.phase === "error" ? state.elapsedSeconds : displayed?.elapsedSeconds ?? state.elapsedSeconds) ?? 0,
@@ -902,7 +905,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       if (ctx.mode !== "tui") return triggerOptimize(ctx);
       if (interacting) return;
       useContext(ctx);
-      if (controller.shouldOpenPanel() || !controller.getModel() || !ctx.ui.getEditorText().trim()) return showPreview(ctx);
+      if (controller.shouldOpenPanel(ctx.ui.getEditorText()) || !controller.getModel()) return showPreview(ctx);
       triggerOptimize(ctx);
     },
     view: (ctx) => showPreview(ctx),

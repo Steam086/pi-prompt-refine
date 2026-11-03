@@ -7,6 +7,7 @@ import { resultHeading, sanitizeTerminalText, type SummaryOptions } from "./pres
 
 export interface PreviewOptions extends SummaryOptions {
   draft?: string;
+  revisionInstruction?: string;
   canRestore: boolean;
   /** An accepted snapshot is read-only, not an actionable candidate. */
   accepted?: { editorChanged: boolean };
@@ -45,6 +46,8 @@ export class PreviewPanel implements Component {
   private revealOriginal = false;
   private originalLine = 0;
   private document: Component = new Text("", 0, 0);
+  private draftDocument = new Text("", 0, 0);
+  private revisionDocument = new Text("", 0, 0);
   private scroll: ScrollView;
   private cachedBody?: { width: number; lines: string[] };
 
@@ -59,8 +62,16 @@ export class PreviewPanel implements Component {
   }
 
   update(options: PreviewOptions): void {
-    const changed = options.state.requestId !== this.options.state.requestId || options.candidateText !== this.options.candidateText;
-    const textChanged = options.candidateText !== this.options.candidateText;
+    const changed = options.state.requestId !== this.options.state.requestId || options.state.phase !== this.options.state.phase ||
+      options.candidateText !== this.options.candidateText;
+    const textChanged = options.candidateText !== this.options.candidateText || options.draft !== this.options.draft ||
+      options.revisionInstruction !== this.options.revisionInstruction;
+    if (options.state.requestId !== this.options.state.requestId) this.helpVisible = false;
+    if (options.state.requestId !== this.options.state.requestId ||
+      (this.options.state.phase === "generating" && options.state.phase !== "generating")) {
+      this.originalVisible = false;
+      this.revealOriginal = false;
+    }
     this.options = options;
     if (textChanged) this.rebuildDocument();
     else this.cachedBody = undefined;
@@ -70,7 +81,8 @@ export class PreviewPanel implements Component {
   setNotice(notice: string): void { this.options = { ...this.options, notice }; }
 
   toggleOriginal(): void {
-    if (this.options.draft === undefined) return;
+    // The source is already the main document while generating or after a failed request.
+    if (this.options.draft === undefined || this.options.candidateText === undefined) return;
     this.originalVisible = !this.originalVisible;
     this.cachedBody = undefined;
     // Expansion is an explicit comparison request: reveal the draft, not an off-screen section.
@@ -99,6 +111,8 @@ export class PreviewPanel implements Component {
   }
 
   private rebuildDocument(): void {
+    this.draftDocument = new Text(sanitizeTerminalText(this.options.draft ?? ""), 0, 0);
+    this.revisionDocument = new Text(sanitizeTerminalText(this.options.revisionInstruction ?? ""), 0, 0);
     const text = sanitizeTerminalText(this.options.candidateText ?? "");
     this.document = this.sourceVisible ? new Text(text, 0, 0) : new Markdown(
       text, 0, 0, markdownTheme(this.theme), { color: (value) => this.theme.fg("text", value) },
@@ -185,16 +199,35 @@ export class PreviewPanel implements Component {
         paragraph("Original draft · at request time", "muted");
         lines.push("");
         // Keep the comparison literal and legible, rather than dimming its body.
-        lines.push(...new Text(sanitizeTerminalText(options.draft), 0, 0).render(width));
+        lines.push(...this.draftDocument.render(width));
       }
-    } else if (options.state.phase === "generating") {
-      paragraph("Refining your prompt.");
-      lines.push("");
-      paragraph("Results appear here. q returns to editing; work continues.", "muted");
-    } else if (options.state.phase === "error") {
-      paragraph(options.errorLabel ?? "Request failed. Retry.", "warning");
-      lines.push("");
-      paragraph("Draft unchanged.", "muted");
+    } else if (options.state.phase === "generating" || options.state.phase === "error") {
+      if (options.state.phase === "error") {
+        paragraph(options.errorLabel ?? "Request failed. Retry.", "warning");
+        paragraph("Draft unchanged.", "muted");
+        lines.push("");
+      } else if (width >= 60) {
+        paragraph("q returns to editing; work continues.", "muted");
+        lines.push("");
+      }
+      if (options.draftChanged) {
+        paragraph(width >= 60
+          ? "Main editor differs; this request excludes its current edits."
+          : "Editor differs; source below.", "warning");
+      }
+      if (options.draft !== undefined) {
+        // Literal request snapshot, not a live editor preview or Markdown interpretation.
+        // The existing bounded ScrollView exposes every line without growing the panel.
+        const title = options.revisionInstruction !== undefined ? "Original task" : "Submitted original";
+        lines.push(theme.fg("accent", theme.bold(width >= 40 ? `${title} · ${options.draft.length} chars` : title)));
+        lines.push(...this.draftDocument.render(width));
+        if (options.revisionInstruction !== undefined) {
+          lines.push("", theme.fg("accent", theme.bold("Submitted revision instruction")));
+          lines.push(...this.revisionDocument.render(width));
+        }
+      } else if (options.state.phase === "generating") {
+        paragraph("Refining your prompt.");
+      }
     } else {
       const needsModel = this.isEmptyState() && !options.state.model;
       paragraph(needsModel ? "No model selected" : "No result yet.");
@@ -266,7 +299,12 @@ export class PreviewPanel implements Component {
       // Position is secondary to notices; scrolling must not hide request feedback.
       header[1] = options.notice
         ? theme.fg("muted", `${sanitizeTerminalText(options.notice)} · ${position}`)
-        : [theme.fg("muted", position), status].filter(Boolean).join(" · ");
+        : options.state.phase === "generating"
+          ? [heading, theme.fg("muted", position), theme.fg("muted", metadata)].filter(Boolean).join(" · ")
+          : [theme.fg("muted", position), status].filter(Boolean).join(" · ");
+    }
+    if (layout.headerHeight === 1 && options.state.phase === "generating") {
+      header[0] = heading;
     }
     if (options.state.pendingSend) {
       // Delivery is not completion. Keep this visible even at the end of a long result.

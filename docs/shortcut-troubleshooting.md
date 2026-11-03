@@ -18,7 +18,7 @@
 2. 输入 `/refine 待优化文本`，或 `/refine optimize 待优化文本`。
 3. 用 `/refine view` 查看结果，`a` 接受进编辑器，`s` 明确发送。
 
-快捷键的默认绑定和原状态切换行为没有改变。裸子命令仍保留；优化文本恰好为 `model` 等保留字时，用 `/refine optimize model`。
+快捷键默认绑定仍为 `Ctrl+\`：草稿未变时查看，改成新的非空草稿后再次按键则优化新稿；完整规则见 [使用说明](usage.md)。裸子命令仍保留；优化文本恰好为 `model` 等保留字时，用 `/refine optimize model`。
 
 ## 如需继续定位物理按键
 

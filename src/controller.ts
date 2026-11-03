@@ -69,6 +69,12 @@ export interface RestoreToken {
   sessionId: string;
 }
 
+/** Literal source captured only when a request starts; retained on failure for inspection. */
+export interface RequestSource {
+  draft: string;
+  revisionInstruction?: string;
+}
+
 export interface ControllerState {
   elapsedSeconds?: number;
   usage?: TokenUsage;
@@ -156,6 +162,7 @@ export class RefineController {
   private restoreSequence = 0;
   private modelVersion = 0;
   private active?: ActiveRequest;
+  private requestSource?: RequestSource;
   private candidate?: Candidate;
   /** Read-only provenance after acceptance, independent of the editable main draft. */
   private accepted?: Candidate;
@@ -202,9 +209,16 @@ export class RefineController {
     return this.accepted ? cloneCandidate(this.accepted) : undefined;
   }
 
-  /** Only a fresh idle workflow may use the shortcut to start a model request. */
-  shouldOpenPanel(): boolean {
-    return this.state.phase !== "idle" || this.accepted !== undefined;
+  getRequestSource(): RequestSource | undefined {
+    return this.requestSource ? { ...this.requestSource } : undefined;
+  }
+
+  /** Viewing never calls the model; a changed non-empty draft is a new optimization. */
+  shouldOpenPanel(draft: string): boolean {
+    // Sending has crossed a delivery boundary; don't replace it while awaiting acknowledgement.
+    if (!draft.trim() || this.pendingSend) return true;
+    if (this.state.phase !== "idle") return draft === this.requestSource?.draft;
+    return !!this.accepted && (draft === this.accepted.text || draft === this.accepted.draft);
   }
 
   getCandidateToken(): CandidateToken | undefined {
@@ -302,6 +316,7 @@ export class RefineController {
     this.cancelActive();
     this.clearPendingSend();
     this.candidate = undefined;
+    this.requestSource = undefined;
     if (clearRestore) {
       this.restore = undefined;
       this.restoreAccepted = undefined;
@@ -346,6 +361,7 @@ export class RefineController {
     };
     const controller = new AbortController();
     const timeout = this.scheduler.setTimeout(() => this.onTimeout(requestId), this.timeoutMs);
+    this.requestSource = { draft: request.draft, ...(request.revision ? { revisionInstruction: request.revision.instruction } : {}) };
     this.active = { request, controller, timeout, previousCandidate, startedAt: Date.now() };
     this.state = { phase: "generating", requestId, model: { ...input.model }, pendingSend: false };
     this.emitState();
@@ -393,6 +409,7 @@ export class RefineController {
       applied: candidate.text,
     };
     this.candidate = undefined;
+    this.requestSource = undefined;
     this.state = { phase: "idle", requestId: this.requestSequence, pendingSend: false };
     this.emitAccepted(candidate);
     this.emitState();
@@ -543,6 +560,7 @@ export class RefineController {
     this.generation += 1;
     this.candidate = undefined;
     this.accepted = undefined;
+    this.requestSource = undefined;
     this.restore = undefined;
     this.restoreAccepted = undefined;
     this.state = { phase: "idle", requestId: this.requestSequence, pendingSend: false };
