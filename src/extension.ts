@@ -709,9 +709,13 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           optimizer: () => {
             const ref = controller.getModel();
             const model = registeredModels(ctx).find((candidate) => ref && sameModel(candidate, ref));
+            const thinkingEnabled = !!model && getSupportedThinkingLevels(model).length > 1;
             return {
               model: ref ? displayModel(ref) : "Not configured",
-              thinking: model ? `${effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel)} · ${thinkingSource(config.thinkingLevel, ctx.thinkingLevel)}` : "Choose a model first",
+              thinking: !model ? "Unavailable — select an available model first"
+                : !thinkingEnabled ? "Unavailable — fixed for this model"
+                : `${effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel)} · ${thinkingSource(config.thinkingLevel, ctx.thinkingLevel)}`,
+              thinkingEnabled,
             };
           },
           chooseModel: (context) => finish({ action: "model", generation: controller.getGeneration(), settingsContext: context }),
