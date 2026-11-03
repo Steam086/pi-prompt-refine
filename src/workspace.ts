@@ -228,8 +228,6 @@ export class RefineWorkspace implements Component, Focusable {
       if (!this.actions.contextEnabled()) hint("Disabled by projectContext.enabled=false", "warning");
       if (optimizer) {
         rows.push("", theme.bold("Optimizer"));
-        hint("Auto-save on change/confirmation");
-        hint("Optimizer only · Main session unchanged");
         add(3, "Model", optimizer.model, "›");
         add(4, "Thinking", optimizer.thinking, "↻", !optimizer.thinkingEnabled);
         if (this.actions.editSystemPrompt) add(5, "Optimization prompt", "Edit…", "›");

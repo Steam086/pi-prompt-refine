@@ -94,7 +94,8 @@ describe("shared refine workspace", () => {
     expect(model).toContain(theme.fg("muted", "Model:"));
     expect(model).toContain(theme.fg("text", "provider/long-model-identifier-with-extra-details"));
     expect(lines.join("\n")).toContain(theme.bold("Optimizer"));
-    expect(lines.join("\n")).toContain("Auto-save on change/confirmation");
+    expect(lines.join("\n")).not.toContain("Auto-save on change/confirmation");
+    expect(lines.join("\n")).not.toContain("Optimizer only · Main session unchanged");
   });
 
   it.each([false, true])("labels manual context saving separately from optimizer auto-save (optimizer: %s)", (optimizer) => {
@@ -135,7 +136,7 @@ describe("shared refine workspace", () => {
         const rendered = workspace.render(width);
         const lines = rendered.map(stripVTControlCharacters);
         const position = (text: string) => lines.findIndex((line) => line.includes(text));
-        const current = ["Context", "Include project instructions", "[x] Directory tree", "Skill metadata", "Optimizer", "Model:", "Thinking:", "Optimization prompt", "Optimizer only"].map(position);
+        const current = ["Context", "Include project instructions", "[x] Directory tree", "Skill metadata", "Optimizer", "Model:", "Thinking:", "Optimization prompt"].map(position);
         expect(current.every((index) => index >= 0)).toBe(true);
         if (anchors) expect(current).toEqual(anchors);
         else anchors = current;
@@ -147,10 +148,9 @@ describe("shared refine workspace", () => {
           expect(lines[position(option!) + 1]).toContain(description);
           expect(lines[position(option!) + 1]).toMatch(/^ {4}\S/);
         }
-        expect(position("Auto-save")).toBe(position("Optimizer") + 1);
-        expect(position("Optimizer only")).toBe(position("Model:") - 1);
+        expect(position("Model:")).toBe(position("Optimizer") + 1);
         expect(rendered[position("Use rules supplied by Pi")]).toContain(theme.fg("muted", "Use rules supplied by Pi (e.g. AGENTS.md)."));
-        const gaps = lines.flatMap((line, i) => i >= current[0]! && i < position("Optimizer only") && !line.trim() ? [i] : []);
+        const gaps = lines.flatMap((line, i) => i >= current[0]! && i < position("Model:") && !line.trim() ? [i] : []);
         expect(gaps).toEqual([position("Optimizer") - 1]);
         expect(rendered).toHaveLength(panelLayout(width, 40).height);
         for (const line of rendered) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
