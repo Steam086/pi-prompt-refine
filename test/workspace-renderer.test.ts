@@ -53,7 +53,7 @@ describe("workspace terminal rendering", () => {
         tui.requestRender();
         tui.renderNow();
         expect(workspace.render(columns)).toHaveLength(initialHeight);
-        for (const key of ["\x1b[C", ...Array<string>(6).fill("\x1b[B"), ...Array<string>(6).fill("\x1b[A"), "\x1b[D", "i", "\x1b"]) {
+        for (const key of ["\x1b[C", ...Array<string>(6).fill("\x1b[B"), ...Array<string>(6).fill("\x1b[A"), "\x1b[C", ...Array<string>(3).fill("\x1b[B"), "\x1b[D", "\x1b", "i", "\x1b"]) {
           input(key);
           tui.renderNow();
           expect(workspace.render(columns)).toHaveLength(initialHeight);

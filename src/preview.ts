@@ -1,7 +1,7 @@
 import { Markdown, ScrollView, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
-import { panelFrame, panelLayout } from "./panel-layout.js";
+import { panelFrame, panelLayout, panelTabs } from "./panel-layout.js";
 import { formatTokenUsage } from "./usage.js";
 import { resultHeading, sanitizeTerminalText, type SummaryOptions } from "./presentation.js";
 
@@ -17,11 +17,11 @@ export interface PreviewOptions extends SummaryOptions {
   notice?: string;
 }
 
-type PreviewTheme = Pick<Theme, "fg" | "bold" | "italic" | "underline" | "strikethrough">;
+type PreviewTheme = Pick<Theme, "bg" | "fg" | "bold" | "italic" | "underline" | "strikethrough">;
 
 function markdownTheme(theme: PreviewTheme): MarkdownTheme {
   return {
-    heading: (text) => theme.fg("accent", theme.bold(text)),
+    heading: (text) => theme.fg("text", theme.bold(text)),
     link: (text) => theme.fg("mdLink", text),
     linkUrl: (text) => theme.fg("mdLinkUrl", text),
     code: (text) => theme.fg("mdCode", text),
@@ -72,9 +72,19 @@ export class PreviewPanel implements Component {
       this.originalVisible = false;
       this.revealOriginal = false;
     }
+    // Elapsed time and notices affect chrome, not document layout. Keep the long
+    // body cached during progress ticks and background refreshes while scrolling.
+    const bodyChanged = textChanged || changed || options.state.pendingSend !== this.options.state.pendingSend ||
+      options.draftChanged !== this.options.draftChanged || options.sessionTitle !== this.options.sessionTitle ||
+      options.errorLabel !== this.options.errorLabel || !!options.accepted !== !!this.options.accepted ||
+      options.accepted?.editorChanged !== this.options.accepted?.editorChanged ||
+      formatTokenUsage(options.state.usage) !== formatTokenUsage(this.options.state.usage) ||
+      ((this.helpVisible || this.isEmptyState()) && (options.contextLabel !== this.options.contextLabel ||
+        options.state.model?.provider !== this.options.state.model?.provider || options.state.model?.id !== this.options.state.model?.id ||
+        options.canRestore !== this.options.canRestore));
     this.options = options;
     if (textChanged) this.rebuildDocument();
-    else this.cachedBody = undefined;
+    else if (bodyChanged) this.cachedBody = undefined;
     if (changed) this.scroll.scrollToStart();
   }
 
@@ -144,7 +154,7 @@ export class PreviewPanel implements Component {
       lines.push("");
     }
     if (this.helpVisible) {
-      lines.push(theme.fg("accent", theme.bold("Help · Keyboard reference")), "");
+      lines.push(theme.fg("text", theme.bold("Help · Keyboard reference")), "");
       if (options.accepted) paragraph("Read-only snapshot; a/e/f/s disabled.\nEdit or send from the main editor.");
       const helpLine = (...items: KeyHint[]) => lines.push(...wrapTextWithAnsi(items.map((hint) => formatKeyHint(hint, theme)).join(" · "), width));
       if (this.hasActionableCandidate()) {
@@ -159,7 +169,7 @@ export class PreviewPanel implements Component {
       helpLine(["m", "Model"], ["c", "Cycle favorites"]);
       helpLine(["o", "Original"], ["v", "Formatted/source"]);
       helpLine(["↑↓", "Scroll"], ["PgUp/PgDn", "Page"]);
-      helpLine(["i", "Input"], ["→", "Settings (← discards unsaved context)"]);
+      helpLine(["i", "Input"], ["→", "Settings (Esc discards unsaved context)"]);
       helpLine(["q", "Back"], ["?", "Hide help"]);
       paragraph("Enter won't send", "muted");
       if (!options.canRestore) paragraph("Nothing to restore.", "muted");
@@ -191,7 +201,7 @@ export class PreviewPanel implements Component {
         paragraph("Accept puts the result in the editor; s sends directly.", "muted");
       }
       const title = options.accepted ? "Accepted prompt · read-only" : "Refined prompt";
-      lines.push(theme.fg("accent", theme.bold(`${title}${this.sourceVisible ? " · source" : ""}`)), "");
+      lines.push(theme.fg("text", theme.bold(`${title}${this.sourceVisible ? " · source" : ""}`)), "");
       lines.push(...this.document.render(width));
       if (this.originalVisible && options.draft !== undefined) {
         this.originalLine = lines.length;
@@ -219,10 +229,10 @@ export class PreviewPanel implements Component {
         // Literal request snapshot, not a live editor preview or Markdown interpretation.
         // The existing bounded ScrollView exposes every line without growing the panel.
         const title = options.revisionInstruction !== undefined ? "Original task" : "Submitted original";
-        lines.push(theme.fg("accent", theme.bold(width >= 40 ? `${title} · ${options.draft.length} chars` : title)));
+        lines.push(theme.fg("text", theme.bold(width >= 40 ? `${title} · ${options.draft.length} chars` : title)));
         lines.push(...this.draftDocument.render(width));
         if (options.revisionInstruction !== undefined) {
-          lines.push("", theme.fg("accent", theme.bold("Submitted revision instruction")));
+          lines.push("", theme.fg("text", theme.bold("Submitted revision instruction")));
           lines.push(...this.revisionDocument.render(width));
         }
       } else if (options.state.phase === "generating") {
@@ -245,15 +255,17 @@ export class PreviewPanel implements Component {
     return bounded;
   }
 
-  render(width: number, tabs?: string): string[] {
+  render(width: number): string[] {
     if (width < 1) return [];
     const { theme, options } = this;
     const layout = panelLayout(width, this.rows());
-    const { innerWidth, bodyHeight } = layout;
+    const { innerWidth } = layout;
+    const navigation = panelTabs(layout, ["Preview", "→ Settings"], 0, theme);
+    const bodyHeight = layout.bodyHeight - navigation.length;
     const heading = options.accepted
       ? theme.fg("success", theme.bold(`✓ Accepted · ${options.elapsedSeconds}s`))
       : options.state.phase === "idle" ? "" : resultHeading(options, theme, false);
-    const header = [truncateToWidth(tabs ?? theme.fg("accent", theme.bold("Prompt Refine")), innerWidth, "")];
+    const header = [theme.fg("text", theme.bold("Prompt refine"))];
     const model = options.state.model;
     // Idle has no request context to describe; details remain available in Help.
     const metadata = sanitizeTerminalText([
@@ -311,6 +323,6 @@ export class PreviewPanel implements Component {
       header[1] = `${theme.fg("warning", "Send pending · draft kept")} · ${header[1]}`;
       if (layout.headerHeight === 1) header[0] = theme.fg("warning", "Send pending · draft kept");
     }
-    return panelFrame(layout, header, visible, footer, (text) => theme.fg("borderMuted", text));
+    return panelFrame(layout, header, [...navigation, ...visible], footer, (text) => theme.fg("borderMuted", text));
   }
 }

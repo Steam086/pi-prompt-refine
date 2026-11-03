@@ -7,9 +7,9 @@ type HintTheme = Pick<Theme, "fg" | "bold">;
 
 /** Shared chrome: emphasize keys, never their descriptions. */
 export function formatKeyHint([key, label]: KeyHint, theme: HintTheme, keyWidth = 1): string {
-  const prefix = key ? theme.fg("accent", theme.bold(key)) : "";
+  const prefix = key ? theme.fg("text", theme.bold(key)) : "";
   const gap = key && label ? " ".repeat(Math.max(1, keyWidth - visibleWidth(key) + 1)) : "";
-  return prefix + gap + (label ? theme.fg("text", label) : "");
+  return prefix + gap + (label ? theme.fg("muted", label) : "");
 }
 
 export function alignedKeyHints(rows: KeyHint[][], width: number, theme: HintTheme): string[] {

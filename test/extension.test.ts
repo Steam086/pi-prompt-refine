@@ -743,7 +743,7 @@ describe("project context injection", () => {
       const settings = harness.command("view", harness.context);
       harness.panelInput("\x1b[C");
       for (let i = 0; i < presses; i++) harness.panelInput(" ");
-      expect(harness.panelLines().join("\n")).toContain(`Project instructions: ${mode}`);
+      expect(harness.panelLines().join("\n")).toMatch(new RegExp(`Project instructions +${mode}`));
       harness.panelInput("\x13");
       await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved · Applies to future requests"));
       harness.panelInput("q");
@@ -1361,7 +1361,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await view;
   });
 
-  it.each(["\x1b[D", "q", "\x1b"])("cancels unsaved context edits with %j and keeps default injection", async (back) => {
+  it.each(["\x1c", "q", "\x1b"])("cancels unsaved context edits with %j and keeps default injection", async (back) => {
     const harness = await makeHarness({ config: { projectContext: structuredClone(DEFAULT_CONFIG.projectContext) } });
     vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([]);
     vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
@@ -1384,6 +1384,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput(" ");
     const edited = harness.panelLines();
     harness.panelInput("\x1b[C");
+    expect(harness.panelLines().join("\n")).toContain("Model");
+    harness.panelInput("\x1b[D");
     expect(harness.panelLines()).toEqual(edited);
     harness.panelInput(back);
     await flushPromises();
@@ -1409,7 +1411,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\x1b[C");
     await flushPromises();
     const lines = harness.panelLines();
-    expect(lines.filter((line) => /\[[x ]\]/.test(line)).map((line) => line.trimEnd())).toEqual(["    [x] Directory tree", "    [ ] Skill metadata"]);
+    expect(lines.find((line) => line.includes("Directory tree"))).toMatch(/Directory tree +\[x\] On/);
+    expect(lines.find((line) => line.includes("Skill metadata"))).toMatch(/Skill metadata +\[ \] Off/);
     harness.panelInput(" ");
     harness.panelInput("\x1b[B");
     harness.panelInput(" ");
@@ -1440,7 +1443,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     harness.panelInput("\x1b[C");
-    expect(harness.panelLines().join("\n")).toContain(`Project instructions: ${label}`);
+    expect(harness.panelLines().join("\n")).toMatch(new RegExp(`Project instructions +${label}`));
     harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved"));
     const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
@@ -1639,15 +1642,16 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const view = harness.command("view", harness.context);
     harness.panelInput("\x1b[C");
     harness.panelInput(" ");
-    for (let i = 0; i < 5; i++) harness.panelInput("\x1b[B");
+    harness.panelInput("\x1b[C");
+    for (let i = 0; i < 2; i++) harness.panelInput("\x1b[B");
     expect(harness.panelLines().join("\n")).toContain("› Optimization prompt");
-    expect(harness.panelLines().join("\n")).toContain("Enter Edit");
+    expect(harness.panelLines().join("\n")).toContain("Enter Change");
     harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.customCalls()).toBe(2));
     expect(harness.context.ui.editor).toHaveBeenCalledWith(expect.any(String), original);
     expect(harness.context.ui.confirm).toHaveBeenCalledTimes(typeof choice === "boolean" ? 1 : 0);
     expect(harness.panelLines().join("\n")).toContain("Unsaved context changes");
-    harness.panelInput("\x1b[D");
+    harness.panelInput("\x1b");
     harness.panelInput("q");
     await view;
     const expected = choice === true ? edited : original;
@@ -1667,13 +1671,15 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\x1b[C");
     harness.panelInput(" ");
     harness.panelInput(" ");
-    for (let i = 0; i < 3; i++) harness.panelInput("\x1b[B");
+    harness.panelInput("\x1b[C");
     expect(harness.panelLines().join("\n")).toContain("Model:");
     harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Choose optimizer model"));
     harness.panelInput("\x1b");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Unsaved context changes"));
-    expect(harness.panelLines().join("\n")).toContain("Project instructions: First request only");
+    harness.panelInput("\x1b[D");
+    expect(harness.panelLines().join("\n")).toMatch(/Project instructions +First request only/);
+    harness.panelInput("\x1b[C");
     harness.panelInput("\x1b[B");
     expect(harness.panelLines().join("\n")).toContain("Thinking: medium");
     harness.panelInput("\r");
@@ -1683,7 +1689,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
     expect(saved.thinkingLevel).toBe("high");
     expect(saved.projectContext.instructionsEnabled).toBe(true);
-    harness.panelInput("\x1b[D");
+    harness.panelInput("\x1b");
     harness.panelInput("q");
     await view;
     expect(harness.editorWrites).toEqual([]);
@@ -1699,7 +1705,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     harness.panelInput("\x1b[C");
-    for (let i = 0; i < 4; i++) harness.panelInput("\x1b[B");
+    harness.panelInput("\x1b[C");
+    for (let i = 0; i < 1; i++) harness.panelInput("\x1b[B");
     expect(harness.panelLines().join("\n")).toContain(`Unavailable — ${options.reason}`);
     for (const key of ["\r", " ", "\x1b[C", "\x1b[Z"]) harness.panelInput(key);
     await flushPromises();
@@ -1717,7 +1724,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\x1b[C");
     harness.panelInput("\r");
     expect(harness.panelLines().join("\n")).toContain("Unsaved context changes");
-    for (let i = 0; i < 3; i++) harness.panelInput("\x1b[B");
+    harness.panelInput("\x1b[C");
     harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved"));
     expect(harness.customCalls()).toBe(1);

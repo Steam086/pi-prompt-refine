@@ -1,4 +1,5 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import { READING_WIDTH } from "./presentation.js";
 
 /** One geometry for reading, settings and input; only terminal resize changes it. */
@@ -17,6 +18,17 @@ export function panelLayout(width: number, rows: number) {
 }
 
 export type PanelLayout = ReturnType<typeof panelLayout>;
+
+/** Shared group strip: reserve the same rows on reading and settings pages. */
+export function panelTabs(layout: PanelLayout, labels: string[], active: number, theme: Pick<Theme, "fg" | "bg" | "bold">): string[] {
+  if (layout.bodyHeight < 4) return [];
+  const tab = (label: string, index: number) => index === active
+    ? theme.bg("toolPendingBg", theme.fg("text", theme.bold(` ${label} `)))
+    : theme.fg("muted", ` ${label} `);
+  const strip = labels.map(tab).join("  ");
+  const line = visibleWidth(strip) <= layout.innerWidth ? strip : tab(labels[active]!, active);
+  return layout.bodyHeight >= 8 ? ["", line, ""] : [line];
+}
 
 export function panelFrame(layout: PanelLayout, header: string[], body: string[], footer: string[], border: (text: string) => string): string[] {
   const reserve = (lines: string[], count: number) => Array.from({ length: count }, (_, i) => lines[i] ?? "");

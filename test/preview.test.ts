@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 // Test-only access to the installed Pi palettes; production uses the injected theme.
 import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { Markdown, Text, visibleWidth } from "@earendil-works/pi-tui";
 import { PreviewPanel, type PreviewOptions } from "../src/preview.js";
 import { READING_WIDTH } from "../src/presentation.js";
-import { panelLayout } from "../src/panel-layout.js";
+import { panelLayout, panelTabs } from "../src/panel-layout.js";
 
 const identity = (text: string) => text;
-const plainTheme = { fg: (_color: string, text: string) => text, bold: identity, italic: identity, underline: identity, strikethrough: identity };
+const plainTheme = { bg: (_color: string, text: string) => text, fg: (_color: string, text: string) => text, bold: identity, italic: identity, underline: identity, strikethrough: identity };
 const options: PreviewOptions = {
   state: { phase: "ready", requestId: 1, pendingSend: false, model: { provider: "openai-codex", id: "example-model" } },
   candidateText: "请优化本项目的 UI 视觉效果。\n\n## 重点\n- 保留 **用户目标** 与约束。\n- 让内容清晰、美观、易读。",
@@ -159,7 +159,7 @@ describe("result reading panel", () => {
       "  a Accept · e Edit · f Revise",
       "  q Back · ? Help",
     ]);
-    expect(text.match(/Prompt Refine/g)).toHaveLength(1);
+    expect(text.match(/Prompt refine/g)).toHaveLength(1);
     panel.toggleOriginal();
     expect(panel.render(100).join("\n")).toContain(options.draft);
     panel.toggleOriginal();
@@ -184,12 +184,13 @@ describe("result reading panel", () => {
 
   it("separates the workspace and keeps idle chrome free of duplicate or unavailable actions", () => {
     const panel = create({ candidateText: undefined, state: { ...options.state, phase: "idle" }, contextLabel: "Context: not captured" });
-    const lines = panel.render(100, "› Prompt refine     Settings");
+    const lines = panel.render(100);
     expect(lines[0]).toBe("  " + "─".repeat(96));
-    expect(lines[1]).toBe("  › Prompt refine     Settings");
+    expect(lines[1]).toBe("  Prompt refine");
     expect(lines[2]?.trim()).toBe("");
     const layout = panelLayout(100, 40);
-    const emptyRow = layout.topSeparatorHeight + layout.headerHeight + Math.floor((layout.bodyHeight - 2) / 2);
+    const tabHeight = panelTabs(layout, ["Preview", "→ Settings"], 0, plainTheme).length;
+    const emptyRow = layout.topSeparatorHeight + layout.headerHeight + tabHeight + Math.floor((layout.bodyHeight - tabHeight - 2) / 2);
     expect(lines[emptyRow]?.trim()).toBe("No result yet.");
     expect(lines[emptyRow + 1]?.trim()).toBe("openai-codex/example-model");
     expect(lines[emptyRow]).toBe(" ".repeat(layout.inset + Math.floor((layout.innerWidth - "No result yet.".length) / 2)) + "No result yet.");
@@ -205,12 +206,12 @@ describe("result reading panel", () => {
     const theme = getThemeByName("dark")!;
     const styled = new PreviewPanel(options, theme, () => 40, vi.fn()).render(100);
     expect(styled[0]).toContain(theme.fg("borderMuted", "─".repeat(96)));
-    expect(styled[1]).toContain(theme.bold("Prompt Refine"));
+    expect(styled[1]).toContain(theme.bold("Prompt refine"));
   });
 
   it.each(["generating", "error", "ready"] as const)("keeps useful %s status without repeating the brand", (phase) => {
     const panel = create({ state: { ...options.state, phase }, candidateText: phase === "ready" ? options.candidateText : undefined });
-    const lines = panel.render(100, "› Prompt refine     Settings");
+    const lines = panel.render(100);
     const text = lines.join("\n");
     expect(text.match(/Prompt refine/gi)).toHaveLength(1);
     expect(lines[2]).toContain(phase === "generating" ? "Refining" : phase === "error" ? "Failed" : "Done");
@@ -242,7 +243,7 @@ describe("result reading panel", () => {
     panel.setNotice("Context saved");
     expect(panel.render(100)[2]).toContain("Context saved");
     panel.toggleHelp();
-    expect(panel.render(100)[3]).toContain("Help");
+    expect(panel.render(100)[6]).toContain("Help");
   });
 
   it("keeps model guidance in the empty block when no model is selected", () => {
@@ -266,7 +267,9 @@ describe("result reading panel", () => {
   it("shows the complete keyboard reference on demand", () => {
     const panel = create();
     panel.toggleHelp();
-    const text = panel.render(100).join("\n");
+    const first = panel.render(100).join("\n");
+    panel.page(1);
+    const text = first + "\n" + panel.render(100).join("\n");
     for (const hint of ["follow-up", "Edit candidate (no model call)", "x/d Stop request / discard result", "z Restore", "r Refine", "m Model", "c Cycle favorites", "o Original", "v Formatted/source", "i Input", "→ Settings", "Enter won't send", "Nothing to restore"]) {
       expect(text).toContain(hint);
     }
@@ -298,7 +301,7 @@ describe("result reading panel", () => {
     expect(next).toContain("e Edit");
     expect(next).toContain("f Revise");
     expect(next).not.toContain("i Input");
-    expect(next).not.toContain("→ Settings");
+    expect(next).toContain("→ Settings");
     expect(next).not.toContain("t Context");
     panel.scrollBy(10000);
     expect(panel.render(80).join("\n")).toContain("内容 79");
@@ -333,7 +336,7 @@ describe("result reading panel", () => {
     const panel = new PreviewPanel(options, theme, () => 40, vi.fn());
     const before = panel.render(100);
     expect(before.join("\n")).toContain(theme.fg("success", theme.bold("✓ Done · 0s")));
-    expect(before.join("\n")).toContain(theme.fg("accent", theme.bold("Refined prompt")));
+    expect(before.join("\n")).toContain(theme.fg("text", theme.bold("Refined prompt")));
     panel.invalidate();
     expect(panel.render(100)).toEqual(before);
     for (const line of before) expect(visibleWidth(line)).toBeLessThanOrEqual(100);
@@ -421,7 +424,7 @@ describe("result reading panel", () => {
       const panel = create({ state: { ...options.state, pendingSend: true }, candidateText: "Result\n".repeat(100) }, rows);
       panel.render(40);
       panel.scrollBy(10000);
-      const lines = panel.render(40, "Prompt refine");
+      const lines = panel.render(40);
       const layout = panelLayout(40, rows);
       expect(lines.slice(layout.topSeparatorHeight, layout.topSeparatorHeight + layout.headerHeight).join("\n")).toContain("Send pending");
     }
@@ -440,6 +443,44 @@ describe("result reading panel", () => {
     const text = panel.render(width).join("\n");
     expect(text).toContain("17s");
     expect(text).not.toMatch(/[\p{Script=Han}…]|\.{3}/u);
+  });
+
+  it("keeps long-body layout cached across progress ticks and scrolling", () => {
+    const pending = { ...options, state: { ...options.state, phase: "generating" as const },
+      candidateText: undefined, draft: "Keep **literal** commands.\n".repeat(500) };
+    const panel = create(pending);
+    const renderText = vi.spyOn(Text.prototype, "render");
+    panel.render(100);
+    renderText.mockClear();
+    for (let elapsedSeconds = 1; elapsedSeconds <= 10; elapsedSeconds++) {
+      panel.update({ ...pending, state: { ...pending.state }, elapsedSeconds });
+      panel.scrollBy(1);
+      expect(panel.render(100)[2]).toContain(`${elapsedSeconds}s`);
+    }
+    expect(renderText).not.toHaveBeenCalled();
+    panel.update({ ...pending, draftChanged: true });
+    panel.scrollBy(-10000);
+    expect(panel.render(100).join("\n")).toContain("Main editor differs");
+    expect(renderText).toHaveBeenCalled();
+    renderText.mockRestore();
+  });
+
+  it("keeps Markdown cached on metadata refresh and rebuilds when content or theme changes", () => {
+    const panel = create({ candidateText: "**A**\n\n".repeat(500) });
+    const renderMarkdown = vi.spyOn(Markdown.prototype, "render");
+    panel.render(100);
+    renderMarkdown.mockClear();
+    panel.update({ ...options, candidateText: "**A**\n\n".repeat(500), elapsedSeconds: 5, notice: "Saved" });
+    panel.scrollBy(1);
+    expect(panel.render(100)[2]).toContain("Saved");
+    expect(renderMarkdown).not.toHaveBeenCalled();
+    panel.update({ ...options, candidateText: "**New result**" });
+    expect(panel.render(100).join("\n")).toContain("New result");
+    expect(renderMarkdown).toHaveBeenCalledOnce();
+    panel.invalidate();
+    panel.render(100);
+    expect(renderMarkdown).toHaveBeenCalledTimes(2);
+    renderMarkdown.mockRestore();
   });
 
   it("refreshes a completed candidate and preserves expansion settings without stale content", () => {
