@@ -56,7 +56,7 @@ interface Harness {
   customCalls(): number;
 }
 
-async function makeHarness(options: { freshInstall?: boolean; sessionName?: string; mode?: "tui" | "print"; busy?: boolean; configureModel?: boolean; noAvailableModels?: boolean; reasoning?: boolean; thinkingLevel?: ModelThinkingLevel; config?: Partial<RefineConfig>; useDefaultShortcuts?: boolean } = {}): Promise<Harness> {
+async function makeHarness(options: { freshInstall?: boolean; sessionName?: string; mode?: "tui" | "rpc" | "print"; busy?: boolean; configureModel?: boolean; noAvailableModels?: boolean; reasoning?: boolean; thinkingLevel?: ModelThinkingLevel; config?: Partial<RefineConfig>; useDefaultShortcuts?: boolean } = {}): Promise<Harness> {
   const agentDir = await mkdtemp(join(tmpdir(), "pi-prompt-refine-agent-"));
   agentDirs.push(agentDir);
   process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -300,10 +300,33 @@ function resourcePrompt(skillDescription = "Extract PDF tables", instructions = 
   return `<tools>\nPRIVATE MAIN AGENT TOOLS\n</tools>\n<project_context>\nProject-specific instructions and guidelines:\n\n<project_instructions path="/repo/AGENTS.md">\n${instructions}\n</project_instructions>\n</project_context>\n<skills>\nUse bash to load skills.\n<available_skills>\n<skill><name>pdf</name><description>${skillDescription}</description><location>/skills/pdf/SKILL.md</location></skill>\n</available_skills>\n</skills>\n<cwd>\n/repo\n</cwd>`;
 }
 
+describe("startup hint", () => {
+  it.each([
+    ["ctrl+\\", "Ctrl + \\"],
+    ["f6", "f6"],
+    [null, "/refine optimize"],
+  ] as const)("uses the configured optimize binding %s", async (optimize, label) => {
+    const harness = await makeHarness({ config: { shortcuts: { ...DEFAULT_CONFIG.shortcuts, optimize } } });
+    expect(harness.notifications).toEqual([`Prompt Refine: Use ${label} to refine your prompt.`]);
+    for (const reason of ["new", "resume", "fork"]) {
+      harness.handlers.get("session_start")?.[0]?.({ reason }, harness.context);
+    }
+    await harness.reload();
+    expect(harness.notifications).toHaveLength(1);
+    expect(harness.complete).not.toHaveBeenCalled();
+    expect(harness.editorWrites).toEqual([]);
+  });
+
+  it.each(["rpc", "print"] as const)("stays silent in %s mode", async (mode) => {
+    const harness = await makeHarness({ mode });
+    expect(harness.notifications).toEqual([]);
+  });
+});
+
 describe("first optimizer model setup", () => {
   it("guides a fresh install without borrowing the main model or starting a request", async () => {
     const harness = await makeHarness({ freshInstall: true });
-    expect(harness.notifications).toEqual([expect.stringContaining("no optimizer model selected")]);
+    expect(harness.notifications).toEqual([expect.stringContaining("No optimizer model selected")]);
     expect(harness.notifications[0]).toContain("/refine model");
     harness.handlers.get("session_start")?.[0]?.({ reason: "new" }, harness.context);
     expect(harness.notifications).toHaveLength(1);
@@ -688,7 +711,10 @@ describe("project context injection", () => {
     await flushPromises();
     expect(harness.complete).not.toHaveBeenCalled();
     expect(harness.widgetLines()).toEqual([]);
-    expect(harness.notifications).toEqual(["Refinement cancelled. Editor unchanged."]);
+    expect(harness.notifications).toEqual([
+      "Prompt Refine: Use Ctrl + \\ to refine your prompt.",
+      "Refinement cancelled. Editor unchanged.",
+    ]);
   });
 
   it.each([false, true])("defaults to per-request instructions with followUp=%s, independent of history budget", async (followUp) => {
@@ -763,7 +789,7 @@ describe("project context injection", () => {
     expect(input).not.toContain("PRIVATE MAIN AGENT TOOLS");
     expect(input).not.toContain("Use bash to load skills");
     expect(request.tools).toEqual([]);
-    expect(harness.notifications).toEqual([]);
+    expect(harness.notifications).toEqual(["Prompt Refine: Use Ctrl + \\ to refine your prompt."]);
     expect(harness.getEditor()).toBe("Draft A");
     expect(harness.sent).toEqual([]);
     expect(harness.sessionWrites).toEqual([]);
@@ -878,7 +904,7 @@ describe("project context injection", () => {
     await flushPromises();
     expect(harness.complete).not.toHaveBeenCalled();
     expect(harness.widgetLines()).toEqual([]);
-    expect(harness.notifications).toHaveLength(1); // Explicit cancellation notice only.
+    expect(harness.notifications).toHaveLength(2); // Startup hint and explicit cancellation only.
   });
 
   it("freezes host resources before asynchronous tree collection and allows draft edits", async () => {
