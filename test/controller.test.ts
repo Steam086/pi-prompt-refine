@@ -34,6 +34,53 @@ function setup(complete: (request: RefineRequest, signal: AbortSignal) => Promis
   return { controller, onState, onAccepted, scheduler };
 }
 
+describe("request source and shortcut routing", () => {
+  it("captures only started requests, supersedes A with B and ignores late A", async () => {
+    const a = deferred<RefineCompletion>();
+    const b = deferred<RefineCompletion>();
+    const complete = vi.fn().mockImplementationOnce(() => a.promise).mockImplementationOnce(() => b.promise);
+    const { controller } = setup(complete);
+    expect(controller.shouldOpenPanel("A")).toBe(false);
+    expect(controller.shouldOpenPanel(" ")).toBe(true);
+    controller.trigger(input("A"));
+    expect(controller.getRequestSource()).toEqual({ draft: "A" });
+    controller.getRequestSource()!.draft = "mutated";
+    expect(controller.shouldOpenPanel("A")).toBe(true);
+    expect(controller.shouldOpenPanel("B")).toBe(false);
+    expect(controller.trigger(input("x".repeat(101))).kind).toBe("too-long");
+    expect(controller.getRequestSource()).toEqual({ draft: "A" });
+    controller.trigger(input("B"));
+    expect(complete.mock.calls[0]![1].aborted).toBe(true);
+    expect(controller.getRequestSource()).toEqual({ draft: "B" });
+    a.resolve(success("Late A"));
+    await flushPromises();
+    expect(controller.getState().phase).toBe("generating");
+    b.resolve(success("Result B"));
+    await flushPromises();
+    expect(controller.getCandidate()?.text).toBe("Result B");
+    expect(controller.shouldOpenPanel("B")).toBe(true);
+    expect(controller.shouldOpenPanel("A")).toBe(false);
+    controller.beginSend(controller.getCandidateToken()!);
+    expect(controller.shouldOpenPanel("C")).toBe(true);
+    controller.onSubmittedInput("Result B", "extension", "followUp");
+    expect(controller.getRequestSource()).toBeUndefined();
+  });
+
+  it.each(["failure", "timeout"])("retains the source after %s but clears it on invalidation", async (outcome) => {
+    const pending = deferred<RefineCompletion>();
+    const { controller, scheduler } = setup(() => pending.promise);
+    controller.trigger(input("A"));
+    if (outcome === "timeout") scheduler.advance(100);
+    else pending.reject(new Error("offline"));
+    await flushPromises();
+    expect(controller.getRequestSource()).toEqual({ draft: "A" });
+    expect(controller.shouldOpenPanel("A")).toBe(true);
+    expect(controller.shouldOpenPanel("B")).toBe(false);
+    controller.invalidateLifecycle(true);
+    expect(controller.getRequestSource()).toBeUndefined();
+  });
+});
+
 describe("candidate revisions", () => {
   it("freezes revision input and retains the original draft across bounded successive revisions", async () => {
     const complete = vi.fn(async () => success("First result"));
@@ -46,6 +93,7 @@ describe("candidate revisions", () => {
     expect(controller.trigger(request, { revisionToken: first }).kind).toBe("started");
     expect(controller.getCandidate()).toBeUndefined();
     request.revision!.instruction = "Mutated";
+    expect(controller.getRequestSource()).toEqual({ draft: "Original constraints", revisionInstruction: "Shorter" });
     await flushPromises();
     expect(controller.getCandidate()).toMatchObject({ draft: "Original constraints", text: "Second result", revision: { instruction: "Shorter" } });
     const copy = controller.getCandidate()!;
@@ -507,7 +555,10 @@ describe("RefineController explicit operations", () => {
     controller.updateCandidate(token, "manually refined");
     const edited = controller.getCandidateToken()!;
     expect(controller.acceptCandidate(edited, "original", false, () => {})).toBe(true);
-    expect(controller.shouldOpenPanel()).toBe(true);
+    expect(controller.shouldOpenPanel("manually refined")).toBe(true);
+    expect(controller.shouldOpenPanel("original")).toBe(true);
+    expect(controller.shouldOpenPanel("changed draft")).toBe(false);
+    expect(controller.getRequestSource()).toBeUndefined();
     expect(controller.getCandidateToken()).toBeUndefined();
     expect(controller.isCandidateCurrent(edited)).toBe(false);
     expect(controller.getAccepted()).toMatchObject({ text: "manually refined", draft: "original", model });
@@ -527,7 +578,7 @@ describe("RefineController explicit operations", () => {
     if (boundary === "branch") controller.invalidateLifecycle(true);
     if (boundary === "restore") controller.restoreDraft(controller.getRestoreToken()!, "Refined", false, () => {});
     const retained = boundary === "dismiss" || boundary === "model";
-    expect(controller.shouldOpenPanel()).toBe(retained);
+    expect(controller.shouldOpenPanel("Refined")).toBe(retained);
     expect(!!controller.getAccepted()).toBe(retained);
   });
 
@@ -542,17 +593,18 @@ describe("RefineController explicit operations", () => {
     controller.restoreDraft(controller.getRestoreToken()!, "second version", false, write);
     expect(write).toHaveBeenCalledWith("Refined with edits");
     expect(controller.getAccepted()?.text).toBe("Refined");
-    expect(controller.shouldOpenPanel()).toBe(true);
+    expect(controller.shouldOpenPanel("Refined")).toBe(true);
+    expect(controller.shouldOpenPanel("Refined with edits")).toBe(false);
     expect(controller.getCandidate()).toBeUndefined();
   });
 
   it("opens a panel for errors instead of treating the shortcut as a retry", async () => {
     const { controller } = setup(async () => { throw new Error("offline"); });
-    expect(controller.shouldOpenPanel()).toBe(false);
+    expect(controller.shouldOpenPanel("draft")).toBe(false);
     controller.trigger(input("draft"));
-    expect(controller.shouldOpenPanel()).toBe(true);
+    expect(controller.shouldOpenPanel("draft")).toBe(true);
     await flushPromises();
-    expect(controller.shouldOpenPanel()).toBe(true);
+    expect(controller.shouldOpenPanel("draft")).toBe(true);
   });
 
   it("restoring an accepted draft cancels a newer refinement and rejects late results", async () => {
@@ -566,7 +618,7 @@ describe("RefineController explicit operations", () => {
     const write = vi.fn();
     expect(controller.restoreDraft(controller.getRestoreToken()!, "accepted with edits", true, write)).toBe(true);
     expect(write).toHaveBeenCalledWith("original");
-    expect(controller.shouldOpenPanel()).toBe(false);
+    expect(controller.shouldOpenPanel("original")).toBe(false);
     pending.resolve(success("stale"));
     await flushPromises();
     expect(controller.getCandidate()).toBeUndefined();

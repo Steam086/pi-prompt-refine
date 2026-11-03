@@ -42,11 +42,30 @@ describe("workspace terminal rendering", () => {
       const clearCalls = vi.mocked(terminal.clearScreen).mock.calls.length;
       writes.length = 0;
       for (let repeat = 0; repeat < 10; repeat++) {
+        panel.update({
+          state: { phase: "generating", requestId: repeat + 2, pendingSend: false },
+          draft: "Submitted 原文😀\n".repeat(200), draftChanged: true,
+          contextLabel: "Draft only", elapsedSeconds: 0, openHint: "ctrl+\\", canRestore: false,
+        });
+        tui.requestRender();
+        tui.renderNow();
+        panel.scrollBy(10000);
+        tui.requestRender();
+        tui.renderNow();
+        expect(workspace.render(columns)).toHaveLength(initialHeight);
         for (const key of ["\x1b[C", ...Array<string>(6).fill("\x1b[B"), ...Array<string>(6).fill("\x1b[A"), "\x1b[D", "i", "\x1b"]) {
           input(key);
           tui.renderNow();
           expect(workspace.render(columns)).toHaveLength(initialHeight);
         }
+        panel.update({
+          state: { phase: "ready", requestId: repeat + 2, pendingSend: false },
+          candidateText: "Completed result", draft: "Submitted 原文😀\n".repeat(200),
+          contextLabel: "Draft only", elapsedSeconds: 1, openHint: "ctrl+\\", canRestore: false,
+        });
+        tui.requestRender();
+        tui.renderNow();
+        expect(workspace.render(columns)).toHaveLength(initialHeight);
       }
       expect(writes.length).toBeGreaterThan(0);
       expect(tui.fullRedraws).toBe(initialRedraws);
