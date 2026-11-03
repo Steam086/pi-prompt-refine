@@ -56,7 +56,7 @@ export function renderSummary(options: SummaryOptions, width: number, theme: Pre
   }
   const usageLabel = formatTokenUsage(options.state.usage);
   if (usageLabel && options.state.phase !== "generating") {
-    lines.push(theme.fg("muted", truncateToWidth(usageLabel, contentWidth, "")));
+    lines.push("", theme.fg("muted", truncateToWidth(usageLabel, contentWidth, "")));
   }
   lines.push("");
   const hint = options.state.pendingSend ? "View · draft kept" : "View";
