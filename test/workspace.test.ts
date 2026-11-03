@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import { stripVTControlCharacters } from "node:util";
 import { CURSOR_MARKER, getKeybindings, visibleWidth, type TUI } from "@earendil-works/pi-tui";
 import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { PreviewPanel, type PreviewOptions } from "../src/preview.js";
 import { RefineWorkspace } from "../src/workspace.js";
 import { panelLayout } from "../src/panel-layout.js";
+import { formatKeyHint } from "../src/key-hints.js";
 
 const options: PreviewOptions = {
   state: { phase: "ready", requestId: 1, pendingSend: false },
@@ -20,7 +22,7 @@ function create(rows = 40, themeName = "dark", optimizer = false) {
     context: () => [true, true, false], contextEnabled: () => true,
     ...(optimizer ? {
       optimizer: () => ({ model: "provider/long-model-identifier-with-extra-details", thinking: "high · Extension setting" }),
-      chooseModel: vi.fn(), cycleThinking: vi.fn(async () => "Thinking level saved"),
+      chooseModel: vi.fn(), editSystemPrompt: vi.fn(), cycleThinking: vi.fn(async () => "Thinking level saved"),
     } : {}),
     saveContext: vi.fn(async () => "Context saved"),
     submit: vi.fn((_text: string): string | undefined => undefined),
@@ -56,19 +58,21 @@ describe("shared refine workspace", () => {
     workspace.handleInput("\x1b[C");
     const settings = textOf(workspace.render(80));
     for (const output of [main, settings]) {
-      expect(output).toContain("[Prompt refine]");
-      expect(output).toContain("[Settings]");
+      const navigation = stripVTControlCharacters(output.split("\n")[1]!);
+      expect(navigation).toContain("Prompt refine");
+      expect(navigation).toContain("Settings");
+      expect(navigation).not.toMatch(/[\[\]]/);
     }
-    expect(main).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold("›[Prompt refine]"))));
-    expect(settings).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold("›[Settings]"))));
+    expect(main).toContain(theme.bg("selectedBg", theme.fg("accent", theme.bold("› Prompt refine"))));
+    expect(settings).toContain(theme.bg("selectedBg", theme.fg("accent", theme.bold("› Settings"))));
     workspace.handleInput("\x1b[D");
-    expect(workspace.render(80)[0]).toBe(main.split("\n")[0]);
+    expect(workspace.render(80)[1]).toBe(main.split("\n")[1]);
   });
   it("prioritizes the active page label in narrow terminals", () => {
     const { workspace } = create();
-    expect(workspace.render(20)[0]).toContain("›[Prompt refine]");
+    expect(workspace.render(20)[1]).toContain("› Prompt refine");
     workspace.openSettings();
-    expect(workspace.render(20)[0]).toContain("›[Settings]");
+    expect(workspace.render(20)[1]).toContain("› Settings");
   });
 
   it.each(["dark", "light"])("separates optimizer labels, values and selection in %s", (name) => {
@@ -80,14 +84,95 @@ describe("shared refine workspace", () => {
     bold.mockRestore();
     const thinking = lines.find((line) => line.includes("Thinking:"))!;
     expect(thinking).toContain(theme.fg("muted", "Thinking:"));
-    expect(thinking).toContain(theme.fg("text", theme.bold("high · Extension setting")));
-    expect(boldCalls).toContain("high · Extension setting");
-    expect(boldCalls).not.toContain("Thinking:");
+    expect(thinking).toContain(theme.fg("text", "high · Extension setting"));
+    expect(thinking).toContain(theme.fg("accent", "› "));
+    expect(boldCalls).toEqual(["› Settings", "Enter", "↑↓", "←/Esc"]);
+    expect(textOf(lines)).not.toContain("Change");
     const model = lines.find((line) => line.includes("Model:"))!;
     expect(model).toContain(theme.fg("muted", "Model:"));
     expect(model).toContain(theme.fg("text", "provider/long-model-identifier-with-extra-details"));
-    expect(lines.join("\n")).toContain(theme.bold("Optimizer"));
+    expect(lines.join("\n")).toContain(theme.fg("muted", "Optimizer"));
     expect(lines.join("\n")).not.toMatch(/immediately/i);
+  });
+
+  it.each([false, true])("keeps save instructions only in the footer (optimizer: %s)", (optimizer) => {
+    const { workspace } = create(40, "dark", optimizer);
+    workspace.openSettings();
+    const lines = workspace.render(100).map(stripVTControlCharacters);
+    expect(lines[2]?.trim()).toBe("");
+    const content = lines.slice(0, -2).join("\n");
+    expect(content).toContain("Context");
+    expect(content).not.toMatch(/Enter|Save|Prompt Refine settings|Next refinement/);
+    expect(lines.slice(-2).join("\n").match(/Enter Save/g)).toHaveLength(1);
+    workspace.handleInput(" ");
+    expect(textOf(workspace.render(100))).toContain("Unsaved changes");
+  });
+
+  it.each(["dark", "light"])("shares footer key and description styles across all pages in %s", (name) => {
+    const { workspace, panel, theme } = create(40, name, true);
+    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["q", "Back"], theme));
+    panel.toggleHelp();
+    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["r", "Refine current draft (model call)"], theme));
+    workspace.openSettings();
+    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["Enter", "Save"], theme));
+    workspace.handleInput("q");
+    workspace.handleInput("i");
+    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["Enter", "Refine"], theme));
+    expect(textOf(workspace.render(20))).toContain(formatKeyHint(["↵", "Refine"], theme));
+  });
+
+  it.each(["dark", "light"])("keeps section hints attached and spacing stable across all selections in %s", (name) => {
+    for (const width of [40, 80, 100]) {
+      const { workspace, theme } = create(40, name, true);
+      workspace.openSettings();
+      let anchors: number[] | undefined;
+      for (let cursor = 0; cursor < 6; cursor++) {
+        const rendered = workspace.render(width);
+        const lines = rendered.map(stripVTControlCharacters);
+        const position = (text: string) => lines.findIndex((line) => line.includes(text));
+        const current = ["Context", "AGENTS.md", "[x] tree", "skills", "Optimizer", "Model:", "Thinking:", "Optimization prompt", "Optimizer only"].map(position);
+        expect(current.every((index) => index >= 0)).toBe(true);
+        if (anchors) expect(current).toEqual(anchors);
+        else anchors = current;
+        for (const [option, description] of [
+          ["AGENTS.md", "Loaded project instructions."],
+          ["[x] tree", "Default tree; explicit @dirs"],
+          ["skills", "Skill metadata; no automatic"],
+        ]) {
+          expect(lines[position(option!) + 1]).toContain(description);
+          expect(lines[position(option!) + 1]).toMatch(/^ {4}\S/);
+        }
+        expect(position("Optimizer only")).toBe(position("Optimization prompt") + 1);
+        expect(rendered[position("Loaded project instructions.")]).toContain(theme.fg("muted", "Loaded project instructions."));
+        const gaps = lines.flatMap((line, i) => i >= current[0]! && i < position("Optimizer only") && !line.trim() ? [i] : []);
+        expect(gaps).toEqual([position("Optimizer") - 1]);
+        expect(rendered).toHaveLength(panelLayout(width, 40).height);
+        for (const line of rendered) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+        workspace.handleInput("\x1b[B");
+      }
+    }
+  });
+
+  it("keeps context explanations and disabled warnings inside Context without an optimizer", () => {
+    const { workspace, actions } = create();
+    actions.contextEnabled = () => false;
+    workspace.openSettings();
+    for (let cursor = 0; cursor < 3; cursor++) {
+      const lines = workspace.render(100).map(stripVTControlCharacters);
+      const context = lines.findIndex((line) => line.trim() === "Context");
+      const warning = lines.findIndex((line) => line.includes("Disabled by projectContext.enabled=false"));
+      expect(lines.slice(context, warning + 1).every((line) => line.trim())).toBe(true);
+      expect(lines[warning - 1]).toContain("Skill metadata; no automatic invocation.");
+      expect(lines.join("\n")).not.toContain("Optimizer");
+      workspace.handleInput("\x1b[B");
+    }
+  });
+
+  it("shows full model details only when the selected navigation row truncates", () => {
+    const { workspace } = create(40, "dark", true);
+    workspace.openSettings([true, true, false], 3);
+    expect(textOf(workspace.render(100)).match(/Model:/g)).toHaveLength(1);
+    expect(textOf(workspace.render(40)).match(/Model:/g)).toHaveLength(2);
   });
 
   it("keeps long optimizer identifiers on one navigation row", () => {
@@ -103,7 +188,7 @@ describe("shared refine workspace", () => {
 
   it.each([[24, 16], [32, 21], [40, 24], [60, 24]])("budgets %i terminal rows as %i panel rows", (rows, height) => {
     expect(panelLayout(80, rows).height).toBe(height);
-    expect(panelLayout(80, rows).bodyHeight).toBe(height - 5);
+    expect(panelLayout(80, rows).bodyHeight).toBe(height - 6);
   });
 
   it.each(["dark", "light"])("keeps geometry, cursor and controls bounded in %s theme", (theme) => {
@@ -119,15 +204,16 @@ describe("shared refine workspace", () => {
         const input = workspace.render(width);
         for (const lines of [main, context, input]) {
           expect(lines).toHaveLength(layout.height);
+          if (layout.topSeparatorHeight) expect(lines[0]).toContain("─".repeat(layout.innerWidth));
           for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(Math.min(width, 100));
         }
         expect(textOf(input)).toContain(CURSOR_MARKER);
         expect(terminal.rows).toBe(rows); // Editor facade must not mutate the host.
         if (width >= 40 && rows >= 16) {
-          expect(textOf(input)).toContain("Esc Back");
-          expect(textOf(input)).toContain("Enter Refine");
-          expect(textOf(context)).toContain("Enter Save");
-          expect(textOf(context)).toContain("discard");
+          expect(stripVTControlCharacters(textOf(input))).toContain("Esc Back");
+          expect(stripVTControlCharacters(textOf(input))).toContain("Enter Refine");
+          expect(stripVTControlCharacters(textOf(context))).toContain("Enter Save");
+          if (width >= 80) expect(textOf(context)).toContain("discard");
         }
       }
     }
@@ -166,7 +252,8 @@ describe("shared refine workspace", () => {
         const lines = workspace.render(width);
         const layout = panelLayout(width, rows);
         expect(lines).toHaveLength(layout.height);
-        const body = lines.slice(layout.headerHeight, layout.headerHeight + layout.bodyHeight);
+        const bodyStart = layout.topSeparatorHeight + layout.headerHeight;
+        const body = lines.slice(bodyStart, bodyStart + layout.bodyHeight);
         expect(body.filter((line) => line.trim())).toHaveLength(layout.bodyHeight);
         expect(textOf(body)).toContain(CURSOR_MARKER);
         for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
@@ -207,20 +294,20 @@ describe("shared refine workspace", () => {
     expect(textOf(workspace.render(80))).toContain("No model configured");
     workspace.handleInput("\r");
     expect(actions.submit).toHaveBeenLastCalledWith(draft);
-    expect(textOf(workspace.render(80))).toContain("[Prompt refine]");
+    expect(textOf(workspace.render(80))).toContain("› Prompt refine");
   });
 
   it("keeps selected settings visible in a tiny viewport and retains their cursor", () => {
     const { workspace } = create(8);
     workspace.handleInput("\x1b[C");
     for (const label of ["AGENTS.md", "tree", "skills"]) {
-      expect(textOf(workspace.render(40))).toContain(`› [${label === "skills" ? " " : "x"}] ${label}`);
+      expect(stripVTControlCharacters(textOf(workspace.render(40)))).toContain(`› [${label === "skills" ? " " : "x"}] ${label}`);
       workspace.handleInput("\x1b[B");
     }
     workspace.handleInput("\x1b[B");
     workspace.handleInput("q");
     workspace.handleInput("\x1b[C");
-    expect(textOf(workspace.render(40))).toContain("› [x] tree");
+    expect(stripVTControlCharacters(textOf(workspace.render(40)))).toContain("› [x] tree");
   });
 
   it("does not steal input focus when background results arrive", () => {
@@ -247,7 +334,7 @@ describe("shared refine workspace", () => {
     workspace.dispose();
     resolve("saved");
     await Promise.resolve();
-    expect(textOf(workspace.render(80))).toContain("[Settings]");
+    expect(textOf(workspace.render(80))).toContain("› Settings");
     workspace.handleInput("i");
     workspace.handleInput("\r");
     expect(actions.submit).not.toHaveBeenCalled();

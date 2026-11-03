@@ -13,6 +13,7 @@ import {
 import { buildRefineInput, buildRefineSystemPrompt, parseRefineOutput, selectHistory, REFINE_SYSTEM_PROMPT, type HistorySnapshot } from "./context.js";
 import { renderSummary } from "./presentation.js";
 import { renderModelChoices } from "./model-picker.js";
+import { formatKeyHint, type KeyHint } from "./key-hints.js";
 import { RefineWorkspace } from "./workspace.js";
 import { PreviewPanel, type PreviewOptions } from "./preview.js";
 import { RefineController, type Candidate, type CandidateToken, type ControllerState, type RefineRequest } from "./controller.js";
@@ -314,10 +315,10 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       const selectedDetails = (model: Model<Api> | undefined): string => {
         if (!model) return theme.fg("muted", statusFor(model));
         return [
-          theme.fg("accent", theme.bold("Selected model")),
+          theme.fg("muted", "Selected model"),
           theme.fg("text", model.name),
           theme.fg("muted", displayModel(modelRef(model))),
-          theme.fg("accent", statusFor(model)),
+          theme.fg("text", statusFor(model)),
         ].join("\n");
       };
       const updateThinkingStatus = (model?: Model<Api>) => {
@@ -327,8 +328,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         container.clear();
         container.addChild(new DynamicBorder((text) => theme.fg("borderMuted", text)));
         container.addChild(new Text(theme.fg("accent", theme.bold("Choose optimizer model")), 1, 0));
-        container.addChild(new Text(theme.fg("muted", "Only used by Prompt Refine; does not change the main session model or its thinking settings"), 1, 0));
-        container.addChild(new Text(`Search: ${query || theme.fg("muted", "provider/model, name, or thinking")}`, 1, 1));
+        container.addChild(new Text(theme.fg("muted", "Optimizer only · Main session unchanged"), 1, 0));
+        container.addChild(new Text(`${theme.fg("muted", "Search:")} ${query ? theme.fg("text", query) : theme.fg("muted", "provider/model, name, or thinking")}`, 1, 1));
         const items = modelPickerItems(available, query, controller.getModel());
         list = new SelectList(items, Math.min(10, Math.max(1, items.length)), {
           selectedPrefix: (text) => theme.fg("accent", text),
@@ -353,7 +354,10 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         container.addChild(new DynamicBorder((text) => theme.fg("borderMuted", text)));
         thinkingStatus = new Text(selectedDetails(highlightedModel()), 1, 0);
         container.addChild(thinkingStatus);
-        container.addChild(new Text(theme.fg("muted", `Type to search · ↑↓ Select · ${cycleThinkingKeys || "thinking-cycle shortcut disabled"} to adjust thinking · Enter Confirm · Esc Cancel`), 1, 0));
+        const hints: KeyHint[] = [["↑↓", "Select"],
+          ...(cycleThinkingKeys ? [[cycleThinkingKeys, "Thinking"] as KeyHint] : []),
+          ["Enter", "Confirm"], ["Esc", "Cancel"]];
+        container.addChild(new Text(hints.map((hint) => formatKeyHint(hint, theme)).join(" · "), 1, 0));
         container.addChild(new DynamicBorder((text) => theme.fg("borderMuted", text)));
       };
       rebuild();

@@ -10,8 +10,10 @@ export function panelLayout(width: number, rows: number) {
   const headerHeight = height >= 12 ? 2 : height >= 3 ? 1 : 0;
   const footerHeight = height >= 6 ? 2 : height >= 2 ? 1 : 0;
   const separatorHeight = height >= 12 ? 1 : 0;
-  return { height, inset, innerWidth, headerHeight, footerHeight, separatorHeight,
-    bodyHeight: height - headerHeight - footerHeight - separatorHeight };
+  // Separate the workspace from the transcript, but preserve content in tiny terminals.
+  const topSeparatorHeight = height >= 4 ? 1 : 0;
+  return { height, inset, innerWidth, headerHeight, footerHeight, separatorHeight, topSeparatorHeight,
+    bodyHeight: height - topSeparatorHeight - headerHeight - footerHeight - separatorHeight };
 }
 
 export type PanelLayout = ReturnType<typeof panelLayout>;
@@ -19,6 +21,7 @@ export type PanelLayout = ReturnType<typeof panelLayout>;
 export function panelFrame(layout: PanelLayout, header: string[], body: string[], footer: string[], border: (text: string) => string): string[] {
   const reserve = (lines: string[], count: number) => Array.from({ length: count }, (_, i) => lines[i] ?? "");
   return [
+    ...(layout.topSeparatorHeight ? [border("─".repeat(layout.innerWidth))] : []),
     ...reserve(header, layout.headerHeight),
     ...reserve(body, layout.bodyHeight),
     ...(layout.separatorHeight ? [border("─".repeat(layout.innerWidth))] : []),

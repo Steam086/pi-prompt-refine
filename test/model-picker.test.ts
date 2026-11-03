@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { renderModelChoices } from "../src/model-picker.js";
@@ -24,6 +24,18 @@ describe("model picker layout", () => {
       expect(lines.some((line) => line.startsWith(theme.bg("selectedBg", "X").split("X")[0]!))).toBe(true);
     }
   });
+  it.each(["dark", "light"])("uses normal model text and an accent selection marker in %s", (name) => {
+    const theme = getThemeByName(name)!;
+    const bold = vi.spyOn(theme, "bold");
+    const output = renderModelChoices(items, items[12]!.value, 100, 40, theme).join("\n");
+    const calls = [...bold.mock.calls];
+    bold.mockRestore();
+    expect(calls).toEqual([]);
+    expect(output).toContain(theme.fg("accent", "› "));
+    expect(output).toContain(theme.fg("text", "模型 Model 12"));
+    expect(output).toContain(theme.fg("muted", `  ${items[12]!.value}`));
+  });
+
   it("uses wide terminals for full identities without a fixed label column", () => {
     const output = renderModelChoices(items, items[12]!.value, 160, 40, getThemeByName("dark")!).join("\n");
     expect(output).toContain(items[12]!.value);

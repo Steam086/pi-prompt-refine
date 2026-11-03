@@ -44,7 +44,8 @@ describe("result reading panel", () => {
     panel.toggleHelp();
     const text = panel.render(100).join("\n");
     expect(text).toContain(theme.bold("Help · Keyboard reference"));
-    expect(text).toContain(theme.bold("Refine & navigate"));
+    expect(text).toContain(theme.fg("muted", "Refine & navigate"));
+    expect(bold.mock.calls.map(([value]) => value)).not.toContain("Refine & navigate");
     expect(text).toContain(theme.bold("a"));
     expect(text).not.toContain(theme.bold("Accept into editor (no send)"));
   });
@@ -91,18 +92,68 @@ describe("result reading panel", () => {
     expect(panel.render(100).join("\n")).toContain("a/e/s disabled");
   });
 
-  it("reserves only two action rows and highlights the current page", () => {
-    const panel = create({ candidateText: undefined, state: { ...options.state, phase: "idle" } });
-    const lines = panel.render(100);
-    expect(lines[0]).toContain("Main");
-    const footer = lines.slice(lines.findIndex((line) => line.includes("──")) + 1);
-    expect(footer).toEqual([
-      "  r Refine · m Model · x Cancel · Enter won't send",
-      "  q Back   · ? Help  · i Input  · → Settings",
+  it("separates the workspace and keeps idle chrome free of duplicate or unavailable actions", () => {
+    const panel = create({ candidateText: undefined, state: { ...options.state, phase: "idle" }, contextLabel: "Context: not captured" });
+    const lines = panel.render(100, "› Prompt refine     Settings");
+    expect(lines[0]).toBe("  " + "─".repeat(96));
+    expect(lines[1]).toBe("  › Prompt refine     Settings");
+    expect(lines[2]?.trim()).toBe("");
+    const layout = panelLayout(100, 40);
+    const emptyRow = layout.topSeparatorHeight + layout.headerHeight + Math.floor((layout.bodyHeight - 2) / 2);
+    expect(lines[emptyRow]?.trim()).toBe("No result yet.");
+    expect(lines[emptyRow + 1]?.trim()).toBe("openai-codex/example-model");
+    expect(lines[emptyRow]).toBe(" ".repeat(layout.inset + Math.floor((layout.innerWidth - "No result yet.".length) / 2)) + "No result yet.");
+    expect(lines.slice(-2)).toEqual([
+      "  r Refine · m Model",
+      "  q Back   · ? Help  · i Input · → Settings",
     ]);
+    const text = lines.join("\n");
+    expect(text.match(/r Refine/g)).toHaveLength(1);
+    for (const redundant of ["Refine · Prompt Refine", "Context: not captured", "x Cancel", "Enter won't send"]) {
+      expect(text).not.toContain(redundant);
+    }
     const theme = getThemeByName("dark")!;
     const styled = new PreviewPanel(options, theme, () => 40, vi.fn()).render(100);
-    expect(styled[0]).toContain(theme.bold("Main"));
+    expect(styled[0]).toContain(theme.fg("borderMuted", "─".repeat(96)));
+    expect(styled[1]).toContain(theme.bold("Prompt Refine"));
+  });
+
+  it.each(["generating", "error", "ready"] as const)("keeps useful %s status without repeating the brand", (phase) => {
+    const panel = create({ state: { ...options.state, phase }, candidateText: phase === "ready" ? options.candidateText : undefined });
+    const lines = panel.render(100, "› Prompt refine     Settings");
+    const text = lines.join("\n");
+    expect(text.match(/Prompt refine/gi)).toHaveLength(1);
+    expect(lines[2]).toContain(phase === "generating" ? "Refining" : phase === "error" ? "Failed" : "Done");
+    if (phase === "generating") expect(text).toContain("x Break");
+    if (phase === "error") expect(text.match(/r Retry/g)).toHaveLength(1);
+    if (phase === "ready") expect(text).toContain("Enter won't send");
+    else expect(text).not.toContain("Enter won't send");
+  });
+
+  it.each(["dark", "light"])("keeps empty-state styling and resize bounded in %s", (name) => {
+    const theme = getThemeByName(name)!;
+    let rows = 40;
+    const panel = new PreviewPanel({ ...options, state: { ...options.state, phase: "idle" }, candidateText: undefined }, theme, () => rows, vi.fn());
+    for (rows of [5, 8, 16, 40]) {
+      for (const width of [1, 12, 20, 40, 100]) {
+        const lines = panel.render(width);
+        expect(lines).toHaveLength(panelLayout(width, rows).height);
+        for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      }
+    }
+    const lines = panel.render(100);
+    expect(lines.join("\n")).toContain(theme.fg("text", "No result yet."));
+    expect(lines.join("\n")).toContain(theme.fg("muted", "openai-codex/example-model"));
+    panel.setNotice("Context saved");
+    expect(panel.render(100)[2]).toContain("Context saved");
+    panel.toggleHelp();
+    expect(panel.render(100)[3]).toContain("Help");
+  });
+
+  it("keeps model guidance in the empty block when no model is selected", () => {
+    const panel = create({ state: { phase: "idle", requestId: 1, pendingSend: false }, candidateText: undefined });
+    expect(panel.render(100).join("\n")).toContain("No model selected");
+    expect(panel.render(100).slice(-2).join("\n")).toContain("m Model");
   });
 
   it("offers a literal view without modifying the candidate", () => {
@@ -225,16 +276,17 @@ describe("result reading panel", () => {
       panel.render(40);
       panel.scrollBy(10000);
       const lines = panel.render(40, "Prompt refine");
-      expect(lines.slice(0, panelLayout(40, rows).headerHeight).join("\n")).toContain("Send pending");
+      const layout = panelLayout(40, rows);
+      expect(lines.slice(layout.topSeparatorHeight, layout.topSeparatorHeight + layout.headerHeight).join("\n")).toContain("Send pending");
     }
   });
 
   it("retains model identity while scrolling and prioritizes notices", () => {
     const panel = create({ candidateText: "Result\n".repeat(100) });
-    expect(panel.render(100)[1]).toContain("openai-codex/example-model");
+    expect(panel.render(100)[2]).toContain("openai-codex/example-model");
     panel.setNotice("Context saved");
     panel.scrollBy(10);
-    expect(panel.render(40)[1]).toMatch(/Context saved.*↑↓/);
+    expect(panel.render(40)[2]).toMatch(/Context saved.*↑↓/);
   });
 
   it.each([40, 80, 100])("uses English chrome with elapsed time and no ellipses at %i columns", (width) => {
