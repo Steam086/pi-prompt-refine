@@ -2,7 +2,7 @@
 
 ## 当前结构
 
-基于 `src/preview.ts`、`src/workspace.ts`、`src/panel-layout.ts` 的代码与渲染测试：当前 UI 是限宽单栏工作区，共用固定高度的头部、正文视口和操作区。Preview 在生成中阅读提交原文，完成后阅读候选结果；History / Usage 只读回看候选与请求，Settings 管理上下文和优化器，Input 编辑新的优化请求。四个顶层页面统一用左右方向键循环切换，输入子页保留光标键语义。完成态的原稿、帮助和源码按需展开；状态区与编辑器中的实际草稿不是同一份内容。
+基于 `src/preview.ts`、`src/workspace.ts`、`src/panel-layout.ts` 的代码与渲染测试：当前 UI 是限宽单栏工作区，共用固定高度的头部、正文视口和操作区。Preview 在生成中阅读提交原文，完成后阅读候选结果；History / Usage 只读回看候选与请求，Settings 管理上下文和优化器，Input 编辑新的优化请求。四个顶层页面统一用左右方向键循环切换，Settings 内先切相邻分组，到外侧边界再切页；输入子页保留光标键语义。完成态的原稿、帮助和源码按需展开；状态区与编辑器中的实际草稿不是同一份内容。
 
 ## 参考原则与取舍
 
@@ -16,7 +16,7 @@
 - 滚动位置属于辅助信息。滚动时保留模型元数据；通知优先于滚动计数显示。
 - 保持主题兼容和终端列宽约束，不引入固定 RGB 或字号。
 
-不采用参考项目的双栏、圆角外框、项目身份色、近全屏尺寸及会话导航语义。保留本项目的阅读宽度、固定视口、保存时机、模型调用及发送逻辑；顶层左右键按 Preview → History → Usage → Settings 循环切换，History / Usage 详情页也适用；不再使用 h/u 切页。Settings 内 Tab 切组，默认 Shift+Tab 保留 thinking 操作；Esc / q / Ctrl+\ 返回。跨顶层页面保留未保存 Context，不自动保存；在 Settings 取消或关闭工作区时丢弃。
+不采用参考项目的双栏、圆角外框、项目身份色、近全屏尺寸及会话导航语义。保留本项目的阅读宽度、固定视口、保存时机、模型调用及发送逻辑；顶层左右键按 Preview → History → Usage → Settings 循环切换，History / Usage 详情页也适用；不再使用 h/u 切页。Settings 内左右键先切相邻分组，到外侧边界再切页，Tab 仍循环切组；默认 Shift+Tab 保留 thinking 操作；Esc / q / Ctrl+\ 返回。跨顶层页面保留未保存 Context，不自动保存；在 Settings 取消或关闭工作区时丢弃。
 
 ## 快捷键与设置文字层级
 
@@ -24,7 +24,7 @@
 - 完成态底栏仅突出 `a Accept`、`e Edit`、`f Revise`，导航行保留 `q Back`、`? Help`。正文用弱化说明区分接受到编辑器与 `s` 直接发送；`Enter won't send`、原稿查看、新输入、取消/丢弃等完整说明移入 Help，按键功能不变。生成中突出 `x Stop`，已接受快照不显示候选操作，发送待确认时不显示接受、编辑、修订或再次发送提示。主页面两行独立适配列宽，避免主操作的长标签挤掉返回和帮助；仅一行底栏时先保留返回、帮助，再按空间补充当前主操作。
 - 主页面、Settings、Input、Help 和模型选择器共用按键样式：按键为 `text` + 粗体，说明为常规 `muted`。快捷键按终端可见列（包括 ANSI、中文和宽字符）测量；需要时按列对齐，空间不足时省略完整提示，紧凑提示与单行回退保持相同样式。Settings 优先保留固定保存键和明确的取消范围。
 - Settings 的 Enter / Space 只操作当前项；Context 的项目规则支持 `First request only` / `Always` / `Off` 三态，目录树与技能仍为复选项；修改暂存，固定 `Ctrl+S` 在任意行保存 Context 并返回。底栏明确显示 `Save context`；有暂存修改时显示 `Discard context changes`，不会暗示撤销已生效的 Optimizer 设置。保存异常保留选择以便重试；配置写入失败但已在进程内生效时仍明确提示未持久化。
-- 设置页参考 Codex CLI：标题、保存状态、横向分组标签、名称 / 当前值 / 说明三列，以及底部按键提示。`Tab` 切换分组并保留各组焦点；`←` / `→` 与其他页面一样切换顶层页面，↑↓只在当前组内循环。Context 状态行显示 `Ctrl+S to save · Applies to future requests`，Optimizer 显示 `Changes save on confirmation · Applies to future requests`；未保存提示和保存错误优先。模型选择和提示词编辑在确认后保存，thinking 切换立即保存。
+- 设置页参考 Codex CLI：标题、保存状态、横向分组标签、名称 / 当前值 / 说明三列，以及底部按键提示。`Tab` 循环切换分组并保留各组焦点；Context 按 `→` 到 Optimizer，Optimizer 按 `←` 返回 Context，复用相同的焦点与滚动处理。Context 按 `←` 到 Usage，Optimizer 按 `→` 到 Preview；没有 Optimizer 分组时左右键仍直接切页。底栏提示左右键的实际目标，↑↓只在当前组内循环。两个分组的默认状态行统一为 `Applies to future requests`，不随分组切换；Context 的保存入口仍由底栏 `Ctrl+S Save context` 说明，未保存、保存中及保存结果提示优先。模型选择和提示词编辑在确认后保存，thinking 切换立即保存。
 - 目录树和技能的值使用 `[x] On` / `[ ] Off`；模型、项目规则和编辑入口带有尾部箭头。thinking 不可用时弱化显示，Enter / Space 与 thinking 快捷键均不能更改。
 - 设置列表根据正文宽度适配：76 列起显示三列，56–75 列显示名称和值，更窄时使用紧凑行。每行高度固定，长值截为单行并显示 `…`，底部详情区正常为两行，短窗口缩为一行，极低窗口优先保留当前项。设置页与其他页面总高度一致。
 - 标签使用 `text`，值与说明使用 `muted`；选中行的标签加粗，值和说明使用 `text`，整行使用 `selectedBg` 背景及前导箭头。活动组使用 `toolPendingBg` 中性背景。沿用主题颜色，兼容明暗主题；文字先截断再着色，避免 ANSI 重置切断高亮背景。

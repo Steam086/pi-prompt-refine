@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { matchesKey, parseKey, visibleWidth } from "@earendil-works/pi-tui";
 import { renderSummary, sanitizeTerminalText, type SummaryOptions } from "../src/presentation.js";
+import { panelLayout } from "../src/panel-layout.js";
 
 const options: SummaryOptions = {
   state: { phase: "ready", requestId: 1, pendingSend: false, model: { provider: "fake", id: "chat" } },
@@ -51,19 +52,47 @@ describe("passive result summary", () => {
       fg: (color, text) => { colors.push(color); return text; },
       bold: (text) => text,
     });
-    expect(lines[0]).toBe("─".repeat(80));
+    expect(lines[0]).toBe("  " + "─".repeat(76));
     expect(lines.at(-1)).toBe(lines[0]);
-    expect(lines[1]).toContain("[Prompt refine]");
+    expect(lines[1]).toContain("Prompt refine");
+    expect(lines[1]).not.toContain("[Prompt refine]");
     expect(colors).toContain("borderMuted");
   });
 
   it("aligns the background card with the workspace and keeps the shortcut concise", () => {
     const lines = renderSummary({ ...options, state: { ...options.state, phase: "generating" } }, 80);
-    expect(lines[1]).toBe("  [Prompt refine] · ◌ Refining · 12s");
+    expect(lines[1]).toBe("  Prompt refine · ◌ Refining · 12s");
     expect(lines[2]).toBe("  2 msgs · 100 char · assistant");
     expect(lines).toContain("  Working in background. Keep editing.");
     expect(lines.at(-2)).toBe("  ctrl+\\ View");
     expect(lines.join("\n")).not.toMatch(/│|\/ actions/);
+  });
+
+  it.each([1, 10, 12, 15, 16, 20, 40, 80, 100, 200])("matches workspace insets and content width at %i columns", (width) => {
+    const layout = panelLayout(width, 24);
+    const lines = renderSummary({ ...options, candidateText: "x".repeat(300) }, width);
+    const prefix = " ".repeat(layout.inset);
+    expect(lines[0]).toBe(prefix + "─".repeat(layout.innerWidth));
+    expect(lines.at(-1)).toBe(lines[0]);
+    expect(lines[4]).toBe(prefix + "x".repeat(layout.innerWidth));
+    for (const line of lines) {
+      expect(line.startsWith(prefix)).toBe(true);
+      expect(visibleWidth(line)).toBeLessThanOrEqual(layout.inset + layout.innerWidth);
+    }
+  });
+
+  it.each([
+    ["generating", "accent"], ["ready", "success"], ["error", "warning"],
+  ] as const)("uses neutral title and shortcut styling while retaining %s status color", (phase, statusColor) => {
+    const styles: [string, string][] = [];
+    renderSummary({ ...options, state: { ...options.state, phase } }, 80, {
+      fg: (color, text) => { styles.push([color, text]); return text; },
+      bold: (text) => `<bold>${text}</bold>`,
+    });
+    expect(styles).toContainEqual(["text", "<bold>Prompt refine</bold>"]);
+    expect(styles).toContainEqual(["text", "<bold>ctrl+\\</bold>"]);
+    expect(styles).toContainEqual(["muted", "View"]);
+    expect(styles).toContainEqual([statusColor, expect.stringMatching(/^<bold>.* · 12s<\/bold>$/)]);
   });
 
   it("normalizes display-only CRLF and tabs without permitting cursor controls", () => {

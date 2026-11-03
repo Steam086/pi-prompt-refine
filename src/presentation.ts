@@ -38,9 +38,9 @@ export function resultHeading(options: SummaryOptions, theme: PresentationTheme,
 export function renderSummary(options: SummaryOptions, width: number, theme: PresentationTheme = plainTheme): string[] {
   if (width < 1 || options.state.phase === "idle") return [];
   const available = Math.min(width, READING_WIDTH);
-  const inset = available >= 12 ? 2 : 0;
-  const contentWidth = Math.max(1, available - inset);
-  const lines = [`${theme.fg("accent", theme.bold("[Prompt refine]"))} · ${resultHeading(options, theme, false)}`];
+  const inset = available >= 16 ? 2 : 0;
+  const contentWidth = Math.max(1, available - inset * 2);
+  const lines = [`${theme.fg("text", theme.bold("Prompt refine"))} · ${resultHeading(options, theme, false)}`];
   lines.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(options.contextLabel), contentWidth, "")));
   lines.push("");
   if (options.state.phase === "ready" && options.candidateText) {
@@ -60,11 +60,9 @@ export function renderSummary(options: SummaryOptions, width: number, theme: Pre
   }
   lines.push("");
   const hint = options.state.pendingSend ? "View · draft kept" : "View";
-  lines.push(`${theme.fg("accent", theme.bold(sanitizeTerminalText(options.openHint)))} ${theme.fg("muted", hint)}`);
-  const separator = theme.fg("borderMuted", "─".repeat(available));
-  const content = lines.map((line) => {
-    const prefix = " ".repeat(inset);
-    return prefix + truncateToWidth(line, contentWidth, "");
-  });
+  lines.push(`${theme.fg("text", theme.bold(sanitizeTerminalText(options.openHint)))} ${theme.fg("muted", hint)}`);
+  const prefix = " ".repeat(inset);
+  const separator = prefix + theme.fg("borderMuted", "─".repeat(contentWidth));
+  const content = lines.map((line) => prefix + truncateToWidth(line, contentWidth, ""));
   return [separator, ...content, separator];
 }

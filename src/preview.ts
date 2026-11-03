@@ -193,6 +193,7 @@ export class PreviewPanel implements Component {
       helpLine(["o", "Original"], ["v", "Formatted/source"]);
       helpLine(["↑↓", "Scroll"], ["PgUp/PgDn", "Page"]);
       helpLine(["i", "Input"], ["Tab", "Settings group (Context / Optimizer)"]);
+      helpLine(["←/→", "In Settings: adjacent group, then page at group boundary"]);
       helpLine(["q", "Back"], ["?", "Hide help"]);
       paragraph("Enter won't send", "muted");
       if (!options.canRestore) paragraph("Nothing to restore.", "muted");
