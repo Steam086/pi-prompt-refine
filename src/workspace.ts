@@ -162,6 +162,15 @@ export class RefineWorkspace implements Component, Focusable {
     this.refreshSettings();
   }
 
+  private switchSettingsGroup(): void {
+    if (!this.settingsOptimizer) return;
+    const group = this.cursor < 3 ? 0 : 1;
+    this.groupCursors[group] = this.cursor;
+    this.cursor = this.groupCursors[1 - group]!;
+    this.settingsScrollTop = 0;
+    this.tui.requestRender();
+  }
+
   private cycleThinking(): void {
     if (!this.actions.cycleThinking || !this.settingsOptimizer?.thinkingEnabled) return;
     this.saving = true;
@@ -194,10 +203,14 @@ export class RefineWorkspace implements Component, Focusable {
       }
       return true;
     }
-    // Input/Revise owns cursor keys. All four top-level pages share these arrows.
+    // Input/Revise owns cursor keys. Settings visits its adjacent group before
+    // leaving the page; arrows at the outer group boundaries still change pages.
     if (this.saving) return true;
     if (key === "left" || key === "right") {
-      this.navigatePage(key === "left" ? -1 : 1);
+      if (this.mode === "context" && this.settingsOptimizer &&
+        (key === "right" ? this.cursor < 3 : this.cursor >= 3)) {
+        this.switchSettingsGroup();
+      } else this.navigatePage(key === "left" ? -1 : 1);
       return true;
     }
     if (this.mode === "history" || this.mode === "usage") {
@@ -210,13 +223,7 @@ export class RefineWorkspace implements Component, Focusable {
         this.settingsInitialized = false;
         this.switchMode("main");
       } else if (key === "tab") {
-        if (this.actions.optimizer) {
-          const group = this.cursor < 3 ? 0 : 1;
-          this.groupCursors[group] = this.cursor;
-          this.cursor = this.groupCursors[1 - group]!;
-          this.settingsScrollTop = 0;
-          this.tui.requestRender();
-        }
+        this.switchSettingsGroup();
       } else if (key === "ctrl+s") {
         this.saving = true;
         this.tui.requestRender();
@@ -318,8 +325,7 @@ export class RefineWorkspace implements Component, Focusable {
       const notice = [this.saving ? "Saving..." : this.settingsNotice, dirty ? "Unsaved context changes" : ""].filter(Boolean).join(" · ");
       const optimizer = this.settingsOptimizer;
       const group = this.cursor < 3 ? "Context" : "Optimizer";
-      const status = theme.fg(dirty ? "warning" : "muted", sanitizeTerminalText(notice || (group === "Context"
-        ? "Ctrl+S to save · Applies to future requests" : "Changes save on confirmation · Applies to future requests")));
+      const status = theme.fg(dirty ? "warning" : "muted", sanitizeTerminalText(notice || "Applies to future requests"));
       header = [layout.headerHeight === 1 && notice ? status : theme.fg("text", theme.bold("Settings")), status];
       const navigation = workspaceTabs(layout, "Settings", theme);
       const contentHeight = bodyHeight - navigation.length;
@@ -401,7 +407,8 @@ export class RefineWorkspace implements Component, Focusable {
         fittingKeyHints(innerWidth < 30
           ? [["^S", "Context"], ["↵", action]]
           : [["Ctrl+S", "Save context"], ["Enter", action], ...(this.cursor < 3 ? [["Space", action] as const] : [])], innerWidth, theme),
-        fittingKeyHints([["Esc", dirty ? (innerWidth >= 30 ? "Discard context changes" : "Discard context") : "Back"], ...(optimizer ? [["Tab", "Group"] as const] : []), ["←/→", "Page"], ["↑↓", "Select"]], innerWidth, theme),
+        fittingKeyHints([["Esc", dirty ? (innerWidth >= 30 ? "Discard context changes" : "Discard context") : "Back"], ...(optimizer ? [["Tab", "Group"] as const] : []),
+          ["←", optimizer && this.cursor >= 3 ? "Context" : "Usage"], ["→", optimizer && this.cursor < 3 ? "Optimizer" : "Preview"], ["↑↓", "Select"]], innerWidth, theme),
       ];
       if (layout.footerHeight === 1) footer = [fittingKeyHints([["^S", "Context"], ["Esc", dirty ? "Discard context" : "Back"], ["↵", action]], innerWidth, theme)];
     }

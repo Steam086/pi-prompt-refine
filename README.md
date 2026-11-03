@@ -90,7 +90,7 @@ pi --extension git:github.com/Steam086/pi-prompt-refine
 - `c`：循环本任务用过的模型、可用收藏和当前模型。
 - `[` / `]`：浏览当前模型的不同候选；修订和手工编辑也保留旧版本。
 - `o`：查看原稿。`a` 接受的是眼前选中的候选。
-- `←` / `→`：循环切换 Preview / History / Usage / Settings；History / Usage 为只读，也可用 `/refine history`、`/refine usage`。Settings 内按 Tab 切换 Context / Optimizer。
+- `←` / `→`：循环切换 Preview / History / Usage / Settings；History / Usage 为只读，也可用 `/refine history`、`/refine usage`。Settings 内 `→` 从 Context 切到 Optimizer，`←` 返回 Context；分组外侧边界继续切换顶层页面，Tab 仍循环切组。
 
 生成或等待发送确认时暂停模型/候选切换；生成中按 `x` 停止后可以继续比较。记录仅保留在内存中，最多 100 条，reload / 退出后清除；暂不提供双栏或差异视图。
 
