@@ -69,10 +69,12 @@ describe("request source and shortcut routing", () => {
   it.each(["failure", "timeout"])("retains the source after %s but clears it on invalidation", async (outcome) => {
     const pending = deferred<RefineCompletion>();
     const { controller, scheduler } = setup(() => pending.promise);
-    controller.trigger(input("A"));
+    controller.trigger(input("A", { thinkingLevel: "high" }));
+    expect(controller.getState()).toMatchObject({ phase: "generating", thinkingLevel: "high" });
     if (outcome === "timeout") scheduler.advance(100);
     else pending.reject(new Error("offline"));
     await flushPromises();
+    expect(controller.getState()).toMatchObject({ phase: "error", thinkingLevel: "high" });
     expect(controller.getRequestSource()).toEqual({ draft: "A" });
     expect(controller.shouldOpenPanel("A")).toBe(true);
     expect(controller.shouldOpenPanel("B")).toBe(false);

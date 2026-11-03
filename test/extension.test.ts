@@ -1862,6 +1862,45 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.complete).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { reasoning: true, thinkingLevel: "high" as const, expected: "high" },
+    { reasoning: true, expected: "medium" },
+    { reasoning: false, thinkingLevel: "high" as const, expected: "off" },
+    { reasoning: true, thinkingLevel: "high" as const, config: { thinkingLevel: "low" as const }, expected: "low" },
+  ])("shows effective idle thinking below the title: $expected", async (options) => {
+    const harness = await makeHarness(options);
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    const lines = harness.panelLines();
+    expect(lines[2]?.trim()).toBe(`fake-provider/fake-chat · ${options.expected}`);
+    expect(lines.join("\n").match(/fake-provider\/fake-chat/g)).toHaveLength(1);
+    expect(lines.join("\n")).toContain("No result yet.");
+    expect(harness.complete).not.toHaveBeenCalled();
+    harness.panelInput("q");
+    await view;
+  });
+
+  it.each(["ready", "accepted", "generating", "error"])("keeps %s header thinking tied to the request, not later session settings", async (phase) => {
+    const harness = await makeHarness({ reasoning: true, thinkingLevel: "high" });
+    if (phase === "generating") harness.complete.mockImplementation(() => new Promise(() => {}));
+    if (phase === "error") harness.complete.mockRejectedValue(new Error("Provider failed"));
+    await trigger(harness);
+    if (phase === "accepted") {
+      harness.setCustomAction("a");
+      await harness.command("view", harness.context);
+    }
+    harness.context.thinkingLevel = "low";
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    const lines = harness.panelLines();
+    expect(lines[2]).toContain("fake-provider/fake-chat · high");
+    expect(lines[2]).not.toContain("low");
+    if (phase === "accepted") expect(lines[2]).toContain("Accepted");
+    expect(harness.complete).toHaveBeenCalledOnce();
+    harness.panelInput("q");
+    await view;
+  });
+
   it("inherits the active session thinking level for optimizer requests", async () => {
     const harness = await makeHarness({ reasoning: true, thinkingLevel: "high" });
     await trigger(harness);

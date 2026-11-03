@@ -39,7 +39,7 @@
 
 四个顶层页面共用固定导航栏：`Preview · History · Usage · Settings`。`←` / `→` 按此顺序循环切换（Preview 按 `←` 可直接到 Settings），包括 History / Usage 的详情页；Settings 内先切换相邻分组，到外侧边界才切页（Context 按 `←` 到 Usage，Optimizer 按 `→` 到 Preview）。没有 Optimizer 分组时仍直接切页。不再使用 `h/u` 切页。切页不调用模型、不修改主编辑器或活动候选。Input / Revise 是编辑子页面，左右键仍移动光标。
 
-以下字母键只在 Main 页生效；普通 Enter 不发送候选。完成态底栏集中展示 `a Accept`、`e Edit`、`f Revise`、`s Send`，以及 `i Input`、`m Model`、`g Same input`、`q Back` 和 `? Help`（依状态与宽度精简）；其余按键仍有效，完整说明在 Help 中。Accept 只放入编辑器、Send 才发送的说明移至 Help。顶部页签提示左右切页，候选行只展示候选位置、来源与 thinking，不重复操作提示。生成中突出 `x Stop`；已接受快照不显示候选操作，发送待确认时不再提示接受、编辑、修订或再次发送。
+以下字母键只在 Main 页生效；普通 Enter 不发送候选。完成态底栏集中展示 `a Accept`、`e Edit`、`f Revise`、`s Send`，以及 `i Input`、`m Model`、`g Same input`、`q Back` 和 `? Help`（依状态与宽度精简）；其余按键仍有效，完整说明在 Help 中。Accept 只放入编辑器、Send 才发送的说明移至 Help。顶部页签提示左右切页，候选行只展示候选位置与来源，不重复操作提示。模型与 thinking 统一显示在标题下方：空闲时为下次调用的有效配置，查看候选或已接受快照时为实际生成配置。普通空态正文只保留淡色居中的 `No result yet.`；无模型、当前模型无候选和失败仍有专门提示。生成中突出 `x Stop`；已接受快照不显示候选操作，发送待确认时不再提示接受、编辑、修订或再次发送。
 
 | 按键 | 操作 |
 | --- | --- |
