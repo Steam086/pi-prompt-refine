@@ -108,7 +108,7 @@ describe("shared refine workspace", () => {
     const { workspace } = create(40, "dark", optimizer);
     workspace.openSettings();
     const lines = workspace.render(100).map(stripVTControlCharacters);
-    expect(lines[2]?.trim()).toBe("");
+    expect(lines[2]?.trim()).toBe("Manual save · Next refinement only");
     const content = lines.slice(0, -2).join("\n");
     expect(content).toContain("Context");
     expect(content).toContain("Manual save · Next refinement only");
@@ -136,7 +136,7 @@ describe("shared refine workspace", () => {
     expect(textOf(workspace.render(20))).toContain(formatKeyHint(["↵", "Refine"], theme));
   });
 
-  it.each(["dark", "light"])("keeps section hints attached and spacing stable across all selections in %s", (name) => {
+  it.each(["dark", "light"])("keeps navigation stable and explanations in a fixed area across all selections in %s", (name) => {
     for (const width of [80, 100]) {
       const { workspace, theme } = create(40, name, true);
       workspace.openSettings();
@@ -149,16 +149,12 @@ describe("shared refine workspace", () => {
         expect(current.every((index) => index >= 0)).toBe(true);
         if (anchors) expect(current).toEqual(anchors);
         else anchors = current;
-        for (const [option, description] of [
-          ["Include project instructions", "Use rules supplied by Pi (e.g. AGENTS.md)."],
-          ["[x] Directory tree", "Default tree only; @directory references are separate."],
-          ["Skill metadata", "Include skill descriptions; never run skills."],
-        ]) {
-          expect(lines[position(option!) + 1]).toContain(description);
-          expect(lines[position(option!) + 1]).toMatch(/^ {4}\S/);
+        const descriptions = ["Use rules supplied by Pi (e.g. AGENTS.md).", "Default tree only; @directory references are separate.", "Include skill descriptions; never run skills."];
+        if (cursor < 3) {
+          expect(lines.at(-5)).toContain(descriptions[cursor]);
+          expect(rendered.at(-5)).toContain(theme.fg("muted", descriptions[cursor]!));
         }
         expect(position("Model:")).toBe(position("Optimizer") + 1);
-        expect(rendered[position("Use rules supplied by Pi")]).toContain(theme.fg("muted", "Use rules supplied by Pi (e.g. AGENTS.md)."));
         const gaps = lines.flatMap((line, i) => i >= current[0]! && i < position("Model:") && !line.trim() ? [i] : []);
         expect(gaps).toEqual([position("Optimizer") - 1]);
         expect(rendered).toHaveLength(panelLayout(width, 40).height);
@@ -177,29 +173,55 @@ describe("shared refine workspace", () => {
       const context = lines.findIndex((line) => line.trim() === "Context");
       const warning = lines.findIndex((line) => line.includes("Disabled by projectContext.enabled=false"));
       expect(lines.slice(context, warning + 1).every((line) => line.trim())).toBe(true);
-      expect(lines[warning - 1]).toContain("Include skill descriptions; never run skills.");
+      expect(lines[warning - 1]).toContain("Skill metadata");
       expect(lines.join("\n")).not.toContain("Optimizer");
       workspace.handleInput("\x1b[B");
     }
   });
 
-  it("shows full model details only when the selected navigation row truncates", () => {
+  it("shows the full model value in a fixed detail area without shifting navigation", () => {
     const { workspace } = create(40, "dark", true);
     workspace.openSettings([true, true, false], 3);
-    expect(textOf(workspace.render(100)).match(/Model:/g)).toHaveLength(1);
+    expect(workspace.render(100).at(-5)).toContain("Model: provider/long-model-identifier-with-extra-details");
     expect(textOf(workspace.render(40)).match(/Model:/g)).toHaveLength(2);
+    expect(workspace.render(40).at(-5)).toContain("Model:");
   });
 
   it("keeps long optimizer identifiers on one navigation row", () => {
     const { workspace } = create(40, "dark", true);
     workspace.openSettings([true, true, false], 3);
     const lines = workspace.render(40);
-    const modelRow = lines.findIndex((line) => line.includes("Model:"));
+    const modelRow = lines.findIndex((line, index) => index > 2 && line.includes("Model:"));
     expect(lines[modelRow]).toContain("…");
-    expect(lines[modelRow + 1]).toContain("Model:"); // Full value follows the focused row.
+    expect(lines[modelRow + 1]).toContain("Thinking:");
     expect(stripVTControlCharacters(lines[modelRow]!)).toMatch(/›$/);
     workspace.handleInput("\x1b[B");
     expect(textOf(workspace.render(40))).toContain("Thinking:");
+  });
+
+  it("keeps narrow optimizer rows in place when focus moves across long values", () => {
+    const { workspace } = create(40, "dark", true);
+    workspace.openSettings();
+    let positions: number[] | undefined;
+    for (let cursor = 0; cursor < 6; cursor++) {
+      const lines = workspace.render(40).map(stripVTControlCharacters);
+      const current = ["Model:", "Thinking:", "Optimization prompt:"].map((label) => lines.findIndex((line, index) => index > 2 && line.includes(label)));
+      expect(current.every((index) => index >= 0)).toBe(true);
+      if (positions) expect(current).toEqual(positions);
+      positions = current;
+      workspace.handleInput("\x1b[B");
+    }
+  });
+
+  it("keeps the viewport still when moving up to an already visible setting", () => {
+    const { workspace } = create(24, "dark", true);
+    workspace.openSettings(undefined, 5);
+    const before = workspace.render(40).map(stripVTControlCharacters);
+    workspace.handleInput("\x1b[A");
+    const after = workspace.render(40).map(stripVTControlCharacters);
+    expect(after[3]).toBe(before[3]);
+    expect(after.findIndex((line) => line.includes("Optimization prompt:"))).toBe(before.findIndex((line) => line.includes("Optimization prompt:")));
+    expect(after.join("\n")).toContain("› Thinking:");
   });
 
   it.each([[24, 16], [32, 21], [40, 24], [60, 24]])("budgets %i terminal rows as %i panel rows", (rows, height) => {
