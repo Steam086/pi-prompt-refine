@@ -19,6 +19,16 @@ export function panelLayout(width: number, rows: number) {
 
 export type PanelLayout = ReturnType<typeof panelLayout>;
 
+export const WORKSPACE_PAGES = ["Preview", "History", "Usage", "Settings"] as const;
+export type WorkspacePage = typeof WORKSPACE_PAGES[number];
+
+/** One persistent top-level strip; compact terminals retain the active page and arrows. */
+export function workspaceTabs(layout: PanelLayout, active: WorkspacePage, theme: Pick<Theme, "fg" | "bg" | "bold">): string[] {
+  const arrows = layout.innerWidth >= 8;
+  const tabs = panelTabs({ ...layout, innerWidth: Math.max(1, layout.innerWidth - (arrows ? 4 : 0)) }, [...WORKSPACE_PAGES], WORKSPACE_PAGES.indexOf(active), theme);
+  return tabs.map((line) => line && arrows ? `${theme.fg("muted", "←")} ${line} ${theme.fg("muted", "→")}` : line);
+}
+
 /** Shared group strip: reserve the same rows on reading and settings pages. */
 export function panelTabs(layout: PanelLayout, labels: string[], active: number, theme: Pick<Theme, "fg" | "bg" | "bold">): string[] {
   if (layout.bodyHeight < 4) return [];

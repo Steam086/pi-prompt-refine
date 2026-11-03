@@ -3,6 +3,7 @@ import type { ModelRef } from "./config.js";
 import type { HistorySnapshot, RevisionInput } from "./context.js";
 import type { TokenUsage } from "./usage.js";
 import type { ProjectSnapshot } from "./project-context.js";
+import { RefineHistory, type RefineRecord } from "./history.js";
 
 interface RequestProjectContext { cwd: string; snapshot: ProjectSnapshot }
 
@@ -20,6 +21,8 @@ export interface RefineRequestInput {
   branchLeafId: string | null;
   history: HistorySnapshot;
   systemPrompt: string;
+  /** Final JSON input, frozen after project directory collection. */
+  preparedInput?: string;
   project?: RequestProjectContext;
 }
 
@@ -27,6 +30,7 @@ export interface RefineRequest extends RefineRequestInput {
   requestId: number;
   generation: number;
   modelVersion: number;
+  recordId: number;
 }
 
 export interface RefineCompletion {
@@ -38,6 +42,7 @@ export interface RefineCompletion {
 }
 
 export interface Candidate extends RefineRequestInput {
+  recordId?: number;
   /** Frozen request duration, retained in accepted/restored snapshots. */
   elapsedSeconds?: number;
   usage?: TokenUsage;
@@ -108,7 +113,8 @@ export type TriggerResult =
   | { kind: "empty" }
   | { kind: "too-long" }
   | { kind: "no-model" }
-  | { kind: "stale-source" };
+  | { kind: "stale-source" }
+  | { kind: "busy" };
 
 interface ActiveRequest {
   /** Roll back a failed revision without making the old result actionable in flight. */
@@ -154,6 +160,10 @@ export class RefineController {
   private readonly maxOutputChars: number;
   private readonly onState: RefineControllerOptions["onState"];
   private readonly onAccepted: RefineControllerOptions["onAccepted"];
+  private readonly journal = new RefineHistory();
+  private taskSequence = 0;
+  private task?: { id: number; input: RefineRequestInput; selected: Map<string, number> };
+  private viewedAccepted?: Candidate;
   private currentModel?: ModelRef;
   private sessionId?: string;
   private generation = 0;
@@ -209,6 +219,81 @@ export class RefineController {
     return this.accepted ? cloneCandidate(this.accepted) : undefined;
   }
 
+  getViewedAccepted(): Candidate | undefined {
+    const accepted = this.task ? this.viewedAccepted : this.accepted;
+    return accepted ? cloneCandidate(accepted) : undefined;
+  }
+
+  getTaskInput(): RefineRequestInput | undefined {
+    return this.task ? structuredClone(this.task.input) : undefined;
+  }
+
+  getHistory(): RefineRecord[] {
+    return this.journal.list(this.sessionId ?? "");
+  }
+
+  getTaskModels(): ModelRef[] {
+    const models = new Map<string, ModelRef>();
+    for (const record of this.taskRecords()) models.set(JSON.stringify(record.input.model), record.input.model);
+    return [...models.values()];
+  }
+
+  private taskRecords(): RefineRecord[] {
+    return this.task ? this.journal.list(this.sessionId ?? "", this.task.id) : [];
+  }
+
+  private modelCandidates(): RefineRecord[] {
+    return this.taskRecords().filter((record) => record.candidate && sameModel(record.input.model, this.currentModel));
+  }
+
+  getCandidatePosition(): { index: number; count: number; label: string } | undefined {
+    if (!this.task) return undefined;
+    const records = this.modelCandidates();
+    const id = this.candidate?.recordId ?? this.viewedAccepted?.recordId;
+    const index = records.findIndex((record) => record.id === id);
+    const record = records[index];
+    return { index: index + 1, count: records.length, label: record
+      ? `#${record.id} ${record.kind}${record.parentId ? ` from #${record.parentId}` : ""}${record.acceptedAt !== undefined ? " · accepted" : ""}`
+      : "No candidate for this model · g Same input" };
+  }
+
+  cycleCandidate(direction: number): boolean {
+    if (this.active || this.pendingSend) return false;
+    const records = this.modelCandidates();
+    if (!records.length) return false;
+    const id = this.candidate?.recordId ?? this.viewedAccepted?.recordId;
+    const index = records.findIndex((record) => record.id === id);
+    this.showRecord(records[(index + direction + records.length) % records.length]!);
+    this.emitState();
+    return true;
+  }
+
+  private showRecord(record?: RefineRecord): void {
+    this.generation += 1;
+    if (this.restore) this.restore = { ...this.restore, generation: this.generation };
+    this.candidate = undefined;
+    this.viewedAccepted = undefined;
+    this.requestSource = this.task ? { draft: this.task.input.draft } : undefined;
+    if (record?.candidate) {
+      const candidate = { ...cloneCandidate(record.candidate), version: ++this.candidateSequence, generation: this.generation };
+      if (record.acceptedAt !== undefined || record.sentAt !== undefined) this.viewedAccepted = candidate;
+      else this.candidate = candidate;
+      this.task?.selected.set(JSON.stringify(candidate.model), record.id);
+      this.requestSource = { draft: candidate.draft, ...(candidate.revision ? { revisionInstruction: candidate.revision.instruction } : {}) };
+    }
+    this.state = { phase: this.candidate ? "ready" : "idle", requestId: record?.candidate?.requestId ?? this.requestSequence,
+      model: this.currentModel ? { ...this.currentModel } : undefined, pendingSend: false };
+  }
+
+  /** Called by the adapter once the final, directory-enriched packet is ready. */
+  capturePreparedInput(requestId: number, generation: number, text: string): void {
+    const request = this.active?.request;
+    if (!request || request.requestId !== requestId || request.generation !== generation) return;
+    request.preparedInput = text;
+    this.journal.captureInput(request.recordId, text);
+    if (this.task && !request.revision && this.task.input.preparedInput === undefined) this.task.input.preparedInput = text;
+  }
+
   getRequestSource(): RequestSource | undefined {
     return this.requestSource ? { ...this.requestSource } : undefined;
   }
@@ -217,6 +302,7 @@ export class RefineController {
   shouldOpenPanel(draft: string): boolean {
     // Sending has crossed a delivery boundary; don't replace it while awaiting acknowledgement.
     if (!draft.trim() || this.pendingSend) return true;
+    if (this.task && draft === this.task.input.draft) return true;
     if (this.state.phase !== "idle") return draft === this.requestSource?.draft;
     return !!this.accepted && (draft === this.accepted.text || draft === this.accepted.draft);
   }
@@ -273,16 +359,12 @@ export class RefineController {
   }
 
   setModel(model: ModelRef | undefined): boolean {
-    if (sameModel(this.currentModel, model)) return false;
-    this.invalidateLifecycle();
+    if (sameModel(this.currentModel, model) || this.active || this.pendingSend) return false;
     this.modelVersion += 1;
     this.currentModel = model ? { ...model } : undefined;
-    this.state = {
-      phase: "idle",
-      requestId: this.requestSequence,
-      pendingSend: false,
-      ...(this.currentModel ? { model: { ...this.currentModel } } : {}),
-    };
+    const records = this.modelCandidates();
+    const selected = this.task?.selected.get(JSON.stringify(model));
+    this.showRecord(records.find((record) => record.id === selected) ?? records.at(-1));
     this.emitState();
     return true;
   }
@@ -308,7 +390,7 @@ export class RefineController {
       this.completeSend();
       return;
     }
-    if (this.active || this.candidate || this.accepted || this.restore || this.pendingSend) this.invalidateLifecycle(true);
+    if (this.task || this.active || this.candidate || this.accepted || this.restore || this.pendingSend) this.invalidateLifecycle(true);
   }
 
   invalidateLifecycle(clearRestore = false): void {
@@ -316,6 +398,8 @@ export class RefineController {
     this.cancelActive();
     this.clearPendingSend();
     this.candidate = undefined;
+    this.task = undefined;
+    this.viewedAccepted = undefined;
     this.requestSource = undefined;
     if (clearRestore) {
       this.restore = undefined;
@@ -326,7 +410,9 @@ export class RefineController {
     this.emitState();
   }
 
-  trigger(input: RefineRequestInput, options: { force?: boolean; revisionToken?: CandidateToken } = {}): TriggerResult {
+  trigger(input: RefineRequestInput, options: { force?: boolean; revisionToken?: CandidateToken; sameTask?: boolean } = {}): TriggerResult {
+    if ((!input.revision && this.pendingSend) || (options.sameTask && this.active)) return { kind: "busy" };
+    if (options.sameTask && (!this.task || input.sessionId !== this.sessionId || input.draft !== this.task.input.draft || input.branchLeafId !== this.task.input.branchLeafId)) return { kind: "stale-source" };
     if (input.revision && (!options.revisionToken || !this.isCandidateCurrent(options.revisionToken) || this.pendingSend ||
       input.sessionId !== this.sessionId || input.branchLeafId !== this.candidate!.branchLeafId ||
       input.draft !== this.candidate!.draft || input.revision.previousCandidate !== this.candidate!.text)) return { kind: "stale-source" };
@@ -344,10 +430,16 @@ export class RefineController {
       return { kind: "ready" };
     }
 
-    const previousCandidate = input.revision && this.candidate ? cloneCandidate(this.candidate) : undefined;
+    const parentId = input.revision ? this.candidate?.recordId : undefined;
+    const previousCandidate = (input.revision || options.sameTask) && this.candidate ? cloneCandidate(this.candidate) : undefined;
     this.cancelActive();
     this.clearPendingSend();
+    if (!this.task || (!input.revision && !options.sameTask)) {
+      this.task = { id: ++this.taskSequence, input: structuredClone(input), selected: new Map() };
+    }
+    this.viewedAccepted = undefined;
     this.candidate = undefined;
+    const recordId = this.journal.start(this.task.id, input, parentId);
     const requestId = ++this.requestSequence;
     const request: RefineRequest = {
       ...input,
@@ -356,6 +448,7 @@ export class RefineController {
       ...(input.project ? { project: structuredClone(input.project) } : {}),
       model: { ...input.model },
       requestId,
+      recordId,
       generation: this.generation,
       modelVersion: this.modelVersion,
     };
@@ -373,10 +466,24 @@ export class RefineController {
     this.invalidateLifecycle();
   }
 
+  /** Stop only the in-flight request; keep this task available for comparison/retry. */
+  stopRequest(): void {
+    if (!this.active) return;
+    this.cancelActive();
+    const records = this.modelCandidates();
+    const selected = this.task?.selected.get(JSON.stringify(this.currentModel));
+    this.showRecord(records.find((record) => record.id === selected) ?? records.at(-1));
+    this.emitState();
+  }
+
   updateCandidate(token: CandidateToken, text: string): boolean {
-    if (!this.isCandidateCurrent(token) || !text.trim() || text.length > this.maxDraftChars) return false;
+    if (!this.isCandidateCurrent(token) || !text.trim() || text.length > this.maxOutputChars) return false;
     this.clearPendingSend();
-    this.candidate = { ...this.candidate!, text, version: ++this.candidateSequence };
+    const source = this.candidate!;
+    const recordId = this.journal.start(this.task!.id, source, source.recordId, "edit");
+    this.candidate = { ...source, recordId, text, version: ++this.candidateSequence };
+    this.journal.update(recordId, { status: "generated", candidate: this.candidate });
+    this.task!.selected.set(JSON.stringify(source.model), recordId);
     this.state = { phase: "ready", requestId: this.candidate.requestId, model: { ...this.candidate.model }, pendingSend: false };
     this.emitState();
     return true;
@@ -401,6 +508,8 @@ export class RefineController {
     this.clearPendingSend();
     this.restoreAccepted = this.accepted;
     this.accepted = cloneCandidate(candidate);
+    this.viewedAccepted = cloneCandidate(candidate);
+    if (candidate.recordId) this.journal.update(candidate.recordId, { acceptedAt: Date.now() });
     this.restore = {
       id: ++this.restoreSequence,
       generation: this.generation,
@@ -463,7 +572,11 @@ export class RefineController {
   private async run(active: ActiveRequest): Promise<void> {
     try {
       const result = await this.complete(active.request, active.controller.signal);
-      if (!this.isActiveCurrent(active.request)) return;
+      if (!this.isActiveCurrent(active.request)) {
+        // Accounting may arrive after cancellation; never resurrect a result or UI state.
+        if (result.usage) this.journal.update(active.request.recordId, { usage: result.usage });
+        return;
+      }
       // Retain reported usage even when the completed response is unusable.
       this.state = { ...this.state, usage: result.usage ? { ...result.usage } : undefined };
       if (result.stopReason !== "stop") {
@@ -487,6 +600,8 @@ export class RefineController {
 
       this.clearActive(active);
       const candidate: Candidate = {
+        recordId: active.request.recordId,
+        preparedInput: active.request.preparedInput,
         elapsedSeconds: elapsedSeconds(active),
         ...(result.usage ? { usage: { ...result.usage } } : {}),
         requestId: active.request.requestId,
@@ -506,6 +621,8 @@ export class RefineController {
         ...(active.request.project ? { project: structuredClone(active.request.project) } : {}),
       };
       this.candidate = candidate;
+      this.journal.update(active.request.recordId, { status: "generated", candidate, usage: result.usage, elapsedSeconds: candidate.elapsedSeconds });
+      this.task?.selected.set(JSON.stringify(candidate.model), active.request.recordId);
       this.state = { phase: "ready", requestId: candidate.requestId, model: { ...candidate.model }, pendingSend: false };
       this.emitState();
     } catch {
@@ -531,6 +648,7 @@ export class RefineController {
   private finishWithError(active: ActiveRequest, error: ControllerState["error"]): void {
     if (!this.isActiveCurrent(active.request)) return;
     this.clearActive(active);
+    this.journal.update(active.request.recordId, { status: "error", error, usage: this.state.usage, elapsedSeconds: elapsedSeconds(active) });
     this.generation += 1;
     this.candidate = active.previousCandidate ? { ...cloneCandidate(active.previousCandidate), generation: this.generation } : undefined;
     if (this.restore) this.restore = { ...this.restore, generation: this.generation };
@@ -544,6 +662,7 @@ export class RefineController {
     if (!active || active.request.requestId !== requestId || !this.isActiveCurrent(active.request)) return;
     this.active = undefined;
     this.scheduler.clearTimeout(active.timeout);
+    this.journal.update(active.request.recordId, { status: "error", error: "timeout", elapsedSeconds: elapsedSeconds(active) });
     this.generation += 1;
     this.candidate = active.previousCandidate ? { ...cloneCandidate(active.previousCandidate), generation: this.generation } : undefined;
     if (this.restore) this.restore = { ...this.restore, generation: this.generation };
@@ -555,6 +674,9 @@ export class RefineController {
 
   private completeSend(): void {
     const candidate = this.candidate;
+    if (candidate?.recordId) this.journal.update(candidate.recordId, { sentAt: Date.now() });
+    this.task = undefined;
+    this.viewedAccepted = undefined;
     this.clearPendingSend();
     this.cancelActive();
     this.generation += 1;
@@ -589,6 +711,7 @@ export class RefineController {
     if (!active) return;
     this.active = undefined;
     this.scheduler.clearTimeout(active.timeout);
+    this.journal.update(active.request.recordId, { status: "cancelled", elapsedSeconds: elapsedSeconds(active) });
     active.controller.abort();
   }
 

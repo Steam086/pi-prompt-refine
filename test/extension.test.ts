@@ -393,6 +393,97 @@ describe("first optimizer model setup", () => {
   });
 });
 
+describe("multi-model preview and read-only history", () => {
+  it("switches models without generating, then reuses exact input despite editor/history changes", async () => {
+    const harness = await makeHarness();
+    const registry = harness.context.modelRegistry;
+    const a = registry.getAvailable()[0]!;
+    const b = { ...a, provider: "other-provider", id: "second-model", name: "Second Model" } as Model<Api>;
+    vi.mocked(registry.getAvailable).mockReturnValue([a, b]);
+    vi.mocked(registry.find).mockImplementation((provider, id) => [a, b].find((model) => model.provider === provider && model.id === id));
+    await trigger(harness);
+    const firstInput = (harness.complete.mock.calls[0] as any[])[1];
+    harness.setEditorText("New editor draft — must not leak into g");
+    vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([]);
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("m");
+    await flushPromises();
+    harness.panelInput("\x1b[B");
+    harness.panelInput("\r");
+    // Model settings persistence runs through fs, not just microtasks.
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("No candidate for this model"));
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    harness.complete.mockResolvedValueOnce({ content: [{ type: "text", text: JSON.stringify({ prompt: "B result" }) }], stopReason: "stop" });
+    harness.panelInput("g");
+    await flushPromises();
+    expect(harness.complete).toHaveBeenCalledTimes(2);
+    const call = harness.complete.mock.calls[1] as any[];
+    expect(call[0]).toBe(b);
+    expect(call[1].systemPrompt).toBe(firstInput.systemPrompt);
+    expect(call[1].messages[0].content).toEqual(firstInput.messages[0].content);
+    expect(harness.panelLines().join("\n")).toContain("B result");
+    harness.panelInput("c");
+    expect(harness.panelLines().join("\n")).toContain("Refined prompt");
+    harness.panelInput("c");
+    expect(harness.panelLines().join("\n")).toContain("B result");
+    expect(harness.getEditor()).toBe("New editor draft — must not leak into g");
+    expect(harness.sent).toEqual([]);
+    harness.panelInput("q");
+    await view;
+  });
+
+  it("appends same-input candidates and keeps History navigation isolated from active selection", async () => {
+    const harness = await makeHarness();
+    await trigger(harness);
+    harness.complete.mockResolvedValueOnce({ content: [{ type: "text", text: JSON.stringify({ prompt: "Second candidate" }) }], stopReason: "stop" });
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("g");
+    await flushPromises();
+    expect(harness.panelLines().join("\n")).toContain("2/2");
+    harness.panelInput("[");
+    expect(harness.panelLines().join("\n")).toContain("1/2");
+    harness.panelInput("\x1b[C");
+    expect(harness.panelLines()[1]).toContain("History");
+    harness.panelInput("\r"); // Most recent record, not the active candidate.
+    expect(harness.panelLines().join("\n")).toContain("Second candidate");
+    for (const key of ["a", "e", "f", "s", "m", "c", "g", "r", "x"]) harness.panelInput(key);
+    harness.panelInput("o");
+    expect(harness.panelLines().join("\n")).toContain("Draft A");
+    harness.panelInput("\x1b");
+    harness.panelInput("\x1b");
+    expect(harness.panelLines().join("\n")).toContain("1/2");
+    expect(harness.complete).toHaveBeenCalledTimes(2);
+    expect(harness.editorWrites).toEqual([]);
+    expect(harness.sent).toEqual([]);
+    harness.panelInput("a");
+    await view;
+    expect(harness.getEditor()).toBe("Refined prompt");
+  });
+
+  it("opens history/usage commands without calls, and retains records after submission", async () => {
+    const harness = await makeHarness();
+    await trigger(harness);
+    harness.handlers.get("input")?.[0]?.({ text: "Another task", source: "interactive" }, harness.context);
+    harness.holdPanel();
+    const view = harness.command("history", harness.context);
+    expect(harness.panelLines().join("\n")).toContain("Draft A");
+    harness.panelInput("\x1b[C");
+    expect(harness.panelLines()[1]).toContain("Usage");
+    harness.panelInput("\r");
+    expect(harness.panelLines().join("\n")).toContain("Tokens: unknown");
+    harness.panelInput("q");
+    harness.panelInput("q");
+    harness.panelInput("q");
+    await view;
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    expect(harness.editorWrites).toEqual([]);
+    expect(harness.internalMessages).toEqual([]);
+    expect(harness.sessionWrites).toEqual([]);
+  });
+});
+
 describe("explicit candidate revision", () => {
   it("revises the latest candidate while preserving the original task and keeping Input independent", async () => {
     const harness = await makeHarness();
@@ -493,7 +584,7 @@ describe("explicit candidate revision", () => {
     await vi.waitFor(() => expect(harness.widgetLines().join("\n")).toContain("Refined prompt"));
     harness.holdPanel();
     const view = harness.command("view", harness.context);
-    harness.panelInput("\x1b[C");
+    harness.panelInput("\x1b[D");
     harness.panelInput(" "); // Disable project instructions for the next request.
     harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved"));
@@ -644,6 +735,32 @@ describe("project context injection", () => {
     expect(harness.editorWrites).toEqual([]);
   });
 
+  it("reuses the final directory-enriched input for g without rescanning files or rules", async () => {
+    const harness = await makeHarness({ config: { projectContext: projectConfig(false) } });
+    await mkdir(join(harness.agentDir, "src"));
+    await writeFile(join(harness.agentDir, "src", "original.ts"), "");
+    vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
+    harness.setEditorText("Explain @src");
+    await trigger(harness);
+    await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
+    await flushPromises();
+    const first = (harness.complete.mock.calls[0] as any[])[1];
+    expect(first.messages[0].content[0].text).toContain("original.ts");
+    await writeFile(join(harness.agentDir, "src", "new.ts"), "");
+    vi.mocked(harness.context.getSystemPrompt).mockReturnValue("Different rules");
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("g");
+    await flushPromises();
+    expect(harness.complete).toHaveBeenCalledTimes(2);
+    const second = (harness.complete.mock.calls[1] as any[])[1];
+    expect(second.messages[0].content).toEqual(first.messages[0].content);
+    expect(second.systemPrompt).toBe(first.systemPrompt);
+    expect(second.messages[0].content[0].text).not.toContain("new.ts");
+    harness.panelInput("q");
+    await view;
+  });
+
   it.each(["references", "project"])("respects the %s opt-out with explicit directories", async (disabled) => {
     const settings = projectConfig(false);
     if (disabled === "references") settings.referencedDirectories.enabled = false;
@@ -741,7 +858,7 @@ describe("project context injection", () => {
       vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
       harness.holdPanel();
       const settings = harness.command("view", harness.context);
-      harness.panelInput("\x1b[C");
+      harness.panelInput("\x1b[D");
       for (let i = 0; i < presses; i++) harness.panelInput(" ");
       expect(harness.panelLines().join("\n")).toMatch(new RegExp(`Project instructions +${mode}`));
       harness.panelInput("\x13");
@@ -1302,7 +1419,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("o");
     expect(harness.panelLines().join("\n")).toContain("Draft A");
     harness.panelInput("?");
-    expect(harness.panelLines().join("\n")).toContain("Cycle favorites");
+    expect(harness.panelLines().join("\n")).toContain("Cycle task models + favorites");
+    harness.panelInput("?");
     harness.panelInput("v");
     expect(harness.panelLines().join("\n")).toContain("source");
     harness.panelInput("\r");
@@ -1371,9 +1489,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(main[0]).toMatch(/^  ─+$/);
     expect(main[1]).toContain("Prompt refine");
     harness.panelInput("t");
-    harness.panelInput("\x1b[D");
     expect(harness.panelLines()).toEqual(main);
-    harness.panelInput("\x1b[C");
+    harness.panelInput("\x1b[D");
     await flushPromises();
     const settings = harness.panelLines();
     expect(settings[1]).toContain("Settings");
@@ -1383,9 +1500,9 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(settings[1]?.startsWith("  ")).toBe(true);
     harness.panelInput(" ");
     const edited = harness.panelLines();
-    harness.panelInput("\x1b[C");
+    harness.panelInput("\t");
     expect(harness.panelLines().join("\n")).toContain("Model");
-    harness.panelInput("\x1b[D");
+    harness.panelInput("\t");
     expect(harness.panelLines()).toEqual(edited);
     harness.panelInput(back);
     await flushPromises();
@@ -1408,7 +1525,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
     harness.holdPanel();
     const view = harness.command("view", harness.context);
-    harness.panelInput("\x1b[C");
+    harness.panelInput("\x1b[D");
     await flushPromises();
     const lines = harness.panelLines();
     expect(lines.find((line) => line.includes("Directory tree"))).toMatch(/Directory tree +\[x\] On/);
@@ -1442,7 +1559,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const harness = await makeHarness({ config: { projectContext: config } });
     harness.holdPanel();
     const view = harness.command("view", harness.context);
-    harness.panelInput("\x1b[C");
+    harness.panelInput("\x1b[D");
     expect(harness.panelLines().join("\n")).toMatch(new RegExp(`Project instructions +${label}`));
     harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved"));
@@ -1493,7 +1610,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await view;
   });
 
-  it.each(["i", "\x1b[C"])("closes secondary state %j on lifecycle invalidation and rejects stale input", async (key) => {
+  it.each(["i", "\x1b[C", "\x1b[D"])("closes secondary state %j on lifecycle invalidation and rejects stale input", async (key) => {
     const harness = await makeHarness();
     harness.holdPanel();
     const view = harness.command("view", harness.context);
@@ -1513,7 +1630,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await mkdir(join(harness.agentDir, "prompt-refine.json"));
     harness.holdPanel();
     const view = harness.command("view", harness.context);
-    harness.panelInput("\x1b[C");
+    harness.panelInput("\x1b[D");
     harness.panelInput(" ");
     harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Not persisted"));
@@ -1532,6 +1649,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const view = harness.command("view", harness.context);
     expect(harness.panelLines().join("\n")).toContain("x Stop");
     harness.panelInput("x");
+    expect(harness.panelLines().join("\n")).toContain("Same input");
+    harness.panelInput("q");
     await view;
     expect(signal.aborted).toBe(true);
     resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "Late output" }) }], stopReason: "stop" });
@@ -1640,9 +1759,9 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     });
     harness.holdPanel();
     const view = harness.command("view", harness.context);
-    harness.panelInput("\x1b[C");
+    harness.panelInput("\x1b[D");
     harness.panelInput(" ");
-    harness.panelInput("\x1b[C");
+    harness.panelInput("\t");
     for (let i = 0; i < 2; i++) harness.panelInput("\x1b[B");
     expect(harness.panelLines().join("\n")).toContain("› Optimization prompt");
     expect(harness.panelLines().join("\n")).toContain("Enter Change");
@@ -1669,9 +1788,9 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     if (origin === "settings") {
-      harness.panelInput("\x1b[C");
+      harness.panelInput("\x1b[D");
       harness.panelInput(" ");
-      harness.panelInput("\x1b[C");
+      harness.panelInput("\t");
       harness.panelInput("\r");
     } else {
       harness.panelInput("m");
@@ -1698,18 +1817,18 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const harness = await makeHarness({ reasoning: true, thinkingLevel: "medium" });
     harness.holdPanel();
     const view = harness.command("view", harness.context);
-    harness.panelInput("\x1b[C");
+    harness.panelInput("\x1b[D");
     harness.panelInput(" ");
     harness.panelInput(" ");
-    harness.panelInput("\x1b[C");
+    harness.panelInput("\t");
     expect(harness.panelLines().join("\n")).toContain("Model:");
     harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Choose optimizer model"));
     harness.panelInput("\x1b");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Unsaved context changes"));
-    harness.panelInput("\x1b[D");
+    harness.panelInput("\t");
     expect(harness.panelLines().join("\n")).toMatch(/Project instructions +First request only/);
-    harness.panelInput("\x1b[C");
+    harness.panelInput("\t");
     harness.panelInput("\x1b[B");
     expect(harness.panelLines().join("\n")).toContain("Thinking: medium");
     harness.panelInput("\r");
@@ -1734,11 +1853,11 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const before = await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8");
     harness.holdPanel();
     const view = harness.command("view", harness.context);
-    harness.panelInput("\x1b[C");
-    harness.panelInput("\x1b[C");
+    harness.panelInput("\x1b[D");
+    harness.panelInput("\t");
     for (let i = 0; i < 1; i++) harness.panelInput("\x1b[B");
     expect(harness.panelLines().join("\n")).toContain(`Unavailable — ${options.reason}`);
-    for (const key of ["\r", " ", "\x1b[C", "\x1b[Z"]) harness.panelInput(key);
+    for (const key of ["\r", " ", "\x1b[Z"]) harness.panelInput(key);
     await flushPromises();
     expect(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8")).toBe(before);
     expect(harness.panelLines().join("\n")).not.toContain("Thinking level saved");
@@ -1751,10 +1870,10 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const harness = await makeHarness();
     harness.holdPanel();
     const view = harness.command("view", harness.context);
-    harness.panelInput("\x1b[C");
+    harness.panelInput("\x1b[D");
     harness.panelInput("\r");
     expect(harness.panelLines().join("\n")).toContain("Unsaved context changes");
-    harness.panelInput("\x1b[C");
+    harness.panelInput("\t");
     harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved"));
     expect(harness.customCalls()).toBe(1);
