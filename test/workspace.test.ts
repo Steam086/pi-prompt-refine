@@ -64,6 +64,11 @@ describe("shared refine workspace", () => {
       expect(navigation).toContain("Settings");
       expect(navigation).not.toMatch(/[\[\]]/);
     }
+    const mainNavigation = stripVTControlCharacters(main.split("\n")[1]!);
+    const settingsNavigation = stripVTControlCharacters(settings.split("\n")[1]!);
+    expect(mainNavigation).toContain("→ Settings");
+    expect(mainNavigation.indexOf("Settings")).toBe(settingsNavigation.indexOf("Settings"));
+    expect(stripVTControlCharacters(workspace.render(80).slice(-2).join("\n"))).not.toContain("→ Settings");
     expect(main).toContain(theme.fg("accent", theme.underline(theme.bold("Prompt refine"))));
     expect(settings).toContain(theme.fg("accent", theme.underline(theme.bold("Settings"))));
     expect(settings.split("\n")[1]).not.toContain("›");
@@ -117,7 +122,10 @@ describe("shared refine workspace", () => {
 
   it.each(["dark", "light"])("shares footer key and description styles across all pages in %s", (name) => {
     const { workspace, panel, theme } = create(40, name, true);
-    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["q", "Back"], theme));
+    const main = textOf(workspace.render(100));
+    for (const hint of [["a", "Accept"], ["e", "Edit"], ["f", "Revise"], ["q", "Back"], ["?", "Help"]] as const) {
+      expect(main).toContain(formatKeyHint(hint, theme));
+    }
     panel.toggleHelp();
     expect(textOf(workspace.render(100))).toContain(formatKeyHint(["r", "Refine current draft (model call)"], theme));
     workspace.openSettings();

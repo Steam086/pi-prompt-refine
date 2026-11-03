@@ -186,9 +186,11 @@ export class RefineWorkspace implements Component, Focusable {
     if (width < 1) return [];
     const tabItems = ([ ["main", "Prompt refine"], ["context", "Settings"] ] as const).map(([mode, label]) => {
       const active = this.mode === mode;
-      return active
+      // Keep tab positions stable while making Settings discoverable without a footer hint.
+      const navigation = mode === "context" ? this.theme.fg("muted", this.mode === "main" ? "→ " : "  ") : "";
+      return navigation + (active
         ? this.theme.fg("accent", this.theme.underline(this.theme.bold(label)))
-        : this.theme.fg("muted", label);
+        : this.theme.fg("muted", label));
     });
     const fullTabs = tabItems.join("   ");
     const tabs = visibleWidth(fullTabs) <= panelLayout(width, this.tui.terminal.rows).innerWidth

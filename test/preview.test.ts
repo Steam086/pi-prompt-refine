@@ -68,9 +68,14 @@ describe("result reading panel", () => {
     expect(text).not.toContain("**用户目标**");
     expect(text).not.toContain(options.draft);
     expect(text).not.toContain("Cycle favorites");
-    expect(text).toContain("o Original");
+    expect(text).not.toContain("o Original");
     expect(text).toContain("? Help");
-    expect(text).toContain("Enter won't send");
+    expect(text).not.toContain("Enter won't send");
+    expect(text).toContain("Accept puts the result in the editor; s sends directly.");
+    expect(panel.render(100).slice(-2)).toEqual([
+      "  a Accept · e Edit · f Revise",
+      "  q Back · ? Help",
+    ]);
     expect(text.match(/Prompt Refine/g)).toHaveLength(1);
     panel.toggleOriginal();
     expect(panel.render(100).join("\n")).toContain(options.draft);
@@ -86,10 +91,12 @@ describe("result reading panel", () => {
     expect(text).toContain("r Refine draft");
     expect(text).not.toContain("a Accept");
     expect(text).not.toContain("e Edit");
+    expect(text).not.toContain("f Revise");
     expect(text).not.toContain("s Send");
+    expect(text).not.toContain("s sends directly");
     expect(text).toContain(editorChanged ? "excludes later edits" : "no model call");
     panel.toggleHelp();
-    expect(panel.render(100).join("\n")).toContain("a/e/s disabled");
+    expect(panel.render(100).join("\n")).toContain("a/e/f/s disabled");
   });
 
   it("separates the workspace and keeps idle chrome free of duplicate or unavailable actions", () => {
@@ -104,8 +111,8 @@ describe("result reading panel", () => {
     expect(lines[emptyRow + 1]?.trim()).toBe("openai-codex/example-model");
     expect(lines[emptyRow]).toBe(" ".repeat(layout.inset + Math.floor((layout.innerWidth - "No result yet.".length) / 2)) + "No result yet.");
     expect(lines.slice(-2)).toEqual([
-      "  r Refine · m Model",
-      "  q Back   · ? Help  · i Input · → Settings",
+      "  r Refine · m Model · i Input",
+      "  q Back · ? Help",
     ]);
     const text = lines.join("\n");
     expect(text.match(/r Refine/g)).toHaveLength(1);
@@ -124,10 +131,15 @@ describe("result reading panel", () => {
     const text = lines.join("\n");
     expect(text.match(/Prompt refine/gi)).toHaveLength(1);
     expect(lines[2]).toContain(phase === "generating" ? "Refining" : phase === "error" ? "Failed" : "Done");
-    if (phase === "generating") expect(text).toContain("x Break");
+    if (phase === "generating") {
+      expect(text).toContain("x Stop");
+      expect(text).toContain("q returns to editing; work continues.");
+      expect(text).not.toContain("Restart");
+    }
     if (phase === "error") expect(text.match(/r Retry/g)).toHaveLength(1);
-    if (phase === "ready") expect(text).toContain("Enter won't send");
-    else expect(text).not.toContain("Enter won't send");
+    if (phase === "ready") expect(text).toContain("s sends directly");
+    else expect(text).not.toContain("s sends directly");
+    expect(text).not.toContain("Enter won't send");
   });
 
   it.each(["dark", "light"])("keeps empty-state styling and resize bounded in %s", (name) => {
@@ -172,7 +184,7 @@ describe("result reading panel", () => {
     const panel = create();
     panel.toggleHelp();
     const text = panel.render(100).join("\n");
-    for (const hint of ["follow-up", "x/d", "z Restore", "r Refine", "m Model", "c Cycle favorites", "v Formatted/source", "Nothing to restore"]) {
+    for (const hint of ["follow-up", "Edit candidate (no model call)", "x/d Stop request / discard result", "z Restore", "r Refine", "m Model", "c Cycle favorites", "o Original", "v Formatted/source", "i Input", "→ Settings", "Enter won't send", "Nothing to restore"]) {
       expect(text).toContain(hint);
     }
     panel.toggleHelp();
@@ -200,8 +212,10 @@ describe("result reading panel", () => {
     expect(next).toContain("a Accept");
     expect(next).toContain("q Back");
     expect(next).not.toContain("q/Esc");
-    expect(next).toContain("i Input");
-    expect(next).toContain("→ Settings");
+    expect(next).toContain("e Edit");
+    expect(next).toContain("f Revise");
+    expect(next).not.toContain("i Input");
+    expect(next).not.toContain("→ Settings");
     expect(next).not.toContain("t Context");
     panel.scrollBy(10000);
     expect(panel.render(80).join("\n")).toContain("内容 79");
@@ -267,7 +281,56 @@ describe("result reading panel", () => {
     const panel = create({ state: { ...options.state, pendingSend: true } });
     const text = panel.render(width).join("\n");
     expect(text).toContain("Send");
-    expect(text).not.toContain("s Send");
+    for (const action of ["a Accept", "e Edit", "f Revise", "s Send", "s sends directly"]) {
+      expect(text).not.toContain(action);
+    }
+  });
+
+  it("prioritizes stopping over candidate actions while a revision is generating", () => {
+    const panel = create({ state: { ...options.state, phase: "generating" } });
+    const text = panel.render(100).join("\n");
+    expect(text).toContain("x Stop");
+    expect(text).toContain("q Back");
+    for (const action of ["a Accept", "e Edit", "f Revise", "s sends directly"]) {
+      expect(text).not.toContain(action);
+    }
+  });
+
+  it("keeps a failed revision actionable without suggesting a new-draft retry", () => {
+    const panel = create({ state: { ...options.state, phase: "error" } });
+    const text = panel.render(100).join("\n");
+    expect(text).toContain("previous result kept");
+    expect(panel.render(100).slice(-2).join("\n")).toContain("a Accept · e Edit · f Revise");
+    expect(text).not.toContain("r Retry");
+  });
+
+  it("prioritizes return and help in the single-line footer, then fits primary actions", () => {
+    const panel = create({}, 8);
+    expect(panel.render(100).at(-1)?.trim()).toBe("q Back · ? Help · a Accept · e Edit · f Revise");
+    expect(panel.render(20).at(-1)?.trim()).toBe("q Back · ? Help");
+    expect(panel.render(12).at(-1)?.trim()).toBe("q Back");
+  });
+
+  it("bounds state-specific footers and preserves return/help across resize", () => {
+    const states: Partial<PreviewOptions>[] = [
+      {},
+      { state: { ...options.state, phase: "generating" }, candidateText: undefined },
+      { state: { ...options.state, pendingSend: true } },
+      { state: { ...options.state, phase: "idle" }, accepted: { editorChanged: false } },
+    ];
+    for (const state of states) {
+      for (const rows of [8, 16, 40]) {
+        for (const width of [12, 20, 40, 100]) {
+          const lines = create(state, rows).render(width);
+          const layout = panelLayout(width, rows);
+          expect(lines).toHaveLength(layout.height);
+          for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+          const footer = lines.slice(-layout.footerHeight).join("\n");
+          expect(footer).toContain("q Back");
+          if (width >= 40) expect(footer).toContain("? Help");
+        }
+      }
+    }
   });
 
   it("keeps pending delivery visible after scrolling and in short terminals", () => {
