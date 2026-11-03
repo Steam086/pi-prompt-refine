@@ -36,11 +36,14 @@ export function resultHeading(options: SummaryOptions, theme: PresentationTheme,
 
 /** Passive, height-bounded preview: no input handler, focus changes, or editor writes. */
 export function renderSummary(options: SummaryOptions, width: number, theme: PresentationTheme = plainTheme): string[] {
-  if (width < 1 || options.state.phase === "idle") return [];
+  if (width < 1 || (options.state.phase === "idle" && !options.state.runningCount && !options.state.queuedCount)) return [];
   const available = Math.min(width, READING_WIDTH);
   const inset = available >= 16 ? 2 : 0;
   const contentWidth = Math.max(1, available - inset * 2);
   const lines = [`${theme.fg("text", theme.bold("Prompt refine"))} · ${resultHeading(options, theme, false)}`];
+  if (options.state.queuedCount || (options.state.runningCount && (options.state.phase !== "generating" || options.state.runningCount > 1))) {
+    lines.push(theme.fg("muted", `${options.state.runningCount ?? 0} running · ${options.state.queuedCount ?? 0} queued`));
+  }
   lines.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(options.contextLabel), contentWidth, "")));
   lines.push("");
   if (options.state.phase === "ready" && options.candidateText) {

@@ -7,12 +7,12 @@
 - `model`：`{ provider, id }`；缺省为未配置，不自动使用主模型或更换 Provider。
 - `favorites`：按配置顺序循环，跳过不可用模型。
 - `thinkingLevel`：省略时继承 session；可设 `off/minimal/low/medium/high/xhigh/max`，实际按模型能力调整。
-- `systemPrompt`：可编辑的改写策略，省略时使用内置策略；固定角色、JSON 输出和标题协议始终由程序加入。面板编辑后需确认保存，后续请求生效。
+- `systemPrompt`：可编辑的改写策略，省略时使用内置策略；固定角色、JSON 输出和标题协议始终由程序加入。面板编辑后需确认保存，下一 round 捕获时生效；当前 round 使用冻结模板。
 - `shortcuts`：默认仅 `optimize: "ctrl+\\"`；`view/dismiss/selectModel/cycleModel/restore` 为 `null`。`null` 只关闭全局绑定，不影响面板和命令。手工修改后执行 `/reload`。
 
 ## 预算与上下文开关
 
-下表的项目字段均位于 `projectContext` 内；具体采集边界见 [上下文说明](context.md)。
+下表的项目字段均位于 `projectContext` 内；具体采集边界见 [上下文说明](context.md)。上下文配置在 round 第一份输入捕获时冻结，Settings 的更改用于下一 round。并行上限目前固定为 4，超出排队；`timeoutMs` 从每条请求实际启动后计算，不包含排队时间。
 
 | 字段 | 默认值 | 范围或用途 |
 | --- | --- | --- |
@@ -32,6 +32,8 @@
 | `tree.exclude` | 依赖、产物、缓存等目录名 | 最多 100 个名称，无路径分隔符；替换默认列表 |
 
 字符限制使用 JavaScript UTF-16 字符单元，不是 token 计数。历史预算按角色标签加正文计算，不含 JSON 转义和元数据；项目总预算含其标题与告警。当前没有完整输入加输出的统一模型窗口校验。
+
+默认树与显式目录同时启用、且没有选中历史时，为保证 round 默认树可复用，两者各预留一半目录字符、条目和扫描预算；只启用一个范围时使用完整预算。
 
 关闭 `projectContext.enabled` 可只保留草稿与历史。关闭所有目录扫描需同时关闭 `tree.enabled` 和 `referencedDirectories.enabled`；单独关闭默认 tree 不影响显式 `@目录`。
 

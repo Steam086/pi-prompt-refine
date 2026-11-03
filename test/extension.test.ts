@@ -393,7 +393,7 @@ describe("first optimizer model setup", () => {
   });
 });
 
-describe("multi-model preview and read-only history", () => {
+describe("multi-model preview and unified Usage", () => {
   it("switches models without generating, then reuses exact input despite editor/history changes", async () => {
     const harness = await makeHarness();
     const registry = harness.context.modelRegistry;
@@ -412,7 +412,7 @@ describe("multi-model preview and read-only history", () => {
     harness.panelInput("\x1b[B");
     harness.panelInput("\r");
     // Model settings persistence runs through fs, not just microtasks.
-    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("No candidate for this model"));
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Run: other-provider/second-model"));
     expect(harness.complete).toHaveBeenCalledTimes(1);
     harness.complete.mockResolvedValueOnce({ content: [{ type: "text", text: JSON.stringify({ prompt: "B result" }) }], stopReason: "stop" });
     harness.panelInput("g");
@@ -422,18 +422,20 @@ describe("multi-model preview and read-only history", () => {
     expect(call[0]).toBe(b);
     expect(call[1].systemPrompt).toBe(firstInput.systemPrompt);
     expect(call[1].messages[0].content).toEqual(firstInput.messages[0].content);
-    expect(harness.panelLines().join("\n")).toContain("B result");
-    harness.panelInput("c");
+    // Completion does not move the selection or replace the applied A result.
     expect(harness.panelLines().join("\n")).toContain("Refined prompt");
-    harness.panelInput("c");
+    harness.panelInput("\x1b[B");
+    expect(harness.panelLines().join("\n")).toContain("B result");
+    harness.panelInput("\r");
     expect(harness.panelLines().join("\n")).toContain("B result");
     expect(harness.getEditor()).toBe("New editor draft — must not leak into g");
     expect(harness.sent).toEqual([]);
     harness.panelInput("q");
+    harness.panelInput("q");
     await view;
   });
 
-  it("appends same-input candidates and keeps History navigation isolated from active selection", async () => {
+  it("appends background candidates and applies from Usage only on Enter", async () => {
     const harness = await makeHarness();
     await trigger(harness);
     harness.complete.mockResolvedValueOnce({ content: [{ type: "text", text: JSON.stringify({ prompt: "Second candidate" }) }], stopReason: "stop" });
@@ -441,37 +443,36 @@ describe("multi-model preview and read-only history", () => {
     const view = harness.command("view", harness.context);
     harness.panelInput("g");
     await flushPromises();
+    expect(harness.panelLines().join("\n")).toContain("2 entries");
+    expect(harness.panelLines().join("\n")).toContain("Refined prompt");
+    harness.panelInput("\x1b[B");
+    harness.panelInput("\r");
     expect(harness.panelLines().join("\n")).toContain("2/2");
     harness.panelInput("[");
     expect(harness.panelLines().join("\n")).toContain("1/2");
     harness.panelInput("\x1b[C");
-    expect(harness.panelLines()[1]).toContain("History");
-    harness.panelInput("\r"); // Most recent record, not the active candidate.
+    expect(harness.panelLines()[1]).toContain("Usage");
+    harness.panelInput("\x1b[B"); // Browsing is independent of the applied candidate.
     expect(harness.panelLines().join("\n")).toContain("Second candidate");
-    for (const key of ["a", "e", "f", "s", "m", "c", "g", "r", "x"]) harness.panelInput(key);
-    harness.panelInput("o");
-    expect(harness.panelLines().join("\n")).toContain("Draft A");
-    harness.panelInput("\x1b");
-    harness.panelInput("\x1b");
-    expect(harness.panelLines().join("\n")).toContain("1/2");
+    harness.panelInput("\r"); // Explicit Apply, never writes to Pi.
+    expect(harness.panelLines().join("\n")).toContain("2/2");
     expect(harness.complete).toHaveBeenCalledTimes(2);
     expect(harness.editorWrites).toEqual([]);
     expect(harness.sent).toEqual([]);
     harness.panelInput("a");
     await view;
-    expect(harness.getEditor()).toBe("Refined prompt");
+    expect(harness.getEditor()).toBe("Second candidate");
   });
 
   it("opens history/usage commands without calls, and retains records after submission", async () => {
     const harness = await makeHarness();
     await trigger(harness);
-    harness.handlers.get("input")?.[0]?.({ text: "Another task", source: "interactive" }, harness.context);
+    harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Another task" } }, harness.context);
     harness.holdPanel();
     const view = harness.command("history", harness.context);
     expect(harness.panelLines().join("\n")).toContain("Draft A");
-    harness.panelInput("\x1b[C");
     expect(harness.panelLines()[1]).toContain("Usage");
-    harness.panelInput("\r");
+    expect(harness.panelLines().join("\n")).toContain("Earlier context");
     expect(harness.panelLines().join("\n")).toContain("Tokens: unknown");
     harness.panelInput("q");
     harness.panelInput("q");
@@ -577,7 +578,7 @@ describe("explicit candidate revision", () => {
     await view;
   });
 
-  it("applies current Context switches to revisions while retaining original history", async () => {
+  it("keeps round Context frozen across settings changes and revisions", async () => {
     const harness = await makeHarness({ config: { projectContext: projectConfig(false) } });
     vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
     await trigger(harness);
@@ -585,7 +586,7 @@ describe("explicit candidate revision", () => {
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     harness.panelInput("\x1b[D");
-    harness.panelInput(" "); // Disable project instructions for the next request.
+    harness.panelInput(" "); // Disable project instructions for the next round.
     harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved"));
     harness.panelInput("f");
@@ -595,7 +596,7 @@ describe("explicit candidate revision", () => {
     const first = JSON.parse((harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
     const revision = JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
     expect(first.project_context).toContain("Use the project venv.");
-    expect(revision.project_context).not.toContain("Use the project venv.");
+    expect(revision.project_context).toContain("Use the project venv.");
     expect(revision.conversation).toEqual(first.conversation);
     harness.panelInput("q");
     await view;
@@ -721,7 +722,8 @@ describe("project context injection", () => {
     const request = (harness.complete.mock.calls[0] as any[])[1];
     const input = request.messages[0].content[0].text;
     expect(JSON.parse(input).project_context).toContain('REFERENCED DIRECTORY: "src"');
-    expect(input.match(/target\.ts/g)).toHaveLength(1);
+    // Default tree and explicit references are independently frozen scopes.
+    expect(input.match(/target\.ts/g)).toHaveLength(!history && tree ? 2 : 1);
     expect(input).toContain("Use the project venv.");
     expect(input).toContain("Extract PDF tables");
     expect(input).toContain("Explain @src without edits");
@@ -862,7 +864,7 @@ describe("project context injection", () => {
       for (let i = 0; i < presses; i++) harness.panelInput(" ");
       expect(harness.panelLines().join("\n")).toMatch(new RegExp(`Project instructions +${mode}`));
       harness.panelInput("\x13");
-      await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved · Applies to future requests"));
+      await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved · Applies to next round"));
       harness.panelInput("q");
       await settings;
       const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
@@ -930,7 +932,8 @@ describe("project context injection", () => {
     expect(input).not.toContain("prompt-refine.json");
     expect(harness.widgetLines(200).join("\n")).not.toContain(" · tree");
 
-    // A later request with no selected history must include tree again.
+    // After send, the next round captures the latest available history.
+    harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Sent" } }, harness.context);
     branch.mockReturnValue([]);
     await trigger(harness);
     await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(2));
@@ -979,13 +982,14 @@ describe("project context injection", () => {
     expect(harness.widgetLines(200).join("\n")).not.toContain(" · tree");
   });
 
-  it("injects fresh metadata on every independent optimization and uses structured command resources when available", async () => {
+  it("captures fresh structured metadata on the next round", async () => {
     const harness = await makeHarness({ config: { projectContext: projectConfig() } });
     const source = { contextFiles: [{ path: "/repo/AGENTS.md", content: "Use npm" }], skills: [{ name: "pdf", description: "Read PDFs" }] };
     Object.assign(harness.context, { getSystemPromptOptions: () => source });
     await trigger(harness);
     source.contextFiles[0]!.content = "Use pnpm";
     source.skills[0]!.description = "Read updated PDFs";
+    harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Sent" } }, harness.context);
     await trigger(harness);
     const first = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
     const second = (harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text;
@@ -1038,6 +1042,146 @@ describe("project context injection", () => {
     expect(text).not.toContain("Changed after trigger");
     expect(text).toContain("Draft A");
     expect(harness.getEditor()).toBe("Draft B");
+  });
+});
+
+describe("round workspace integration", () => {
+  it("archives on committed Pi send, preserves background work, and captures the next context lazily", async () => {
+    const harness = await makeHarness();
+    let finish!: (value: any) => void;
+    harness.complete.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    await trigger(harness);
+    const signal = (harness.complete.mock.calls[0] as any[])[2].signal as AbortSignal;
+    harness.handlers.get("input")?.[0]?.({ text: "Sent prompt", source: "interactive" }, harness.context);
+    harness.handlers.get("before_agent_start")?.[0]?.({ messageType: "user", prompt: "Sent prompt" }, harness.context);
+    expect(signal.aborted).toBe(false);
+    harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Sent prompt" } }, harness.context);
+    expect(signal.aborted).toBe(false);
+    vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([
+      { type: "message", message: { role: "assistant", content: "Latest available response" } },
+    ] as any);
+    harness.setEditorText("Next round draft");
+    harness.holdPanel();
+    const view = shortcut(harness, "ctrl+\\")(harness.context);
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    expect(harness.panelLines().join("\n")).toContain("Unsent");
+    harness.panelInput("\r");
+    await flushPromises();
+    expect(harness.complete).toHaveBeenCalledTimes(2);
+    const second = JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
+    expect(second.draft).toBe("Next round draft");
+    expect(second.conversation.items[0].text).toBe("Latest available response");
+    harness.panelInput("\r"); // Apply, not accept or send.
+    expect(harness.panelLines().join("\n")).toContain("Refined prompt");
+    finish(refinement("Earlier round result"));
+    await flushPromises();
+    expect(harness.panelLines().join("\n")).not.toContain("Earlier round result");
+    harness.panelInput("\x1b[C"); // Usage contains both rounds, old first.
+    harness.panelInput("\x1b[A");
+    expect(harness.panelLines().join("\n")).toContain("Earlier context");
+    expect(harness.panelLines().join("\n")).toContain("Earlier round result");
+    harness.panelInput("\r");
+    expect(harness.panelLines().join("\n")).toContain("Earlier round result");
+    expect(harness.editorWrites).toEqual([]);
+    expect(harness.sent).toEqual([]);
+    expect(harness.setSessionName).not.toHaveBeenCalled();
+    harness.panelInput("q");
+    harness.panelInput("q");
+    await view;
+  });
+
+  it("validates the applied result's model for revision, independently of the next launch model", async () => {
+    const harness = await makeHarness();
+    const registry = harness.context.modelRegistry;
+    const a = registry.getAvailable()[0]!;
+    const b = { ...a, id: "second" } as Model<Api>;
+    vi.mocked(registry.getAvailable).mockReturnValue([a, b]);
+    vi.mocked(registry.find).mockImplementation((provider, id) => [a, b].find((model) => model.provider === provider && model.id === id));
+    await trigger(harness);
+    harness.setCustomAction(["\x1b[B", "\r"]);
+    await harness.command("model", harness.context);
+    vi.mocked(registry.getAvailable).mockReturnValue([b]);
+    vi.mocked(registry.find).mockImplementation((provider, id) => provider === b.provider && id === b.id ? b : undefined);
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("f");
+    harness.panelInput("Shorter");
+    harness.panelInput("\r");
+    expect(harness.panelLines().join("\n")).toContain("missing or unavailable");
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    expect(harness.editorWrites).toEqual([]);
+    harness.panelInput("\x1b");
+    harness.panelInput("q");
+    await view;
+  });
+
+  it("copies an archived unsent prompt into the new round without silently changing the old snapshot", async () => {
+    const harness = await makeHarness();
+    await trigger(harness);
+    harness.setEditorText("Pending B");
+    harness.setCustomAction("q");
+    await shortcut(harness, "ctrl+\\")(harness.context);
+    harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Sent A" } }, harness.context);
+    vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([]);
+    harness.holdPanel();
+    const view = harness.command("usage", harness.context);
+    harness.panelInput("\x1b[B");
+    expect(harness.panelLines().join("\n")).toContain("Refine (old context)");
+    harness.panelInput("n");
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    harness.panelInput("\x1b[B");
+    expect(harness.panelLines().join("\n")).toContain("Round 2");
+    harness.panelInput("\r");
+    await flushPromises();
+    const payload = JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
+    expect(payload.draft).toBe("Pending B");
+    expect(payload.conversation.items).toEqual([]);
+    expect(harness.getEditor()).toBe("Pending B");
+    expect(harness.editorWrites).toEqual([]);
+    harness.panelInput("q");
+    harness.panelInput("q");
+    await view;
+  });
+
+  it("shares directory-enriched packets across overlapping model runs without cancellation or rescan", async () => {
+    const harness = await makeHarness({ config: { projectContext: projectConfig(true) } });
+    vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([]);
+    await mkdir(join(harness.agentDir, "src"));
+    await writeFile(join(harness.agentDir, "src", "frozen.ts"), "not read");
+    const registry = harness.context.modelRegistry;
+    const a = registry.getAvailable()[0]!;
+    const b = { ...a, id: "second" } as Model<Api>;
+    vi.mocked(registry.getAvailable).mockReturnValue([a, b]);
+    vi.mocked(registry.find).mockImplementation((provider, id) => [a, b].find((model) => model.provider === provider && model.id === id));
+    const pending = new Map<string, (value: any) => void>();
+    harness.complete.mockImplementation((model: Model<Api>) => new Promise((resolve) => { pending.set(model.id, resolve); }));
+    harness.setEditorText("Explain @src");
+    await trigger(harness);
+    await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
+    harness.holdPanel();
+    const view = shortcut(harness, "ctrl+\\")(harness.context);
+    harness.panelInput("m");
+    await flushPromises();
+    harness.panelInput("\x1b[B");
+    harness.panelInput("\r");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Run: fake-provider/second"));
+    await writeFile(join(harness.agentDir, "src", "later.ts"), "not read");
+    harness.panelInput("g");
+    await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(2));
+    expect((harness.complete.mock.calls[0] as any[])[2].signal.aborted).toBe(false);
+    const first = (harness.complete.mock.calls[0] as any[])[1];
+    const second = (harness.complete.mock.calls[1] as any[])[1];
+    expect(second.systemPrompt).toBe(first.systemPrompt);
+    expect(second.messages[0].content).toEqual(first.messages[0].content);
+    harness.panelInput("x"); // Stops only the selected first model.
+    pending.get(a.id)!(refinement("Cancelled late result"));
+    pending.get(b.id)!(refinement("Second result"));
+    await flushPromises();
+    expect(harness.panelLines().join("\n")).not.toContain("Cancelled late result");
+    harness.panelInput("\x1b[B");
+    expect(harness.panelLines().join("\n")).toContain("Second result");
+    harness.panelInput("q");
+    await view;
   });
 });
 
@@ -1154,6 +1298,7 @@ describe("session naming", () => {
     await harness.command("restore", harness.context);
     expect(harness.getEditor()).toBe("Draft A");
     harness.manualName("");
+    harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Sent" } }, harness.context);
     await trigger(harness);
     expect((harness.complete.mock.calls.at(-1) as any[])[1].systemPrompt).toContain("Do not generate a title");
     await panelAction(harness, "a");
@@ -1240,6 +1385,8 @@ describe("session naming", () => {
       if (ack === "followUp") harness.handlers.get("input")?.[0]?.({ text: "Refined prompt", source: "extension", streamingBehavior: "followUp" }, harness.context);
       else if (ack === "message_start") harness.handlers.get(ack)?.[0]?.({ message: { role: "user", content: [{ type: "text", text: "Refined prompt" }] } }, harness.context);
       else harness.handlers.get(ack)?.[0]?.({ messageType: "user", prompt: "Refined prompt" }, harness.context);
+      // Neither queue preflight nor before_agent_start is a successful send boundary.
+      if (ack !== "message_start") harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Refined prompt" } }, harness.context);
     };
     acknowledge();
     acknowledge();
@@ -1262,7 +1409,7 @@ describe("session naming", () => {
         harness.handlers.get("session_start")?.[0]?.({}, harness.context);
       }
       if (boundary === "branch") harness.handlers.get("session_before_tree")?.[0]?.({}, harness.context);
-      if (boundary === "other-input") harness.handlers.get("input")?.[0]?.({ text: "Unrelated", source: "interactive" }, harness.context);
+      if (boundary === "other-input") harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Unrelated" } }, harness.context);
       if (boundary === "edit") await panelAction(harness, "e");
       harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Refined prompt" } }, harness.context);
       expect(harness.setSessionName).not.toHaveBeenCalled();
@@ -1312,14 +1459,14 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await shortcut(harness, "ctrl+\\")(harness.context);
     harness.holdPanel();
     const view = shortcut(harness, "ctrl+\\")(harness.context);
-    expect(harness.panelLines().join("\n")).toContain("Refining");
-    expect(harness.panelLines().join("\n")).toContain("Submitted original");
+    expect(harness.panelLines().join("\n")).toContain("Running");
+    expect(harness.panelLines().join("\n")).toContain("Original prompt");
     expect(harness.panelLines().join("\n")).toContain("Draft A");
     expect(harness.complete).toHaveBeenCalledTimes(1);
     resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "Fresh completed result", title: "Live preview" }) }], stopReason: "stop" });
     await flushPromises();
     expect(harness.panelLines().join("\n")).toContain("Fresh completed result");
-    expect(harness.panelLines().join("\n")).not.toContain("Draft A");
+    expect(harness.panelLines().join("\n")).toContain("Draft A"); // Task label remains stable.
     expect(harness.customCalls()).toBe(1);
     harness.panelInput("a");
     await view;
@@ -1369,13 +1516,10 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const view = harness.command("view", harness.context);
     expect(harness.panelLines().join("\n")).toContain("Tokens: total 190 · in 120 · out 30");
     expect(harness.panelLines().join("\n")).not.toContain("think(out)");
-    harness.panelInput("\x1b[C"); // History
-    harness.panelInput("\x1b[C"); // Usage
-    harness.panelInput("\r"); // Full request detail retains all provider counts.
+    harness.panelInput("\x1b[C"); // Unified Usage shows full details beside the list.
     const usageDetail = harness.panelLines(100).join("").replace(/\s/g, "");
     for (const count of ["read40", "write0", "think(out)10"]) expect(usageDetail).toContain(count);
-    harness.panelInput("\x1b[D"); // History
-    harness.panelInput("\x1b[D"); // Preview
+    harness.panelInput("\r"); // Apply to Preview before accepting into Pi.
     harness.panelInput("a");
     await view;
     const acceptedView = harness.command("view", harness.context);
@@ -1493,7 +1637,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("i");
     harness.panelInput("\r");
     await flushPromises();
-    expect(JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text).draft).toBe(text);
+    expect(harness.complete).toHaveBeenCalledTimes(1); // Same captured input is not a new request.
+    expect(harness.panelLines().join("\n")).toContain("Original 中文");
     harness.panelInput("q");
     await view;
     expect(harness.getEditor()).toBe(mainDraft);
@@ -1576,7 +1721,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await flushPromises();
     harness.panelInput("\x1b[B");
     harness.panelInput("\r");
-    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("No candidate for this model"));
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Run: other-provider/second-model"));
     harness.panelInput("i");
     expect(harness.panelLines().join("\n")).toContain("Original input + later edit");
     harness.panelInput("\x1b");
@@ -1586,12 +1731,16 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect((harness.complete.mock.calls[1] as any[])[1].messages[0].content).toEqual(frozen.messages[0].content);
     harness.panelInput("g"); // A second candidate for B remains in the same task.
     await flushPromises();
-    expect(harness.panelLines().join("\n")).toContain("2/2");
+    expect(harness.panelLines().join("\n")).toContain("3 entries");
     harness.panelInput("i");
     harness.panelInput("\r");
     await flushPromises();
+    expect(harness.complete).toHaveBeenCalledTimes(3);
+    expect(harness.panelLines().join("\n")).toContain("Unsent");
+    for (let i = 0; i < 3; i++) harness.panelInput("\x1b[B");
+    harness.panelInput("\r");
+    await flushPromises();
     expect(JSON.parse((harness.complete.mock.calls[3] as any[])[1].messages[0].content[0].text).draft).toBe("Original input + later edit");
-    expect(harness.panelLines().join("\n")).toContain("1/1");
     harness.panelInput("q");
     await view;
     expect(harness.editorWrites).toEqual([]);
@@ -1815,7 +1964,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.customCalls()).toBe(1);
   });
 
-  it.each(["input", "session_before_tree", "session_shutdown"])("clears widget and live panel on %s and ignores late output", async (event) => {
+  it.each(["session_before_tree", "session_shutdown"])("clears widget and live panel on %s and ignores late output", async (event) => {
     const harness = await makeHarness();
     let resolve!: (value: any) => void;
     harness.complete.mockImplementation(() => new Promise((res) => { resolve = res; }));
@@ -2204,9 +2353,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await shortcut(harness, "ctrl+\\")(harness.context);
     expect(harness.complete).toHaveBeenCalledTimes(1);
     const panel = harness.panelLines().join("\n");
-    expect(panel).toContain("Accepted prompt");
-    expect(panel).toContain("read-only");
-    if (draft !== "Refined prompt") expect(panel).toContain("excludes later edits");
+    expect(panel).toContain("Applied");
+    expect(panel).toContain("Accepted into Pi editor");
     expect(harness.getEditor()).toBe(draft);
     expect(harness.editorWrites).toEqual(["Refined prompt"]);
     expect(harness.sent).toEqual([]);
@@ -2230,7 +2378,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.getEditor()).toBe("my final edits");
   });
 
-  it("optimizes an edited accepted prompt on the next shortcut, without requiring r", async () => {
+  it("captures an edited accepted prompt without automatically requesting", async () => {
     const harness = await makeHarness({ useDefaultShortcuts: true });
     await trigger(harness);
     harness.setCustomAction("a");
@@ -2240,14 +2388,14 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const panelsBefore = harness.customCalls();
     await shortcut(harness, "ctrl+\\")(harness.context);
     await flushPromises();
-    expect(harness.customCalls()).toBe(panelsBefore);
-    expect(harness.complete).toHaveBeenCalledTimes(2);
-    const request = (harness.complete.mock.calls[1] as any[])[1];
-    expect(request.messages[0].content[0].text).toContain("my edited accepted prompt");
+    expect(harness.customCalls()).toBe(panelsBefore + 1);
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    expect(harness.panelLines().join("\n")).toContain("Unsent");
     expect(harness.getEditor()).toBe("my edited accepted prompt");
     harness.setCustomAction("q");
     await shortcut(harness, "ctrl+\\")(harness.context);
-    expect(harness.complete).toHaveBeenCalledTimes(2);
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    expect(harness.panelLines().join("\n")).toContain("2 entries");
   });
 
   it("explicit view opens an edited candidate without regenerating and labels a changed main draft", async () => {
@@ -2263,7 +2411,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.getEditor()).toBe("another main draft");
   });
 
-  it.each(["generating", "ready", "error"] as const)("optimizes B instead of viewing A when A is %s", async (phase) => {
+  it.each(["generating", "ready", "error"] as const)("captures B without replacing or cancelling A when A is %s", async (phase) => {
     const harness = await makeHarness({ useDefaultShortcuts: true });
     let finishA!: (value: any) => void;
     if (phase === "generating") harness.complete.mockImplementationOnce(() => new Promise((resolve) => { finishA = resolve; }));
@@ -2282,28 +2430,28 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(text).not.toContain("Draft B");
     expect(text.toLowerCase()).toMatch(/editor (changed|differs)/);
     expect(harness.complete).toHaveBeenCalledTimes(1);
-    const panelsBefore = harness.customCalls();
     let finishB!: (value: any) => void;
     harness.complete.mockImplementationOnce(() => new Promise((resolve) => { finishB = resolve; }));
-    await shortcut(harness, "ctrl+\\")(harness.context);
-    expect(harness.customCalls()).toBe(panelsBefore);
-    expect(harness.complete).toHaveBeenCalledTimes(2);
-    const request = (harness.complete.mock.calls[1] as any[])[1];
-    expect(JSON.parse(request.messages[0].content[0].text).draft).toBe("Draft B");
     harness.holdPanel();
     const view = shortcut(harness, "ctrl+\\")(harness.context);
+    expect(harness.complete).toHaveBeenCalledTimes(1);
     expect(harness.panelLines().join("\n")).toContain("Draft B");
-    expect(harness.panelLines().join("\n")).not.toContain("Draft A");
+    expect(harness.panelLines().join("\n")).toContain("Draft A");
+    expect(harness.panelLines().join("\n")).toContain("Unsent");
+    harness.panelInput("\x1b[B");
+    harness.panelInput("\r"); // Explicitly start B while A may still be running.
+    const request = (harness.complete.mock.calls[1] as any[])[1];
+    expect(JSON.parse(request.messages[0].content[0].text).draft).toBe("Draft B");
     if (phase === "generating") {
-      expect((harness.complete.mock.calls[0] as any[])[2].signal.aborted).toBe(true);
+      expect((harness.complete.mock.calls[0] as any[])[2].signal.aborted).toBe(false);
       finishA(refinement("Late A result"));
       await flushPromises();
-      expect(harness.panelLines().join("\n")).not.toContain("Late A result");
+      expect(harness.panelLines().join("\n")).not.toContain("Late A result"); // Still viewing B.
     }
     finishB(refinement("Result B"));
     await flushPromises();
     expect(harness.panelLines().join("\n")).toContain("Result B");
-    expect(harness.panelLines().join("\n")).not.toContain("Draft B");
+    expect(harness.panelLines().join("\n")).toContain("Draft B");
     expect(harness.complete).toHaveBeenCalledTimes(2);
     expect(harness.getEditor()).toBe("Draft B");
     expect(harness.editorWrites).toEqual([]);
@@ -2332,7 +2480,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await trigger(harness);
     harness.setCustomAction("q");
     await shortcut(harness, "ctrl+\\")(harness.context);
-    expect(harness.panelLines().join("\n")).toContain("request failed");
+    expect(harness.panelLines().join("\n")).toContain("Failed");
     expect(harness.complete).toHaveBeenCalledTimes(1);
     harness.setCustomAction("r");
     await shortcut(harness, "ctrl+\\")(harness.context);
@@ -2361,7 +2509,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.getEditor()).toBe(draft);
   });
 
-  it("does not forget accepted provenance on dismiss, but clears it after submission", async () => {
+  it("retains archived work after submission so new shortcut input is unsent", async () => {
     const harness = await makeHarness({ useDefaultShortcuts: true });
     await trigger(harness);
     harness.setCustomAction("a");
@@ -2370,11 +2518,12 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.setCustomAction("q");
     await shortcut(harness, "ctrl+\\")(harness.context);
     expect(harness.complete).toHaveBeenCalledTimes(1);
-    harness.handlers.get("input")?.[0]?.({ type: "input", text: "Refined prompt", source: "interactive" }, harness.context);
+    harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Refined prompt" } }, harness.context);
     harness.setEditorText("brand new task");
     await shortcut(harness, "ctrl+\\")(harness.context);
     await flushPromises();
-    expect(harness.complete).toHaveBeenCalledTimes(2);
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    expect(harness.panelLines().join("\n")).toContain("Unsent");
   });
 
   it("rejects a confirmation that returns after the session branch changed", async () => {
@@ -2404,7 +2553,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.editorWrites).toEqual([]);
   });
 
-  it("invalidates a late result on submitted input even if the user retypes the same A", async () => {
+  it("keeps a running request across raw input without writing Pi until explicit acceptance", async () => {
     const harness = await makeHarness();
     let resolve!: (value: any) => void;
     harness.complete.mockImplementation(() => new Promise((res) => { resolve = res; }));
@@ -2420,7 +2569,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.editorWrites).toEqual([]);
     harness.setCustomAction("a");
     await shortcut(harness, "f3")(harness.context);
-    expect(harness.editorWrites).toEqual([]);
+    expect(harness.editorWrites).toEqual(["stale result"]);
   });
 
   it.each(["tree", "shutdown"] as const)("drops a late response after %s lifecycle invalidation", async (boundary) => {
@@ -2437,7 +2586,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
   });
 
 
-  it("waits for Pi's idle before-agent boundary before consuming an explicitly sent candidate", async () => {
+  it("waits past Pi preflight until message start before archiving an explicitly sent candidate", async () => {
     const harness = await makeHarness();
     await trigger(harness);
     harness.setCustomAction("s");
@@ -2454,7 +2603,10 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.statuses.at(-1)).toBeUndefined();
     harness.setCustomAction("q");
     await shortcut(harness, "f3")(harness.context);
-    expect(harness.panelLines().join("\n")).toContain("No result yet");
+    expect(harness.panelLines().join("\n")).toContain("Send pending");
+    harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Refined prompt" } }, harness.context);
+    await shortcut(harness, "f3")(harness.context);
+    expect(harness.panelLines().join("\n")).toContain("Accepted prompt");
     expect(harness.getEditor()).toBe("Draft A");
   });
 

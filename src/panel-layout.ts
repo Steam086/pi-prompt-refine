@@ -19,7 +19,7 @@ export function panelLayout(width: number, rows: number) {
 
 export type PanelLayout = ReturnType<typeof panelLayout>;
 
-export const WORKSPACE_PAGES = ["Preview", "History", "Usage", "Settings"] as const;
+export const WORKSPACE_PAGES = ["Preview", "Usage", "Settings"] as const;
 export type WorkspacePage = typeof WORKSPACE_PAGES[number];
 
 /** One persistent top-level strip; compact terminals retain the active page and arrows. */

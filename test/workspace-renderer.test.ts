@@ -40,6 +40,8 @@ describe("workspace terminal rendering", () => {
       context: () => ({ instructions: "always" as const, tree: true, skills: false }), contextEnabled: () => true,
       optimizer: () => ({ model: "provider/long-model-identifier-with-extra-details", thinking: "high · Extension setting", thinkingEnabled: true }),
       chooseModel() {}, editSystemPrompt() {}, history: () => records,
+      tasks: { records: () => records, appliedId: () => records[1]!.id,
+        activate: (id) => !!records.find((record) => record.id === id)?.candidate, run() {}, stop() {}, copy() {} },
       saveContext: async () => "Saved", submit: () => undefined,
     });
     tui.addChild(workspace);
@@ -64,8 +66,8 @@ describe("workspace terminal rendering", () => {
         tui.renderNow();
         expect(workspace.render(columns)).toHaveLength(initialHeight);
         for (const key of [
-          "\x1b[C", "\x1b[B", "\x1b[6~", "\r", "\x1b[6~", "o", "]", "\x1b", // History list and detail
-          "\x1b[C", "\x1b[B", "\r", "\x1b[6~", "\x1b", // Usage list and detail
+          "\t", "\x1b[6~", "\t", "\x1b[B", "\r", "\x1b[6~", "o", "\x1b", // Task browser and applied result
+          "\x1b[C", "\x1b[B", "\t", "\x1b[6~", "\r", "\x1b", // Unified Usage and Apply
           "\x1b[C", ...Array<string>(6).fill("\x1b[B"), ...Array<string>(6).fill("\x1b[A"), "\t", ...Array<string>(3).fill("\x1b[B"), "\t", "\x1b", "i", "\x1b",
         ]) {
           input(key);

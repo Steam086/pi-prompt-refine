@@ -48,8 +48,8 @@ describe("shared refine workspace", () => {
     const { workspace, actions, theme } = create(40, name, true);
     const height = workspace.render(100).length;
     for (const [key, pages] of [
-      ["\x1b[C", ["History", "Usage", "Settings", "Settings", "Preview"]],
-      ["\x1b[D", ["Settings", "Settings", "Usage", "History", "Preview"]],
+      ["\x1b[C", ["Usage", "Settings", "Settings", "Preview"]],
+      ["\x1b[D", ["Settings", "Settings", "Usage", "Preview"]],
     ] as const) {
       for (const page of pages) {
         expect(workspace.handleInput(key)).toBe(true);
@@ -57,7 +57,7 @@ describe("shared refine workspace", () => {
         expect(lines).toHaveLength(height);
         const strip = lines[4]!;
         expect(strip).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(` ${page} `))));
-        for (const label of ["Preview", "History", "Usage", "Settings", "←", "→"]) expect(strip).toContain(label);
+        for (const label of ["Preview", "Usage", "Settings", "←", "→"]) expect(strip).toContain(label);
         expect(strip).not.toMatch(/h History|u Usage|→ Settings/);
         expect(stripVTControlCharacters(lines[1]!)).toContain(page === "Preview" ? "Prompt refine" : page);
         for (const obsolete of ["h", "u"]) {
@@ -79,7 +79,7 @@ describe("shared refine workspace", () => {
     workspace.handleInput("\t");
     workspace.handleInput("\x1b[B");
     const settings = workspace.render(100);
-    for (let i = 0; i < 4; i++) workspace.handleInput("\x1b[C");
+    for (let i = 0; i < 3; i++) workspace.handleInput("\x1b[C");
     expect(workspace.render(100)).toEqual(settings);
     expect(textOf(settings)).toContain("Unsaved context changes");
     expect(stripVTControlCharacters(textOf(settings))).toContain("› Thinking");
@@ -91,7 +91,7 @@ describe("shared refine workspace", () => {
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toMatch(/Project instructions +Always/);
   });
 
-  it("switches away from History details with arrows and keeps Preview's reading state", () => {
+  it("switches away from Usage with arrows and keeps Preview's reading state", () => {
     const { workspace, actions, panel } = create(40, "dark", true);
     const input = { draft: "Original", model: { provider: "p", id: "m" }, sessionId: "session", branchLeafId: "leaf", systemPrompt: "Policy", history: selectHistory([], 12, 100) };
     const records: RefineRecord[] = [{ id: 1, taskId: 1, kind: "refine", createdAt: 1, status: "generated", input,
@@ -104,8 +104,6 @@ describe("shared refine workspace", () => {
     workspace.handleInput("\x1b[C");
     workspace.handleInput("\r");
     expect(textOf(workspace.render(100))).toContain("Historical candidate");
-    workspace.handleInput("\x1b[C");
-    expect(stripVTControlCharacters(workspace.render(100)[1]!)).toContain("Usage");
     workspace.handleInput("\x1b[C");
     expect(stripVTControlCharacters(workspace.render(100)[1]!)).toContain("Settings");
     workspace.handleInput("\x1b[C");
@@ -120,7 +118,7 @@ describe("shared refine workspace", () => {
     for (const rows of [5, 8, 12, 16, 24, 40]) {
       for (const width of [1, 8, 12, 20, 40, 100]) {
         const { workspace } = create(rows, name, true);
-        for (const page of ["History", "Usage", "Settings", "Settings", "Preview"]) {
+        for (const page of ["Usage", "Settings", "Settings", "Preview"]) {
           workspace.handleInput("\x1b[C");
           const lines = workspace.render(width);
           expect(lines).toHaveLength(panelLayout(width, rows).height);
@@ -242,7 +240,7 @@ describe("shared refine workspace", () => {
       const { workspace } = create(40, "dark", optimizer);
       workspace.openSettings();
       workspace.handleInput("\x1b[D");
-      expect(stripVTControlCharacters(workspace.render(100)[1]!)).toBe("  Usage");
+      expect(stripVTControlCharacters(workspace.render(100)[1]!)).toBe("  Usage · All rounds");
       workspace.handleInput("\x1b[C");
       expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Project instructions");
       if (optimizer) {
@@ -425,7 +423,7 @@ describe("shared refine workspace", () => {
       expect(main).toContain(formatKeyHint(hint, theme));
     }
     panel.toggleHelp();
-    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["r", "Refine current draft (model call)"], theme));
+    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["r", "Refine current draft in this round (model call)"], theme));
     workspace.openSettings();
     expect(textOf(workspace.render(100))).toContain(formatKeyHint(["Ctrl+S", "Save context"], theme));
     workspace.handleInput("q");
