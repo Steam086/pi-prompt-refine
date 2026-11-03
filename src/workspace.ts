@@ -27,6 +27,7 @@ export class RefineWorkspace implements Component, Focusable {
   private selected: boolean[] = [];
   private original: boolean[] = [];
   private cursor = 0;
+  private settingsScrollTop = 0;
   private saving = false;
   private disposed = false;
   private inputError = "";
@@ -94,6 +95,7 @@ export class RefineWorkspace implements Component, Focusable {
     this.original = this.actions.context();
     this.selected = [...selected];
     this.cursor = cursor;
+    this.settingsScrollTop = 0;
     this.settingsNotice = "";
     this.switchMode("context");
   }
@@ -154,6 +156,7 @@ export class RefineWorkspace implements Component, Focusable {
         const count = this.actions.optimizer ? (this.actions.editSystemPrompt ? 6 : 5) : 3;
         if (this.keys.matches(data, "tui.select.up")) this.cursor = (this.cursor + count - 1) % count;
         else if (this.keys.matches(data, "tui.select.down")) this.cursor = (this.cursor + 1) % count;
+        else return true;
         this.tui.requestRender();
       }
       return true;
@@ -219,18 +222,14 @@ export class RefineWorkspace implements Component, Focusable {
     } else {
       const dirty = this.selected.some((value, i) => value !== this.original[i]);
       const notice = [this.saving ? "Saving..." : this.settingsNotice, dirty ? "Unsaved context changes" : ""].filter(Boolean).join(" · ");
-      const status = theme.fg(dirty ? "warning" : "muted", sanitizeTerminalText(notice));
+      const status = theme.fg(dirty ? "warning" : "muted", sanitizeTerminalText(notice || "Manual save · Next refinement only"));
       // Short screens have only one header row; never scroll save feedback out of view.
       header = [layout.headerHeight === 1 && notice ? status : tabs, status];
       const optimizer = this.actions.optimizer?.();
       const rows: string[] = [theme.bold("Context")];
       let focusStart = 0;
       let focusEnd = 0;
-      const hint = (text: string, color: "muted" | "warning" = "muted") => {
-        const inset = innerWidth >= 4 ? 2 : 0;
-        rows.push(...wrapTextWithAnsi(sanitizeTerminalText(text), innerWidth - inset)
-          .map((line) => " ".repeat(inset) + theme.fg(color, line)));
-      };
+      let focusedDetail = "";
       const add = (index: number, text: string, value?: string, affordance = "", disabled = false) => {
         const active = index === this.cursor;
         if (active) focusStart = rows.length;
@@ -243,31 +242,37 @@ export class RefineWorkspace implements Component, Focusable {
         const line = truncateToWidth(content, available, "…");
         const rendered = truncateToWidth(`${theme.fg("accent", active ? "› " : "  ")}${line}${theme.fg("muted", suffix)}`, innerWidth, "");
         rows.push(active ? theme.bg("selectedBg", rendered + " ".repeat(Math.max(0, innerWidth - visibleWidth(rendered)))) : rendered);
-        // Keep a truncated value beside its focused row, including in short viewports.
-        if (active && value !== undefined && visibleWidth(content) > available) hint(`${label}: ${value}`);
+        if (active && value !== undefined) focusedDetail = `${label}: ${value}`;
         if (active) focusEnd = rows.length;
       };
-      // Keep explanations with their owners, not in a selection-dependent block
-      // after both sections. Only section boundaries introduce an empty row.
-      hint("Manual save · Next refinement only");
+      // Navigation rows have fixed heights; explanations live in a reserved
+      // area below the list so changing focus never inserts or removes rows.
       [
         ["Include project instructions", "Use rules supplied by Pi (e.g. AGENTS.md)."],
         ["Directory tree", "Default tree only; @directory references are separate."],
         ["Skill metadata", "Include skill descriptions; never run skills."],
       ].forEach(([label, description], i) => {
         add(i, `[${this.selected[i] ? "x" : " "}] ${label}`);
-        hint(description!);
-        if (i === this.cursor) focusEnd = rows.length;
+        if (i === this.cursor) focusedDetail = description!;
       });
-      if (!this.actions.contextEnabled()) hint("Disabled by projectContext.enabled=false", "warning");
+      if (!this.actions.contextEnabled()) rows.push(theme.fg("warning", "Disabled by projectContext.enabled=false"));
       if (optimizer) {
         rows.push("", theme.bold("Optimizer"));
         add(3, "Model", optimizer.model, "›");
         add(4, "Thinking", optimizer.thinking, "↻", !optimizer.thinkingEnabled);
         if (this.actions.editSystemPrompt) add(5, "Optimization prompt", "Edit…", "›");
       }
-      const start = Math.min(focusStart, Math.max(0, focusEnd - bodyHeight));
-      body = rows.slice(start, start + bodyHeight);
+      const detailHeight = bodyHeight >= 12 ? 2 : bodyHeight >= 3 ? 1 : 0;
+      const listHeight = bodyHeight - detailHeight;
+      const maxStart = Math.max(0, rows.length - listHeight);
+      let start = Math.min(this.settingsScrollTop, maxStart);
+      if (focusStart < start) start = focusStart;
+      else if (focusEnd > start + listHeight) start = Math.min(focusStart, focusEnd - listHeight);
+      this.settingsScrollTop = Math.max(0, Math.min(start, maxStart));
+      body = Array.from({ length: listHeight }, (_, i) => rows[this.settingsScrollTop + i] ?? "");
+      const details = wrapTextWithAnsi(sanitizeTerminalText(focusedDetail), innerWidth);
+      body.push(...details.slice(0, detailHeight).map((line, i) => theme.fg("muted",
+        i === detailHeight - 1 && details.length > detailHeight ? truncateToWidth(line + "…", innerWidth, "…") : line)));
       const action = this.cursor === 3 ? "Choose" : this.cursor === 4 ? (optimizer?.thinkingEnabled ? "Cycle" : "Unavailable") : this.cursor === 5 ? "Edit" : "Toggle";
       // Saving has a fixed key and an explicit scope, independent of row focus.
       footer = [

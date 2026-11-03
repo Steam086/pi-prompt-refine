@@ -28,6 +28,8 @@ describe("workspace terminal rendering", () => {
     }, theme, () => terminal.rows, () => tui.requestRender());
     const workspace = new RefineWorkspace(panel, tui, theme, getKeybindings(), {
       context: () => [true, true, false], contextEnabled: () => true,
+      optimizer: () => ({ model: "provider/long-model-identifier-with-extra-details", thinking: "high · Extension setting", thinkingEnabled: true }),
+      chooseModel() {}, editSystemPrompt() {},
       saveContext: async () => "Saved", submit: () => undefined,
     });
     tui.addChild(workspace);
@@ -40,7 +42,7 @@ describe("workspace terminal rendering", () => {
       const clearCalls = vi.mocked(terminal.clearScreen).mock.calls.length;
       writes.length = 0;
       for (let repeat = 0; repeat < 10; repeat++) {
-        for (const key of ["\x1b[C", "\x1b[D", "i", "\x1b"]) {
+        for (const key of ["\x1b[C", ...Array<string>(6).fill("\x1b[B"), ...Array<string>(6).fill("\x1b[A"), "\x1b[D", "i", "\x1b"]) {
           input(key);
           tui.renderNow();
           expect(workspace.render(columns)).toHaveLength(initialHeight);
