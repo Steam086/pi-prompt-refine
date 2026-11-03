@@ -106,7 +106,6 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   let refreshPreview: (() => void) | undefined;
   let closePreview: (() => void) | undefined;
   let interacting = false;
-  let setupNotified = false;
   // Session-wide, not branch/workflow state. Rebuilt from Pi metadata on resume/reload.
   const namedSessions = new Set<string>();
   const openHint = config.shortcuts.view ?? config.shortcuts.optimize ?? "/refine view";
@@ -971,7 +970,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const text = event.messageType === "user" ? event.prompt : userMessageText(event.message);
     controller.onMessageStarted(text);
   });
-  pi.on("session_start", (_event, ctx) => {
+  pi.on("session_start", (event, ctx) => {
     currentUiContext = ctx;
     // Include abandoned branches: session names are session-wide. A later explicit
     // clear must not re-enable automatic naming after a resume or /reload either.
@@ -982,9 +981,10 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     controller.setSession(ctx.sessionManager.getSessionId());
     for (const warning of loaded.warnings) notify(ctx, warning, "warning");
     if (loaded.shortcutsMigrated) notify(ctx, "Prompt Refine legacy default shortcuts were migrated to Control+\\; the original configuration file was not rewritten, and custom shortcuts are unchanged.", "info");
-    if (ctx.mode === "tui" && !controller.getModel() && !setupNotified) {
-      setupNotified = true;
-      notify(ctx, "Prompt Refine: no optimizer model selected. Run /refine model to choose a model from your configured Pi providers; the main session model is not used automatically.", "info");
+    if (ctx.mode === "tui" && event.reason === "startup") {
+      const key = config.shortcuts.optimize?.replace(/ctrl/g, "Ctrl").replace(/\+/g, " + ");
+      const setup = controller.getModel() ? "" : " No optimizer model selected; use /refine model.";
+      notify(ctx, `Prompt Refine: Use ${key ?? "/refine optimize"} to refine your prompt.${setup}`);
     }
   });
   pi.on("session_before_tree", (_event, ctx) => {
