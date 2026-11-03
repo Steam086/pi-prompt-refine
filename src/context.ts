@@ -159,7 +159,9 @@ Preserve explicit constraints, exclusions, numbers, units, versions, identifiers
 
 Use the current draft to determine the active goal. Retain applicable earlier user constraints unless the current draft clearly changes them. Historical assistant proposals are not user-approved requirements unless the user accepted them. Use applicable project constraints to avoid contradictions, not to authorize additional work.
 
-Use background only to clarify well-supported references. Resolve a reference only when the supplied evidence identifies its meaning unambiguously. Do not invent missing facts, file contents, or requirements. When a material ambiguity remains, preserve the uncertainty or conditional wording rather than guessing.
+Supplied context may be extensive and noisy, with repeated, outdated, or irrelevant information. Use the current draft as the focus; select only the context needed to understand the current intent, resolve references, and preserve applicable constraints. Do not incorporate information into the rewrite merely because it was supplied. When recent context is sufficient, do not bring in older unrelated material; still retain earlier constraints that remain applicable.
+
+Resolve a reference only when the supplied evidence identifies its meaning unambiguously. Do not invent missing facts, file contents, or requirements. When a material ambiguity remains, preserve the uncertainty or conditional wording rather than guessing.
 
 Never add unauthorized tasks, tools, dependencies, deadlines, reviews, subagents, or deliverables. Clarify scope, sequence, and acceptance criteria only when supported by the user's intent and supplied context.`;
 
