@@ -1,5 +1,6 @@
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ModelRef } from "./config.js";
+import type { HistorySnapshot } from "./context.js";
 import type { TokenUsage } from "./usage.js";
 import type { ProjectSnapshot } from "./project-context.js";
 
@@ -15,7 +16,8 @@ export interface RefineRequestInput {
   generateTitle?: boolean;
   sessionId: string;
   branchLeafId: string | null;
-  historyText: string;
+  history: HistorySnapshot;
+  systemPrompt: string;
   project?: RequestProjectContext;
 }
 
@@ -33,22 +35,15 @@ export interface RefineCompletion {
   stopReason: RefineStopReason;
 }
 
-export interface Candidate {
+export interface Candidate extends RefineRequestInput {
   /** Frozen request duration, retained in accepted/restored snapshots. */
   elapsedSeconds?: number;
   usage?: TokenUsage;
   title?: string;
-  generateTitle?: boolean;
   requestId: number;
   version: number;
   generation: number;
-  sessionId: string;
-  draft: string;
   text: string;
-  model: ModelRef;
-  branchLeafId: string | null;
-  historyText: string;
-  project?: RequestProjectContext;
 }
 
 export interface CandidateToken {
@@ -129,7 +124,7 @@ function sameModel(left: ModelRef | undefined, right: ModelRef | undefined): boo
 }
 
 function fingerprint(request: RefineRequestInput): string {
-  return JSON.stringify([request.draft, request.model.provider, request.model.id, request.thinkingLevel, request.sessionId, request.branchLeafId, request.historyText, request.project, request.generateTitle]);
+  return JSON.stringify([request.draft, request.model.provider, request.model.id, request.thinkingLevel, request.sessionId, request.branchLeafId, request.history, request.project, request.generateTitle, request.systemPrompt]);
 }
 
 function elapsedSeconds(active: ActiveRequest): number {
@@ -137,7 +132,7 @@ function elapsedSeconds(active: ActiveRequest): number {
 }
 
 function cloneCandidate(candidate: Candidate): Candidate {
-  return { ...candidate, ...(candidate.project ? { project: structuredClone(candidate.project) } : {}), ...(candidate.usage ? { usage: { ...candidate.usage } } : {}), model: { ...candidate.model } };
+  return { ...candidate, history: structuredClone(candidate.history), ...(candidate.project ? { project: structuredClone(candidate.project) } : {}), ...(candidate.usage ? { usage: { ...candidate.usage } } : {}), model: { ...candidate.model } };
 }
 
 export class RefineController {
@@ -331,6 +326,7 @@ export class RefineController {
     const requestId = ++this.requestSequence;
     const request: RefineRequest = {
       ...input,
+      history: structuredClone(input.history),
       ...(input.project ? { project: structuredClone(input.project) } : {}),
       model: { ...input.model },
       requestId,
@@ -475,7 +471,9 @@ export class RefineController {
         ...(active.request.generateTitle && result.title ? { title: result.title } : {}),
         model: { ...active.request.model },
         branchLeafId: active.request.branchLeafId,
-        historyText: active.request.historyText,
+        history: structuredClone(active.request.history),
+        systemPrompt: active.request.systemPrompt,
+        thinkingLevel: active.request.thinkingLevel,
         ...(active.request.project ? { project: structuredClone(active.request.project) } : {}),
       };
       this.candidate = candidate;

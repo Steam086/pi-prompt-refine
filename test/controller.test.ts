@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { RefineController, type RefineCompletion, type RefineRequest, type RefineRequestInput } from "../src/controller.js";
 import type { ModelRef } from "../src/config.js";
+import { buildRefineSystemPrompt, selectHistory } from "../src/context.js";
 import { deferred, FakeScheduler, flushPromises, success } from "./helpers.js";
 
 const model: ModelRef = { provider: "provider-a", id: "chat-model" };
@@ -11,7 +12,8 @@ function input(draft: string, overrides: Partial<RefineRequestInput> = {}): Refi
     model,
     sessionId: "session-1",
     branchLeafId: "leaf-1",
-    historyText: "[user]\nKeep it concise",
+    history: selectHistory([{ type: "message", message: { role: "user", content: "Keep it concise" } }], 12, 1000),
+    systemPrompt: buildRefineSystemPrompt(false),
     ...overrides,
   };
 }
@@ -88,6 +90,30 @@ describe("RefineController request lifecycle", () => {
     } finally {
       clock.mockRestore();
     }
+  });
+
+  it("freezes history metadata and includes it and the system prompt in active/ready deduplication", async () => {
+    const pending = deferred<RefineCompletion>();
+    const complete = vi.fn(() => pending.promise);
+    const { controller } = setup(complete);
+    const request = input("Draft", { thinkingLevel: "high" });
+    controller.trigger(request);
+    request.history.items[0]!.text = "mutated outside request";
+    expect(controller.trigger(input("Draft", { thinkingLevel: "high" })).kind).toBe("duplicate");
+    const updated = input("Draft", { thinkingLevel: "high", systemPrompt: buildRefineSystemPrompt(false, "Be brief") });
+    expect(controller.trigger(updated).kind).toBe("started");
+    pending.resolve(success("Refined"));
+    await flushPromises();
+    expect(controller.getCandidate()?.history.items[0]?.text).toBe("Keep it concise");
+    expect(controller.getCandidate()?.systemPrompt).toBe(updated.systemPrompt);
+    expect(controller.trigger(updated).kind).toBe("ready");
+    const copy = controller.getCandidate()!;
+    copy.history.items[0]!.text = "mutated copy";
+    expect(controller.getCandidate()?.history.items[0]?.text).toBe("Keep it concise");
+    const changed = structuredClone(updated);
+    changed.history.status = "partial";
+    changed.history.omittedMessageCount = 1;
+    expect(controller.trigger(changed).kind).toBe("started");
   });
 
   it("includes title eligibility in deduplication and drops unsolicited titles", async () => {

@@ -123,12 +123,12 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       const available = ctx.modelRegistry.getAvailable().some((candidate) => sameModel(candidate, request.model));
       if (!available) throw new Error(`Model is not currently available: ${displayModel(request.model)}`);
 
-      const systemPrompt = buildRefineSystemPrompt(!!request.generateTitle, config.systemPrompt);
+      const systemPrompt = request.systemPrompt;
       let projectText = "";
       if (request.project) {
         // History gates only the default tree; explicit @directories are independent.
         const tree = await collectDirectoryContext(
-          request.project.cwd, request.draft, config.projectContext, !request.historyText, signal,
+          request.project.cwd, request.draft, config.projectContext, !request.history.text, signal,
         );
         if (signal.aborted) throw new Error("Context collection cancelled");
         const project = assembleProjectContext(request.project.snapshot, tree, config.projectContext);
@@ -145,11 +145,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
 
       const userMessage: UserMessage = {
         role: "user",
-        content: [{ type: "text", text: buildRefineInput(request.draft, {
-          text: request.historyText,
-          messageCount: 0,
-          characterCount: request.historyText.length,
-        }, projectText) }],
+        content: [{ type: "text", text: buildRefineInput(request.draft, request.history, projectText) }],
         timestamp: Date.now(),
       };
       const response = await ctx.modelRegistry.streamSimple(
@@ -202,7 +198,10 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const history = !historySnapshot.messageCount
       ? (projectLabel ? "No history" : "Draft only")
       : `${historySnapshot.messageCount} msgs · ${historySnapshot.characterCount} char · ${historySnapshot.latestAssistantIncluded ? "assistant" : "no assistant"}${historySnapshot.truncated ? " · trimmed" : ""}`;
-    return `${warning}${history}${projectLabel ? ` · ${projectLabel}` : ""}`;
+    const completeness = historySnapshot.status === "disabled_by_policy"
+      ? " · history off"
+      : `${historySnapshot.omittedMessageCount ? ` · ${historySnapshot.omittedMessageCount} omitted` : ""}${historySnapshot.excerptedMessageCount ? ` · ${historySnapshot.excerptedMessageCount} excerpted` : ""}`;
+    return `${warning}${history}${completeness}${projectLabel ? ` · ${projectLabel}` : ""}`;
   }
 
   function updatePresentation(state: ControllerState): void {
@@ -444,7 +443,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       return;
     }
     const confirmed = await ctx.ui.confirm("Apply optimization prompt changes?",
-      "Use the edited instructions for future refinements and save them to prompt-refine.json? Existing results and running requests are unchanged. Session title rules are appended automatically.");
+      "Use the edited instructions for future refinements and save them to prompt-refine.json? Existing results and running requests are unchanged. The fixed refiner role, JSON output contract and session title rules are added automatically.");
     if (!confirmed || !isCurrent()) return;
     config.systemPrompt = edited;
     const persisted = await persistConfig(ctx);
@@ -520,14 +519,16 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const project = config.projectContext.enabled ? captureProjectContext(ctx, config.projectContext, draft, followUp) : undefined;
     projectLabel = project ? `${project.instructionCount} rules · ${project.skillCount} skills${config.projectContext.tree.enabled && !history.text ? " · tree" : ""}` : "";
     projectWarnings = project?.warnings ?? [];
+    const generateTitle = canNameSession(ctx);
     const result = controller.trigger({
       draft,
       model: selected,
       thinkingLevel: effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel),
-      generateTitle: canNameSession(ctx),
+      generateTitle,
+      systemPrompt: buildRefineSystemPrompt(generateTitle, config.systemPrompt),
       sessionId: ctx.sessionManager.getSessionId(),
       branchLeafId: ctx.sessionManager.getLeafId(),
-      historyText: history.text,
+      history,
       ...(project ? { project: { cwd: ctx.cwd, snapshot: project } } : {}),
     }, { force });
     if (result.kind !== "started") {

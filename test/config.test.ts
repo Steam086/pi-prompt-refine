@@ -60,11 +60,11 @@ describe("Prompt Refine configuration", () => {
     expect(invalid.warnings).toHaveLength(2);
   });
 
-  it("defaults follow-up instructions off and validates the opt-in", () => {
-    expect(parseConfig({ version: 1 }).config.projectContext.instructionsOnFollowUp).toBe(false);
-    expect(parseConfig({ version: 1, projectContext: { instructionsOnFollowUp: true } }).config.projectContext.instructionsOnFollowUp).toBe(true);
+  it("defaults follow-up instructions on and preserves explicit opt-outs", () => {
+    expect(parseConfig({ version: 1 }).config.projectContext.instructionsOnFollowUp).toBe(true);
+    expect(parseConfig({ version: 1, projectContext: { instructionsOnFollowUp: false } }).config.projectContext.instructionsOnFollowUp).toBe(false);
     const invalid = parseConfig({ version: 1, projectContext: { instructionsOnFollowUp: "yes" } });
-    expect(invalid.config.projectContext.instructionsOnFollowUp).toBe(false);
+    expect(invalid.config.projectContext.instructionsOnFollowUp).toBe(true);
     expect(invalid.warnings.join(" ")).toContain("instructionsOnFollowUp");
   });
 
