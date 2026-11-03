@@ -166,7 +166,7 @@ export class PreviewPanel implements Component {
     const paragraph = (text: string, color: "text" | "muted" | "warning" = "text") => {
       lines.push(...wrapTextWithAnsi(sanitizeTerminalText(text), width).map((line) => theme.fg(color, line)));
     };
-    const usageLabel = formatTokenUsage(options.state.usage);
+    const usageLabel = formatTokenUsage(options.state.usage, this.helpVisible ? "full" : "summary");
     if (usageLabel && options.state.phase !== "generating") {
       paragraph(usageLabel, "muted");
       lines.push("");
@@ -179,6 +179,7 @@ export class PreviewPanel implements Component {
         helpLine(["a", "Accept into editor (no send)"], ["e", "Edit candidate (no model call)"]);
         helpLine(["f", "Revise current result with new instructions (model call)"]);
         helpLine(["s", "Send (follow-up if busy; draft kept)"]);
+        paragraph("Accept puts the result in the editor; s sends directly.", "muted");
       }
       helpLine(["x/d", "Stop request / discard result (not just close)"]);
       helpLine(["z", "Restore draft before acceptance"]);
@@ -218,9 +219,6 @@ export class PreviewPanel implements Component {
       if (!options.accepted && options.sessionTitle) {
         paragraph(`Title on accept: ${options.sessionTitle}`, "muted");
         lines.push("");
-      }
-      if (this.hasActionableCandidate() && !this.helpVisible) {
-        paragraph("Accept puts the result in the editor; s sends directly.", "muted");
       }
       const title = options.accepted ? "Accepted prompt · read-only" : "Refined prompt";
       lines.push(theme.fg("text", theme.bold(`${title}${this.sourceVisible ? " · source" : ""}`)), "");
@@ -287,7 +285,7 @@ export class PreviewPanel implements Component {
     if (options.navigation && layout.bodyHeight - navigation.length >= 4) {
       const position = options.navigation;
       navigation.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(
-        `${position.index}/${position.count} · ${position.label}${options.thinkingLevel ? ` · ${options.thinkingLevel}` : ""} · [ / ] Candidates · m Model · c Cycle · g Generate`,
+        `${position.index}/${position.count} · ${position.label}${options.thinkingLevel ? ` · ${options.thinkingLevel}` : ""}`,
       ), innerWidth)));
     }
     const bodyHeight = layout.bodyHeight - navigation.length;
@@ -299,7 +297,7 @@ export class PreviewPanel implements Component {
     // Idle has no request context to describe; details remain available in Help.
     const metadata = sanitizeTerminalText([
       model ? `${model.provider}/${model.id}` : "No model",
-      ...(options.state.phase !== "idle" || options.accepted ? [options.contextLabel] : []),
+      ...(options.state.phase === "generating" || options.state.phase === "error" ? [options.contextLabel] : []),
     ].join(" · "));
     const status = this.isEmptyState() && !options.navigation ? "" : [heading, theme.fg("muted", metadata)].filter(Boolean).join(" · ");
     header.push(options.notice ? theme.fg("muted", sanitizeTerminalText(options.notice)) : status);
@@ -312,11 +310,15 @@ export class PreviewPanel implements Component {
         : options.accepted
           ? [["r", "Refine draft"], ...(options.canRestore ? [["z", "Restore"] as KeyHint] : [])]
           : this.hasActionableCandidate()
-            ? [["a", "Accept"], ["e", "Edit"], ["f", "Revise"]]
+            ? [["a", "Accept"], ["e", "Edit"], ["f", "Revise"], ["s", "Send"]]
             : [["r", options.state.phase === "error" ? "Retry" : "Refine"], ["m", "Model"], ["i", "Input"]];
     const secondary: KeyHint[] = [["q", "Back"], ["?", this.helpVisible ? "Hide help" : "Help"]];
-    if (options.navigation && options.state.phase !== "generating" && !options.state.pendingSend) {
-      secondary.push(["m", "Model"], ["c", "Cycle"], ["g", "Same input"], ["←/→", "Page"]);
+    // Back/Help survive narrow widths; other hints are omitted rather than wrapped.
+    // Empty/error primary actions already expose Input/Model. Tabs own page hints.
+    if (!primary.some(([key]) => key === "i")) secondary.push(["i", "Input"]);
+    if (options.state.phase !== "generating" && !options.state.pendingSend) {
+      if (!primary.some(([key]) => key === "m")) secondary.push(["m", "Model"]);
+      if (options.navigation) secondary.push(["g", "Same input"]);
     }
     // Independent rows keep long primary labels from crowding out Back/Help.
     const footer = [fittingKeyHints(primary, innerWidth, theme), fittingKeyHints(secondary, innerWidth, theme)];

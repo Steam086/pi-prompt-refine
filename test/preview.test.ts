@@ -23,6 +23,47 @@ function create(overrides: Partial<PreviewOptions> = {}, rows = 40) {
 }
 
 describe("result reading panel", () => {
+  it("keeps completed candidate metadata separate from a single action footer", () => {
+    const panel = create({
+      navigation: { index: 1, count: 2, label: "#5 refine" }, thinkingLevel: "xhigh",
+      state: { ...options.state, usage: { totalTokens: 5969, input: 5634, output: 335, cacheRead: 0, cacheWrite: 0, reasoning: 315 } },
+      contextLabel: "6 msgs · 6467 char · assistant · 2 rules · 0 skills",
+    });
+    const lines = panel.render(100);
+    const text = lines.join("\n");
+    expect(lines.find((line) => line.includes("#5 refine"))?.trim()).toBe("1/2 · #5 refine · xhigh");
+    expect(lines[2]).not.toContain("6 msgs");
+    expect(text).toContain("Tokens: total 5969 · in 5634 · out 335");
+    expect(text).not.toContain("read 0");
+    expect(text).not.toContain("think(out)");
+    for (const hint of ["a Accept", "e Edit", "f Revise", "s Send", "i Input", "m Model", "g Same input", "q Back", "? Help"]) {
+      expect(text.split(hint)).toHaveLength(2);
+      expect(lines.slice(-2).join("\n")).toContain(hint);
+    }
+    for (const hint of ["c Cycle", "g Generate", "←/→ Page", "Candidates", "Accept puts"]) expect(text).not.toContain(hint);
+    panel.toggleHelp();
+    const help = panel.render(100).join("\n");
+    panel.scrollBy(10);
+    let fullHelp = help + "\n" + panel.render(100).join("\n");
+    panel.scrollBy(10);
+    fullHelp += "\n" + panel.render(100).join("\n");
+    for (const hint of ["Accept puts", "Previous / next candidate", "c Cycle", "g Generate from the same frozen input", "6 msgs", "read 0", "think(out) 315"]) {
+      expect(fullHelp).toContain(hint);
+    }
+  });
+
+  it.each([12, 20, 40, 80, 100])("keeps comparison hints bounded and nonduplicated at %i columns", (width) => {
+    const panel = create({ navigation: { index: 1, count: 2, label: "#5 refine" } });
+    const lines = panel.render(width);
+    expect(lines).toHaveLength(panelLayout(width, 40).height);
+    for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+    const text = lines.join("\n");
+    for (const hint of ["m Model", "g Same input", "i Input"]) expect(text.split(hint).length).toBeLessThanOrEqual(2);
+    expect(text).not.toContain("←/→ Page");
+    expect(lines.slice(-2).join("\n")).toContain("q Back");
+    if (width >= 40) expect(lines.slice(-2).join("\n")).toContain("? Help");
+  });
+
   it("remembers candidate reading positions across navigation and model-picker reopen", () => {
     const positions = new Map<string, number>();
     const first = { ...options, viewKey: "record-1", candidateText: Array.from({ length: 100 }, (_, i) => `A line ${i}`).join("\n") };
@@ -171,10 +212,10 @@ describe("result reading panel", () => {
     expect(text).not.toContain("o Original");
     expect(text).toContain("? Help");
     expect(text).not.toContain("Enter won't send");
-    expect(text).toContain("Accept puts the result in the editor; s sends directly.");
+    expect(text).not.toContain("Accept puts the result in the editor; s sends directly.");
     expect(panel.render(100).slice(-2)).toEqual([
-      "  a Accept · e Edit · f Revise",
-      "  q Back · ? Help",
+      "  a Accept · e Edit · f Revise · s Send",
+      "  q Back · ? Help · i Input · m Model",
     ]);
     expect(text.match(/Prompt refine/g)).toHaveLength(1);
     panel.toggleOriginal();
@@ -238,8 +279,9 @@ describe("result reading panel", () => {
       expect(text).not.toContain("Restart");
     }
     if (phase === "error") expect(text.match(/r Retry/g)).toHaveLength(1);
-    if (phase === "ready") expect(text).toContain("s sends directly");
-    else expect(text).not.toContain("s sends directly");
+    if (phase === "ready") expect(text).toContain("s Send");
+    else expect(text).not.toContain("s Send");
+    expect(text).not.toContain("s sends directly");
     expect(text).not.toContain("Enter won't send");
   });
 
@@ -317,7 +359,7 @@ describe("result reading panel", () => {
     expect(next).not.toContain("q/Esc");
     expect(next).toContain("e Edit");
     expect(next).toContain("f Revise");
-    expect(next).not.toContain("i Input");
+    expect(next).toContain("i Input");
     expect(next).toContain("Settings");
     expect(next).toContain("←");
     expect(next).toContain("→");
@@ -411,7 +453,7 @@ describe("result reading panel", () => {
 
   it("prioritizes return and help in the single-line footer, then fits primary actions", () => {
     const panel = create({}, 8);
-    expect(panel.render(100).at(-1)?.trim()).toBe("q Back · ? Help · a Accept · e Edit · f Revise");
+    expect(panel.render(100).at(-1)?.trim()).toBe("q Back · ? Help · a Accept · e Edit · f Revise · s Send · i Input · m Model");
     expect(panel.render(20).at(-1)?.trim()).toBe("q Back · ? Help");
     expect(panel.render(12).at(-1)?.trim()).toBe("q Back");
   });

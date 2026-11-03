@@ -1367,7 +1367,15 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.widgetLines(100).join("\n")).toContain("Tokens: total 190 · in 120 · out 30");
     harness.holdPanel();
     const view = harness.command("view", harness.context);
-    expect(harness.panelLines().join("").replace(/\s/g, "")).toContain("think(out)10");
+    expect(harness.panelLines().join("\n")).toContain("Tokens: total 190 · in 120 · out 30");
+    expect(harness.panelLines().join("\n")).not.toContain("think(out)");
+    harness.panelInput("\x1b[C"); // History
+    harness.panelInput("\x1b[C"); // Usage
+    harness.panelInput("\r"); // Full request detail retains all provider counts.
+    const usageDetail = harness.panelLines(100).join("").replace(/\s/g, "");
+    for (const count of ["read40", "write0", "think(out)10"]) expect(usageDetail).toContain(count);
+    harness.panelInput("\x1b[D"); // History
+    harness.panelInput("\x1b[D"); // Preview
     harness.panelInput("a");
     await view;
     const acceptedView = harness.command("view", harness.context);
@@ -1457,6 +1465,137 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const footer = vi.mocked(harness.context.ui.setFooter);
     expect((footer.mock.calls[0]![0] as any)().render(80)).toEqual([]);
     expect(footer).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it.each(["", "Main editor stays independent"])("retains exact Input text across close/reopen with main editor %j", async (mainDraft) => {
+    const harness = await makeHarness();
+    harness.setEditorText(mainDraft);
+    harness.holdPanel();
+    const text = "  Original 中文 😀\n\n" + "Long pasted line\n".repeat(30);
+    let view = harness.command("view", harness.context);
+    harness.panelInput("i");
+    harness.panelInput(`\x1b[200~${text}\x1b[201~`);
+    harness.panelInput("\x1b");
+    harness.panelInput("q");
+    await view;
+    expect(harness.complete).not.toHaveBeenCalled();
+
+    view = harness.command("view", harness.context);
+    expect(harness.panelLines()[1]).toContain("Prompt refine");
+    harness.panelInput("i");
+    harness.panelInput("\r");
+    await flushPromises();
+    const payload = JSON.parse((harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
+    expect(payload.draft).toBe(text);
+    harness.panelInput("q");
+    await view;
+    view = harness.command("view", harness.context);
+    harness.panelInput("i");
+    harness.panelInput("\r");
+    await flushPromises();
+    expect(JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text).draft).toBe(text);
+    harness.panelInput("q");
+    await view;
+    expect(harness.getEditor()).toBe(mainDraft);
+    expect(harness.editorWrites).toEqual([]);
+    expect(harness.sent).toEqual([]);
+    expect(harness.sessionWrites).toEqual([]);
+  });
+
+  it("isolates Input by session, remembers clearing, and drops runtime memory on reload", async () => {
+    const harness = await makeHarness();
+    harness.holdPanel();
+    const session = vi.spyOn(harness.context.sessionManager, "getSessionId");
+    let view = harness.command("view", harness.context);
+    harness.panelInput("i");
+    harness.panelInput("Session one input");
+    harness.handlers.get("session_before_switch")?.[0]?.({ type: "session_before_switch" }, harness.context);
+    await view;
+    session.mockReturnValue("session-two");
+    view = harness.command("view", harness.context);
+    harness.panelInput("i");
+    expect(harness.panelLines().join("\n")).not.toContain("Session one input");
+    harness.panelInput("Session two input");
+    harness.panelInput("\x1b");
+    harness.panelInput("q");
+    await view;
+
+    session.mockReturnValue("session-one");
+    view = harness.command("view", harness.context);
+    harness.panelInput("i");
+    expect(harness.panelLines().join("\n")).toContain("Session one input");
+    expect(harness.panelLines().join("\n")).not.toContain("Session two input");
+    harness.panelInput("\x15");
+    harness.panelInput("\x1b");
+    harness.panelInput("q");
+    await view;
+    view = harness.command("view", harness.context);
+    harness.panelInput("i");
+    expect(harness.panelLines().join("\n")).not.toContain("Session one input");
+    harness.panelInput("Not persisted");
+    harness.panelInput("\x1b");
+    harness.panelInput("q");
+    await view;
+    await harness.reload();
+    view = harness.command("view", harness.context);
+    harness.panelInput("i");
+    expect(harness.panelLines().join("\n")).not.toContain("Not persisted");
+    harness.panelInput("\x1b");
+    harness.panelInput("q");
+    await view;
+    expect(harness.complete).not.toHaveBeenCalled();
+    expect(harness.sessionWrites).toEqual([]);
+    expect(harness.editorWrites).toEqual([]);
+  });
+
+  it("keeps edited Input through completion and model picking without changing frozen-input comparisons", async () => {
+    const harness = await makeHarness();
+    const registry = harness.context.modelRegistry;
+    const a = registry.getAvailable()[0]!;
+    const b = { ...a, provider: "other-provider", id: "second-model", name: "Second Model" } as Model<Api>;
+    vi.mocked(registry.getAvailable).mockReturnValue([a, b]);
+    vi.mocked(registry.find).mockImplementation((provider, id) => [a, b].find((model) => model.provider === provider && model.id === id));
+    let finish!: (value: any) => void;
+    harness.complete.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("i");
+    harness.panelInput("Original input");
+    harness.panelInput("\r");
+    await flushPromises();
+    const frozen = (harness.complete.mock.calls[0] as any[])[1];
+    harness.panelInput("i");
+    expect(harness.panelLines().join("\n")).toContain("Original input");
+    harness.panelInput(" + later edit");
+    const editing = harness.panelLines();
+    finish({ content: [{ type: "text", text: JSON.stringify({ prompt: "First result" }) }], stopReason: "stop" });
+    await flushPromises();
+    expect(harness.panelLines()).toEqual(editing);
+    harness.panelInput("\x1b");
+    harness.panelInput("m");
+    await flushPromises();
+    harness.panelInput("\x1b[B");
+    harness.panelInput("\r");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("No candidate for this model"));
+    harness.panelInput("i");
+    expect(harness.panelLines().join("\n")).toContain("Original input + later edit");
+    harness.panelInput("\x1b");
+    harness.panelInput("g");
+    await flushPromises();
+    expect((harness.complete.mock.calls[1] as any[])[0]).toBe(b);
+    expect((harness.complete.mock.calls[1] as any[])[1].messages[0].content).toEqual(frozen.messages[0].content);
+    harness.panelInput("g"); // A second candidate for B remains in the same task.
+    await flushPromises();
+    expect(harness.panelLines().join("\n")).toContain("2/2");
+    harness.panelInput("i");
+    harness.panelInput("\r");
+    await flushPromises();
+    expect(JSON.parse((harness.complete.mock.calls[3] as any[])[1].messages[0].content[0].text).draft).toBe("Original input + later edit");
+    expect(harness.panelLines().join("\n")).toContain("1/1");
+    harness.panelInput("q");
+    await view;
+    expect(harness.editorWrites).toEqual([]);
+    expect(harness.sent).toEqual([]);
   });
 
   it("retains canceled input and rejects blank submissions in place", async () => {

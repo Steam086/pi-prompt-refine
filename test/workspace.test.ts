@@ -15,12 +15,13 @@ const options: PreviewOptions = {
   draft: "Original draft", contextLabel: "Draft only", elapsedSeconds: 0, openHint: "ctrl+\\", canRestore: false,
 };
 
-function create(rows = 40, themeName = "dark", optimizer = false) {
+function create(rows = 40, themeName = "dark", optimizer = false, inputText = "") {
   const terminal = { rows, columns: 80 };
   const tui = { terminal, requestRender: vi.fn() } as unknown as TUI;
   const theme = getThemeByName(themeName)!;
   const panel = new PreviewPanel(options, theme, () => terminal.rows, () => tui.requestRender());
   const actions = {
+    inputDraft: { text: inputText, save: vi.fn() },
     history: vi.fn((): RefineRecord[] => []),
     context: () => ({ instructions: "always" as const, tree: true, skills: false }), contextEnabled: () => true,
     ...(optimizer ? {
@@ -484,6 +485,25 @@ describe("shared refine workspace", () => {
     expect(actions.saveContext).not.toHaveBeenCalled();
   });
 
+  it("hydrates the independent draft and saves only edits, including an explicit clear", () => {
+    const { workspace, actions } = create(40, "dark", false, "Retained input");
+    expect(textOf(workspace.render(100))).not.toContain("Retained input");
+    workspace.handleInput("i");
+    expect(textOf(workspace.render(100))).toContain("Retained input");
+    workspace.handleInput("\x1b[D");
+    workspace.handleInput("\x1b[C");
+    workspace.handleInput("\r");
+    expect(actions.submit).toHaveBeenCalledWith("Retained input");
+    expect(actions.inputDraft.save).not.toHaveBeenCalled();
+    workspace.handleInput("i");
+    expect(textOf(workspace.render(100))).toContain("Retained input");
+    workspace.handleInput("\x15"); // Ctrl+U at end of the single line.
+    expect(actions.inputDraft.save).toHaveBeenLastCalledWith("");
+    workspace.handleInput("\r"); // Validation belongs to the host; even submission keeps the clear.
+    workspace.handleInput("i");
+    expect(textOf(workspace.render(100))).not.toContain("Retained input");
+  });
+
   it("expands bracketed paste exactly and preserves failed input for retry", () => {
     const { workspace, actions } = create();
     const draft = "  第一行\n\n" + "Long pasted text\n".repeat(20);
@@ -491,12 +511,18 @@ describe("shared refine workspace", () => {
     workspace.handleInput("i");
     workspace.handleInput(`\x1b[200~${draft}\x1b[201~`);
     expect(actions.submit).not.toHaveBeenCalled();
+    expect(actions.inputDraft.save).toHaveBeenLastCalledWith(draft);
+    const saves = actions.inputDraft.save.mock.calls.length;
     workspace.handleInput("\r");
     expect(actions.submit).toHaveBeenLastCalledWith(draft);
     expect(textOf(workspace.render(80))).toContain("No model configured");
     workspace.handleInput("\r");
     expect(actions.submit).toHaveBeenLastCalledWith(draft);
     expect(textOf(workspace.render(80))).toContain("Prompt refine");
+    expect(actions.inputDraft.save).toHaveBeenCalledTimes(saves);
+    workspace.handleInput("i");
+    workspace.handleInput("\r");
+    expect(actions.submit).toHaveBeenLastCalledWith(draft);
   });
 
   it("keeps selected settings visible in a tiny viewport and retains their cursor", () => {

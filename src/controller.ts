@@ -254,7 +254,7 @@ export class RefineController {
     const record = records[index];
     return { index: index + 1, count: records.length, label: record
       ? `#${record.id} ${record.kind}${record.parentId ? ` from #${record.parentId}` : ""}${record.acceptedAt !== undefined ? " · accepted" : ""}`
-      : "No candidate for this model · g Same input" };
+      : "No candidate for this model" };
   }
 
   cycleCandidate(direction: number): boolean {
