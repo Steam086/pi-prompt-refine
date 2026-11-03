@@ -3,6 +3,8 @@ import { getKeybindings, TuiAltScreen, TuiMainScreen, type Terminal } from "@ear
 import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { PreviewPanel } from "../src/preview.js";
 import { RefineWorkspace } from "../src/workspace.js";
+import type { RefineRecord } from "../src/history.js";
+import { selectHistory } from "../src/context.js";
 
 // Exercise the real Pi diff renderers, not just component snapshots. Terminal I/O
 // is captured, so these tests make no claims about a physical terminal's latency/IME.
@@ -26,10 +28,18 @@ describe("workspace terminal rendering", () => {
       state: { phase: "ready", requestId: 1, pendingSend: false },
       candidateText: "A short result", contextLabel: "Draft only", elapsedSeconds: 0, openHint: "ctrl+\\", canRestore: false,
     }, theme, () => terminal.rows, () => tui.requestRender());
+    const requestInput = { draft: "Historical draft 中文😀 ".repeat(8), model: { provider: "provider", id: "long-model-identifier-中文" },
+      sessionId: "session", branchLeafId: "leaf", systemPrompt: "Policy", history: selectHistory([], 12, 100) };
+    const records: RefineRecord[] = Array.from({ length: 30 }, (_, index) => ({
+      id: index + 1, taskId: 1, kind: "refine", createdAt: 1, input: requestInput,
+      status: index % 3 === 0 ? "error" : "generated", elapsedSeconds: index,
+      usage: index % 3 === 0 ? undefined : { totalTokens: index * 1200, input: index * 1000, output: index * 200 },
+      candidate: index % 3 === 0 ? undefined : { ...requestInput, requestId: index + 1, version: index + 1, generation: 0, text: "Candidate 中文😀\n".repeat(50) },
+    }));
     const workspace = new RefineWorkspace(panel, tui, theme, getKeybindings(), {
       context: () => ({ instructions: "always" as const, tree: true, skills: false }), contextEnabled: () => true,
       optimizer: () => ({ model: "provider/long-model-identifier-with-extra-details", thinking: "high · Extension setting", thinkingEnabled: true }),
-      chooseModel() {}, editSystemPrompt() {},
+      chooseModel() {}, editSystemPrompt() {}, history: () => records,
       saveContext: async () => "Saved", submit: () => undefined,
     });
     tui.addChild(workspace);
@@ -53,7 +63,11 @@ describe("workspace terminal rendering", () => {
         tui.requestRender();
         tui.renderNow();
         expect(workspace.render(columns)).toHaveLength(initialHeight);
-        for (const key of ["\x1b[C", "\x1b[C", "\x1b[C", ...Array<string>(6).fill("\x1b[B"), ...Array<string>(6).fill("\x1b[A"), "\t", ...Array<string>(3).fill("\x1b[B"), "\t", "\x1b", "i", "\x1b"]) {
+        for (const key of [
+          "\x1b[C", "\x1b[B", "\x1b[6~", "\r", "\x1b[6~", "o", "]", "\x1b", // History list and detail
+          "\x1b[C", "\x1b[B", "\r", "\x1b[6~", "\x1b", // Usage list and detail
+          "\x1b[C", ...Array<string>(6).fill("\x1b[B"), ...Array<string>(6).fill("\x1b[A"), "\t", ...Array<string>(3).fill("\x1b[B"), "\t", "\x1b", "i", "\x1b",
+        ]) {
           input(key);
           tui.renderNow();
           expect(workspace.render(columns)).toHaveLength(initialHeight);
