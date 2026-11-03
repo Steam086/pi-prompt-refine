@@ -34,6 +34,99 @@ function setup(complete: (request: RefineRequest, signal: AbortSignal) => Promis
   return { controller, onState, onAccepted, scheduler };
 }
 
+describe("candidate revisions", () => {
+  it("freezes revision input and retains the original draft across bounded successive revisions", async () => {
+    const complete = vi.fn(async () => success("First result"));
+    const { controller } = setup(complete);
+    controller.trigger(input("Original constraints"));
+    await flushPromises();
+    const first = controller.getCandidateToken()!;
+    const request = input("Original constraints", { revision: { previousCandidate: "First result", instruction: "Shorter" } });
+    complete.mockResolvedValueOnce(success("Second result"));
+    expect(controller.trigger(request, { revisionToken: first }).kind).toBe("started");
+    expect(controller.getCandidate()).toBeUndefined();
+    request.revision!.instruction = "Mutated";
+    await flushPromises();
+    expect(controller.getCandidate()).toMatchObject({ draft: "Original constraints", text: "Second result", revision: { instruction: "Shorter" } });
+    const copy = controller.getCandidate()!;
+    copy.revision!.previousCandidate = "Mutated copy";
+    expect(controller.getCandidate()?.revision?.previousCandidate).toBe("First result");
+    complete.mockResolvedValueOnce(success("Third result"));
+    controller.trigger(input("Original constraints", { revision: { previousCandidate: "Second result", instruction: "Keep commands" } }), { revisionToken: controller.getCandidateToken()! });
+    await flushPromises();
+    expect(controller.getCandidate()).toMatchObject({ draft: "Original constraints", text: "Third result", revision: { previousCandidate: "Second result", instruction: "Keep commands" } });
+    expect(JSON.stringify(controller.getCandidate())).not.toContain("First result");
+    expect(controller.acceptCandidate(first, "Original constraints", false, () => {})).toBe(false);
+    const write = vi.fn();
+    expect(controller.acceptCandidate(controller.getCandidateToken()!, "Original constraints", false, write)).toBe(true);
+    expect(write).toHaveBeenCalledWith("Third result");
+    expect(controller.getRestore()?.before).toBe("Original constraints");
+  });
+
+  it("rejects empty, over-budget, stale, mismatched and pending-send revisions without discarding the source", async () => {
+    const { controller } = setup();
+    controller.trigger(input("Draft"));
+    await flushPromises();
+    const token = controller.getCandidateToken()!;
+    const revision = (instruction: string) => input("Draft", { revision: { previousCandidate: "Refined", instruction } });
+    expect(controller.trigger(revision(" "), { revisionToken: token }).kind).toBe("empty");
+    expect(controller.trigger(revision("x".repeat(101)), { revisionToken: token }).kind).toBe("too-long");
+    expect(controller.trigger(revision("Shorter")).kind).toBe("stale-source");
+    expect(controller.trigger({ ...revision("Shorter"), draft: "Other task" }, { revisionToken: token }).kind).toBe("stale-source");
+    controller.beginSend(token);
+    expect(controller.trigger(revision("Shorter"), { revisionToken: token }).kind).toBe("stale-source");
+    controller.failSend(token.requestId);
+    controller.updateCandidate(token, "Manually edited");
+    expect(controller.trigger(revision("Shorter"), { revisionToken: token }).kind).toBe("stale-source");
+    expect(controller.getCandidate()?.text).toBe("Manually edited");
+  });
+
+  it("accepts a previous result larger than the draft limit without treating it as a new draft", async () => {
+    const { controller } = setup(async () => success("x".repeat(150)));
+    controller.trigger(input("Draft"));
+    await flushPromises();
+    expect(controller.trigger(input("Draft", { revision: { previousCandidate: "x".repeat(150), instruction: "Shorter" } }), { revisionToken: controller.getCandidateToken()! }).kind).toBe("started");
+    await flushPromises();
+  });
+
+  it.each(["failure", "invalid", "truncated", "timeout"])("restores the previous candidate after revision %s and rejects late output", async (kind) => {
+    const pending = deferred<RefineCompletion>();
+    let calls = 0;
+    const { controller, scheduler } = setup(() => ++calls === 1 ? Promise.resolve(success("Previous")) : pending.promise);
+    controller.trigger(input("Draft"));
+    await flushPromises();
+    const oldToken = controller.getCandidateToken()!;
+    controller.trigger(input("Draft", { revision: { previousCandidate: "Previous", instruction: "Shorter" } }), { revisionToken: oldToken });
+    if (kind === "timeout") scheduler.advance(100);
+    else if (kind === "failure") pending.reject(new Error("offline"));
+    else pending.resolve({ text: "bad", stopReason: kind === "truncated" ? "length" : "stop", invalidOutput: kind === "invalid" });
+    await flushPromises();
+    expect(controller.getState().phase).toBe("error");
+    expect(controller.getCandidate()?.text).toBe("Previous");
+    expect(controller.isCandidateCurrent(oldToken)).toBe(false);
+    expect(controller.isCandidateCurrent(controller.getCandidateToken()!)).toBe(true);
+    pending.resolve(success("Late replacement"));
+    await flushPromises();
+    expect(controller.getCandidate()?.text).toBe("Previous");
+  });
+
+  it.each(["cancel", "session", "model", "new-draft"])("does not resurrect a revision source after %s", async (change) => {
+    const pending = deferred<RefineCompletion>();
+    let calls = 0;
+    const { controller } = setup(() => ++calls === 1 ? Promise.resolve(success("Previous")) : pending.promise);
+    controller.trigger(input("Draft"));
+    await flushPromises();
+    controller.trigger(input("Draft", { revision: { previousCandidate: "Previous", instruction: "Shorter" } }), { revisionToken: controller.getCandidateToken()! });
+    if (change === "cancel") controller.cancelAndDismiss();
+    if (change === "session") controller.setSession("other");
+    if (change === "model") controller.setModel({ provider: "other", id: "model" });
+    if (change === "new-draft") controller.trigger(input("New draft"));
+    pending.reject(new Error("Late failure"));
+    await flushPromises();
+    expect(controller.getCandidate()).toBeUndefined();
+  });
+});
+
 describe("RefineController request lifecycle", () => {
   it("freezes duration through edits, pending sends, acceptance and restore, and resets it on retry", async () => {
     let now = 0;

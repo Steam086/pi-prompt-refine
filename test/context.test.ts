@@ -6,6 +6,24 @@ const message = (role: string, content: unknown, type = "message") => ({
   message: { role, content },
 });
 
+describe("revision protocol", () => {
+  it("keeps the original task, latest result and editing instruction separate", () => {
+    const history = selectHistory([message("user", "Keep npm test unchanged")], 12, 1000);
+    const packet = JSON.parse(buildRefineInput("Fix tests; do not add dependencies.", history, "Project rules", {
+      previousCandidate: "Fix the tests and run npm test.", instruction: "再短一点，命令原样保留。",
+    }));
+    expect(packet).toMatchObject({ operation: "revise", original_draft: "Fix tests; do not add dependencies.",
+      previous_candidate: "Fix the tests and run npm test.", revision_instruction: "再短一点，命令原样保留。", project_context: "Project rules" });
+    expect(packet).not.toHaveProperty("draft");
+    expect(packet.conversation.items).toEqual(history.items);
+    const protocol = buildRefineSystemPrompt(false, "Use short sentences.");
+    expect(protocol).toContain('For operation "revise"');
+    expect(protocol).toContain("return the complete revised prompt");
+    expect(protocol).toContain("Preserve original constraints and prior edits");
+    expect(JSON.parse(buildRefineInput("New draft", history))).toMatchObject({ operation: "refine", draft: "New draft" });
+  });
+});
+
 describe("selectHistory", () => {
   it("uses only current-branch visible user/assistant text, excluding thinking, tools, and other entry types", () => {
     const branch = [

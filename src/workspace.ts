@@ -16,6 +16,8 @@ interface WorkspaceActions {
   saveContext(selected: boolean[]): Promise<string>;
   /** Undefined means the request was accepted; errors stay beside the retained input. */
   submit(text: string): string | undefined;
+  /** Captures one actionable candidate; the callback rejects stale targets. */
+  revision?(): { key: string; submit(text: string): string | undefined } | undefined;
 }
 
 /** One custom UI lifetime: internal navigation never restores the host editor/card. */
@@ -31,6 +33,11 @@ export class RefineWorkspace implements Component, Focusable {
   private settingsNotice = "";
   private beforeInput = "";
   private readonly input: PromptInput;
+  private readonly revisionInput: PromptInput;
+  private inputKind: "draft" | "revision" = "draft";
+  private revisionTarget?: { key: string; submit(text: string): string | undefined };
+
+  private get activeInput(): PromptInput { return this.inputKind === "revision" ? this.revisionInput : this.input; }
 
   constructor(
     private readonly panel: PreviewPanel,
@@ -39,7 +46,7 @@ export class RefineWorkspace implements Component, Focusable {
     private readonly keys: KeybindingsManager,
     private readonly actions: WorkspaceActions,
   ) {
-    this.input = new PromptInput(tui, {
+    const makeInput = () => new PromptInput(tui, {
       borderColor: (text) => theme.fg("borderMuted", text),
       selectList: {
         selectedPrefix: (text) => theme.fg("accent", text), selectedText: (text) => theme.fg("accent", text),
@@ -47,27 +54,35 @@ export class RefineWorkspace implements Component, Focusable {
         noMatch: (text) => theme.fg("warning", text),
       },
     });
-    this.input.editor.onSubmit = () => {
-      const text = this.beforeInput;
-      const error = this.actions.submit(text);
-      if (error) {
-        this.input.editor.setText(text);
-        this.inputError = error;
-      } else {
-        this.inputError = "";
-        this.switchMode("main");
-      }
-    };
+    this.input = makeInput();
+    this.revisionInput = makeInput();
+    for (const input of [this.input, this.revisionInput]) {
+      input.editor.onSubmit = () => {
+        const text = this.beforeInput;
+        const error = input === this.input ? this.actions.submit(text)
+          : this.revisionTarget ? this.revisionTarget.submit(text) : "No current result to revise.";
+        if (error) {
+          input.editor.setText(text);
+          this.inputError = error;
+        } else {
+          // Keep feedback for a failed request; a new candidate key clears it on entry.
+          if (input === this.revisionInput) input.editor.setText(text);
+          this.inputError = "";
+          this.switchMode("main");
+        }
+      };
+    }
   }
 
   get focused(): boolean { return this.hasFocus; }
   set focused(value: boolean) {
     this.hasFocus = value;
-    this.input.editor.focused = value && this.mode === "input";
+    this.input.editor.focused = value && this.mode === "input" && this.inputKind === "draft";
+    this.revisionInput.editor.focused = value && this.mode === "input" && this.inputKind === "revision";
   }
 
   dispose(): void { this.disposed = true; this.focused = false; }
-  invalidate(): void { this.panel.invalidate(); this.input.editor.invalidate(); }
+  invalidate(): void { this.panel.invalidate(); this.input.editor.invalidate(); this.revisionInput.editor.invalidate(); }
 
   private switchMode(mode: "main" | "context" | "input"): void {
     this.mode = mode;
@@ -100,9 +115,9 @@ export class RefineWorkspace implements Component, Focusable {
       if (this.keys.matches(data, "tui.select.cancel") || key === "ctrl+\\") {
         this.switchMode("main"); // Keep unsubmitted text until this workspace closes.
       } else {
-        this.beforeInput = this.input.editor.getExpandedText();
+        this.beforeInput = this.activeInput.editor.getExpandedText();
         this.inputError = "";
-        this.input.editor.handleInput(data);
+        this.activeInput.editor.handleInput(data);
         this.tui.requestRender();
       }
       return true;
@@ -147,7 +162,20 @@ export class RefineWorkspace implements Component, Focusable {
       this.openSettings();
       return true;
     }
+    if (key?.toLowerCase() === "f") {
+      const target = this.actions.revision?.();
+      if (target) {
+        if (target.key !== this.revisionTarget?.key) this.revisionInput.editor.setText("");
+        this.revisionTarget = target;
+        this.inputKind = "revision";
+        this.inputError = "";
+        this.switchMode("input");
+      }
+      return true;
+    }
     if (key?.toLowerCase() === "i") {
+      this.inputKind = "draft";
+      this.inputError = "";
       this.switchMode("input");
       return true;
     }
@@ -173,14 +201,18 @@ export class RefineWorkspace implements Component, Focusable {
     let header: string[];
     let footer: string[];
     if (this.mode === "input") {
-      const cursor = this.input.editor.getCursor();
-      header = [theme.fg("accent", theme.bold("Input")),
-        theme.fg(this.inputError ? "warning" : "muted", sanitizeTerminalText(this.inputError || `Line ${cursor.line + 1} · Not sent to main agent`))];
-      body = this.input.render(innerWidth, bodyHeight);
+      const cursor = this.activeInput.editor.getCursor();
+      const revising = this.inputKind === "revision";
+      const action = revising ? "Revise" : "Refine";
+      header = [theme.fg("accent", theme.bold(revising ? "Revise current result" : "Input")),
+        theme.fg(this.inputError ? "warning" : "muted", sanitizeTerminalText(this.inputError || (revising
+          ? "Describe changes · Original task kept · Not sent"
+          : `Line ${cursor.line + 1} · Not sent to main agent`)))];
+      body = this.activeInput.render(innerWidth, bodyHeight);
       footer = alignedKeyHints(innerWidth < 30
-        ? [[["↵", "Refine"], ["⇧↵", "NL"]], [["Esc", "Back"]]]
-        : [[["Enter", "Refine"], ["Shift+Enter", "Newline"]], [["Esc", "Back"]]], innerWidth, theme);
-      if (layout.footerHeight === 1) footer = [fittingKeyHints([["Esc", "Back"], ["↵", "Refine"]], innerWidth, theme)];
+        ? [[["↵", action], ["⇧↵", "NL"]], [["Esc", "Back"]]]
+        : [[["Enter", action], ["Shift+Enter", "Newline"]], [["Esc", "Back"]]], innerWidth, theme);
+      if (layout.footerHeight === 1) footer = [fittingKeyHints([["Esc", "Back"], ["↵", action]], innerWidth, theme)];
       if (this.inputError && layout.headerHeight < 2 && layout.footerHeight > 1) footer[1] = theme.fg("warning", sanitizeTerminalText(this.inputError));
     } else {
       const dirty = this.selected.some((value, i) => value !== this.original[i]);

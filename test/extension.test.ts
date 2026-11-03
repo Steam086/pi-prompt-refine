@@ -56,7 +56,7 @@ interface Harness {
   customCalls(): number;
 }
 
-async function makeHarness(options: { sessionName?: string; mode?: "tui" | "print"; busy?: boolean; configureModel?: boolean; noAvailableModels?: boolean; reasoning?: boolean; thinkingLevel?: ModelThinkingLevel; config?: Partial<RefineConfig>; useDefaultShortcuts?: boolean } = {}): Promise<Harness> {
+async function makeHarness(options: { freshInstall?: boolean; sessionName?: string; mode?: "tui" | "print"; busy?: boolean; configureModel?: boolean; noAvailableModels?: boolean; reasoning?: boolean; thinkingLevel?: ModelThinkingLevel; config?: Partial<RefineConfig>; useDefaultShortcuts?: boolean } = {}): Promise<Harness> {
   const agentDir = await mkdtemp(join(tmpdir(), "pi-prompt-refine-agent-"));
   agentDirs.push(agentDir);
   process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -70,7 +70,7 @@ async function makeHarness(options: { sessionName?: string; mode?: "tui" | "prin
   if (!options.useDefaultShortcuts) config.shortcuts = { ...config.shortcuts, view: "f3", selectModel: "f5", restore: "f7" };
   if (options.config?.shortcuts) config.shortcuts = { ...DEFAULT_CONFIG.shortcuts, ...options.config.shortcuts };
   if (options.configureModel !== false) config.model = { provider: "fake-provider", id: "fake-chat" };
-  await writeFile(join(agentDir, "prompt-refine.json"), `${JSON.stringify(config)}\n`, "utf8");
+  if (!options.freshInstall) await writeFile(join(agentDir, "prompt-refine.json"), `${JSON.stringify(config)}\n`, "utf8");
 
   const model = { provider: "fake-provider", id: "fake-chat", name: "Fake Chat", maxTokens: 4096, reasoning: options.reasoning ?? false } as Model<Api>;
   const complete = vi.fn(async (_model?: Model<Api>, _context?: unknown, _options?: unknown) => ({
@@ -299,6 +299,232 @@ function projectConfig(tree = false): RefineConfig["projectContext"] {
 function resourcePrompt(skillDescription = "Extract PDF tables", instructions = "Use the project venv."): string {
   return `<tools>\nPRIVATE MAIN AGENT TOOLS\n</tools>\n<project_context>\nProject-specific instructions and guidelines:\n\n<project_instructions path="/repo/AGENTS.md">\n${instructions}\n</project_instructions>\n</project_context>\n<skills>\nUse bash to load skills.\n<available_skills>\n<skill><name>pdf</name><description>${skillDescription}</description><location>/skills/pdf/SKILL.md</location></skill>\n</available_skills>\n</skills>\n<cwd>\n/repo\n</cwd>`;
 }
+
+describe("first optimizer model setup", () => {
+  it("guides a fresh install without borrowing the main model or starting a request", async () => {
+    const harness = await makeHarness({ freshInstall: true });
+    expect(harness.notifications).toEqual([expect.stringContaining("no optimizer model selected")]);
+    expect(harness.notifications[0]).toContain("/refine model");
+    harness.handlers.get("session_start")?.[0]?.({ reason: "new" }, harness.context);
+    expect(harness.notifications).toHaveLength(1);
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    expect(harness.panelLines().join("\n")).toContain("Choose one with m or /refine model.");
+    expect(harness.panelLines().join("\n")).not.toContain("No result yet.");
+    expect(harness.complete).not.toHaveBeenCalled();
+    harness.panelInput("q");
+    await view;
+    expect(harness.editorWrites).toEqual([]);
+  });
+
+  it("persists the first selection and gives a usable next step without auto-refining", async () => {
+    const harness = await makeHarness({ freshInstall: true });
+    harness.setCustomAction("\r");
+    await harness.command("model", harness.context);
+    const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
+    expect(saved.model).toEqual({ provider: "fake-provider", id: "fake-chat" });
+    expect(harness.notifications.at(-1)).toContain("Use /refine <text> to start.");
+    expect(harness.complete).not.toHaveBeenCalled();
+    harness.notifications.length = 0;
+    await harness.reload();
+    expect(harness.notifications).toEqual([]);
+  });
+
+  it("keeps setup intact on cancel and reports when no authorized models exist", async () => {
+    const harness = await makeHarness({ configureModel: false });
+    harness.setCustomAction("\x1b");
+    await harness.command("model", harness.context);
+    expect(JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"))).not.toHaveProperty("model");
+    vi.mocked(harness.context.modelRegistry.getAvailable).mockReturnValue([]);
+    await harness.command("model", harness.context);
+    expect(harness.notifications.at(-1)).toContain("Configure a model and authentication in Pi first");
+    expect(harness.complete).not.toHaveBeenCalled();
+  });
+
+  it("revalidates model availability when the picker closes", async () => {
+    const harness = await makeHarness({ configureModel: false });
+    harness.holdPanel();
+    const picker = harness.command("model", harness.context);
+    vi.mocked(harness.context.modelRegistry.getAvailable).mockReturnValue([]);
+    harness.panelInput("\r");
+    await picker;
+    expect(harness.notifications.at(-1)).toContain("no longer available");
+    expect(JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"))).not.toHaveProperty("model");
+  });
+
+  it("does not claim a failed first selection save was persisted", async () => {
+    const harness = await makeHarness({ configureModel: false });
+    const path = join(harness.agentDir, "prompt-refine.json");
+    await rm(path);
+    await mkdir(path);
+    harness.setCustomAction("\r");
+    await harness.command("model", harness.context);
+    expect(harness.notifications.at(-1)).toContain("current process only; not saved");
+    expect(harness.complete).not.toHaveBeenCalled();
+  });
+
+  it("does not show TUI setup hints in non-interactive mode", async () => {
+    const harness = await makeHarness({ configureModel: false, mode: "print" });
+    expect(harness.notifications).toEqual([]);
+    expect(harness.complete).not.toHaveBeenCalled();
+  });
+});
+
+describe("explicit candidate revision", () => {
+  it("revises the latest candidate while preserving the original task and keeping Input independent", async () => {
+    const harness = await makeHarness();
+    await trigger(harness);
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    expect(harness.panelLines(100).join("\n")).toContain("f Revise");
+    harness.panelInput("i");
+    harness.panelInput("Separate new draft");
+    harness.panelInput("\x1b");
+    harness.panelInput("f");
+    expect(harness.panelLines().join("\n")).toContain("Revise current result");
+    expect(harness.panelLines().join("\n")).not.toContain("Separate new draft");
+    harness.panelInput("再短一点，命令原样保留。");
+    harness.setEditorText("Unrelated main editor changes");
+    harness.complete.mockResolvedValueOnce({ content: [{ type: "text", text: JSON.stringify({ prompt: "Second result" }) }], stopReason: "stop" });
+    harness.panelInput("\r");
+    await flushPromises();
+    const packet = JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
+    expect(packet).toMatchObject({ operation: "revise", original_draft: "Draft A", previous_candidate: "Refined prompt", revision_instruction: "再短一点，命令原样保留。" });
+    expect(packet).not.toHaveProperty("draft");
+    expect(packet.conversation.items).toHaveLength(2);
+    expect(harness.editorWrites).toEqual([]);
+    expect(harness.sent).toEqual([]);
+    expect(harness.panelLines().join("\n")).toContain("Second result");
+    harness.panelInput("f");
+    expect(harness.panelLines().join("\n")).not.toContain("再短一点");
+    harness.panelInput("Use bullet points");
+    harness.complete.mockResolvedValueOnce({ content: [{ type: "text", text: JSON.stringify({ prompt: "Third result" }) }], stopReason: "stop" });
+    harness.panelInput("\r");
+    await flushPromises();
+    const next = JSON.parse((harness.complete.mock.calls[2] as any[])[1].messages[0].content[0].text);
+    expect(next).toMatchObject({ operation: "revise", original_draft: "Draft A", previous_candidate: "Second result", revision_instruction: "Use bullet points" });
+    expect(JSON.stringify(next)).not.toContain("Refined prompt");
+    harness.panelInput("i");
+    expect(harness.panelLines().join("\n")).toContain("Separate new draft");
+    harness.panelInput("\x1b");
+    harness.panelInput("a");
+    await view;
+    await flushPromises();
+    expect(harness.context.ui.confirm).toHaveBeenCalled();
+    expect(harness.getEditor()).toBe("Third result");
+  });
+
+  it("retains empty/oversized feedback and rejects a source changed during editing", async () => {
+    const harness = await makeHarness({ config: { maxDraftChars: 30 } });
+    await trigger(harness);
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("f");
+    harness.panelInput("\r");
+    expect(harness.panelLines().join("\n")).toContain("Enter revision instructions");
+    harness.panelInput("x".repeat(31));
+    harness.panelInput("\r");
+    expect(harness.panelLines().join("\n")).toContain("exceed");
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    harness.panelInput("\x1b");
+    harness.panelInput("f");
+    expect(harness.panelLines().join("\n")).toContain("x".repeat(31));
+    await harness.command("optimize New task", harness.context);
+    await flushPromises();
+    harness.panelInput("\r");
+    expect(harness.panelLines().join("\n")).toContain("result changed");
+    expect(harness.complete).toHaveBeenCalledTimes(2);
+    expect(harness.editorWrites).toEqual([]);
+    harness.panelInput("\x1b");
+    harness.panelInput("q");
+    await view;
+  });
+
+  it("keeps the previous result on failure and permits an explicit revision retry", async () => {
+    const harness = await makeHarness();
+    await trigger(harness);
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("f");
+    harness.panelInput("Shorter");
+    harness.complete.mockRejectedValueOnce(new Error("offline"));
+    harness.panelInput("\r");
+    await flushPromises();
+    expect(harness.panelLines().join("\n")).toContain("previous result kept");
+    expect(harness.panelLines().join("\n")).toContain("Refined prompt");
+    harness.panelInput("f");
+    expect(harness.panelLines().join("\n")).toContain("Shorter");
+    harness.panelInput("\r");
+    await flushPromises();
+    expect(harness.complete).toHaveBeenCalledTimes(3);
+    expect(JSON.parse((harness.complete.mock.calls[2] as any[])[1].messages[0].content[0].text).revision_instruction).toBe("Shorter");
+    expect(harness.editorWrites).toEqual([]);
+    harness.panelInput("q");
+    await view;
+  });
+
+  it("applies current Context switches to revisions while retaining original history", async () => {
+    const harness = await makeHarness({ config: { projectContext: projectConfig(false) } });
+    vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
+    await trigger(harness);
+    await vi.waitFor(() => expect(harness.widgetLines().join("\n")).toContain("Refined prompt"));
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("\x1b[C");
+    harness.panelInput(" "); // Disable project instructions for the next request.
+    harness.panelInput("\x13");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved"));
+    harness.panelInput("f");
+    harness.panelInput("Shorter");
+    harness.panelInput("\r");
+    await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(2));
+    const first = JSON.parse((harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
+    const revision = JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
+    expect(first.project_context).toContain("Use the project venv.");
+    expect(revision.project_context).not.toContain("Use the project venv.");
+    expect(revision.conversation).toEqual(first.conversation);
+    harness.panelInput("q");
+    await view;
+  });
+
+  it("blocks revision while delivery is pending", async () => {
+    const harness = await makeHarness();
+    await trigger(harness);
+    harness.holdPanel();
+    let view = harness.command("view", harness.context);
+    harness.panelInput("s");
+    await view;
+    expect(harness.sent).toHaveLength(1);
+    view = harness.command("view", harness.context);
+    harness.panelInput("f");
+    expect(harness.panelLines().join("\n")).not.toContain("Revise current result");
+    expect(harness.panelLines(100).slice(-2).join("\n")).not.toContain("f Revise");
+    harness.panelInput("q");
+    await view;
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not offer revision for an empty workflow or accepted read-only snapshot", async () => {
+    const harness = await makeHarness();
+    harness.holdPanel();
+    let view = harness.command("view", harness.context);
+    harness.panelInput("f");
+    expect(harness.panelLines().join("\n")).not.toContain("Revise current result");
+    harness.panelInput("q");
+    await view;
+    await trigger(harness);
+    view = harness.command("view", harness.context);
+    harness.panelInput("a");
+    await view;
+    view = harness.command("view", harness.context);
+    harness.panelInput("f");
+    expect(harness.panelLines().join("\n")).not.toContain("Revise current result");
+    expect(harness.panelLines(100).slice(-2).join("\n")).not.toContain("f Revise");
+    harness.panelInput("q");
+    await view;
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("slash command drafts", () => {
   it.each([
@@ -671,6 +897,12 @@ function refinement(prompt: string, title?: unknown) {
 }
 
 async function panelAction(harness: Harness, action: string): Promise<void> {
+  if (action === "e") {
+    vi.mocked(harness.context.ui.editor).mockImplementationOnce(async () => {
+      harness.setCustomAction("q"); // Close the result page reopened after editing.
+      return "Edited candidate";
+    });
+  }
   harness.setCustomAction(action);
   await harness.command("view", harness.context);
   await flushPromises();
@@ -1608,8 +1840,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
   it("opens an edited candidate without regenerating and labels a changed main draft", async () => {
     const harness = await makeHarness({ useDefaultShortcuts: true });
     await trigger(harness);
-    harness.setCustomAction("e");
-    await shortcut(harness, "ctrl+\\")(harness.context);
+    await panelAction(harness, "e");
     harness.setEditorText("another main draft");
     harness.setCustomAction("q");
     await shortcut(harness, "ctrl+\\")(harness.context);
@@ -1767,13 +1998,65 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.sent).toHaveLength(1);
   });
 
-  it("allows canceling independent edits and leaves the main editor untouched", async () => {
+  it.each([undefined, "Edited candidate", ""])("returns from candidate editing to the result page before Esc exits (edit: %s)", async (edited) => {
     const harness = await makeHarness();
     await trigger(harness);
-    harness.setCustomAction("e");
-    await shortcut(harness, "f3")(harness.context);
+    vi.mocked(harness.context.ui.editor).mockResolvedValueOnce(edited);
+    harness.holdPanel();
+    let closed = false;
+    const view = harness.command("view", harness.context);
+    void Promise.resolve(view).then(() => { closed = true; });
+    harness.panelInput("e");
+    await flushPromises();
     expect(harness.context.ui.editor).toHaveBeenCalledWith("Edit candidate (cancel keeps original)", "Refined prompt");
+    expect(harness.customCalls()).toBe(2);
+    expect(harness.panelLines().join("\n")).toContain(edited || "Refined prompt");
+    expect(harness.panelLines().join("\n")).toContain("Settings");
+    expect(harness.widgetLines()).toEqual([]);
+    expect(closed).toBe(false);
+    harness.panelInput("\x1b");
+    await view;
+    expect(closed).toBe(true);
+    expect(harness.widgetLines().join("\n")).toContain(edited || "Refined prompt");
+    expect(harness.complete).toHaveBeenCalledTimes(1);
     expect(harness.getEditor()).toBe("Draft A");
+    expect(harness.editorWrites).toEqual([]);
+    expect(harness.sent).toEqual([]);
+  });
+
+  it("returns from Revise to the result page before a second Esc exits", async () => {
+    const harness = await makeHarness();
+    await trigger(harness);
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("f");
+    harness.panelInput("Make it shorter");
+    harness.panelInput("\x1b");
+    expect(harness.panelLines().join("\n")).toContain("Refined prompt");
+    expect(harness.widgetLines()).toEqual([]);
+    harness.panelInput("f");
+    expect(harness.panelLines().join("\n")).toContain("Make it shorter");
+    harness.panelInput("\x1b");
+    harness.panelInput("\x1b");
+    await view;
+    expect(harness.widgetLines().join("\n")).toContain("Refined prompt");
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    expect(harness.editorWrites).toEqual([]);
+  });
+
+  it.each(["session_before_switch", "session_before_tree", "session_shutdown"])("does not reopen the result page after %s during editing", async (event) => {
+    const harness = await makeHarness();
+    await trigger(harness);
+    let finishEdit!: (value: string | undefined) => void;
+    vi.mocked(harness.context.ui.editor).mockImplementationOnce(() => new Promise((resolve) => { finishEdit = resolve; }));
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("e");
+    await flushPromises();
+    harness.handlers.get(event)?.[0]?.({ type: event }, harness.context);
+    finishEdit(undefined);
+    await view;
+    expect(harness.customCalls()).toBe(1);
     expect(harness.editorWrites).toEqual([]);
   });
 

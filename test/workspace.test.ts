@@ -26,6 +26,7 @@ function create(rows = 40, themeName = "dark", optimizer = false) {
     } : {}),
     saveContext: vi.fn(async () => "Context saved"),
     submit: vi.fn((_text: string): string | undefined => undefined),
+    revision: vi.fn((): { key: string; submit(text: string): string | undefined } | undefined => undefined),
   };
   const workspace = new RefineWorkspace(panel, tui, theme, getKeybindings(), actions);
   workspace.focused = true;
@@ -277,6 +278,42 @@ describe("shared refine workspace", () => {
     workspace.handleInput("\r");
     expect(actions.submit).toHaveBeenCalledWith(expect.stringContaining("中文 😀 é line 44\n"));
     expect(textOf(workspace.render(80))).not.toContain(CURSOR_MARKER);
+  });
+
+  it.each(["dark", "light"])("keeps revision input focused, bounded and distinct from new drafts in %s", (name) => {
+    const { workspace, actions, terminal, theme } = create(40, name);
+    const revise = vi.fn((_text: string): string | undefined => "Revision failed validation");
+    actions.revision.mockReturnValue({ key: "result-1", submit: revise });
+    workspace.handleInput("i");
+    workspace.handleInput("New draft text");
+    workspace.handleInput("\x1b");
+    workspace.handleInput("f");
+    expect(textOf(workspace.render(80))).not.toContain("New draft text");
+    workspace.handleInput("Shorter, keep 中文 😀 commands");
+    for (const rows of [5, 8, 16, 40]) {
+      terminal.rows = rows;
+      for (const width of [12, 20, 40, 100]) {
+        const lines = workspace.render(width);
+        expect(lines).toHaveLength(panelLayout(width, rows).height);
+        expect(textOf(lines)).toContain(CURSOR_MARKER);
+        for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      }
+    }
+    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["Enter", "Revise"], theme));
+    workspace.handleInput("\r");
+    expect(revise).toHaveBeenCalledWith("Shorter, keep 中文 😀 commands");
+    expect(actions.submit).not.toHaveBeenCalled();
+    expect(textOf(workspace.render(100))).toContain("Revision failed validation");
+    workspace.handleInput("\x1b");
+    workspace.handleInput("f");
+    expect(textOf(workspace.render(100))).toContain("Shorter, keep");
+    workspace.handleInput("\x1b");
+    actions.revision.mockReturnValue({ key: "result-2", submit: revise });
+    workspace.handleInput("f");
+    expect(textOf(workspace.render(100))).not.toContain("Shorter, keep");
+    workspace.handleInput("\x1b");
+    workspace.handleInput("i");
+    expect(textOf(workspace.render(100))).toContain("New draft text");
   });
 
   it("does not let input arrows or action letters navigate or execute main actions", () => {

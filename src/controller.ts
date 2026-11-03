@@ -1,6 +1,6 @@
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ModelRef } from "./config.js";
-import type { HistorySnapshot } from "./context.js";
+import type { HistorySnapshot, RevisionInput } from "./context.js";
 import type { TokenUsage } from "./usage.js";
 import type { ProjectSnapshot } from "./project-context.js";
 
@@ -10,7 +10,9 @@ export type RefinePhase = "idle" | "generating" | "ready" | "error";
 export type RefineStopReason = "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred" | "pending";
 
 export interface RefineRequestInput {
+  /** Original task, unchanged across explicit candidate revisions. */
   draft: string;
+  revision?: RevisionInput;
   model: ModelRef;
   thinkingLevel?: ModelThinkingLevel;
   generateTitle?: boolean;
@@ -99,9 +101,12 @@ export type TriggerResult =
   | { kind: "ready" }
   | { kind: "empty" }
   | { kind: "too-long" }
-  | { kind: "no-model" };
+  | { kind: "no-model" }
+  | { kind: "stale-source" };
 
 interface ActiveRequest {
+  /** Roll back a failed revision without making the old result actionable in flight. */
+  previousCandidate?: Candidate;
   startedAt: number;
   request: RefineRequest;
   controller: AbortController;
@@ -124,7 +129,7 @@ function sameModel(left: ModelRef | undefined, right: ModelRef | undefined): boo
 }
 
 function fingerprint(request: RefineRequestInput): string {
-  return JSON.stringify([request.draft, request.model.provider, request.model.id, request.thinkingLevel, request.sessionId, request.branchLeafId, request.history, request.project, request.generateTitle, request.systemPrompt]);
+  return JSON.stringify([request.draft, request.model.provider, request.model.id, request.thinkingLevel, request.sessionId, request.branchLeafId, request.history, request.project, request.generateTitle, request.systemPrompt, request.revision]);
 }
 
 function elapsedSeconds(active: ActiveRequest): number {
@@ -132,7 +137,7 @@ function elapsedSeconds(active: ActiveRequest): number {
 }
 
 function cloneCandidate(candidate: Candidate): Candidate {
-  return { ...candidate, history: structuredClone(candidate.history), ...(candidate.project ? { project: structuredClone(candidate.project) } : {}), ...(candidate.usage ? { usage: { ...candidate.usage } } : {}), model: { ...candidate.model } };
+  return { ...candidate, ...(candidate.revision ? { revision: { ...candidate.revision } } : {}), history: structuredClone(candidate.history), ...(candidate.project ? { project: structuredClone(candidate.project) } : {}), ...(candidate.usage ? { usage: { ...candidate.usage } } : {}), model: { ...candidate.model } };
 }
 
 export class RefineController {
@@ -172,8 +177,8 @@ export class RefineController {
   }
 
   getState(): ControllerState {
-    const usage = this.candidate?.usage ?? this.state.usage;
-    const elapsed = this.active ? elapsedSeconds(this.active) : this.candidate?.elapsedSeconds ?? this.state.elapsedSeconds;
+    const usage = this.state.phase === "error" ? this.state.usage : this.candidate?.usage ?? this.state.usage;
+    const elapsed = this.active ? elapsedSeconds(this.active) : this.state.phase === "error" ? this.state.elapsedSeconds : this.candidate?.elapsedSeconds ?? this.state.elapsedSeconds;
     return { ...this.state, ...(elapsed !== undefined ? { elapsedSeconds: elapsed } : {}), ...(usage ? { usage: { ...usage } } : {}), ...(this.state.model ? { model: { ...this.state.model } } : {}) };
   }
 
@@ -306,10 +311,14 @@ export class RefineController {
     this.emitState();
   }
 
-  trigger(input: RefineRequestInput, options: { force?: boolean } = {}): TriggerResult {
+  trigger(input: RefineRequestInput, options: { force?: boolean; revisionToken?: CandidateToken } = {}): TriggerResult {
+    if (input.revision && (!options.revisionToken || !this.isCandidateCurrent(options.revisionToken) || this.pendingSend ||
+      input.sessionId !== this.sessionId || input.branchLeafId !== this.candidate!.branchLeafId ||
+      input.draft !== this.candidate!.draft || input.revision.previousCandidate !== this.candidate!.text)) return { kind: "stale-source" };
     this.ensureSession(input.sessionId);
-    if (!input.draft.trim()) return { kind: "empty" };
-    if (input.draft.length > this.maxDraftChars) return { kind: "too-long" };
+    if (!input.draft.trim() || (input.revision && !input.revision.instruction.trim())) return { kind: "empty" };
+    if (input.draft.length > this.maxDraftChars || (input.revision &&
+      (input.revision.instruction.length > this.maxDraftChars || input.revision.previousCandidate.length > this.maxOutputChars))) return { kind: "too-long" };
     if (!input.model.provider || !input.model.id) return { kind: "no-model" };
 
     const requestFingerprint = fingerprint(input);
@@ -320,12 +329,14 @@ export class RefineController {
       return { kind: "ready" };
     }
 
+    const previousCandidate = input.revision && this.candidate ? cloneCandidate(this.candidate) : undefined;
     this.cancelActive();
     this.clearPendingSend();
     this.candidate = undefined;
     const requestId = ++this.requestSequence;
     const request: RefineRequest = {
       ...input,
+      ...(input.revision ? { revision: { ...input.revision } } : {}),
       history: structuredClone(input.history),
       ...(input.project ? { project: structuredClone(input.project) } : {}),
       model: { ...input.model },
@@ -335,7 +346,7 @@ export class RefineController {
     };
     const controller = new AbortController();
     const timeout = this.scheduler.setTimeout(() => this.onTimeout(requestId), this.timeoutMs);
-    this.active = { request, controller, timeout, startedAt: Date.now() };
+    this.active = { request, controller, timeout, previousCandidate, startedAt: Date.now() };
     this.state = { phase: "generating", requestId, model: { ...input.model }, pendingSend: false };
     this.emitState();
     void this.run(this.active).catch(() => undefined);
@@ -466,6 +477,7 @@ export class RefineController {
         generation: active.request.generation,
         sessionId: active.request.sessionId,
         draft: active.request.draft,
+        ...(active.request.revision ? { revision: { ...active.request.revision } } : {}),
         text: textBlocks,
         generateTitle: active.request.generateTitle,
         ...(active.request.generateTitle && result.title ? { title: result.title } : {}),
@@ -503,7 +515,7 @@ export class RefineController {
     if (!this.isActiveCurrent(active.request)) return;
     this.clearActive(active);
     this.generation += 1;
-    this.candidate = undefined;
+    this.candidate = active.previousCandidate ? { ...cloneCandidate(active.previousCandidate), generation: this.generation } : undefined;
     if (this.restore) this.restore = { ...this.restore, generation: this.generation };
     this.clearPendingSend();
     this.state = { phase: "error", requestId: active.request.requestId, model: { ...active.request.model }, error, pendingSend: false, usage: this.state.usage, elapsedSeconds: elapsedSeconds(active) };
@@ -516,7 +528,7 @@ export class RefineController {
     this.active = undefined;
     this.scheduler.clearTimeout(active.timeout);
     this.generation += 1;
-    this.candidate = undefined;
+    this.candidate = active.previousCandidate ? { ...cloneCandidate(active.previousCandidate), generation: this.generation } : undefined;
     if (this.restore) this.restore = { ...this.restore, generation: this.generation };
     this.clearPendingSend();
     active.controller.abort();
