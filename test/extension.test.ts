@@ -1664,6 +1664,36 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect((harness.complete.mock.calls[0]?.[1] as { systemPrompt: string }).systemPrompt).toContain(expected);
   });
 
+  it.each(["main", "settings"])("returns to %s after confirming the optimizer model without starting refinement", async (origin) => {
+    const harness = await makeHarness({ configureModel: false });
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    if (origin === "settings") {
+      harness.panelInput("\x1b[C");
+      harness.panelInput(" ");
+      harness.panelInput("\x1b[C");
+      harness.panelInput("\r");
+    } else {
+      harness.panelInput("m");
+    }
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Choose optimizer model"));
+    harness.panelInput("\r");
+    await vi.waitFor(() => expect(harness.customCalls()).toBe(3));
+    const lines = harness.panelLines().join("\n");
+    expect(lines).not.toContain("Choose optimizer model");
+    expect(lines).toContain(origin === "settings" ? "Unsaved context changes" : "m Model");
+    const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
+    expect(saved.model).toEqual({ provider: "fake-provider", id: "fake-chat" });
+    expect(harness.notifications.join(" ")).toContain("Optimizer model set to fake-provider/fake-chat");
+    expect(harness.notifications.join(" ")).toContain("main session unchanged");
+    expect(harness.complete).not.toHaveBeenCalled();
+    expect(harness.editorWrites).toEqual([]);
+    expect(harness.sent).toEqual([]);
+    if (origin === "settings") harness.panelInput("\x1b");
+    harness.panelInput("q");
+    await view;
+  });
+
   it("opens the model picker from Settings and restores unsaved context on cancel", async () => {
     const harness = await makeHarness({ reasoning: true, thinkingLevel: "medium" });
     harness.holdPanel();
