@@ -261,12 +261,9 @@ export class PreviewPanel implements Component {
       }
     } else {
       const needsModel = this.isEmptyState() && !options.state.model;
-      paragraph(needsModel ? "No model selected" : options.navigation ? "No candidate for this model." : "No result yet.");
+      paragraph(needsModel ? "No model selected" : options.navigation ? "No candidate for this model." : "No result yet.", "muted");
       if (options.navigation) paragraph("g generates from the same frozen input; r reads the current editor.", "muted");
-      if (this.isEmptyState()) {
-        const model = options.state.model;
-        paragraph(model ? `${model.provider}/${model.id}` : "Choose one with m or /refine model.", "muted");
-      }
+      if (needsModel) paragraph("Choose one with m or /refine model.", "muted");
     }
     if (options.state.pendingSend) {
       lines.push("");
@@ -286,7 +283,7 @@ export class PreviewPanel implements Component {
     if (options.navigation && layout.bodyHeight - navigation.length >= 4) {
       const position = options.navigation;
       navigation.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(
-        `${position.index}/${position.count} · ${position.label}${options.thinkingLevel ? ` · ${options.thinkingLevel}` : ""}`,
+        `${position.index}/${position.count} · ${position.label}`,
       ), innerWidth)));
     }
     const bodyHeight = layout.bodyHeight - navigation.length;
@@ -295,12 +292,13 @@ export class PreviewPanel implements Component {
       : options.state.phase === "idle" ? "" : resultHeading(options, theme, false);
     const header = [theme.fg("text", theme.bold("Prompt refine"))];
     const model = options.state.model;
-    // Idle has no request context to describe; details remain available in Help.
+    // Keep model/thinking in the same place for idle, requests and saved candidates.
     const metadata = sanitizeTerminalText([
       model ? `${model.provider}/${model.id}` : "No model",
+      ...(model && options.thinkingLevel ? [options.thinkingLevel] : []),
       ...(options.state.phase === "generating" || options.state.phase === "error" ? [options.contextLabel] : []),
     ].join(" · "));
-    const status = this.isEmptyState() && !options.navigation ? "" : [heading, theme.fg("muted", metadata)].filter(Boolean).join(" · ");
+    const status = [heading, theme.fg("muted", metadata)].filter(Boolean).join(" · ");
     header.push(options.notice ? theme.fg("muted", sanitizeTerminalText(options.notice)) : status);
     // Keep the main decision visible; secondary actions remain available in Help.
     // Pending/generating states take priority even if a previous candidate is retained.
@@ -339,7 +337,7 @@ export class PreviewPanel implements Component {
     const start = this.scroll.scrollTop;
     let visible = body.slice(start, start + bodyHeight);
     if (this.isEmptyState() && body.length <= bodyHeight) {
-      // Treat the empty message and its model as one quiet block, away from navigation.
+      // Keep empty-state guidance quiet and centered, away from navigation.
       visible = [
         ...Array<string>(Math.floor((bodyHeight - body.length) / 2)).fill(""),
         ...visible.map((line) => " ".repeat(Math.max(0, Math.floor((innerWidth - visibleWidth(line)) / 2))) + line),

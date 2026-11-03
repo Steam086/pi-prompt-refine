@@ -86,6 +86,8 @@ export interface ControllerState {
   phase: RefinePhase;
   requestId: number;
   model?: ModelRef;
+  /** Frozen reasoning effort for a running or failed request. */
+  thinkingLevel?: ModelThinkingLevel;
   error?: "timeout" | "failed" | "empty" | "truncated" | "tool-call" | "invalid-output";
   pendingSend: boolean;
 }
@@ -456,7 +458,7 @@ export class RefineController {
     const timeout = this.scheduler.setTimeout(() => this.onTimeout(requestId), this.timeoutMs);
     this.requestSource = { draft: request.draft, ...(request.revision ? { revisionInstruction: request.revision.instruction } : {}) };
     this.active = { request, controller, timeout, previousCandidate, startedAt: Date.now() };
-    this.state = { phase: "generating", requestId, model: { ...input.model }, pendingSend: false };
+    this.state = { phase: "generating", requestId, model: { ...input.model }, thinkingLevel: request.thinkingLevel, pendingSend: false };
     this.emitState();
     void this.run(this.active).catch(() => undefined);
     return { kind: "started", requestId };
@@ -653,7 +655,7 @@ export class RefineController {
     this.candidate = active.previousCandidate ? { ...cloneCandidate(active.previousCandidate), generation: this.generation } : undefined;
     if (this.restore) this.restore = { ...this.restore, generation: this.generation };
     this.clearPendingSend();
-    this.state = { phase: "error", requestId: active.request.requestId, model: { ...active.request.model }, error, pendingSend: false, usage: this.state.usage, elapsedSeconds: elapsedSeconds(active) };
+    this.state = { phase: "error", requestId: active.request.requestId, model: { ...active.request.model }, thinkingLevel: active.request.thinkingLevel, error, pendingSend: false, usage: this.state.usage, elapsedSeconds: elapsedSeconds(active) };
     this.emitState();
   }
 
@@ -668,7 +670,7 @@ export class RefineController {
     if (this.restore) this.restore = { ...this.restore, generation: this.generation };
     this.clearPendingSend();
     active.controller.abort();
-    this.state = { phase: "error", requestId, model: { ...active.request.model }, error: "timeout", pendingSend: false, elapsedSeconds: elapsedSeconds(active) };
+    this.state = { phase: "error", requestId, model: { ...active.request.model }, thinkingLevel: active.request.thinkingLevel, error: "timeout", pendingSend: false, elapsedSeconds: elapsedSeconds(active) };
     this.emitState();
   }
 

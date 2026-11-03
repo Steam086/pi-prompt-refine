@@ -31,7 +31,9 @@ describe("result reading panel", () => {
     });
     const lines = panel.render(100);
     const text = lines.join("\n");
-    expect(lines.find((line) => line.includes("#5 refine"))?.trim()).toBe("1/2 · #5 refine · xhigh");
+    expect(lines.find((line) => line.includes("#5 refine"))?.trim()).toBe("1/2 · #5 refine");
+    expect(lines[2]).toContain("openai-codex/example-model · xhigh");
+    expect(text.match(/xhigh/g)).toHaveLength(1);
     expect(lines[2]).not.toContain("6 msgs");
     expect(text).toContain("Tokens: total 5969 · in 5634 · out 335");
     expect(text).not.toContain("read 0");
@@ -241,16 +243,16 @@ describe("result reading panel", () => {
   });
 
   it("separates the workspace and keeps idle chrome free of duplicate or unavailable actions", () => {
-    const panel = create({ candidateText: undefined, state: { ...options.state, phase: "idle" }, contextLabel: "Context: not captured" });
+    const panel = create({ candidateText: undefined, state: { ...options.state, phase: "idle" }, thinkingLevel: "high", contextLabel: "Context: not captured" });
     const lines = panel.render(100);
     expect(lines[0]).toBe("  " + "─".repeat(96));
     expect(lines[1]).toBe("  Prompt refine");
-    expect(lines[2]?.trim()).toBe("");
+    expect(lines[2]?.trim()).toBe("openai-codex/example-model · high");
     const layout = panelLayout(100, 40);
     const tabHeight = panelTabs(layout, ["Preview", "→ Settings"], 0, plainTheme).length;
-    const emptyRow = layout.topSeparatorHeight + layout.headerHeight + tabHeight + Math.floor((layout.bodyHeight - tabHeight - 2) / 2);
+    const emptyRow = layout.topSeparatorHeight + layout.headerHeight + tabHeight + Math.floor((layout.bodyHeight - tabHeight - 1) / 2);
     expect(lines[emptyRow]?.trim()).toBe("No result yet.");
-    expect(lines[emptyRow + 1]?.trim()).toBe("openai-codex/example-model");
+    expect(lines.slice(layout.topSeparatorHeight + layout.headerHeight + tabHeight, -3).filter((line) => line.trim())).toEqual([lines[emptyRow]]);
     expect(lines[emptyRow]).toBe(" ".repeat(layout.inset + Math.floor((layout.innerWidth - "No result yet.".length) / 2)) + "No result yet.");
     expect(lines.slice(-2)).toEqual([
       "  r Refine · m Model · i Input",
@@ -297,7 +299,7 @@ describe("result reading panel", () => {
       }
     }
     const lines = panel.render(100);
-    expect(lines.join("\n")).toContain(theme.fg("text", "No result yet."));
+    expect(lines.join("\n")).toContain(theme.fg("muted", "No result yet."));
     expect(lines.join("\n")).toContain(theme.fg("muted", "openai-codex/example-model"));
     panel.setNotice("Context saved");
     expect(panel.render(100)[2]).toContain("Context saved");

@@ -780,9 +780,15 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           const displayed = candidate ?? accepted;
           const source = controller.getRequestSource();
           const draft = displayed?.draft ?? source?.draft;
+          const model = displayed?.model ?? state.model ?? controller.getModel();
+          const registeredModel = model && registeredModels(ctx).find((candidate) => sameModel(candidate, model));
+          // Saved results and in-flight requests must not inherit later setting changes.
+          const thinkingLevel = displayed ? displayed.thinkingLevel
+            : state.phase === "generating" || state.phase === "error" ? state.thinkingLevel
+            : registeredModel ? effectiveThinkingLevel(registeredModel, config.thinkingLevel, ctx.thinkingLevel) : undefined;
           displayedToken = controller.getCandidateToken();
           return {
-            state: { ...state, usage: state.phase === "error" ? state.usage : displayed?.usage ?? state.usage, model: displayed?.model ?? state.model ?? controller.getModel() },
+            state: { ...state, usage: state.phase === "error" ? state.usage : displayed?.usage ?? state.usage, model },
             candidateText: displayed?.text,
             sessionTitle: candidate?.title && canNameSession(ctx) ? candidate.title : undefined,
             draft,
@@ -795,7 +801,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             errorLabel: errorStatus(state),
             navigation: controller.getCandidatePosition(),
             viewKey: displayed?.recordId ? `record-${displayed.recordId}` : `request-${state.requestId}-${controller.getModel()?.id ?? "none"}`,
-            thinkingLevel: displayed?.thinkingLevel,
+            thinkingLevel,
           };
         };
         const panel = new PreviewPanel(snapshot(), theme, () => tui.terminal.rows, () => tui.requestRender(), previewPositions);
