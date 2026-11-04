@@ -385,7 +385,7 @@ export class RefineController {
       input.sessionId !== this.sessionId || input.branchLeafId !== this.candidate!.branchLeafId ||
       this.candidate!.contextUnavailable || input.draft !== this.candidate!.draft || input.revision.previousCandidate !== this.candidate!.text)) return { kind: "stale-source" };
     const source = this.getTaskInput();
-    if (options.sameTask && (!source || input.sessionId !== this.sessionId || input.draft !== source.draft)) return { kind: "stale-source" };
+    if (options.sameTask && (!source || source.contextUnavailable || input.sessionId !== this.sessionId || input.draft !== source.draft)) return { kind: "stale-source" };
     this.ensureSession(input.sessionId);
     const frozen = input.revision ? structuredClone({ ...input, roundId: this.candidate!.roundId })
       : options.sameTask ? structuredClone({ ...source!, model: input.model, thinkingLevel: input.thinkingLevel }) : this.freezeRound(input);
@@ -482,7 +482,7 @@ export class RefineController {
     this.clearPendingSend();
     const source = this.candidate!;
     const recordId = this.journal.start(this.taskId!, source, source.recordId, "edit");
-    this.candidate = { ...source, recordId, text, version: ++this.candidateSequence };
+    this.candidate = { ...source, recordId, text, usage: undefined, version: ++this.candidateSequence };
     this.journal.update(recordId, { status: "generated", candidate: this.candidate,
       ...(source.roundId !== this.round?.id ? { archivedAt: Date.now() } : {}) });
     this.state = this.candidateState(this.candidate);
@@ -544,7 +544,7 @@ export class RefineController {
     try {
       const result = await this.options.complete(active.request, active.controller.signal);
       if (!this.isActive(active)) {
-        if (result.usage) {
+        if (result.usage && active.request.sessionId === this.sessionId) {
           this.journal.update(active.request.recordId, { usage: result.usage });
           this.emitState();
         }

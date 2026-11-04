@@ -19,6 +19,7 @@
     "restore": null
   },
   "timeoutMs": 60000,
+  "historyPersistence": true,
   "context": {
     "maxMessages": 12,
     "maxChars": 16000

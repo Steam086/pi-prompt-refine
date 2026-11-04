@@ -21,9 +21,11 @@ import { RefineController, type Candidate, type CandidateToken, type ControllerS
 import type { TaskPanelPosition } from "./task-panel.js";
 
 import { readRunUsage } from "./usage.js";
+import { HistoryStore, historyPath } from "./history-store.js";
 import { assembleProjectContext, captureProjectContext, collectDirectoryContext, type TreeSnapshot } from "./project-context.js";
 
 const STATUS_KEY = "prompt-refine";
+const RESTORED_CONTEXT_HINT = "Background was not saved. Press i in the task list to copy the original into the current round before running.";
 
 type PreviewAction = "accept" | "edit" | "send" | "dismiss" | "restore" | "close" | "optimize" | "model" | "run-model" | "cycle" | "system-prompt";
 
@@ -109,6 +111,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   let refreshPreview: (() => void) | undefined;
   let closePreview: (() => void) | undefined;
   let interacting = false;
+  let historyStore: HistoryStore | undefined;
+  let historyEpoch = 0;
   // Session-wide, not branch/workflow state. Rebuilt from Pi metadata on resume/reload.
   const namedSessions = new Set<string>();
   const previewPositions = new Map<string, number>();
@@ -148,7 +152,10 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     timeoutMs: config.timeoutMs,
     maxDraftChars: config.maxDraftChars,
     maxOutputChars: Math.max(config.maxDraftChars, config.maxOutputTokens * 32),
-    onState: (state) => updatePresentation(state),
+    onState: (state) => {
+      if (config.historyPersistence && historyStore && historyStore.sessionId === controller.getSessionId()) historyStore.save(controller.getHistory());
+      updatePresentation(state);
+    },
     onAccepted: applySessionTitle,
     complete: async (request: RefineRequest, signal) => {
       const ctx = completionContext;
@@ -212,6 +219,10 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         content: [{ type: "text", text: budget.input }],
         timestamp: Date.now(),
       };
+      const usageOptions = {
+        hasPricing: [model.cost?.input, model.cost?.output, model.cost?.cacheRead, model.cost?.cacheWrite].some((rate) => typeof rate === "number" && rate > 0),
+        subscription: ctx.modelRegistry.isUsingOAuth(model),
+      };
       const response = await ctx.modelRegistry.streamSimple(
         model,
         { systemPrompt, messages: [userMessage], tools: [] },
@@ -233,10 +244,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         title: request.generateTitle ? parsed?.title : undefined,
         invalidOutput: stopReason === "stop" && !parsed,
         stopReason,
-        usage: readRunUsage(response.usage, {
-          hasPricing: [model.cost?.input, model.cost?.output, model.cost?.cacheRead, model.cost?.cacheWrite].some((rate) => typeof rate === "number" && rate > 0),
-          subscription: ctx.modelRegistry.isUsingOAuth(model),
-        }),
+        usage: readRunUsage(response.usage, usageOptions),
       };
     },
   }, config.model);
@@ -380,6 +388,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const source = runId === undefined ? undefined : controller.getOriginalRecord(runId);
     const baseline = runId === undefined ? undefined : controller.getRecord(runId);
     if (runId !== undefined && !source) return;
+    if (source?.input.contextUnavailable) { notify(ctx, RESTORED_CONTEXT_HINT, "info"); return; }
     const taskRecords = source ? controller.getHistory().filter((record) => record.taskId === source.taskId) : [];
     const taskModels = source ? taskRecords.map((record) => modelKey(record.input.model)) : controller.getTaskModels().map(modelKey);
     const recent = recentRunModels.get(ctx.sessionManager.getSessionId()) ?? [];
@@ -732,6 +741,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       notify(ctx, "No frozen input is available. Use r to refine the current editor first.", "info");
       return;
     }
+    if (input.contextUnavailable) { notify(ctx, RESTORED_CONTEXT_HINT, "info"); return; }
     if (input.sessionId !== ctx.sessionManager.getSessionId()) {
       notify(ctx, "The session branch changed; use r to capture a new input.", "warning");
       return;
@@ -876,6 +886,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     if (!instruction.trim()) return "Enter revision instructions; the current result is unchanged.";
     if (instruction.length > config.maxDraftChars) return `Revision instructions exceed ${config.maxDraftChars} characters; the current result is unchanged.`;
     const source = controller.getCandidate()!;
+    if (source.contextUnavailable) return RESTORED_CONTEXT_HINT;
     const error = optimizationError(ctx, source.draft, source.model);
     if (error) return error;
     const model = ctx.modelRegistry.find(source.model.provider, source.model.id)!;
@@ -948,6 +959,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             navigation: controller.getCandidatePosition(),
             viewKey: (displayed?.recordId ?? state.recordId) ? `record-${displayed?.recordId ?? state.recordId}` : `idle-${controller.getModel()?.id ?? "none"}`,
             thinkingLevel,
+            contextUnavailable: displayed?.contextUnavailable,
           };
         };
         const panel = new PreviewPanel(snapshot(), theme, () => tui.terminal.rows, () => tui.requestRender(), previewPositions);
@@ -960,6 +972,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           if (closed || ctx.sessionManager.getSessionId() !== sessionId) return;
           const record = controller.getRecord(id);
           if (!record) return;
+          if (record.input.contextUnavailable) { notify(ctx, RESTORED_CONTEXT_HINT, "info"); return; }
           const error = optimizationError(ctx, record.input.draft);
           if (error) { notify(ctx, error, "warning"); return; }
           const selected = controller.getModel()!;
@@ -1071,6 +1084,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             return await persistConfig(ctx) ? "Context saved · Applies to next round" : "Context applied · Not persisted; check configuration";
           },
           revision: (id) => {
+            const source = id === undefined ? controller.getCandidate() : controller.getRecord(id)?.candidate;
+            if (source?.contextUnavailable) { notify(ctx, RESTORED_CONTEXT_HINT, "info"); return undefined; }
             if (id !== undefined && !controller.applyResult(id)) return undefined;
             const token = controller.getCandidateToken();
             if (!token || controller.getState().pendingSend) return undefined;
@@ -1267,10 +1282,26 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   }
 
   pi.registerCommand("refine", {
-    description: "Prompt Refine: /refine <text> or optimize [text], view, history, usage, cancel, model, cycle, restore",
+    description: "Prompt Refine: /refine <text> or optimize [text], view, history, history clear, usage, cancel, model, cycle, restore",
     handler: async (args, ctx) => {
       const text = args.trim();
       const action = text.toLocaleLowerCase();
+      if (action === "history clear") {
+        const file = ctx.sessionManager.getSessionFile();
+        if (!file) { notify(ctx, "This session has no saved history file.", "info"); return; }
+        if (!ctx.hasUI) { notify(ctx, "Clearing history requires confirmation in interactive mode.", "warning"); return; }
+        const sessionId = ctx.sessionManager.getSessionId();
+        const epoch = historyEpoch;
+        if (!await ctx.ui.confirm("Clear saved Refine history?", "Delete this session's Refine sidecar only. In-memory records stay visible; saving pauses until reload. Pi conversation is unchanged.")) return;
+        if (epoch !== historyEpoch || sessionId !== controller.getSessionId()) return;
+        historyStore ??= new HistoryStore(historyPath(file), sessionId, (message) => notify(ctx, message, "warning"));
+        try {
+          await historyStore.clear();
+          if (epoch !== historyEpoch) return;
+          notify(ctx, "Saved Refine history cleared. Saving paused until reload; in-memory records and Pi conversation unchanged.", "info");
+        } catch { if (epoch === historyEpoch) notify(ctx, "Could not delete saved Refine history. Saving is paused; check file permissions.", "warning"); }
+        return;
+      }
       if (action === "history" || action === "usage") {
         await showPreview(ctx, "usage");
         return;
@@ -1288,7 +1319,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         await showPreview(ctx);
         return;
       }
-      // Only exact bare subcommands are reserved. Preserve prompt case and
+      // Only exact subcommands are reserved. Preserve prompt case and
       // internal whitespace; `optimize <text>` disambiguates reserved words.
       const explicitDraft = /^optimize\s+([\s\S]+)$/i.exec(text)?.[1];
       const selectedAction = Object.hasOwn(mapping, action) ? mapping[action] : undefined;
@@ -1310,7 +1341,10 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     if (event.message.role === "user") controller.onMessageStarted(userMessageText(event.message));
   });
   // before_agent_start and input are preflight hooks; only message_start commits a round boundary.
-  pi.on("session_start", (event, ctx) => {
+  pi.on("session_start", async (event, ctx) => {
+    const epoch = ++historyEpoch;
+    const previousStore = historyStore;
+    historyStore = undefined;
     currentUiContext = ctx;
     // Include abandoned branches: session names are session-wide. A later explicit
     // clear must not re-enable automatic naming after a resume or /reload either.
@@ -1319,12 +1353,24 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
     canNameSession(ctx);
     controller.setSession(ctx.sessionManager.getSessionId());
+    if (previousStore) await previousStore.flush();
+    const sessionFile = ctx.sessionManager.getSessionFile();
+    if (config.historyPersistence && sessionFile) {
+      const store = new HistoryStore(historyPath(sessionFile), ctx.sessionManager.getSessionId(), (message) => {
+        if (store.sessionId === controller.getSessionId()) notify(ctx, message, "warning");
+      });
+      const records = await store.load();
+      if (epoch !== historyEpoch) return;
+      controller.restoreHistory(records);
+      historyStore = store;
+      if (records.length) notify(ctx, `Restored ${records.length} Refine runs · background not saved · /refine history`, "info");
+    }
     for (const warning of loaded.warnings) notify(ctx, warning, "warning");
     if (loaded.shortcutsMigrated) notify(ctx, "Prompt Refine legacy default shortcuts were migrated to Control+\\; the original configuration file was not rewritten, and custom shortcuts are unchanged.", "info");
     if (ctx.mode === "tui" && event.reason === "startup") {
       const key = config.shortcuts.optimize?.replace(/ctrl/g, "Ctrl").replace(/\+/g, " + ");
       const setup = controller.getModel() ? "" : " No optimizer model selected; use /refine model.";
-      notify(ctx, `Prompt Refine: Use ${key ?? "/refine optimize"} to refine your prompt.${setup}`);
+      notify(ctx, `Prompt Refine: Use ${key ?? "/refine optimize"} to refine your prompt.${setup}${config.historyPersistence && sessionFile ? " Minimal prompt/result history is saved beside this session; no full background. Disable with historyPersistence=false." : ""}`);
     }
   });
   pi.on("session_before_tree", (_event, ctx) => {
@@ -1349,12 +1395,16 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     controller.invalidateLifecycle(true);
     currentUiContext = undefined;
   });
-  pi.on("session_shutdown", (_event, ctx) => {
+  pi.on("session_shutdown", async (_event, ctx) => {
+    historyEpoch++;
     currentUiContext = ctx;
     closePreview?.();
     controller.invalidateLifecycle(true);
     currentUiContext = undefined;
     completionContext = undefined;
     clearContextJobs();
+    const store = historyStore;
+    historyStore = undefined;
+    await store?.flush();
   });
 }

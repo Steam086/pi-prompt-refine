@@ -38,7 +38,8 @@ export function readRunUsage(value: unknown, options: { hasPricing?: boolean; su
   if (typeof cost === "object" && cost !== null) {
     const values = cost as Record<string, unknown>;
     // A zero-filled SDK default is not evidence that an unpriced model is free.
-    if (finiteCount(values.total) && (values.total > 0 || (options.hasPricing && totalInputTokens(usage) !== undefined && usage.output !== undefined))) {
+    const input = totalInputTokens(usage);
+    if (finiteCount(values.total) && (values.total > 0 || (options.hasPricing && input !== undefined && usage.output !== undefined && input + usage.output > 0))) {
       usage.cost = { total: values.total };
       for (const key of ["input", "output", "cacheRead", "cacheWrite"] as const) {
         if (finiteCount(values[key])) usage.cost[key] = values[key];

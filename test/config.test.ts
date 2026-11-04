@@ -71,6 +71,12 @@ describe("Prompt Refine configuration", () => {
     }
   });
 
+  it("defaults minimal history persistence on and respects explicit privacy opt-out", () => {
+    expect(parseConfig({ version: 1 }).config.historyPersistence).toBe(true);
+    expect(parseConfig({ version: 1, historyPersistence: false }).config.historyPersistence).toBe(false);
+    expect(parseConfig({ version: 1, historyPersistence: "false" }).warnings.join(" ")).toContain("historyPersistence");
+  });
+
   it("defaults instructions, tree and skills off, preserving explicit opt-ins", () => {
     expect(parseConfig({ version: 1 }).config.projectContext).toMatchObject({ instructionsEnabled: false, skillsEnabled: false, tree: { enabled: false } });
     const custom = parseConfig({ version: 1, projectContext: { instructionsEnabled: true, skillsEnabled: true, tree: { enabled: true } } });

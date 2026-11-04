@@ -46,6 +46,8 @@ export interface RefineConfig {
   favorites: ModelRef[];
   shortcuts: ShortcutConfig;
   timeoutMs: number;
+  /** Save minimal per-session history; never full background or unsent input. */
+  historyPersistence: boolean;
   context: {
     maxMessages: number;
     maxChars: number;
@@ -76,6 +78,7 @@ export const DEFAULT_CONFIG: RefineConfig = {
   favorites: [],
   shortcuts: { ...DEFAULT_SHORTCUTS },
   timeoutMs: 60_000,
+  historyPersistence: true,
   context: { maxMessages: 12, maxChars: 16_000 },
   projectContext: {
     enabled: true,
@@ -252,6 +255,7 @@ export function parseConfig(value: unknown): LoadedConfig {
 
   const config = structuredClone(DEFAULT_CONFIG);
   config.projectContext = parseProjectContext(value.projectContext, warnings);
+  config.historyPersistence = booleanOption(value.historyPersistence, config.historyPersistence, "historyPersistence", warnings);
   if (value.systemPrompt !== undefined) {
     if (typeof value.systemPrompt === "string" && value.systemPrompt.trim()) config.systemPrompt = value.systemPrompt;
     else warnings.push("systemPrompt must be a non-empty string; using the built-in prompt.");

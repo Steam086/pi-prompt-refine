@@ -8,13 +8,13 @@ Pi Prompt Refine 是 TypeScript 编写的 Pi 扩展，入口由 `package.json` �
 | --- | --- |
 | `src/extension.ts` | 注册命令、快捷键和生命周期事件；连接 Pi UI、模型注册表、上下文收集与 controller |
 | `src/controller.ts` | 管理冻结上下文 round、未发送输入、并行运行与排队、独立 Apply 目标、接受快照及恢复状态；处理去重、取消、超时、发送归档和过期操作 |
-| `src/history.ts`、`task-panel.ts` | 有界内存日志与原稿／模型运行两层树；按新旧轮次堆叠，支持详情、结果对比与选中结果接受；Enter 启动未发送输入或查看详情，不自动进入模型上下文 |
+| `src/history.ts`、`history-store.ts`、`task-panel.ts` | 有界日志、每 session 最小白名单 sidecar 与原稿／模型运行两层树；按新旧轮次堆叠，支持详情、比较与接受；恢复记录不含完整背景，禁止原背景重跑，不自动进入模型上下文 |
 | `src/context.ts` | 选择可见历史，构造固定协议与编辑策略、JSON 输入，校验模型输出 |
 | `src/project-context.ts` | 提取宿主项目规则和技能元数据，收集有界目录列表并标注遗漏 |
 | `src/config.ts` | 配置校验、默认值、迁移及持久化 |
 | `src/workspace.ts`、`preview.ts`、`prompt-input.ts` | Main / Context / Input 工作区、候选阅读和独立输入 |
 | `src/presentation.ts`、`panel-layout.ts`、`key-hints.ts` | 被动摘要、布局和按键提示 |
-| `src/model-picker.ts`、`usage.ts` | 模型选项展示与响应 token 用量处理 |
+| `src/model-picker.ts`、`usage.ts` | 模型选项展示、响应 token 口径归一化与请求时 SDK 参考费用 |
 
 ## 数据流与验证
 

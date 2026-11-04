@@ -11,6 +11,12 @@
 - `systemPrompt`：可编辑的改写策略，省略时使用内置策略；固定角色、JSON 输出和标题协议始终由程序加入。面板编辑后需确认保存，下一 round 捕获时生效；当前 round 使用冻结模板。
 - `shortcuts`：默认仅 `optimize: "ctrl+\\"`；`view/dismiss/selectModel/cycleModel/restore` 为 `null`。`null` 只关闭全局绑定，不影响面板和命令。手工修改后执行 `/reload`。
 
+## 历史保存与隐私
+
+`historyPersistence` 默认 `true`。仅在有 session 文件路径时，将原稿、结果、已提交的修订要求与运行元数据保存到相邻的 `<session-file>.prompt-refine.json`，每 session 最多 100 条 / 2 MiB，权限 `0600`。不保存完整背景、请求载荷、未提交输入或撤销快照。
+
+设为 `false` 后执行 `/reload`，停止加载和保存历史，但不删除旧文件。执行 `/refine history clear` 并确认，可删除当前 session 的 sidecar，同时暂停保存直到 reload；内存中的记录仍可查看。原稿与结果仍可能含敏感文本，清理或移动 session 时应同步处理 sidecar。恢复记录不能按旧背景重跑，详情见[历史恢复说明](usage.md#resume--reload-后的历史)。
+
 ## 预算与上下文开关
 
 下表的项目字段均位于 `projectContext` 内；具体采集边界见 [上下文说明](context.md)。上下文配置在 round 第一份输入捕获时冻结，Settings 的更改用于下一 round。并行上限目前固定为 4，超出排队；`timeoutMs` 从每条请求实际启动后计算，不包含排队时间。
