@@ -72,7 +72,7 @@ async function makeHarness(options: { freshInstall?: boolean; sessionName?: stri
   if (options.configureModel !== false) config.model = { provider: "fake-provider", id: "fake-chat" };
   if (!options.freshInstall) await writeFile(join(agentDir, "prompt-refine.json"), `${JSON.stringify(config)}\n`, "utf8");
 
-  const model = { provider: "fake-provider", id: "fake-chat", name: "Fake Chat", maxTokens: 4096, reasoning: options.reasoning ?? false } as Model<Api>;
+  const model = { provider: "fake-provider", id: "fake-chat", name: "Fake Chat", contextWindow: 128_000, maxTokens: 16_384, reasoning: options.reasoning ?? false } as Model<Api>;
   const complete = vi.fn(async (_model?: Model<Api>, _context?: unknown, _options?: unknown) => ({
     content: [{ type: "text", text: JSON.stringify({ prompt: "Refined prompt", title: "Draft refinement workflow" }) }],
     stopReason: "stop",
@@ -2368,6 +2368,73 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(packet.draft).toBe("继续看这个方案");
     expect(harness.widgetLines(200).join("\n")).toContain("1 omitted");
     expect(harness.complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("budgets the actual request, warns on pruning and restores full frozen background for a larger model", async () => {
+    const harness = await makeHarness();
+    const registry = harness.context.modelRegistry;
+    const small = registry.getAvailable()[0]!;
+    small.contextWindow = 20_000;
+    const large = { ...small, id: "larger", name: "Larger", contextWindow: 128_000 };
+    vi.mocked(registry.getAvailable).mockReturnValue([small, large]);
+    vi.mocked(registry.find).mockImplementation((provider, id) => [small, large].find((model) => model.provider === provider && model.id === id));
+    vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([
+      { type: "message", id: "old", message: { role: "assistant", content: "OLD".repeat(3000) } },
+      { type: "message", id: "latest", message: { role: "user", content: "Do not implement" } },
+    ] as any);
+    await trigger(harness);
+    const first = harness.complete.mock.calls[0] as any[];
+    expect(first).toBeDefined();
+    const firstPacket = JSON.parse(first[1].messages[0].content[0].text);
+    expect(firstPacket.draft).toBe("Draft A");
+    expect(firstPacket.budget_omissions).toBeDefined();
+    const tokens = Buffer.byteLength(first[1].systemPrompt) + Buffer.byteLength(first[1].messages[0].content[0].text);
+    expect(tokens + first[2].maxTokens + 4096 + Math.ceil(small.contextWindow * 0.01)).toBeLessThanOrEqual(small.contextWindow);
+    expect(harness.notifications.join(" ")).toContain("Budget trimmed background");
+    expect(harness.widgetLines().join("\n")).toContain("⚠");
+    harness.holdPanel();
+    const view = harness.command("", harness.context);
+    expect(harness.panelLines(60).join("\n")).toContain("⚠");
+    harness.panelInput("m"); await flushPromises();
+    harness.panelInput("\r"); await flushPromises();
+    expect(harness.complete).toHaveBeenCalledTimes(2);
+    const second = harness.complete.mock.calls[1] as any[];
+    expect(second[0]).toBe(large);
+    expect(JSON.parse(second[1].messages[0].content[0].text).conversation.items).toHaveLength(2);
+    expect(second[1].messages[0].content[0].text).toContain("OLD".repeat(3000));
+    expect(harness.editorWrites).toEqual([]);
+    harness.panelInput("q"); harness.panelInput("q"); await view;
+  });
+
+  it.each(["context", "output", "unknown"])("blocks before the provider on %s budget failure, preserving the editor and warning in the UI", async (kind) => {
+    const harness = await makeHarness();
+    const model = harness.context.modelRegistry.getAvailable()[0]!;
+    if (kind === "context") model.contextWindow = 5000;
+    if (kind === "output") model.maxTokens = 100;
+    if (kind === "unknown") model.contextWindow = NaN;
+    await trigger(harness);
+    expect(harness.context.modelRegistry.streamSimple).not.toHaveBeenCalled();
+    expect(harness.notifications.join(" ")).toContain("Request not sent");
+    expect(harness.notifications.join(" ")).toContain("Draft unchanged");
+    expect(harness.widgetLines().join("\n")).toContain("⚠");
+    expect(harness.widgetLines().join("\n")).not.toContain("model/network");
+    expect(harness.getEditor()).toBe("Draft A");
+    expect(harness.editorWrites).toEqual([]);
+    harness.holdPanel();
+    const view = harness.command("usage", harness.context);
+    expect(harness.panelLines(60).join("\n")).toContain("⚠");
+    harness.panelInput("q"); harness.panelInput("q"); await view;
+  });
+
+  it("bounds reasoning additions inside the configured and model output ceiling", async () => {
+    const harness = await makeHarness({ reasoning: true, thinkingLevel: "high" });
+    const model = harness.context.modelRegistry.getAvailable()[0]!;
+    model.maxTokens = 6000;
+    await trigger(harness);
+    const call = harness.complete.mock.calls[0] as any[];
+    expect(call[2].reasoning).toBe("high");
+    expect(call[2].thinkingBudgets.high).toBeGreaterThanOrEqual(1024);
+    expect(call[2].maxTokens + call[2].thinkingBudgets.high).toBeLessThanOrEqual(model.maxTokens);
   });
 
   it("runs the optimizer in the background without writing the editor or session", async () => {

@@ -1,5 +1,6 @@
 import type { Candidate, RefineRequestInput } from "./controller.js";
 import type { TokenUsage } from "./usage.js";
+import type { BudgetReport } from "./budget.js";
 
 export interface RefineRecord {
   id: number;
@@ -40,7 +41,12 @@ export class RefineHistory {
       this.records.splice(index, 1);
     }
     const id = ++this.sequence;
-    this.records.push({ id, taskId, input: structuredClone(input), originalInput, parentId, kind, createdAt: Date.now(), status });
+    const freshInput = structuredClone(input);
+    if (kind !== "edit") {
+      delete freshInput.budget;
+      delete freshInput.sentInput;
+    }
+    this.records.push({ id, taskId, input: freshInput, originalInput, parentId, kind, createdAt: Date.now(), status });
     return id;
   }
 
@@ -97,6 +103,13 @@ export class RefineHistory {
         }
       }
     }
+  }
+
+  captureBudget(id: number, budget: BudgetReport, sentInput?: string): void {
+    const record = this.records.find((item) => item.id === id);
+    if (!record) return;
+    record.input.budget = structuredClone(budget);
+    record.input.sentInput = sentInput;
   }
 
   list(sessionId: string, taskId?: number): RefineRecord[] {

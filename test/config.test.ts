@@ -118,6 +118,16 @@ describe("Prompt Refine configuration", () => {
     expect(Object.values(disabled.config.shortcuts)).toEqual([null, null, null, null, null, null]);
   });
 
+  it("raises the default output allowance without overriding explicit older limits", () => {
+    expect(parseConfig({ version: 1 }).config.maxOutputTokens).toBe(8192);
+    for (const maxOutputTokens of [2048, 8192, 65_536]) {
+      const parsed = parseConfig({ version: 1, maxOutputTokens });
+      expect(parsed.config.maxOutputTokens).toBe(maxOutputTokens);
+      expect(parsed.warnings).toEqual([]);
+    }
+    expect(parseConfig({ version: 1, maxOutputTokens: 65_537 }).warnings).not.toEqual([]);
+  });
+
   it("keeps the checked-in example valid", async () => {
     const example = JSON.parse(await readFile(new URL("../examples/prompt-refine.json", import.meta.url), "utf8")) as unknown;
     const result = parseConfig(example);
@@ -130,7 +140,7 @@ describe("Prompt Refine configuration", () => {
       version: 1,
       timeoutMs: 10,
       maxDraftChars: -1,
-      maxOutputTokens: 50_000,
+      maxOutputTokens: 100_000,
       shortcuts: { optimize: "alt+shift+v", view: "alt+shift+v", dismiss: "escape" },
       favorites: [{ provider: "openai", id: "gpt-chat" }, { provider: "openai", id: "gpt-chat" }, { provider: "", id: "bad" }],
     });

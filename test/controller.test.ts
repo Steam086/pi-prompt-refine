@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { RefineController, type RefineCompletion, type RefineRequest, type RefineRequestInput } from "../src/controller.js";
 import type { ModelRef } from "../src/config.js";
+import type { BudgetReport } from "../src/budget.js";
 import { buildRefineSystemPrompt, selectHistory } from "../src/context.js";
 import { deferred, FakeScheduler, flushPromises, success } from "./helpers.js";
 
@@ -33,6 +34,53 @@ function setup(complete: (request: RefineRequest, signal: AbortSignal) => Promis
   controller.setSession("session-1");
   return { controller, onState, onAccepted, scheduler };
 }
+
+describe("request budget diagnostics", () => {
+  const report: BudgetReport = { status: "trimmed", inputTokens: 200, outputTokens: 1000, safetyTokens: 4096,
+    contextWindow: 8000, outputLimit: 1000, removedMessages: 1, removedProjectParts: [], message: "Background reduced" };
+
+  it("keeps per-run budgets separate from reusable input and ignores stale diagnostics", async () => {
+    const jobs: Array<{ request: RefineRequest; pending: ReturnType<typeof deferred<RefineCompletion>> }> = [];
+    const { controller } = setup((request) => {
+      const pending = deferred<RefineCompletion>(); jobs.push({ request, pending }); return pending.promise;
+    });
+    controller.trigger(input("Draft"));
+    const first = jobs[0]!;
+    controller.capturePreparedInput(first.request.requestId, first.request.generation, "Full packet");
+    controller.captureBudget(first.request.requestId, first.request.generation, report, "Reduced packet");
+    expect(controller.getState().budget).toEqual(report);
+    first.pending.resolve(success("Result")); await flushPromises();
+    expect(controller.getCandidate()).toMatchObject({ preparedInput: "Full packet", sentInput: "Reduced packet", budget: report });
+    controller.rerunRecord(first.request.recordId, { provider: "other", id: "larger" });
+    const second = jobs[1]!;
+    expect(second.request.preparedInput).toBe("Full packet");
+    expect(second.request.budget).toBeUndefined();
+    expect(second.request.sentInput).toBeUndefined();
+    controller.captureBudget(second.request.requestId, second.request.generation, { ...report, status: "ok", removedMessages: 0 }, "Full packet");
+    // Background work cannot overwrite the applied candidate's warning.
+    expect(controller.getState().budget).toEqual(report);
+    controller.stopRequest(second.request.recordId);
+    controller.captureBudget(second.request.requestId, second.request.generation, { ...report, status: "blocked" });
+    expect(controller.getRecord(second.request.recordId)?.input.budget?.status).toBe("ok");
+    second.pending.resolve(success("Late")); await flushPromises();
+  });
+
+  it("reports budget rejection distinctly and preserves the previous revision candidate", async () => {
+    let blocked = false;
+    const { controller } = setup(async (request) => {
+      if (!blocked) return success("Previous");
+      controller.captureBudget(request.requestId, request.generation, { ...report, status: "blocked", message: "Request not sent" });
+      return { text: "", stopReason: "budget" };
+    });
+    controller.trigger(input("Draft")); await flushPromises();
+    blocked = true;
+    controller.trigger(input("Draft", { revision: { previousCandidate: "Previous", instruction: "Shorten" } }), { revisionToken: controller.getCandidateToken()! });
+    await flushPromises();
+    expect(controller.getState()).toMatchObject({ phase: "error", error: "budget", budget: { status: "blocked" } });
+    expect(controller.getCandidate()?.text).toBe("Previous");
+    expect(controller.getHistory().at(-1)).toMatchObject({ status: "error", error: "budget" });
+  });
+});
 
 describe("request source and shortcut routing", () => {
   it("preserves A while B runs and keeps B as the explicit foreground", async () => {

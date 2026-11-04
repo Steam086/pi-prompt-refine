@@ -1,5 +1,6 @@
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ModelRef, ProjectContextConfig } from "./config.js";
+import type { BudgetReport } from "./budget.js";
 import type { HistorySnapshot, RevisionInput } from "./context.js";
 import type { TokenUsage } from "./usage.js";
 import type { ProjectSnapshot } from "./project-context.js";
@@ -7,7 +8,7 @@ import { RefineHistory, type RefineRecord } from "./history.js";
 
 interface RequestProjectContext { cwd: string; snapshot: ProjectSnapshot; revisionSnapshot?: ProjectSnapshot; config?: ProjectContextConfig }
 export type RefinePhase = "idle" | "generating" | "ready" | "error";
-export type RefineStopReason = "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred" | "pending";
+export type RefineStopReason = "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred" | "pending" | "budget";
 export interface RefineRequestInput {
   draft: string;
   revision?: RevisionInput;
@@ -18,7 +19,11 @@ export interface RefineRequestInput {
   branchLeafId: string | null;
   history: HistorySnapshot;
   systemPrompt: string;
+  /** Full frozen input before per-model budget pruning (reusable by other models). */
   preparedInput?: string;
+  /** Exact serialized input after budget pruning; absent if preflight blocked. */
+  sentInput?: string;
+  budget?: BudgetReport;
   project?: RequestProjectContext;
   projectDiagnostics?: { warnings: string[]; referencedDirectoryCount: number };
   roundId?: number;
@@ -57,7 +62,8 @@ export interface ControllerState {
   recordId?: number;
   model?: ModelRef;
   thinkingLevel?: ModelThinkingLevel;
-  error?: "timeout" | "failed" | "empty" | "truncated" | "tool-call" | "invalid-output";
+  error?: "timeout" | "failed" | "empty" | "truncated" | "tool-call" | "invalid-output" | "budget";
+  budget?: BudgetReport;
   pendingSend: boolean;
   runningCount?: number;
   queuedCount?: number;
@@ -203,6 +209,15 @@ export class RefineController {
     active.request.preparedInput = text;
     if (diagnostics) active.request.projectDiagnostics = structuredClone(diagnostics);
     this.journal.captureInput(active.request.recordId, text, diagnostics);
+  }
+  captureBudget(requestId: number, generation: number, budget: BudgetReport, sentInput?: string): void {
+    const active = this.active.get(requestId);
+    if (!active || active.request.generation !== generation) return;
+    active.request.budget = structuredClone(budget);
+    active.request.sentInput = sentInput;
+    this.journal.captureBudget(active.request.recordId, budget, sentInput);
+    if (this.foregroundId === requestId) this.state.budget = structuredClone(budget);
+    this.emitState();
   }
   getRequestSource(): RequestSource | undefined { return this.requestSource ? { ...this.requestSource } : undefined; }
   getDisplayedInput(): RefineRequestInput | undefined {
@@ -521,7 +536,7 @@ export class RefineController {
         return;
       }
       this.journal.update(active.request.recordId, { usage: result.usage });
-      const error = result.stopReason !== "stop" ? (result.stopReason === "length" ? "truncated" : result.stopReason === "toolUse" ? "tool-call" : "failed")
+      const error = result.stopReason !== "stop" ? (result.stopReason === "budget" ? "budget" : result.stopReason === "length" ? "truncated" : result.stopReason === "toolUse" ? "tool-call" : "failed")
         : result.invalidOutput ? "invalid-output" : !result.text.trim() ? "empty"
           : result.text.length > (this.options.maxOutputChars ?? 1_000_000) ? "truncated" : undefined;
       if (error) { this.finishError(active, error); return; }
@@ -550,7 +565,7 @@ export class RefineController {
       this.rebase();
       this.candidate = active.previousCandidate ? { ...active.previousCandidate, generation: this.generation } : undefined;
       this.state = { phase: "error", requestId: active.request.requestId, recordId: active.request.recordId, model: active.request.model,
-        thinkingLevel: active.request.thinkingLevel, error, pendingSend: false, usage, elapsedSeconds: elapsed(active) };
+        thinkingLevel: active.request.thinkingLevel, error, budget: active.request.budget, pendingSend: false, usage, elapsedSeconds: elapsed(active) };
     }
     this.pump();
     this.emitState();
@@ -576,7 +591,7 @@ export class RefineController {
   }
   private candidateState(candidate: Candidate): ControllerState {
     return { phase: "ready", requestId: candidate.requestId, recordId: candidate.recordId, model: candidate.model, thinkingLevel: candidate.thinkingLevel,
-      usage: candidate.usage, elapsedSeconds: candidate.elapsedSeconds, pendingSend: false };
+      usage: candidate.usage, elapsedSeconds: candidate.elapsedSeconds, budget: candidate.budget, pendingSend: false };
   }
   private rebase(): void {
     this.generation++;
