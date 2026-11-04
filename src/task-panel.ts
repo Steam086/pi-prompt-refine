@@ -357,14 +357,16 @@ export class TaskPanel {
     if (selected && !selected.original && pending(selected.record)) primary.push(["x", "Stop"]);
     if (selected && !selected.original && selected.record.candidate) primary.push(["a", "Accept"]);
     if (selected && this.actions.deleteRecords) primary.push(["Delete", "Delete"]);
-    const secondary: KeyHint[] = [["Esc", "Back"], ...(other || !this.inspecting ? [["Tab", other ? "Switch result" : this.reading ? "Select" : "Read"] as KeyHint] : [])];
+    // Reserve both focus labels so Tab never shifts columns or changes which hints fit.
+    const focusAction = (this.reading ? "Select" : "Read").padEnd("Select".length);
+    const secondary: KeyHint[] = [["Esc", "Back"], ...(other || !this.inspecting ? [["Tab", other ? "Switch result" : focusAction] as KeyHint] : [])];
     if (this.inspecting && selected && !selected.original && selected.record.candidate) {
       secondary.push(["c", other ? "Next comparison" : "Compare"], ["e", "Edit result"], ...(!restored ? [["f", "Revise"] as const] : []), ["s", "Send"]);
     }
     const footer = layout.innerWidth < 30
       ? [fittingKeyHints(primary.map(([key, label]) => [key === "Enter" ? "↵" : key, label]), layout.innerWidth, this.theme), fittingKeyHints(secondary, layout.innerWidth, this.theme)]
       : alignedKeyHints([primary, secondary], layout.innerWidth, this.theme);
-    if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["Esc", "Back"], ["Enter", action], ["Tab", this.reading ? "Select" : "Read"]], layout.innerWidth, this.theme);
+    if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["Esc", "Back"], ["Enter", action], ["Tab", focusAction]], layout.innerWidth, this.theme);
     const title = this.inspecting ? (other ? "Compare results" : "Prompt details") : this.usage ? "Usage · All rounds" : "Prompt refine · Tasks";
     return panelFrame(layout, [this.heading(title), this.muted(this.notice || (this.inspecting
       ? `${selected && !selected.original ? `Selected: #${selected.record.id} ${selected.record.input.model.id}` : "Original prompt"} · ↑↓ scroll${other ? " · Same original and conversation context" : ""}`

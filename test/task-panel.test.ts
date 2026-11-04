@@ -296,3 +296,20 @@ describe("delete confirmation", () => {
     expect(remove).toHaveBeenCalledWith([1, 2]);
   });
 });
+
+describe("stable Read/Select footer", () => {
+  it.each(["dark", "light"])("keeps hint columns and visibility fixed across Tab toggles in %s", (name) => {
+    const { panel } = create(name);
+    for (let width = 20; width <= 140; width++) {
+      const footer = () => panel.render(width).slice(-2).map(stripVTControlCharacters);
+      const before = footer();
+      panel.handleInput("\t");
+      const after = footer();
+      expect(after[0], `primary footer at width ${width}`).toBe(before[0]);
+      expect(after[1]?.replace("Tab Select", "Tab Read  ").trimEnd(), `secondary footer at width ${width}`)
+        .toBe(before[1]?.trimEnd());
+      panel.handleInput("\t");
+      expect(footer()).toEqual(before);
+    }
+  });
+});
