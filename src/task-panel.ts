@@ -112,7 +112,7 @@ export class TaskPanel {
     }
     if (key) this.notice = "";
     const row = this.selected();
-    if (key === "delete") {
+    if (key === "d") {
       if (row && this.actions.deleteRecords) this.deletion = {
         ids: (row.original ? row.records : [row.record]).map((record) => record.id),
         label: row.original ? `original prompt and all ${row.records.length} request(s)` : `run #${row.record.id}`,
@@ -356,7 +356,7 @@ export class TaskPanel {
       : [["Enter", action], ["i", restored ? "Copy to current" : "Edit"], ["n", "New"], ...(!restored ? [["m", selected ? "Run model" : "Model"] as const] : [])];
     if (selected && !selected.original && pending(selected.record)) primary.push(["x", "Stop"]);
     if (selected && !selected.original && selected.record.candidate) primary.push(["a", "Accept"]);
-    if (selected && this.actions.deleteRecords) primary.push(["Delete", "Delete"]);
+    if (selected && this.actions.deleteRecords) primary.push(["d", "Delete"]);
     // Reserve both focus labels so Tab never shifts columns or changes which hints fit.
     const focusAction = (this.reading ? "Select" : "Read").padEnd("Select".length);
     const secondary: KeyHint[] = [["Esc", "Back"], ...(other || !this.inspecting ? [["Tab", other ? "Switch result" : focusAction] as KeyHint] : [])];

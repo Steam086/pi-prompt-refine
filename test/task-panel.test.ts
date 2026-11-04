@@ -270,7 +270,7 @@ describe("delete confirmation", () => {
     const remove = vi.fn(() => true);
     Object.assign(actions, { deleteRecords: remove });
     expect(text()).toContain("Delete");
-    panel.handleInput("\x1b[3~");
+    panel.handleInput("d");
     expect(text()).toContain("Delete run #1?");
     expect(text()).toContain("Running requests will be stopped");
     panel.handleInput("\r");
@@ -279,7 +279,7 @@ describe("delete confirmation", () => {
     expect(position.selectedId).toBe(1);
     panel.handleInput("\x1b");
     expect(panel.isConfirmingDelete()).toBe(false);
-    panel.handleInput("\x1b[3~");
+    panel.handleInput("d");
     panel.handleInput("y");
     expect(remove).toHaveBeenCalledWith([1]);
   });
@@ -289,7 +289,7 @@ describe("delete confirmation", () => {
     const remove = vi.fn(() => true);
     Object.assign(actions, { deleteRecords: remove });
     position.selectedTaskId = 1;
-    panel.handleInput("\x1b[3~");
+    panel.handleInput("d");
     expect(text()).toContain("all 2 request(s)");
     records.push(record(3));
     panel.handleInput("y");
