@@ -3,8 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_CONFIG } from "../src/config.js";
+import { DEFAULT_CONFIG as DEFAULTS } from "../src/config.js";
 import { assembleProjectContext, captureProjectContext, collectDirectoryContext, collectTree, directoryReferences, formatProjectResources, resourcesFromPrompt } from "../src/project-context.js";
+
+// Resource/scanner tests opt in; production defaults are covered separately.
+const DEFAULT_CONFIG = { ...DEFAULTS, projectContext: {
+  ...DEFAULTS.projectContext, instructionsEnabled: true,
+  tree: { ...DEFAULTS.projectContext.tree, enabled: true },
+} };
 
 const dirs: string[] = [];
 async function fixture(): Promise<string> {

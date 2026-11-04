@@ -30,7 +30,7 @@
     "maxChars": 28000,
     "instructionsMaxChars": 16000,
     "instructionsOnFollowUp": true,
-    "instructionsEnabled": true,
+    "instructionsEnabled": false,
     "skillsEnabled": false,
     "skillsMaxChars": 6000,
     "referencedDirectories": {
@@ -38,7 +38,7 @@
       "maxReferences": 8
     },
     "tree": {
-      "enabled": true,
+      "enabled": false,
       "maxChars": 4000,
       "maxDepth": 2,
       "maxEntriesPerDirectory": 20,

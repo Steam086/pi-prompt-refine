@@ -12,17 +12,17 @@ describe("unified request budget", () => {
     const draft = '中文😀\\path\n"literal"\u0000';
     const input = packet(draft);
     const result = budgetRequest("system 中文", input, model, 8192);
-    expect(result.report).toMatchObject({ status: "ok", inputTokens: Buffer.byteLength("system 中文") + Buffer.byteLength(input), outputTokens: 8192 });
+    expect(result.report).toMatchObject({ status: "ok", inputTokens: estimateTextTokens("system 中文") + estimateTextTokens(input), outputTokens: 8192 });
     expect(result.input).toBe(input);
     expect(JSON.parse(result.input).draft).toBe(draft);
-    expect(estimateTextTokens(draft)).toBeGreaterThan(draft.length);
+    expect(estimateTextTokens(draft)).toBe(Math.ceil(Buffer.byteLength(draft) / 3));
   });
 
   it("drops tree then skills before touching history or project rules", () => {
     const history = selectHistory([message("u", "user", "Do not add dependencies.")], 12, 16_000);
     const project = 'PROJECT INSTRUCTIONS:\n{"content":"preserve rules"}' +
-      "\n\nMAIN AGENT SKILLS (metadata only; not optimizer tools):\n" + "S".repeat(6000) +
-      "\n\nPROJECT TREE (names only, partial):\n" + "T".repeat(6000);
+      "\n\nMAIN AGENT SKILLS (metadata only; not optimizer tools):\n" + "S".repeat(12000) +
+      "\n\nPROJECT TREE (names only, partial):\n" + "T".repeat(12000);
     const input = buildRefineInput("draft intact", history, project);
     const result = budgetRequest("system", input, { ...model, contextWindow: 8000 }, 1024);
     expect(result.report).toMatchObject({ status: "trimmed", removedMessages: 0, removedProjectParts: ["project tree", "skill metadata"] });
@@ -30,12 +30,12 @@ describe("unified request budget", () => {
     expect(sent.project_context).toContain("preserve rules");
     expect(sent.conversation.items).toEqual(history.items);
     expect(sent.budget_omissions).toHaveLength(2);
-    expect(input).toContain("T".repeat(6000));
+    expect(input).toContain("T".repeat(12000));
   });
 
   it("removes older whole messages first, preserving latest user and assistant and accurate counts", () => {
     const history = selectHistory([
-      message("old", "user", "O".repeat(4000)),
+      message("old", "user", "O".repeat(9000)),
       message("assistant", "assistant", "current proposal"),
       message("correction", "user", "Only discuss. Do not implement."),
     ], 12, 16_000);
@@ -66,19 +66,19 @@ describe("unified request budget", () => {
     const draft = "中文原文".repeat(1000);
     const revision = { previousCandidate: "previous".repeat(1000), instruction: "Keep paths unchanged" };
     const input = buildRefineInput(draft, empty, "optional project", revision);
-    const result = budgetRequest("custom system".repeat(1000), input, { ...model, contextWindow: 20_000 }, 16_384);
+    const result = budgetRequest("custom system".repeat(1000), input, { ...model, contextWindow: 12_000 }, 16_384);
     expect(result.report.status).toBe("blocked");
     expect(result.maxTokens).toBe(0);
     expect(JSON.parse(result.input)).toMatchObject({ original_draft: draft, previous_candidate: revision.previousCandidate, revision_instruction: revision.instruction });
     expect(result.report.message).toContain("Request not sent");
   });
 
-  it("blocks when the full prompt cannot fit the configured or model output ceiling", () => {
+  it("does not reject based on an estimated full-prompt output reserve", () => {
     for (const [maxTokens, configLimit] of [[100, 8192], [16_384, 100]]) {
       const input = packet("中文".repeat(500));
       const result = budgetRequest("system", input, { ...model, maxTokens: maxTokens! }, configLimit!);
-      expect(result.report.status).toBe("blocked");
-      expect(result.report.message).toContain("output reserve");
+      expect(result.report.status).toBe("ok");
+      expect(result.maxTokens).toBe(100);
       expect(result.input).toBe(input);
     }
   });
@@ -91,7 +91,7 @@ describe("unified request budget", () => {
     expect(result.input).toBe(input);
   });
 
-  it("reduces surplus output only after optional context, never below the full-prompt reserve", () => {
+  it("reduces surplus output to fit the available context window", () => {
     const result = budgetRequest("system", packet(), { ...model, contextWindow: 6000 }, 8192);
     expect(result.report.status).toBe("ok");
     expect(result.maxTokens).toBeLessThan(8192);
@@ -102,10 +102,40 @@ describe("unified request budget", () => {
   it.each([undefined, "off", "minimal", "low", "medium", "high", "xhigh", "max"] as const)("budgets reasoning adapters safely: %s", (thinking) => {
     const result = budgetRequest("system", packet(), model, 8192, thinking);
     expect(result.report.status).toBe("ok");
-    const addedThinking = result.thinkingBudgets?.high ?? 0;
-    expect(result.maxTokens + addedThinking).toBe(result.report.outputTokens);
-    expect(result.maxTokens + addedThinking).toBeLessThanOrEqual(model.maxTokens);
-    if (thinking && thinking !== "off") expect(addedThinking).toBeGreaterThanOrEqual(1024);
+    expect(result.maxTokens).toBe(result.report.outputTokens);
+    expect(result.maxTokens).toBeLessThanOrEqual(model.maxTokens);
+    if (thinking && thinking !== "off") expect(result.thinkingBudgets?.high).toBeGreaterThanOrEqual(1024);
+  });
+
+  it.each([undefined, "openai-responses", "anthropic-messages", "bedrock-converse-stream"])("allows a small request with legacy 2048 output and high thinking (%s)", (api) => {
+    const result = budgetRequest("system", packet("请把这段话写清楚，不要执行任务。"), { ...model, api }, 2048, "high");
+    expect(result.report.status).toBe("ok");
+    expect(result.thinkingBudgets?.high).toBe(1024);
+    const additive = api === "anthropic-messages" || api === "bedrock-converse-stream";
+    expect(result.maxTokens).toBe(additive ? 1024 : 2048);
+    expect(result.report.outputTokens).toBe(2048);
+  });
+
+  it("allows Chinese drafts with default output and inherited reasoning without cutting input", () => {
+    const input = packet("保留路径和约束，优化这段需求。".repeat(300));
+    const result = budgetRequest("system", input, model, 8192, "high");
+    expect(result.report.status).toBe("ok");
+    expect(result.input).toBe(input);
+  });
+
+  it("preserves useful history by reducing surplus output first", () => {
+    const history = selectHistory([message("u", "user", "Keep this constraint.".repeat(100))], 12, 16_000);
+    const input = buildRefineInput("Explain", history);
+    const result = budgetRequest("system", input, { ...model, contextWindow: 8192 }, 8192);
+    expect(result.report.status).toBe("ok");
+    expect(result.input).toBe(input);
+    expect(result.maxTokens).toBeLessThan(8192);
+  });
+
+  it("still rejects output ceilings too small for enabled thinking", () => {
+    const result = budgetRequest("system", packet(), model, 1024, "high");
+    expect(result.report.status).toBe("blocked");
+    expect(result.report.message).toContain("turn thinking off");
   });
 
   it.each([0, -1, NaN, Infinity, undefined])("fails closed on unavailable/invalid model capacity: %s", (capacity) => {
@@ -125,7 +155,7 @@ describe("unified request budget", () => {
           const { inputTokens, outputTokens, safetyTokens } = result.report;
           expect(inputTokens).toBe(estimateTextTokens("sys") + estimateTextTokens(result.input));
           expect(inputTokens + outputTokens + safetyTokens).toBeLessThanOrEqual(window);
-          expect(result.maxTokens + (result.thinkingBudgets?.high ?? 0)).toBe(outputTokens);
+          expect(result.maxTokens).toBe(outputTokens);
           expect(outputTokens).toBeLessThanOrEqual(8192);
         }
       }

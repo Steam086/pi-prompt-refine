@@ -291,6 +291,7 @@ function projectConfig(tree = false): RefineConfig["projectContext"] {
   const config = structuredClone(DEFAULT_CONFIG.projectContext);
   config.tree.enabled = tree;
   // Existing resource/budget tests explicitly exercise repeat injection.
+  config.instructionsEnabled = true;
   config.instructionsOnFollowUp = true;
   config.skillsEnabled = true;
   return config;
@@ -825,9 +826,9 @@ describe("project context injection", () => {
     ]);
   });
 
-  it.each([false, true])("defaults to per-request instructions with followUp=%s, independent of history budget", async (followUp) => {
+  it.each([false, true])("includes opted-in per-request instructions with followUp=%s, independent of history budget", async (followUp) => {
     const config = structuredClone(DEFAULT_CONFIG.projectContext);
-    config.tree.enabled = false;
+    config.instructionsEnabled = true;
     expect(config.instructionsOnFollowUp).toBe(true);
     const harness = await makeHarness({ config: { projectContext: config, context: { maxMessages: 0, maxChars: 0 } } });
     vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue(followUp
@@ -1866,7 +1867,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await view;
   });
 
-  it.each(["\x1c", "q", "\x1b"])("cancels unsaved context edits with %j and keeps default injection", async (back) => {
+  it.each(["\x1c", "q", "\x1b"])("cancels unsaved context edits with %j and keeps default context opt-outs", async (back) => {
     const harness = await makeHarness({ config: { projectContext: structuredClone(DEFAULT_CONFIG.projectContext) } });
     vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([]);
     vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
@@ -1902,8 +1903,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await trigger(harness);
     await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
     const input = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
-    expect(input).toContain("Use the project venv.");
-    expect(input).toContain("PROJECT TREE");
+    expect(input).not.toContain("Use the project venv.");
+    expect(input).not.toContain("PROJECT TREE");
     expect(input).not.toContain("Extract PDF tables");
   });
 
@@ -1916,7 +1917,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\x1b[D");
     await flushPromises();
     const lines = harness.panelLines();
-    expect(lines.find((line) => line.includes("Directory tree"))).toMatch(/Directory tree +\[x\] On/);
+    expect(lines.find((line) => line.includes("Directory tree"))).toMatch(/Directory tree +\[ \] Off/);
     expect(lines.find((line) => line.includes("Skill metadata"))).toMatch(/Skill metadata +\[ \] Off/);
     harness.panelInput(" ");
     harness.panelInput("\x1b[B");
@@ -1928,12 +1929,13 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("q");
     await view;
     const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
-    expect(saved.projectContext).toMatchObject({ instructionsEnabled: false, skillsEnabled: true, tree: { enabled: false } });
+    expect(saved.projectContext).toMatchObject({ instructionsEnabled: true, skillsEnabled: true, tree: { enabled: true } });
     await harness.reload();
     await trigger(harness);
+    await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
     const input = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
-    expect(input).not.toContain("Use the project venv.");
-    expect(input).not.toContain("PROJECT TREE");
+    expect(input).toContain("Use the project venv.");
+    expect(input).toContain("PROJECT TREE");
     expect(input).toContain("Extract PDF tables");
   });
 
@@ -2254,7 +2256,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\x1b");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Unsaved context changes"));
     harness.panelInput("\t");
-    expect(harness.panelLines().join("\n")).toMatch(/Project instructions +First request only/);
+    expect(harness.panelLines().join("\n")).toMatch(/Project instructions +Always/);
     harness.panelInput("\t");
     harness.panelInput("\x1b[B");
     expect(harness.panelLines().join("\n")).toContain("Thinking: medium");
@@ -2264,7 +2266,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.context.thinkingLevel).toBe("medium");
     const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
     expect(saved.thinkingLevel).toBe("high");
-    expect(saved.projectContext.instructionsEnabled).toBe(true);
+    expect(saved.projectContext.instructionsEnabled).toBe(false);
     harness.panelInput("\x1b");
     harness.panelInput("q");
     await view;
@@ -2305,7 +2307,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved"));
     expect(harness.customCalls()).toBe(1);
     const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
-    expect(saved.projectContext.instructionsEnabled).toBe(false);
+    expect(saved.projectContext.instructionsEnabled).toBe(true);
     harness.panelInput("q");
     await view;
   });
@@ -2374,7 +2376,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const harness = await makeHarness();
     const registry = harness.context.modelRegistry;
     const small = registry.getAvailable()[0]!;
-    small.contextWindow = 20_000;
+    small.contextWindow = 9000;
     const large = { ...small, id: "larger", name: "Larger", contextWindow: 128_000 };
     vi.mocked(registry.getAvailable).mockReturnValue([small, large]);
     vi.mocked(registry.find).mockImplementation((provider, id) => [small, large].find((model) => model.provider === provider && model.id === id));
@@ -2388,7 +2390,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const firstPacket = JSON.parse(first[1].messages[0].content[0].text);
     expect(firstPacket.draft).toBe("Draft A");
     expect(firstPacket.budget_omissions).toBeDefined();
-    const tokens = Buffer.byteLength(first[1].systemPrompt) + Buffer.byteLength(first[1].messages[0].content[0].text);
+    const tokens = Math.ceil(Buffer.byteLength(first[1].systemPrompt) / 3) + Math.ceil(Buffer.byteLength(first[1].messages[0].content[0].text) / 3);
     expect(tokens + first[2].maxTokens + 4096 + Math.ceil(small.contextWindow * 0.01)).toBeLessThanOrEqual(small.contextWindow);
     expect(harness.notifications.join(" ")).toContain("Budget trimmed background");
     expect(harness.widgetLines().join("\n")).toContain("⚠");
@@ -2406,11 +2408,10 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("q"); harness.panelInput("q"); await view;
   });
 
-  it.each(["context", "output", "unknown"])("blocks before the provider on %s budget failure, preserving the editor and warning in the UI", async (kind) => {
+  it.each(["context", "unknown"])("blocks before the provider on %s budget failure, preserving the editor and warning in the UI", async (kind) => {
     const harness = await makeHarness();
     const model = harness.context.modelRegistry.getAvailable()[0]!;
     if (kind === "context") model.contextWindow = 5000;
-    if (kind === "output") model.maxTokens = 100;
     if (kind === "unknown") model.contextWindow = NaN;
     await trigger(harness);
     expect(harness.context.modelRegistry.streamSimple).not.toHaveBeenCalled();
@@ -2426,7 +2427,17 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("q"); harness.panelInput("q"); await view;
   });
 
-  it("bounds reasoning additions inside the configured and model output ceiling", async () => {
+  it("sends a small request with legacy 2048 output and inherited high thinking", async () => {
+    const harness = await makeHarness({ reasoning: true, thinkingLevel: "high", config: { maxOutputTokens: 2048 } });
+    await trigger(harness);
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    const call = harness.complete.mock.calls[0] as any[];
+    expect(call[2]).toMatchObject({ maxTokens: 2048, reasoning: "high" });
+    expect(harness.notifications.join(" ")).not.toContain("Request not sent");
+    expect(harness.editorWrites).toEqual([]);
+  });
+
+  it("bounds shared reasoning inside the configured and model output ceiling", async () => {
     const harness = await makeHarness({ reasoning: true, thinkingLevel: "high" });
     const model = harness.context.modelRegistry.getAvailable()[0]!;
     model.maxTokens = 6000;
@@ -2434,7 +2445,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const call = harness.complete.mock.calls[0] as any[];
     expect(call[2].reasoning).toBe("high");
     expect(call[2].thinkingBudgets.high).toBeGreaterThanOrEqual(1024);
-    expect(call[2].maxTokens + call[2].thinkingBudgets.high).toBeLessThanOrEqual(model.maxTokens);
+    expect(call[2].maxTokens).toBeLessThanOrEqual(model.maxTokens);
   });
 
   it("runs the optimizer in the background without writing the editor or session", async () => {
