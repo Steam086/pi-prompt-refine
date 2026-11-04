@@ -16,6 +16,18 @@ afterEach(async () => {
 });
 
 describe("Prompt Refine configuration", () => {
+  it("validates the local Preferences key separately from global shortcuts", () => {
+    expect(parseConfig({ version: 1, preferencesKey: null }).config.preferencesKey).toBeNull();
+    expect(parseConfig({ version: 1, preferencesKey: "alt+p" }).config.preferencesKey).toBe("alt+p");
+    for (const key of ["p", "tab", "shift+tab", "ctrl+s", "ctrl+e", "ctrl+\\", "ctrl+c", "invalid"]) {
+      const parsed = parseConfig({ version: 1, preferencesKey: key });
+      expect(parsed.warnings.join(" ")).toContain("preferencesKey");
+      expect(parsed.config.preferencesKey).toBe("f2");
+    }
+    const conflict = parseConfig({ version: 1, shortcuts: { view: "f2" } });
+    expect(conflict.config.preferencesKey).toBeNull();
+    expect(conflict.warnings.join(" ")).toContain("conflicts");
+  });
   it("uses documented defaults and leaves the model unconfigured", () => {
     const result = parseConfig({ version: 1 });
     expect(result.warnings).toEqual([]);

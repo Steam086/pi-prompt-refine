@@ -7,6 +7,7 @@ import { matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import promptRefineExtension, { modelPickerItems } from "../src/extension.js";
 import { DEFAULT_CONFIG, type RefineConfig } from "../src/config.js";
+import { PreferenceStore } from "../src/preference-store.js";
 import { flushPromises } from "./helpers.js";
 
 const agentDirs: string[] = [];
@@ -159,6 +160,7 @@ async function makeHarness(options: { persistHistory?: boolean; freshInstall?: b
           theme,
           {
             getKeys: (action: string) => action === "app.thinking.cycle" ? ["shift+tab"] : [],
+            getResolvedBindings: () => ({ "app.thinking.cycle": ["shift+tab"] }),
             matches: (data: string, action: string) => {
               const keys: Record<string, string> = {
                 "tui.select.cancel": "escape", "tui.select.confirm": "return", "tui.input.submit": "return",
@@ -623,6 +625,48 @@ describe("persistent session-local Refine history", () => {
 });
 
 describe("explicit candidate revision", () => {
+  it("composes saved preference snapshots into the existing request, only after returning and Ctrl+S", async () => {
+    const harness = await makeHarness();
+    const store = new PreferenceStore(harness.agentDir, harness.context.cwd);
+    const entry = await store.save("global", { name: "Keep literal", body: "Keep all commands unchanged." });
+    await trigger(harness);
+    harness.holdPanel(); const view = harness.command("view", harness.context);
+    harness.panelInput("p");
+    await vi.waitFor(() => expect(harness.panelLines(100).join("\n")).toContain("Keep literal"));
+    harness.panelInput("\r"); harness.panelInput(" ");
+    harness.panelInput("\x13");
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    harness.panelInput("\t"); harness.panelInput("\r"); // Bring back
+    await store.save("global", { name: "Changed", body: "New library body" }, entry);
+    harness.panelInput("Shorten examples."); harness.panelInput("\x13");
+    await flushPromises();
+    const packet = JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
+    expect(packet).toMatchObject({ operation: "revise", original_draft: "Draft A", previous_candidate: "Refined prompt",
+      revision_instruction: "Keep all commands unchanged.\n\nShorten examples." });
+    expect(harness.editorWrites).toEqual([]); expect(harness.sent).toEqual([]);
+    harness.panelInput("q"); await view;
+  });
+
+  it("checks total composed length and retains preferences when a candidate becomes stale", async () => {
+    const harness = await makeHarness({ config: { maxDraftChars: 30 } });
+    await new PreferenceStore(harness.agentDir, harness.context.cwd).save("global", { name: "Long", body: "1234567890123456789012345" });
+    await trigger(harness); harness.holdPanel(); const view = harness.command("view", harness.context);
+    harness.panelInput("f"); harness.panelInput("Extra"); harness.panelInput("\x1bOQ");
+    await vi.waitFor(() => expect(harness.panelLines(100).join("\n")).toContain("Long"));
+    harness.panelInput("\r"); harness.panelInput(" "); harness.panelInput("\t"); harness.panelInput("\r");
+    harness.panelInput("\x13");
+    expect(harness.panelLines(100).join("\n")).toContain("exceed 30");
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    harness.complete.mockResolvedValueOnce(refinement("New background candidate"));
+    harness.setEditorText("New original"); await trigger(harness);
+    harness.panelInput("\x13");
+    expect(harness.panelLines(100).join("\n")).toContain("result changed");
+    expect(harness.panelLines(100).join("\n")).toContain("1 preference");
+    expect(harness.panelLines(100).join("\n")).not.toContain("New background candidate");
+    expect(harness.panelLines(60).join("\n")).not.toContain("New background candidate");
+    expect(harness.complete).toHaveBeenCalledTimes(2);
+    harness.panelInput("\x1b"); harness.panelInput("q"); await view;
+  });
   it("revises inline in Usage inspection, preserving the source viewport and explicit submit", async () => {
     const harness = await makeHarness();
     harness.complete.mockResolvedValueOnce(refinement("Source result\n" + Array.from({ length: 80 }, (_, i) => `Source line ${i}`).join("\n")));

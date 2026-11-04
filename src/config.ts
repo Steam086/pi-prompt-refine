@@ -45,6 +45,8 @@ export interface RefineConfig {
   systemPrompt?: string;
   favorites: ModelRef[];
   shortcuts: ShortcutConfig;
+  /** Local to Revise; null disables the key, leaving the result-page p entry. */
+  preferencesKey: KeyId | null;
   timeoutMs: number;
   /** Save minimal per-session history; never full background or unsent input. */
   historyPersistence: boolean;
@@ -77,6 +79,7 @@ export const DEFAULT_CONFIG: RefineConfig = {
   modelThinkingLevels: {},
   favorites: [],
   shortcuts: { ...DEFAULT_SHORTCUTS },
+  preferencesKey: "f2",
   timeoutMs: 60_000,
   historyPersistence: true,
   context: { maxMessages: 12, maxChars: 16_000 },
@@ -307,6 +310,19 @@ export function parseConfig(value: unknown): LoadedConfig {
 
   const shortcutsMigrated = isLegacyDefaultShortcuts(value.shortcuts);
   config.shortcuts = validateShortcuts(shortcutsMigrated ? undefined : value.shortcuts, warnings);
+  if (value.preferencesKey === null) config.preferencesKey = null;
+  else if (value.preferencesKey !== undefined) {
+    const key = typeof value.preferencesKey === "string" ? canonicalShortcut(value.preferencesKey) : undefined;
+    if (key && (/^f\d+$/.test(key) || key.includes("ctrl+") || key.includes("alt+")) &&
+      !["ctrl+s", "ctrl+e", "ctrl+c", "ctrl+\\", "tab", "shift+tab", "escape", "enter"].includes(key) &&
+      !Object.values(config.shortcuts).some((shortcut) => shortcut && canonicalShortcut(shortcut) === key)) {
+      config.preferencesKey = key as KeyId;
+    } else warnings.push("preferencesKey must be a function/modified key without a reserved Revise or extension conflict; using F2.");
+  }
+  if (config.preferencesKey && Object.values(config.shortcuts).some((shortcut) => shortcut && canonicalShortcut(shortcut) === canonicalShortcut(config.preferencesKey!))) {
+    config.preferencesKey = null;
+    warnings.push("preferencesKey conflicts with an extension shortcut; disabled. Use p on result details.");
+  }
   config.timeoutMs = boundedInteger(value.timeoutMs, DEFAULT_CONFIG.timeoutMs, 1_000, 300_000, "timeoutMs", warnings);
   config.maxDraftChars = boundedInteger(value.maxDraftChars, DEFAULT_CONFIG.maxDraftChars, 1, 100_000, "maxDraftChars", warnings);
   config.maxOutputTokens = boundedInteger(value.maxOutputTokens, DEFAULT_CONFIG.maxOutputTokens, 16, 65_536, "maxOutputTokens", warnings);

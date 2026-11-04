@@ -105,6 +105,32 @@ Enter 详情内保留 `e` 编辑结果、`f` 修订、`s` 发送、`o` 原稿对
 - **Context 设置**：规则 `First request only` / `Always` / `Off`、默认目录树和技能元数据。规则 First 模式对修订省略规则，策略在 round 捕获时冻结。配置修改用于**下一 round**，不偷偷改变当前任务。
 - **Optimizer 设置**：模型与 thinking 选择用于下一次显式启动，不改变主 Agent。系统编辑策略变更同样要等下一 round 捕获。配置持久化失败会明确提示仅进程内有效。
 
+## 保存与复用修订要求（Preferences）
+
+Revise 中按 **F2** 打开选择页；也可从结果详情或 Inspect 按 **p Preferences** 进入。只有返回 Revise 后的 **Ctrl+S** 才请求模型；浏览、勾选、临时编辑、保存和带回均不写 Pi 主编辑器、不发送 Pi 消息。
+
+1. 输入名称或正文进行搜索，Enter 进入列表，↑↓移动，Space 勾选／取消，Enter 阅读全文。
+2. Tab / Shift+Tab 在搜索、列表和各操作按钮间循环；当前按钮显示序号。聚焦 `Show all selected` 后 Enter，可查看搜索结果外的全部已选项；Space 移除。`Edit selected for this revision` 只修改本次工作副本。
+3. `Current actual requirements` 查看已经带回的要求；`Preview after bringing back` 查看暂存选择生效后的要求，标题明确标注 **NOT active**。二者都包含完整正文与自由输入；它们不是整个请求 payload。
+4. 聚焦 `Bring back to this revision` 并 Enter，才更新 Revise 已选项。选择页根层 Esc 放弃暂存选择；不会撤销已经保存到库的条目。
+5. 回到 Revise 后可继续补充自由输入，再 Ctrl+S 提交。候选过期、总组合超长等错误会保留输入与选择，不自动改绑来源。
+
+已选项按勾选顺序组合，然后追加自由输入，以两个换行分隔；全空白段跳过，其他正文原样保留。移除后重新选择会追加到末尾并捕获库最新正文。最多 50 项，不自动识别语义冲突或去重。名称不进入请求，也不决定指令含义。例如“精简提示词”与“在提示词中要求主 Agent 简洁回答”应分别写清。
+
+**保存与管理：**`Save new from free input` 预填完整自由输入，允许删减；填写名称、正文和作用域，在保存按钮上 Enter。正文 Enter 换行，Tab 切字段；子页 Ctrl+S 不保存也不提交。`Edit library entry` 修改长期条目，`Save highlighted as` 可复制到其他作用域，`Delete library entry` 需要 y 确认。表单 Esc 遇到未保存修改时确认放弃；失败保留字段。保存成功不自动选中，以免与仍在自由输入中的正文重复。
+
+已选项是快照，库更新或删除不会静默改变它们。`Refresh library` 显式刷新列表后，可在已选全文中查看来源已变更／删除标记。临时草稿、已选项及其修改仅在当前工作区内按候选隔离，关闭后清除；已提交组合正文沿用现有历史保存规则。
+
+**库位置与配置：**
+
+- 全局：Pi agent directory 下 `prompt-refine-preferences.json`。
+- 项目：规范化 cwd 下 `.pi/prompt-refine-preferences.json`，不自动上探仓库、不跨 worktree 合并。
+- 每个库最多 500 条、1 MiB；名称最多 120 字符，单条正文最多 16,000 字符；提交组合另受 `maxDraftChars` 限制。文件以 `0600` 创建，不随 session 历史清理。
+- 在 `prompt-refine.json` 中设置 `"preferencesKey": "alt+p"` 可改绑，设为 `null` 可禁用 Revise 内入口；结果详情的 p 仍可用。普通输入键及保留键不能占用；与本扩展或 Pi 已解析绑定冲突时会提示，不能保证识别其他扩展／终端截获。
+- 库写入通过同目录 `.lock` 文件协调多进程，并检查编辑版本。忙时重试；冲突时保留表单内容，取消后刷新再编辑。崩溃遗留锁只在确认没有写入进程后手工移除。损坏、未知版本或超限库不会被空库覆盖。外部编辑器若绕过锁写文件，不受这套并发协调保证。
+
+实体终端的功能键传递与中文 IME 仍需实际验收；自动测试覆盖组件、两种 Pi 渲染器、粘贴和异步状态，不能替代真实终端验证。
+
 ## 记录范围与用量
 
 运行期日志最多 **100 条**，容量满时优先淘汰最早的已终结记录；未发送、排队和运行中工作不被静默淘汰。全部被待处理工作占满时拒绝新增并提示。日志按 session 隔离、跨该 session 的分支查看，不按项目聚合，不自动进入模型上下文。
