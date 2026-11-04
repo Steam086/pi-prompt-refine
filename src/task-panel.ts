@@ -146,6 +146,10 @@ export class TaskPanel {
     return false;
   }
   private badge(record: RefineRecord): string {
+    const warning = record.input.budget && record.input.budget.status !== "ok" ? "⚠ " : "";
+    return warning + this.statusBadge(record);
+  }
+  private statusBadge(record: RefineRecord): string {
     if (record.status === "unsent") return "○ Unsent";
     if (record.status === "queued") return "… Queued";
     if (record.status === "generating") return "◌ Running";
@@ -192,6 +196,11 @@ export class TaskPanel {
     }
     if (record.archivedAt !== undefined) header.push(...this.wrapped(this.theme.fg("warning", "Uses earlier conversation context"), width));
     if (record.error) header.push(...this.wrapped(this.theme.fg("error", sanitizeTerminalText(`Error: ${record.error}`)), width));
+    if (!row.original && record.input.budget?.message) {
+      const message = record.input.budget.status === "blocked"
+        ? "Request not sent · budget exceeded" : "Background reduced · token budget";
+      header.push(...this.wrapped(this.theme.fg("warning", sanitizeTerminalText(`⚠ ${message}`)), width));
+    }
     for (const warning of record.input.projectDiagnostics?.warnings ?? record.input.project?.snapshot.warnings ?? []) {
       header.push(...this.wrapped(this.theme.fg("warning", sanitizeTerminalText(`Context warning: ${warning}`)), width));
     }
@@ -217,6 +226,12 @@ export class TaskPanel {
             body.push(cell(a!, b!, half) + "   " + cell(c!, d!, width - half - 3));
           } else body.push(cell(a!, b!, width), cell(c!, d!, width));
         }
+      }
+      if (!row.original && record.input.budget) {
+        const budget = record.input.budget;
+        body.push("", this.heading("Request budget · conservative token estimate"),
+          this.muted(`Input ${budget.inputTokens} + output ${budget.outputTokens} + safety ${budget.safetyTokens} / window ${budget.contextWindow}`));
+        if (budget.message) body.push(this.theme.fg("warning", sanitizeTerminalText(`⚠ ${budget.message}`)));
       }
       body.push("", this.heading("Record"), this.muted(`Round ${record.input.roundId ?? "?"} · Task ${record.taskId}`));
       if (!row.original) body.push(this.muted(`Run #${record.id} · ${record.kind}${record.parentId ? ` from #${record.parentId}` : ""}`));

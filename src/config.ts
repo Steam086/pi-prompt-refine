@@ -91,7 +91,7 @@ export const DEFAULT_CONFIG: RefineConfig = {
     },
   },
   maxDraftChars: 16_000,
-  maxOutputTokens: 2_048,
+  maxOutputTokens: 8_192,
 };
 
 const SHORTCUT_ACTIONS: ShortcutAction[] = ["optimize", "view", "dismiss", "selectModel", "cycleModel", "restore"];
@@ -290,7 +290,7 @@ export function parseConfig(value: unknown): LoadedConfig {
   config.shortcuts = validateShortcuts(shortcutsMigrated ? undefined : value.shortcuts, warnings);
   config.timeoutMs = boundedInteger(value.timeoutMs, DEFAULT_CONFIG.timeoutMs, 1_000, 300_000, "timeoutMs", warnings);
   config.maxDraftChars = boundedInteger(value.maxDraftChars, DEFAULT_CONFIG.maxDraftChars, 1, 100_000, "maxDraftChars", warnings);
-  config.maxOutputTokens = boundedInteger(value.maxOutputTokens, DEFAULT_CONFIG.maxOutputTokens, 16, 16_384, "maxOutputTokens", warnings);
+  config.maxOutputTokens = boundedInteger(value.maxOutputTokens, DEFAULT_CONFIG.maxOutputTokens, 16, 65_536, "maxOutputTokens", warnings);
 
   if (value.context !== undefined && !isRecord(value.context)) {
     warnings.push("context must be an object; using the default context budget.");

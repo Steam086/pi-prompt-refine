@@ -11,6 +11,7 @@ import {
   loadConfig,
 } from "./config.js";
 import { buildRefineInput, buildRefineSystemPrompt, parseRefineOutput, selectHistory, REFINE_SYSTEM_PROMPT, type HistorySnapshot } from "./context.js";
+import { budgetRequest } from "./budget.js";
 import { renderSummary } from "./presentation.js";
 import { renderModelChoices } from "./model-picker.js";
 import { formatKeyHint, type KeyHint } from "./key-hints.js";
@@ -82,6 +83,7 @@ function userMessageText(message: unknown): string | undefined {
 
 function errorStatus(state: ControllerState): string {
   switch (state.error) {
+    case "budget": return `⚠ ${state.budget?.message ?? "Request does not fit the model budget. Draft unchanged."}`;
     case "timeout": return "Refine: timed out. Retry.";
     case "empty": return "Refine: no prompt returned. Retry.";
     case "truncated": return "Refine: incomplete output. Retry.";
@@ -195,10 +197,19 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       }
 
       const preparedInput = request.preparedInput ?? buildRefineInput(request.draft, request.history, projectText, request.revision);
+      if (signal.aborted) throw new Error("Request cancelled");
       controller.capturePreparedInput(request.requestId, request.generation, preparedInput, diagnostics);
+      const budget = budgetRequest(systemPrompt, preparedInput, model, config.maxOutputTokens, request.thinkingLevel);
+      const blocked = budget.report.status === "blocked";
+      controller.captureBudget(request.requestId, request.generation, budget.report, blocked ? undefined : budget.input);
+      if (budget.report.message && controller.getSessionId() === request.sessionId && !signal.aborted) {
+        notify(ctx, `⚠ Refine #${request.recordId}: ${budget.report.message}`, "warning");
+      }
+      if (blocked) return { text: "", stopReason: "budget" };
+      if (signal.aborted) throw new Error("Request cancelled");
       const userMessage: UserMessage = {
         role: "user",
-        content: [{ type: "text", text: preparedInput }],
+        content: [{ type: "text", text: budget.input }],
         timestamp: Date.now(),
       };
       const response = await ctx.modelRegistry.streamSimple(
@@ -206,7 +217,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         { systemPrompt, messages: [userMessage], tools: [] },
         {
           signal,
-          maxTokens: Math.min(config.maxOutputTokens, model.maxTokens),
+          maxTokens: budget.maxTokens,
+          ...(budget.thinkingBudgets ? { thinkingBudgets: budget.thinkingBudgets } : {}),
           ...(request.thinkingLevel && request.thinkingLevel !== "off" ? { reasoning: request.thinkingLevel } : {}),
         },
       ).result();
@@ -248,6 +260,10 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   function contextLabel(source?: RefineRequestInput): string {
     const snapshot = source?.history ?? historySnapshot;
     if (!snapshot) return "Context: not captured";
+    if (source?.budget?.status === "blocked") return "⚠ Budget blocked · no model request";
+    if (source?.budget?.status === "trimmed") {
+      return `⚠ Budget reduced · ${snapshot.messageCount - source.budget.removedMessages} msgs · input est. ${source.budget.inputTokens} tokens`;
+    }
     const project = source ? (source.project ? `${source.project.snapshot.instructionCount} rules · ${source.project.snapshot.skillCount} skills${source.project.config?.tree.enabled && !source.history.text ? " · tree" : ""}${source.projectDiagnostics?.referencedDirectoryCount ? ` · @dirs ${source.projectDiagnostics.referencedDirectoryCount}` : ""}` : "") : projectLabel;
     const warnings = source ? source.projectDiagnostics?.warnings ?? source.project?.snapshot.warnings ?? [] : projectWarnings;
     const warning = warnings.length ? `⚠${warnings.length} · ` : "";

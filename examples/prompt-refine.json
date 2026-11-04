@@ -24,7 +24,7 @@
     "maxChars": 16000
   },
   "maxDraftChars": 16000,
-  "maxOutputTokens": 2048,
+  "maxOutputTokens": 8192,
   "projectContext": {
     "enabled": true,
     "maxChars": 28000,
