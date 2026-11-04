@@ -78,6 +78,7 @@ async function makeHarness(options: { freshInstall?: boolean; sessionName?: stri
     stopReason: "stop",
   }));
   const modelRegistry = {
+    isUsingOAuth: vi.fn(() => false),
     find: vi.fn((provider: string, id: string) => provider === model.provider && id === model.id ? model : undefined),
     getAvailable: vi.fn(() => options.noAvailableModels ? [] : [model]),
     streamSimple: vi.fn((selectedModel: Model<Api>, context: unknown, requestOptions: unknown) => ({
@@ -1626,6 +1627,23 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.widgetLines().join("\n")).toContain("Done · 0s");
   });
 
+  it("captures SDK cost and subscription at completion without repricing from later settings", async () => {
+    const harness = await makeHarness();
+    vi.mocked(harness.context.modelRegistry.isUsingOAuth).mockReturnValue(true);
+    harness.complete.mockResolvedValueOnce({
+      ...refinement("Priced result"),
+      usage: { input: 200, output: 300, cacheRead: 1000, cacheWrite: 0, totalTokens: 1500, cost: { total: 0.012, input: 0.005, output: 0.006, cacheRead: 0.001, cacheWrite: 0 } },
+    });
+    await trigger(harness);
+    vi.mocked(harness.context.modelRegistry.isUsingOAuth).mockReturnValue(false);
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    expect(harness.panelLines().join("\n")).toContain("↑1.2k ↓300 · ≈$0.012 (sub)");
+    harness.panelInput("q");
+    await view;
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+  });
+
   it("shows reported usage in the summary and accepted snapshot without extra requests", async () => {
     const harness = await makeHarness();
     harness.complete.mockResolvedValueOnce({
@@ -1636,7 +1654,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.widgetLines(100).join("\n")).toContain("Tokens: total 190 · in 120 · out 30");
     harness.holdPanel();
     const view = harness.command("view", harness.context);
-    expect(harness.panelLines().join("\n")).toContain("Tokens: total 190 · in 120 · out 30");
+    expect(harness.panelLines().join("\n")).toContain("↑160 ↓30 · Cost —");
     expect(harness.panelLines().join("\n")).not.toContain("think(out)");
     harness.panelInput("\x1b[C"); // Unified Usage shows full details beside the list.
     harness.panelInput("\r");
@@ -1646,7 +1664,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("a");
     await view;
     const acceptedView = harness.command("view", harness.context);
-    expect(harness.panelLines().join("\n")).toContain("Tokens: total 190");
+    expect(harness.panelLines().join("\n")).toContain("↑160 ↓30 · Cost —");
     harness.panelInput("q");
     await acceptedView;
     expect(harness.complete).toHaveBeenCalledTimes(1);

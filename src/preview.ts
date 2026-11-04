@@ -2,7 +2,7 @@ import { Markdown, ScrollView, Text, truncateToWidth, visibleWidth, wrapTextWith
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
 import { panelFrame, panelLayout, workspaceTabs } from "./panel-layout.js";
-import { formatTokenUsage } from "./usage.js";
+import { formatRunUsage, formatTokenUsage } from "./usage.js";
 import { resultHeading, sanitizeTerminalText, type SummaryOptions } from "./presentation.js";
 
 export interface PreviewOptions extends SummaryOptions {
@@ -91,7 +91,7 @@ export class PreviewPanel implements Component {
       options.draftChanged !== this.options.draftChanged || options.sessionTitle !== this.options.sessionTitle ||
       options.errorLabel !== this.options.errorLabel || !!options.accepted !== !!this.options.accepted ||
       options.accepted?.editorChanged !== this.options.accepted?.editorChanged ||
-      formatTokenUsage(options.state.usage) !== formatTokenUsage(this.options.state.usage) ||
+      JSON.stringify(options.state.usage) !== JSON.stringify(this.options.state.usage) ||
       ((this.helpVisible || this.isEmptyState()) && (options.contextLabel !== this.options.contextLabel ||
         options.state.model?.provider !== this.options.state.model?.provider || options.state.model?.id !== this.options.state.model?.id ||
         options.canRestore !== this.options.canRestore));
@@ -166,7 +166,7 @@ export class PreviewPanel implements Component {
     const paragraph = (text: string, color: "text" | "muted" | "warning" = "text") => {
       lines.push(...wrapTextWithAnsi(sanitizeTerminalText(text), width).map((line) => theme.fg(color, line)));
     };
-    const usageLabel = formatTokenUsage(options.state.usage, this.helpVisible ? "full" : "summary");
+    const usageLabel = this.helpVisible ? formatTokenUsage(options.state.usage) : options.state.usage ? formatRunUsage(options.state.usage) : undefined;
     if (usageLabel && options.state.phase !== "generating") {
       paragraph(usageLabel, "muted");
       lines.push("");

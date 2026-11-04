@@ -36,7 +36,7 @@ describe("result reading panel", () => {
     expect(lines[2]).toContain("openai-codex/example-model · xhigh");
     expect(text.match(/xhigh/g)).toHaveLength(1);
     expect(lines[2]).not.toContain("6 msgs");
-    expect(text).toContain("Tokens: total 5969 · in 5634 · out 335");
+    expect(text).toContain("↑5.6k ↓335 · Cost —");
     expect(text).not.toContain("read 0");
     expect(text).not.toContain("think(out)");
     for (const hint of ["a Accept", "e Edit", "f Revise", "s Send", "i Input", "m Model", "g Same input", "q Back", "? Help"]) {

@@ -20,7 +20,7 @@ import { PreviewPanel, type PreviewOptions } from "./preview.js";
 import { RefineController, type Candidate, type CandidateToken, type ControllerState, type RefineRequest, type RefineRequestInput, type TriggerResult } from "./controller.js";
 import type { TaskPanelPosition } from "./task-panel.js";
 
-import { readTokenUsage } from "./usage.js";
+import { readRunUsage } from "./usage.js";
 import { assembleProjectContext, captureProjectContext, collectDirectoryContext, type TreeSnapshot } from "./project-context.js";
 
 const STATUS_KEY = "prompt-refine";
@@ -233,7 +233,10 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         title: request.generateTitle ? parsed?.title : undefined,
         invalidOutput: stopReason === "stop" && !parsed,
         stopReason,
-        usage: readTokenUsage(response.usage),
+        usage: readRunUsage(response.usage, {
+          hasPricing: [model.cost?.input, model.cost?.output, model.cost?.cacheRead, model.cost?.cacheWrite].some((rate) => typeof rate === "number" && rate > 0),
+          subscription: ctx.modelRegistry.isUsingOAuth(model),
+        }),
       };
     },
   }, config.model);
