@@ -50,6 +50,27 @@ describe("Prompt Refine configuration", () => {
     expect(invalid.warnings.join(" ")).toContain("thinkingLevel");
   });
 
+  it("validates per-model thinking memory without requiring a default model", async () => {
+    const levels = { "provider/model": "high", "other/model": "off", "provider/nested/model": "max" };
+    const parsed = parseConfig({ version: 1, modelThinkingLevels: levels });
+    expect(parsed.warnings).toEqual([]);
+    expect(parsed.config.modelThinkingLevels).toEqual(levels);
+    expect(parsed.config.model).toBeUndefined();
+    const path = configPath(await tempDirectory());
+    await saveConfig(path, parsed.config);
+    expect((await loadConfig(path)).config.modelThinkingLevels).toEqual(levels);
+    expect(parseConfig({ version: 1 }).config.modelThinkingLevels).toEqual({});
+
+    const invalid = parseConfig({ version: 1, modelThinkingLevels: {
+      ...levels, bad: "low", "/model": "low", "provider/": "low", "provider/bad": "turbo", "provider/null": null,
+    } });
+    expect(invalid.config.modelThinkingLevels).toEqual(levels);
+    expect(invalid.warnings).toHaveLength(5);
+    for (const value of [null, [], "high"]) {
+      expect(parseConfig({ version: 1, modelThinkingLevels: value }).warnings).toHaveLength(1);
+    }
+  });
+
   it("defaults instructions, tree and skills off, preserving explicit opt-ins", () => {
     expect(parseConfig({ version: 1 }).config.projectContext).toMatchObject({ instructionsEnabled: false, skillsEnabled: false, tree: { enabled: false } });
     const custom = parseConfig({ version: 1, projectContext: { instructionsEnabled: true, skillsEnabled: true, tree: { enabled: true } } });

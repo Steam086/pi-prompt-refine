@@ -373,7 +373,9 @@ describe("first optimizer model setup", () => {
     harness.panelInput("\r");
     await picker;
     expect(harness.notifications.at(-1)).toContain("no longer available");
-    expect(JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"))).not.toHaveProperty("model");
+    const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
+    expect(saved).not.toHaveProperty("model");
+    expect(saved.modelThinkingLevels).toEqual({});
   });
 
   it("does not claim a failed first selection save was persisted", async () => {
@@ -420,8 +422,9 @@ describe("multi-model preview and unified Usage", () => {
     expect(call[0]).toBe(b);
     expect(call[1].systemPrompt).toBe(firstInput.systemPrompt);
     expect(call[1].messages[0].content).toEqual(firstInput.messages[0].content);
-    expect(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8")).toBe(savedBefore);
-    expect(harness.panelLines().join("\n")).toContain("Run: fake-provider/fake-chat");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Run: fake-provider/fake-chat"));
+    const savedAfter = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
+    expect(savedAfter).toEqual({ ...JSON.parse(savedBefore), modelThinkingLevels: { "other-provider/second-model": "off" } });
     expect(harness.panelLines().join("\n")).toContain("Refined prompt");
     harness.panelInput("\x1b[A");
     expect(harness.panelLines().join("\n")).toContain("B result");
@@ -1119,7 +1122,8 @@ describe("round workspace integration", () => {
     expect(harness.complete).not.toHaveBeenCalled();
     harness.panelInput("e"); harness.panelInput("Independent original"); harness.panelInput("\r");
     expect(harness.panelLines().join("\n")).toContain("1 prompts");
-    harness.panelInput("m"); await flushPromises(); harness.panelInput("\r"); await flushPromises();
+    harness.panelInput("m"); await flushPromises(); harness.panelInput("\r");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).not.toContain("Run original with another model"));
     expect(harness.complete).toHaveBeenCalledTimes(1);
     const payload = JSON.parse((harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
     expect(payload.draft).toBe("Independent original");
@@ -1141,7 +1145,7 @@ describe("round workspace integration", () => {
     harness.panelInput("\r"); await flushPromises();
     expect(harness.complete).toHaveBeenCalledTimes(1);
     expect(harness.notifications.at(-1)).toContain("already running");
-    expect(harness.panelLines().join("\n")).toContain("x Stop");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("x Stop"));
     harness.panelInput("x");
     expect((harness.complete.mock.calls[0] as any[])[2].signal.aborted).toBe(true);
     harness.panelInput("q"); await view;
@@ -2176,6 +2180,123 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect((harness.complete.mock.calls[0] as any[])[2]).toMatchObject({ reasoning: "high" });
   });
 
+  it("remembers comparison-only thinking across reload and runs it with Enter without changing defaults", async () => {
+    const harness = await makeHarness({ reasoning: true, thinkingLevel: "medium", config: { thinkingLevel: "low" } });
+    const registry = harness.context.modelRegistry;
+    const a = registry.getAvailable()[0]!;
+    const b = { ...a, provider: "other-provider", name: "Other Model" } as Model<Api>;
+    vi.mocked(registry.getAvailable).mockReturnValue([a, b]);
+    vi.mocked(registry.find).mockImplementation((provider, id) => [a, b].find((model) => model.provider === provider && model.id === id));
+    harness.holdPanel();
+    const runComparison = async (adjust: boolean) => {
+      const view = harness.command("", harness.context);
+      harness.panelInput("m");
+      await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Run original with another model"));
+      if (adjust) harness.panelInput("\x1b[Z"); // low -> medium
+      expect(harness.panelLines().join("\n")).toContain("Thinking level: medium");
+      if (!adjust) expect(harness.panelLines().join("\n")).toContain("Last used for this model");
+      harness.panelInput("\r");
+      await vi.waitFor(() => expect(harness.panelLines().join("\n")).not.toContain("Run original with another model"));
+      harness.panelInput("q");
+      await view;
+    };
+    await trigger(harness);
+    await runComparison(true);
+    let saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
+    expect(saved.model).toEqual({ provider: a.provider, id: a.id });
+    expect(saved.thinkingLevel).toBe("low");
+    expect(saved.modelThinkingLevels[`${b.provider}/${b.id}`]).toBe("medium");
+    await harness.reload();
+    await trigger(harness);
+    await runComparison(false);
+    expect(harness.complete.mock.calls.map((call) => (call as any[])[2].reasoning)).toEqual(["low", "medium", "low", "medium"]);
+    expect(harness.context.thinkingLevel).toBe("medium");
+    expect(harness.editorWrites).toEqual([]);
+    saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
+    expect(saved.thinkingLevel).toBe("low");
+  });
+
+  it("isolates picker edits by model across navigation and search, and discards them on cancel", async () => {
+    const harness = await makeHarness({ reasoning: true, config: { modelThinkingLevels: {
+      "fake-provider/fake-chat": "low", "other-provider/fake-chat": "high",
+    } } });
+    const registry = harness.context.modelRegistry;
+    const a = registry.getAvailable()[0]!;
+    const b = { ...a, provider: "other-provider", name: "Other Model" } as Model<Api>;
+    vi.mocked(registry.getAvailable).mockReturnValue([a, b]);
+    vi.mocked(registry.find).mockImplementation((provider, id) => [a, b].find((model) => model.provider === provider && model.id === id));
+    const path = join(harness.agentDir, "prompt-refine.json");
+    const before = await readFile(path, "utf8");
+    harness.holdPanel();
+    const picker = harness.command("model", harness.context);
+    expect(harness.panelLines().join("\n")).toContain("Thinking level: low");
+    harness.panelInput("\x1b[Z");
+    expect(harness.panelLines().join("\n")).toContain("Thinking level: medium");
+    harness.panelInput("\x1b[B");
+    expect(harness.panelLines().join("\n")).toContain("Thinking level: high");
+    harness.panelInput("\x1b[A");
+    expect(harness.panelLines().join("\n")).toContain("Thinking level: medium");
+    for (const key of "other") harness.panelInput(key);
+    expect(harness.panelLines().join("\n")).toContain("Thinking level: high");
+    harness.panelInput("\x1b");
+    await picker;
+    expect(await readFile(path, "utf8")).toBe(before);
+    expect(harness.complete).not.toHaveBeenCalled();
+  });
+
+  it("restores remembered thinking on default model selection and favorite cycling", async () => {
+    const harness = await makeHarness({ reasoning: true, config: { thinkingLevel: "low", favorites: [
+      { provider: "fake-provider", id: "fake-chat" }, { provider: "other-provider", id: "fake-chat" },
+    ], modelThinkingLevels: { "other-provider/fake-chat": "high" } } });
+    const registry = harness.context.modelRegistry;
+    const a = registry.getAvailable()[0]!;
+    const b = { ...a, provider: "other-provider" } as Model<Api>;
+    vi.mocked(registry.getAvailable).mockReturnValue([a, b]);
+    vi.mocked(registry.find).mockImplementation((provider, id) => [a, b].find((model) => model.provider === provider && model.id === id));
+    harness.setCustomAction(["\x1b[B", "\r"]);
+    await harness.command("model", harness.context);
+    const path = join(harness.agentDir, "prompt-refine.json");
+    expect(JSON.parse(await readFile(path, "utf8")).thinkingLevel).toBe("high");
+    await harness.command("cycle", harness.context);
+    expect(JSON.parse(await readFile(path, "utf8")).thinkingLevel).toBe("low");
+  });
+
+  it.each([true, false])("clamps remembered thinking to current model capabilities (reasoning: %s)", async (reasoning) => {
+    const harness = await makeHarness({ reasoning, config: { modelThinkingLevels: { "fake-provider/fake-chat": "max" } } });
+    harness.holdPanel();
+    const picker = harness.command("model", harness.context);
+    expect(harness.panelLines().join("\n")).toContain(reasoning ? "Thinking level: high" : "not supported by this model");
+    harness.panelInput("\r");
+    await picker;
+    expect(JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8")).modelThinkingLevels["fake-provider/fake-chat"]).toBe(reasoning ? "high" : "off");
+    await trigger(harness);
+    expect((harness.complete.mock.calls[0] as any[])[2].reasoning).toBe(reasoning ? "high" : undefined);
+  });
+
+  it("keeps comparison thinking in memory and warns if saving fails", async () => {
+    const harness = await makeHarness({ reasoning: true, thinkingLevel: "low" });
+    await trigger(harness);
+    const path = join(harness.agentDir, "prompt-refine.json");
+    await rm(path);
+    await mkdir(path);
+    harness.holdPanel();
+    const view = harness.command("", harness.context);
+    harness.panelInput("m");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Run original with another model"));
+    harness.panelInput("\x1b[Z");
+    harness.panelInput("\r");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).not.toContain("Run original with another model"));
+    expect(harness.notifications.join(" ")).toContain("not persisted");
+    expect((harness.complete.mock.calls[1] as any[])[2].reasoning).toBe("medium");
+    harness.panelInput("m");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Run original with another model"));
+    expect(harness.panelLines().join("\n")).toContain("Thinking level: medium");
+    harness.panelInput("\x1b");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).not.toContain("Run original with another model"));
+    harness.panelInput("q");
+    await view;
+  });
+
   it.each([true, false, undefined, "unchanged", "empty"] as const)("edits the optimization prompt with confirmation: %s", async (choice) => {
     const original = "Original optimization instructions";
     const harness = await makeHarness({ config: { systemPrompt: original } });
@@ -2266,6 +2387,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.context.thinkingLevel).toBe("medium");
     const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
     expect(saved.thinkingLevel).toBe("high");
+    expect(saved.modelThinkingLevels["fake-provider/fake-chat"]).toBe("high");
     expect(saved.projectContext.instructionsEnabled).toBe(false);
     harness.panelInput("\x1b");
     harness.panelInput("q");
@@ -2405,6 +2527,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(JSON.parse(second[1].messages[0].content[0].text).conversation.items).toHaveLength(2);
     expect(second[1].messages[0].content[0].text).toContain("OLD".repeat(3000));
     expect(harness.editorWrites).toEqual([]);
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).not.toContain("Run original with another model"));
     harness.panelInput("q"); harness.panelInput("q"); await view;
   });
 
