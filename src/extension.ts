@@ -471,7 +471,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
               const runs = retained.filter((record) => displayModel(record.input.model) === item.value);
               const running = runs.find((record) => record.status === "generating" || record.status === "queued");
               const latest = running ?? runs.at(-1);
-              const status = latest ? ({ generating: "Running", queued: "Queued", generated: "Done", error: "Failed", cancelled: "Cancelled", unsent: "Unsent" })[latest.status] : "";
+              const status = latest ? ({ generating: "Running", queued: "Queued", generated: "Done", error: "Failed", cancelled: "Cancelled", interrupted: "Interrupted", unsent: "Unsent" })[latest.status] : "";
               const favorite = config.favorites.some((model) => displayModel(model) === item.value);
               return { ...item, description: [item.description, status, recent.includes(item.value) ? "Recent" : favorite ? "Favorite" : ""].filter(Boolean).join(" · ") };
             }), list.getSelectedItem()?.value, width, tui.terminal.rows, theme);

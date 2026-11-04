@@ -11,7 +11,7 @@ export interface RefineRecord {
   input: RefineRequestInput;
   /** Keep the common original even if the earliest completed call is evicted. */
   originalInput?: RefineRequestInput;
-  status: "unsent" | "queued" | "generating" | "generated" | "error" | "cancelled";
+  status: "unsent" | "queued" | "generating" | "generated" | "error" | "cancelled" | "interrupted";
   archivedAt?: number;
   appliedAt?: number;
   error?: string;
@@ -22,11 +22,16 @@ export interface RefineRecord {
   sentAt?: number;
 }
 
-/** Runtime-only journal shared by the round workspace and unified Usage. Never model context. */
+/** Bounded runtime journal; history-store persists only a minimal projection. Never model context. */
 export class RefineHistory {
   private sequence = 0;
   private records: RefineRecord[] = [];
   constructor(private readonly limit = 100) {}
+
+  restore(records: RefineRecord[]): void {
+    this.records = structuredClone(records.slice(-this.limit));
+    this.sequence = Math.max(this.sequence, ...this.records.map((record) => record.id));
+  }
 
   canStart(): boolean {
     return this.records.length < this.limit || this.records.some((record) => !["unsent", "queued", "generating"].includes(record.status));

@@ -161,12 +161,13 @@ export class TaskPanel {
     if (record.status === "generating") return "◌ Running";
     if (record.status === "error") return record.error === "timeout" ? "! Timed out" : "! Failed";
     if (record.status === "cancelled") return "× Cancelled";
+    if (record.status === "interrupted") return "× Interrupted";
     if (record.sentAt !== undefined) return "✓ Sent to Pi";
     if (record.acceptedAt !== undefined) return "✓ Accepted";
     return record.kind === "edit" ? "✓ Edited" : "✓ Done";
   }
   private color(record: RefineRecord): "error" | "warning" | "accent" | "success" {
-    return record.status === "error" ? "error" : record.status === "unsent" || record.status === "cancelled" ? "warning"
+    return record.status === "error" ? "error" : record.status === "unsent" || record.status === "cancelled" || record.status === "interrupted" ? "warning"
       : pending(record) ? "accent" : "success";
   }
   private heading(text: string): string { return this.theme.fg("text", this.theme.bold(sanitizeTerminalText(text))); }
