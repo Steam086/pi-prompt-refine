@@ -38,5 +38,14 @@ export function renderBackgroundStatus(status: string, width: number, theme: Pre
   if (width < 1) return [];
   const available = Math.min(width, READING_WIDTH);
   const inset = available >= 16 ? 2 : 0;
-  return [" ".repeat(inset) + theme.fg("muted", truncateToWidth(sanitizeTerminalText(status).replace(/\n/g, " "), available - inset * 2, ""))];
+  const parts = sanitizeTerminalText(status).replace(/\n/g, " ").split(" · ");
+  const styled = parts.map((part, index) => {
+    if (index === 0) return theme.fg("text", theme.bold(part));
+    // Match the workspace's semantic colors, without bold states or a background fill.
+    const color = /^\d+ (running|queued)$/.test(part) ? "accent"
+      : /^\d+ new results?$/.test(part) ? "success"
+        : /^\d+ failed$/.test(part) ? "warning" : "muted";
+    return theme.fg(color, part);
+  }).join(theme.fg("muted", " · "));
+  return [" ".repeat(inset) + truncateToWidth(styled, available - inset * 2, "")];
 }
