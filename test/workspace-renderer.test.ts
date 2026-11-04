@@ -41,7 +41,7 @@ describe("workspace terminal rendering", () => {
       optimizer: () => ({ model: "provider/long-model-identifier-with-extra-details", thinking: "high · Extension setting", thinkingEnabled: true }),
       chooseModel() {}, editSystemPrompt() {}, history: () => records,
       tasks: { records: () => records, appliedId: () => records[1]!.id,
-        activate: (id) => !!records.find((record) => record.id === id)?.candidate, run() {}, stop() {}, copy() {} },
+        activate: (id) => !!records.find((record) => record.id === id)?.candidate, run() {}, stop() {} },
       saveContext: async () => "Saved", submit: () => undefined,
     });
     tui.addChild(workspace);

@@ -8,7 +8,7 @@ Pi Prompt Refine 是 TypeScript 编写的 Pi 扩展，入口由 `package.json` �
 | --- | --- |
 | `src/extension.ts` | 注册命令、快捷键和生命周期事件；连接 Pi UI、模型注册表、上下文收集与 controller |
 | `src/controller.ts` | 管理冻结上下文 round、未发送输入、并行运行与排队、独立 Apply 目标、接受快照及恢复状态；处理去重、取消、超时、发送归档和过期操作 |
-| `src/history.ts`、`task-panel.ts` | 有界内存日志与实时双栏任务 / Usage 浏览；显示旧上下文、候选来源及接受/发送事件；Enter 启动未发送输入或 Apply 结果，不自动进入模型上下文 |
+| `src/history.ts`、`task-panel.ts` | 有界内存日志与原稿／模型运行两层树；按新旧轮次堆叠，支持详情、结果对比与选中结果接受；Enter 启动未发送输入或查看详情，不自动进入模型上下文 |
 | `src/context.ts` | 选择可见历史，构造固定协议与编辑策略、JSON 输入，校验模型输出 |
 | `src/project-context.ts` | 提取宿主项目规则和技能元数据，收集有界目录列表并标注遗漏 |
 | `src/config.ts` | 配置校验、默认值、迁移及持久化 |

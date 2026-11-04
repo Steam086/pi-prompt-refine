@@ -25,6 +25,7 @@ const instructionDescriptions = {
 };
 
 interface WorkspaceActions {
+  original?(id?: number): { text: string; save(text: string): string | undefined; cancel(): void } | undefined;
   /** Session-owned text, independent of request snapshots and revision feedback. */
   inputDraft?: { text: string; save(text: string): void };
   inputCaptureOnly?(): boolean;
@@ -51,7 +52,7 @@ export class RefineWorkspace implements Component, Focusable {
   private historyPanel?: TaskPanel;
   private taskPanel?: TaskPanel;
   private returnToTasks = false;
-  private inputReturnMode: "main" | "result" = "main";
+  private inputReturnMode: "main" | "result" | "usage" = "main";
   private settingsInitialized = false;
   private hasFocus = false;
   private selected: ContextSettings = { instructions: "always", tree: false, skills: false };
@@ -70,10 +71,12 @@ export class RefineWorkspace implements Component, Focusable {
   private beforeInput = "";
   private readonly input: PromptInput;
   private readonly revisionInput: PromptInput;
-  private inputKind: "draft" | "revision" = "draft";
+  private readonly originalInput: PromptInput;
+  private originalTarget?: ReturnType<NonNullable<WorkspaceActions["original"]>>;
+  private inputKind: "draft" | "revision" | "original" = "draft";
   private revisionTarget?: { key: string; submit(text: string): string | undefined };
 
-  private get activeInput(): PromptInput { return this.inputKind === "revision" ? this.revisionInput : this.input; }
+  private get activeInput(): PromptInput { return this.inputKind === "original" ? this.originalInput : this.inputKind === "revision" ? this.revisionInput : this.input; }
 
   constructor(
     private readonly panel: PreviewPanel,
@@ -83,7 +86,7 @@ export class RefineWorkspace implements Component, Focusable {
     private readonly actions: WorkspaceActions,
   ) {
     if (actions.tasks) {
-      const taskActions: TaskPanelActions = { ...actions.tasks, activate: (id) => {
+      const taskActions: TaskPanelActions = { ...actions.tasks, editOriginal: (id) => this.openOriginal(id), activate: (id) => {
         const applied = actions.tasks!.activate(id);
         if (applied) this.showApplied(id);
         return applied;
@@ -101,10 +104,12 @@ export class RefineWorkspace implements Component, Focusable {
     this.input = makeInput();
     this.input.editor.setText(actions.inputDraft?.text ?? "");
     this.revisionInput = makeInput();
-    for (const input of [this.input, this.revisionInput]) {
+    this.originalInput = makeInput();
+    for (const input of [this.input, this.revisionInput, this.originalInput]) {
       input.editor.onSubmit = () => {
         const text = this.beforeInput;
-        const error = input === this.input ? this.actions.submit(text)
+        const error = input === this.originalInput ? (this.originalTarget ? this.originalTarget.save(text) : "Original prompt changed; reopen the editor.")
+          : input === this.input ? this.actions.submit(text)
           : this.revisionTarget ? this.revisionTarget.submit(text) : "No current result to revise.";
         // Native Editor clears on submit. Submission reads our draft; it never consumes it.
         // Revision feedback is also kept until its candidate identity changes.
@@ -113,7 +118,8 @@ export class RefineWorkspace implements Component, Focusable {
           this.inputError = error;
         } else {
           this.inputError = "";
-          this.switchMode(input === this.revisionInput ? "result" : "main");
+          if (input === this.originalInput) { this.originalTarget = undefined; this.switchMode(this.inputReturnMode); }
+          else this.switchMode(input === this.revisionInput ? "result" : "main");
         }
       };
     }
@@ -124,15 +130,29 @@ export class RefineWorkspace implements Component, Focusable {
     this.hasFocus = value;
     this.input.editor.focused = value && this.mode === "input" && this.inputKind === "draft";
     this.revisionInput.editor.focused = value && this.mode === "input" && this.inputKind === "revision";
+    this.originalInput.editor.focused = value && this.mode === "input" && this.inputKind === "original";
   }
 
-  dispose(): void { this.disposed = true; this.focused = false; }
+  private openOriginal(id?: number): void {
+    const target = this.actions.original?.(id);
+    if (!target) return;
+    (this.mode === "usage" ? this.historyPanel : this.taskPanel)?.openList();
+    this.originalTarget = target;
+    this.originalInput.editor.setText(target.text);
+    this.inputKind = "original";
+    this.inputReturnMode = this.mode === "usage" ? "usage" : "main";
+    this.inputError = "";
+    this.switchMode("input");
+  }
+
+  dispose(): void { this.disposed = true; this.originalTarget?.cancel(); this.originalTarget = undefined; this.focused = false; }
   invalidate(): void {
     this.panel.invalidate();
     this.historyPanel?.invalidate();
     this.taskPanel?.invalidate();
     this.input.editor.invalidate();
     this.revisionInput.editor.invalidate();
+    this.originalInput.editor.invalidate();
     this.settingsFrames.clear();
     this.refreshSettings();
   }
@@ -153,6 +173,7 @@ export class RefineWorkspace implements Component, Focusable {
   openUsage(): void {
     const actions = this.actions.tasks;
     this.historyPanel = new TaskPanel({
+      ...actions,
       records: () => this.actions.history?.() ?? [],
       appliedId: () => actions?.appliedId(),
       activate: (id) => {
@@ -160,21 +181,25 @@ export class RefineWorkspace implements Component, Focusable {
         if (applied) this.showApplied(id);
         return applied;
       },
-      run: (id) => actions?.run(id), stop: (id) => actions?.stop(id), copy: (id) => actions?.copy(id), launchModel: () => actions?.launchModel?.() ?? "No model",
+      run: (id) => actions?.run(id), stop: (id) => actions?.stop(id), launchModel: () => actions?.launchModel?.() ?? "No model",
+      editOriginal: (id) => this.openOriginal(id),
     }, this.theme, () => this.tui.terminal.rows, this.keys, true, this.actions.usagePosition);
     this.switchMode("usage");
   }
 
   private showApplied(id: number): void {
+    this.taskPanel?.openList();
+    this.historyPanel?.openList();
     if (this.actions.taskPosition) {
       this.actions.taskPosition.selectedId = id;
+      this.actions.taskPosition.selectedTaskId = undefined;
       this.actions.taskPosition.scroll = 0;
     }
     this.openResult(true);
   }
 
   isUsage(): boolean { return this.mode === "usage"; }
-  openTasks(): void { this.switchMode("main"); }
+  openTasks(): void { this.taskPanel?.openList(); this.switchMode("main"); }
 
   openResult(fromTasks = false): void { this.returnToTasks = fromTasks; this.switchMode("result"); }
 
@@ -228,6 +253,8 @@ export class RefineWorkspace implements Component, Focusable {
     const key = parseKey(data);
     if (this.mode === "input") {
       if (this.keys.matches(data, "tui.select.cancel") || key === "ctrl+\\") {
+        this.originalTarget?.cancel();
+        this.originalTarget = undefined;
         this.switchMode(this.inputReturnMode); // Back never discards the independent input draft.
       } else {
         this.beforeInput = this.activeInput.editor.getExpandedText();
@@ -253,12 +280,12 @@ export class RefineWorkspace implements Component, Focusable {
       return true;
     }
     if (this.mode === "usage" || (this.mode === "main" && this.taskPanel)) {
-      if (this.mode === "usage" && (key === "q" || key === "ctrl+\\" || this.keys.matches(data, "tui.select.cancel"))) {
-        this.switchMode("main");
-        return true;
-      }
       if ((this.mode === "usage" ? this.historyPanel : this.taskPanel)?.handleInput(data)) {
         this.tui.requestRender();
+        return true;
+      }
+      if (this.mode === "usage" && (key === "q" || key === "ctrl+\\" || this.keys.matches(data, "tui.select.cancel"))) {
+        this.switchMode("main");
         return true;
       }
     }
@@ -361,11 +388,11 @@ export class RefineWorkspace implements Component, Focusable {
     if (this.mode === "input") {
       const cursor = this.activeInput.editor.getCursor();
       const revising = this.inputKind === "revision";
-      const action = revising ? "Revise" : this.actions.inputCaptureOnly?.() ? "Add unsent" : "Refine";
-      header = [theme.fg("text", theme.bold(revising ? "Revise current result" : "Input")),
+      const action = this.inputKind === "original" ? "Save" : revising ? "Revise" : this.actions.inputCaptureOnly?.() ? "Add unsent" : "Refine";
+      header = [theme.fg("text", theme.bold(this.inputKind === "original" ? "Edit original prompt" : revising ? "Revise current result" : "Input")),
         theme.fg(this.inputError ? "warning" : "muted", sanitizeTerminalText(this.inputError || (revising
           ? "Describe changes · Original task kept · Not sent"
-          : `Line ${cursor.line + 1} · Not sent to main agent`)))];
+          : this.inputKind === "original" ? `Line ${cursor.line + 1} · Save only · Enter on the list to run` : `Line ${cursor.line + 1} · Not sent to main agent`)))];
       body = this.activeInput.render(innerWidth, bodyHeight);
       footer = alignedKeyHints(innerWidth < 30
         ? [[["↵", action], ["⇧↵", "NL"]], [["Esc", "Back"]]]
