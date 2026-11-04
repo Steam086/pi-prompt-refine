@@ -18,6 +18,63 @@ function setup(maxConcurrent = 4) {
 }
 
 describe("round workspace", () => {
+  it("creates independent editable drafts without a model, but refuses an empty launch", () => {
+    const { controller, complete } = setup();
+    const first = controller.createDraft({ ...input(""), model: { provider: "", id: "" } });
+    expect(first.kind).toBe("captured");
+    if (first.kind !== "captured") throw new Error("Missing draft");
+    expect(controller.startRecord(first.recordId, model).kind).toBe("empty");
+    expect(controller.updateDraft(first.recordId, "", "A")).toBe(true);
+    expect(controller.updateDraft(first.recordId, "", "stale edit")).toBe(false);
+    expect(controller.createDraft(input("A")).kind).toBe("captured");
+    expect(controller.getHistory()).toHaveLength(2);
+    expect(complete).not.toHaveBeenCalled();
+    expect(controller.startRecord(first.recordId, model).kind).toBe("started");
+    expect(controller.updateDraft(first.recordId, "A", "B")).toBe(false);
+    controller.removeDraft(first.recordId);
+    expect(controller.getRecord(first.recordId)).toBeDefined();
+  });
+
+  it("rejects draft edits after archival and cancels only the temporary draft", () => {
+    const { controller, jobs } = setup();
+    controller.trigger(input("A"));
+    const created = controller.createDraft(input("B"));
+    if (created.kind !== "captured") throw new Error("Missing draft");
+    controller.onMessageStarted();
+    expect(controller.updateDraft(created.recordId, "B", "C")).toBe(false);
+    controller.removeDraft(created.recordId);
+    expect(controller.getHistory()).toHaveLength(1);
+    expect(jobs[0]!.signal.aborted).toBe(false);
+  });
+
+  it("does not keep the background of a cancelled empty workspace", () => {
+    const { controller } = setup();
+    const draft = controller.createDraft(input("", "old background"));
+    if (draft.kind !== "captured") throw new Error("Missing draft");
+    controller.removeDraft(draft.recordId);
+    expect(controller.getRoundId()).toBeUndefined();
+    controller.createDraft(input("A", "new background"));
+    expect(controller.getHistory()[0]!.input.systemPrompt).toBe("new background");
+  });
+
+  it("compares the original even when launched from a revision, without changing the default model", async () => {
+    const { controller, jobs } = setup();
+    controller.trigger(input("A"));
+    controller.capturePreparedInput(jobs[0]!.request.requestId, jobs[0]!.request.generation, "Original packet");
+    jobs[0]!.result.resolve(success("A result"));
+    await flushPromises();
+    const token = controller.getCandidateToken()!;
+    controller.trigger({ ...input("A"), revision: { previousCandidate: "A result", instruction: "Shorter" } }, { revisionToken: token });
+    const revisionId = jobs[1]!.request.recordId;
+    controller.capturePreparedInput(jobs[1]!.request.requestId, jobs[1]!.request.generation, "Revision packet");
+    expect(controller.runOriginal(revisionId, other, "high").kind).toBe("started");
+    expect(jobs[2]!.request).toMatchObject({ draft: "A", model: other, thinkingLevel: "high", preparedInput: "Original packet" });
+    expect(jobs[2]!.request.revision).toBeUndefined();
+    expect(controller.getModel()).toEqual(model);
+    expect(controller.runOriginal(revisionId, other, "high").kind).toBe("duplicate");
+    expect(jobs).toHaveLength(3);
+  });
+
   it("captures changed inputs during generation without calling, replacing, or duplicating", () => {
     const { controller, jobs, complete } = setup();
     controller.trigger(input("A"));

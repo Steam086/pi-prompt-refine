@@ -3,9 +3,8 @@ import { parseKey, Text, truncateToWidth, visibleWidth, type KeybindingsManager 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { RefineRecord } from "./history.js";
 import { panelFrame, panelLayout, workspaceTabs } from "./panel-layout.js";
-import { alignedKeyHints, fittingKeyHints } from "./key-hints.js";
+import { alignedKeyHints, fittingKeyHints, type KeyHint } from "./key-hints.js";
 import { sanitizeTerminalText } from "./presentation.js";
-import { formatTokenUsage } from "./usage.js";
 
 export interface TaskPanelActions {
   records(): RefineRecord[];
@@ -13,19 +12,30 @@ export interface TaskPanelActions {
   activate(id: number): boolean;
   run(id: number): void;
   stop(id: number): void;
-  copy(id: number): void;
+  editOriginal?(id?: number): void;
+  chooseModel?(id: number): void;
+  accept?(id: number): void;
   launchModel?(): string;
 }
-export interface TaskPanelPosition { selectedId?: number; scroll?: number; archived?: boolean }
+export interface TaskPanelPosition {
+  selectedId?: number;
+  selectedTaskId?: number;
+  scroll?: number;
+  scrolls?: Record<string, number>;
+}
+interface Row { record: RefineRecord; original: boolean; records: RefineRecord[] }
+const pending = (record: RefineRecord) => record.status === "queued" || record.status === "generating";
 
-/** Live, ID-selected task browser. Completion never sorts rows or moves selection. */
+/** Two-level original/run tree. Selection and scroll belong to identities, never row indexes. */
 export class TaskPanel {
   private reading = false;
+  private inspecting = false;
+  private compareId?: number;
   private original = false;
   private viewport = 1;
   private top = 0;
   private notice = "";
-  private cached?: { key: string; lines: string[] };
+  private cache = new Map<string, string[]>();
   constructor(
     private readonly actions: TaskPanelActions,
     private readonly theme: Theme,
@@ -34,69 +44,105 @@ export class TaskPanel {
     private readonly usage = false,
     private readonly position: TaskPanelPosition = {},
   ) {}
-  invalidate(): void { this.cached = undefined; }
+  invalidate(): void { this.cache.clear(); }
   setNotice(text: string): void { this.notice = text; }
-  private entries(): RefineRecord[] {
-    const records = this.actions.records();
-    const current = records.filter((record) => record.archivedAt === undefined);
-    // With no current work, retain the older entries instead of presenting a false empty workspace.
-    const visible = this.usage || this.position.archived || !current.length ? records : records.filter((record) =>
-      record.archivedAt === undefined || record.id === this.position.selectedId);
-    const groups = new Map<string, RefineRecord[]>();
-    for (const record of visible) {
-      const key = `${record.input.roundId}:${record.taskId}`;
-      const group = groups.get(key) ?? [];
+  openList(): void { this.inspecting = false; this.compareId = undefined; this.reading = false; }
+  private entries(): Row[] {
+    const groups = new Map<number, RefineRecord[]>();
+    for (const record of this.actions.records()) {
+      const group = groups.get(record.taskId) ?? [];
       group.push(record);
-      groups.set(key, group);
+      groups.set(record.taskId, group);
     }
-    return [...groups.values()].flat();
+    return [...groups.values()].sort((a, b) =>
+      Number(a[0]!.archivedAt !== undefined) - Number(b[0]!.archivedAt !== undefined) ||
+      (b[0]!.input.roundId ?? 0) - (a[0]!.input.roundId ?? 0) ||
+      Math.max(...b.map((r) => r.id)) - Math.max(...a.map((r) => r.id)),
+    ).flatMap((records) => {
+      const source = records.find((r) => !r.input.revision) ?? records[0]!;
+      const children = records.filter((r) => r.status !== "unsent").sort((a, b) => b.id - a.id);
+      return [{ record: source, original: true, records },
+        ...children.map((record) => ({ record, original: false, records }))];
+    });
   }
-  private selected(records = this.entries()): RefineRecord | undefined {
-    let selected = records.find((record) => record.id === this.position.selectedId);
-    if (!selected) {
-      selected = records.find((record) => record.id === this.actions.appliedId()) ?? records[0];
-      this.position.selectedId = selected?.id;
-      this.position.scroll = 0;
+  private rowKey(row: Row): string { return row.original ? `task-${row.record.taskId}` : `run-${row.record.id}`; }
+  private isSelected(row: Row): boolean {
+    return this.position.selectedTaskId !== undefined
+      ? row.original && row.record.taskId === this.position.selectedTaskId
+      : !row.original && row.record.id === this.position.selectedId;
+  }
+  private select(row: Row | undefined): void {
+    if (!row) return;
+    this.position.selectedTaskId = row.original ? row.record.taskId : undefined;
+    this.position.selectedId = row.record.id;
+    this.position.scroll = this.position.scrolls?.[this.rowKey(row)] ?? 0;
+    this.original = false;
+  }
+  private selected(rows = this.entries()): Row | undefined {
+    let row = rows.find((item) => this.isSelected(item));
+    if (!row) {
+      row = rows.find((item) => !item.original && item.record.id === this.actions.appliedId()) ?? rows[0];
+      this.select(row);
     }
-    return selected;
+    return row;
   }
-  /** Returns false for parent navigation/model/input keys; true for owned actions. */
+  private scroll(row: Row, delta: number): void {
+    this.position.scroll = Math.max(0, (this.position.scroll ?? 0) + delta);
+    (this.position.scrolls ??= {})[this.rowKey(row)] = this.position.scroll;
+  }
   handleInput(data: string): boolean {
     const key = parseKey(data)?.toLowerCase();
     if (key) this.notice = "";
-    const selected = this.selected();
-    if (key === "tab") { this.reading = !this.reading; return true; }
-    if (key === "h" && !this.usage) { this.position.archived = !this.position.archived; return true; }
-    if (key === "o") { this.original = !this.original; this.position.scroll = 0; return true; }
-    if (this.keys.matches(data, "tui.select.confirm")) {
-      if (selected) this.actions.activate(selected.id);
+    const row = this.selected();
+    if (this.inspecting && (key === "q" || this.keys.matches(data, "tui.select.cancel"))) {
+      this.openList();
       return true;
     }
-    if (key === "g" || key === "x" || key === "n") {
-      if (selected) {
-        if (key === "g") this.actions.run(selected.id);
-        else if (key === "x") this.actions.stop(selected.id);
-        else this.actions.copy(selected.id);
-      }
+    if (key === "tab") {
+      if (this.compareId !== undefined && row) {
+        const other = this.entries().find((item) => !item.original && item.record.id === this.compareId);
+        if (other) { this.compareId = row.record.id; this.select(other); }
+      } else if (!this.inspecting) this.reading = !this.reading;
       return true;
+    }
+    if (this.keys.matches(data, "tui.select.confirm")) {
+      if (row?.original && row.record.status === "unsent" && !this.inspecting) this.actions.run(row.record.id);
+      else if (row) { this.inspecting = true; this.reading = true; }
+      return true;
+    }
+    if (key === "n") { this.actions.editOriginal?.(); return true; }
+    if (key === "i" || (key === "e" && !this.inspecting)) {
+      this.actions.editOriginal?.(row?.record.id); return true;
+    }
+    if (key === "m") { if (!row) return false; this.actions.chooseModel?.(row.record.id); return true; }
+    if (key === "x") { if (row && !row.original && pending(row.record)) this.actions.stop(row.record.id); return true; }
+    if (key === "a") {
+      if (row && !row.original && row.record.candidate) this.actions.accept?.(row.record.id);
+      return true;
+    }
+    if (this.inspecting && key === "c") {
+      const peers = row?.records.filter((record) => record.id !== row.record.id && record.candidate) ?? [];
+      const index = peers.findIndex((record) => record.id === this.compareId);
+      this.compareId = row && !row.original ? peers[index + 1]?.id : undefined;
+      return true;
+    }
+    if (this.inspecting && key === "o") { this.original = !this.original; this.position.scroll = 0; return true; }
+    if (this.inspecting && key === "g") { if (row) this.actions.run(row.record.id); return true; }
+    if (this.inspecting && ["e", "f", "s"].includes(key ?? "")) {
+      return !(row && !row.original && row.record.candidate && this.actions.activate(row.record.id));
     }
     const delta = key === "up" ? -1 : key === "down" ? 1 : key === "pageup" ? -this.viewport : key === "pagedown" ? this.viewport : 0;
     if (delta) {
-      if (this.reading) this.position.scroll = Math.max(0, (this.position.scroll ?? 0) + delta);
+      if (row && (this.reading || this.inspecting)) this.scroll(row, delta);
       else {
-        const records = this.entries();
-        const index = records.findIndex((record) => record.id === selected?.id);
-        this.position.selectedId = records[Math.max(0, Math.min(records.length - 1, index + delta))]?.id;
-        this.position.scroll = 0;
-        this.original = false;
+        const rows = this.entries();
+        const index = rows.findIndex((item) => this.isSelected(item));
+        this.select(rows[Math.max(0, Math.min(rows.length - 1, index + delta))]);
       }
       return true;
     }
-    // Mutation shortcuts belong to the applied-result view, never a merely selected row.
-    if (["a", "e", "f", "s", "[", "]"].includes(key ?? "") && selected?.id !== this.actions.appliedId()) {
-      this.notice = "Enter applies a completed result first; Pi editor unchanged.";
-      return true;
-    }
+    // Main actions never leak to a different, previously applied result.
+    if (["g", "c", "o", "h", "f", "s", "[", "]", "d", "z"].includes(key ?? "")) return true;
     return false;
   }
   private badge(record: RefineRecord): string {
@@ -105,111 +151,151 @@ export class TaskPanel {
     if (record.status === "generating") return "◌ Running";
     if (record.status === "error") return record.error === "timeout" ? "! Timed out" : "! Failed";
     if (record.status === "cancelled") return "× Cancelled";
-    if (record.id === this.actions.appliedId()) return "✓ Applied";
+    if (record.sentAt !== undefined) return "✓ Sent to Pi";
+    if (record.acceptedAt !== undefined) return "✓ Accepted";
     return record.kind === "edit" ? "✓ Edited" : "✓ Done";
   }
-  private detailDocument(record: RefineRecord, width: number): string {
-    const { theme } = this;
-    // Sanitize external text before adding our own theme escapes.
-    const text = (value: string) => theme.fg("text", sanitizeTerminalText(value));
-    const heading = (value: string) => theme.fg("text", theme.bold(sanitizeTerminalText(value)));
-    const metadata = (...items: string[]): string[] => {
-      const lines: string[] = [];
-      let line = "";
-      // Keep each metadata item (especially a token label and its count) together.
-      // Text still wraps an individual item if even that cannot fit a narrow pane.
-      for (const value of items) {
-        const item = sanitizeTerminalText(value);
-        const next = line ? `${line} · ${item}` : item;
-        if (line && visibleWidth(next) > width) { lines.push(line); line = item; }
-        else line = next;
-      }
-      if (line) lines.push(line);
-      return lines.map((line) => theme.fg("muted", line));
-    };
-    const statusColor = record.status === "error" ? "error"
-      : record.status === "unsent" || record.status === "cancelled" ? "warning"
-        : record.status === "generating" || record.status === "queued" ? "accent" : "success";
-    const original = this.original || !record.candidate;
-    const usage = record.kind === "edit" ? "Manual edit · no model call" : record.status === "unsent" ? "Not sent to optimizer"
-      : `${record.elapsedSeconds ?? "—"}s · ${formatTokenUsage(record.usage) ?? "Tokens: unknown"}`;
-    return [
-      heading(`Round ${record.input.roundId ?? "?"} · Task ${record.taskId} · #${record.id} ${record.kind}${record.parentId ? ` from #${record.parentId}` : ""}`),
-      ...metadata(`${record.input.model.provider}/${record.input.model.id}`, `thinking ${record.input.thinkingLevel ?? "default"}`),
-      theme.fg(statusColor, this.badge(record)) + theme.fg("muted", record.archivedAt !== undefined ? " · Earlier context · Archived" : " · Frozen context"),
-      ...metadata(new Date(record.createdAt).toLocaleTimeString(), `Branch: ${record.input.branchLeafId ?? "root"}`),
-      ...(record.error ? [theme.fg("error", sanitizeTerminalText(`Error: ${record.error}`))] : []),
-      ...(record.input.projectDiagnostics?.warnings ?? record.input.project?.snapshot.warnings ?? [])
-        .map((warning) => theme.fg("warning", sanitizeTerminalText(`Context warning: ${warning}`))),
-      ...(record.acceptedAt !== undefined ? metadata(`Accepted into Pi editor: ${new Date(record.acceptedAt).toLocaleTimeString()}`) : []),
-      ...(record.sentAt !== undefined ? metadata(`Pi started send: ${new Date(record.sentAt).toLocaleTimeString()}`) : []),
-      ...metadata(...usage.split(" · ")),
-      ...(record.input.revision ? metadata(`Revision: ${record.input.revision.instruction}`) : []),
-      "", heading(original ? "Original prompt" : "Result"), "",
-      text(original ? record.input.draft : record.candidate!.text),
-    ].join("\n");
+  private color(record: RefineRecord): "error" | "warning" | "accent" | "success" {
+    return record.status === "error" ? "error" : record.status === "unsent" || record.status === "cancelled" ? "warning"
+      : pending(record) ? "accent" : "success";
   }
-  render(width: number, empty?: () => string[]): string[] {
+  private heading(text: string): string { return this.theme.fg("text", this.theme.bold(sanitizeTerminalText(text))); }
+  private muted(text: string): string { return this.theme.fg("muted", sanitizeTerminalText(text)); }
+  private wrapped(document: string, width: number): string[] {
+    const key = JSON.stringify([document, width]);
+    let lines = this.cache.get(key);
+    if (!lines) {
+      lines = new Text(document, 0, 0).render(width);
+      if (this.cache.size >= 12) this.cache.delete(this.cache.keys().next().value!);
+      this.cache.set(key, lines);
+    }
+    return lines;
+  }
+  private pane(row: Row, width: number, height: number, active = true): string[] {
+    const { record, records } = row;
+    const title = row.original ? "Original prompt" : record.input.model.id;
+    const status = row.original && record.status !== "unsent"
+      ? this.muted(`${records.filter((r) => r.status !== "unsent").length} runs · ${records.filter(pending).length} active`)
+      : this.theme.fg(this.color(record), this.badge(record));
+    const titleText = this.heading(title);
+    const header = visibleWidth(titleText) + visibleWidth(status) + 2 <= width
+      ? [titleText + " ".repeat(width - visibleWidth(titleText) - visibleWidth(status)) + status]
+      : [truncateToWidth(titleText, width, "…"), status];
+    if (!row.original) {
+      header.push(...this.wrapped(this.muted(`${record.input.model.provider} · Thinking ${record.input.thinkingLevel ?? "default"}`), width));
+      const metrics: string[] = [];
+      if (record.status !== "unsent" && record.status !== "queued" && record.elapsedSeconds !== undefined) {
+        metrics.push(this.theme.fg(record.status === "generating" ? "accent" : "text", this.theme.bold(`${record.elapsedSeconds}s`)));
+      }
+      if (record.usage?.totalTokens !== undefined) metrics.push(this.muted(`${record.usage.totalTokens.toLocaleString("en-US")} tokens`));
+      if (metrics.length) header.push(...this.wrapped(metrics.join(this.muted(" · ")), width));
+    }
+    if (record.archivedAt !== undefined) header.push(...this.wrapped(this.theme.fg("warning", "Uses earlier conversation context"), width));
+    if (record.error) header.push(...this.wrapped(this.theme.fg("error", sanitizeTerminalText(`Error: ${record.error}`)), width));
+    for (const warning of record.input.projectDiagnostics?.warnings ?? record.input.project?.snapshot.warnings ?? []) {
+      header.push(...this.wrapped(this.theme.fg("warning", sanitizeTerminalText(`Context warning: ${warning}`)), width));
+    }
+    const original = row.original || this.original || !record.candidate;
+    const body = [
+      ...(!row.original ? [this.heading(original ? "Original prompt" : "Result"), ""] : []),
+      this.theme.fg("text", sanitizeTerminalText(original ? record.input.draft || "Empty prompt · Press i to edit" : record.candidate!.text)),
+    ];
+    if (this.inspecting || this.usage) {
+      if (!row.original && record.candidate && !original) body.push("", this.heading("Original prompt"), "", this.theme.fg("text", sanitizeTerminalText(record.input.draft)));
+      const value = (n: number | undefined) => n === undefined ? "—" : n.toLocaleString("en-US");
+      const pairs = [
+        ["Input", value(record.usage?.input), "Output", value(record.usage?.output)],
+        ["Cache read", value(record.usage?.cacheRead), "Cache write", value(record.usage?.cacheWrite)],
+        ["Reasoning", value(record.usage?.reasoning), "Total", value(record.usage?.totalTokens)],
+      ];
+      if (!row.original && record.status !== "unsent") {
+        body.push("", this.heading(record.kind === "edit" ? "Manual edit · no model call" : "Usage · tokens"));
+        for (const [a, b, c, d] of pairs) {
+          const cell = (label: string, count: string, w: number) => this.muted(label + " ".repeat(Math.max(1, w - label.length - count.length)) + count);
+          if (width >= 44) {
+            const half = Math.floor((width - 3) / 2);
+            body.push(cell(a!, b!, half) + "   " + cell(c!, d!, width - half - 3));
+          } else body.push(cell(a!, b!, width), cell(c!, d!, width));
+        }
+      }
+      body.push("", this.heading("Record"), this.muted(`Round ${record.input.roundId ?? "?"} · Task ${record.taskId}`));
+      if (!row.original) body.push(this.muted(`Run #${record.id} · ${record.kind}${record.parentId ? ` from #${record.parentId}` : ""}`));
+      body.push(this.muted(`Created ${new Date(record.createdAt).toLocaleTimeString()}`));
+      if (record.acceptedAt !== undefined) body.push(this.muted(`Accepted into Pi editor: ${new Date(record.acceptedAt).toLocaleTimeString()}`));
+      if (record.sentAt !== undefined) body.push(this.muted(`Pi started send: ${new Date(record.sentAt).toLocaleTimeString()}`));
+      if (record.input.revision) body.push(this.muted(`Revision: ${record.input.revision.instruction}`));
+    }
+    const fixed = header.slice(0, Math.max(0, height - 2));
+    if (height > fixed.length + 2) fixed.push("");
+    const available = Math.max(1, height - fixed.length);
+    const lines = this.wrapped(body.join("\n"), width);
+    const offset = Math.min(active ? this.position.scroll ?? 0 : this.position.scrolls?.[this.rowKey(row)] ?? 0, Math.max(0, lines.length - available));
+    if (active) { this.position.scroll = offset; this.viewport = available; }
+    return [...fixed, ...lines.slice(offset, offset + available)];
+  }
+  render(width: number, _empty?: () => string[]): string[] {
     if (width < 1) return [];
     const layout = panelLayout(width, this.rows());
     const tabs = workspaceTabs(layout, this.usage ? "Usage" : "Preview", this.theme);
     const height = Math.max(1, layout.bodyHeight - tabs.length);
-    this.viewport = height;
-    const records = this.entries();
-    if (!records.length && empty) return empty();
-    const selected = this.selected(records);
-    const split = layout.innerWidth >= 72;
+    const rows = this.entries();
+    const selected = this.selected(rows);
+    const split = !this.inspecting && layout.innerWidth >= 72;
     const leftWidth = split ? Math.min(36, Math.floor(layout.innerWidth / 3)) : layout.innerWidth;
     const rightWidth = split ? layout.innerWidth - leftWidth - 3 : layout.innerWidth;
-    const clean = (text: string) => sanitizeTerminalText(text);
-    const clip = (text: string, width: number) => stripVTControlCharacters(truncateToWidth(text, width, "…"));
-    const list: string[] = [];
-    let selectedLine = 0;
-    let group = "";
-    for (const record of records) {
-      const next = `${record.input.roundId ?? 0}:${record.taskId}`;
+    const selectedIndex = Math.max(0, rows.findIndex((row) => this.isSelected(row)));
+    this.top = Math.max(0, Math.min(this.top, selectedIndex, rows.length - height));
+    if (selectedIndex >= this.top + height) this.top = selectedIndex - height + 1;
+    const list = rows.slice(this.top, this.top + height).map((row) => {
+      const { record } = row;
       const old = record.archivedAt !== undefined;
-      if (next !== group) {
-        group = next;
-        list.push(this.theme.fg(old ? "dim" : "muted", clip(
-          `R${record.input.roundId ?? "?"} · ${old ? "Earlier · " : ""}${clean(record.input.draft).replace(/\s+/g, " ")}`, leftWidth)));
-      }
-      const active = record.id === selected?.id;
-      if (active) selectedLine = list.length;
-      const label = `${active ? "›" : " "} ${this.badge(record)} · ${clean(record.input.model.id)}`;
-      const color = old ? "dim" : record.status === "unsent" || record.status === "cancelled" ? "warning"
-        : record.status === "error" ? "error" : record.status === "generating" || record.status === "queued" ? "accent" : "text";
-      const text = this.theme.fg(color, clip(label, leftWidth));
-      list.push(active ? this.theme.bg("selectedBg", text + " ".repeat(Math.max(0, leftWidth - visibleWidth(text)))) : text);
-    }
-    if (!records.length) list.push(this.theme.fg("muted", "No tasks yet. Use i or r."));
-    this.top = Math.max(0, Math.min(this.top, selectedLine, list.length - height));
-    if (selectedLine >= this.top + height) this.top = selectedLine - height + 1;
-    const document = selected ? this.detailDocument(selected, rightWidth)
-      : this.theme.fg("muted", "Select a task. Enter refines an unsent prompt or applies a completed result. Apply never writes to Pi.");
-    const cacheKey = JSON.stringify([document, rightWidth]);
-    if (this.cached?.key !== cacheKey) this.cached = { key: cacheKey, lines: new Text(document, 0, 0).render(rightWidth) };
-    this.position.scroll = Math.min(this.position.scroll ?? 0, Math.max(0, this.cached.lines.length - height));
-    const detail = this.cached.lines.slice(this.position.scroll, this.position.scroll + height);
-    const body = Array.from({ length: height }, (_, i) => {
-      if (!split) return this.reading ? detail[i] ?? "" : list[this.top + i] ?? "";
-      const left = list[this.top + i] ?? "";
-      return left + " ".repeat(Math.max(0, leftWidth - visibleWidth(left))) + this.theme.fg("borderMuted", " │ ") + (detail[i] ?? "");
+      const active = this.isSelected(row);
+      const prefix = `${active ? "›" : " "} ${record.id === Math.min(...row.records.filter((r) => r.status !== "unsent").map((r) => r.id)) ? "└" : "├"} `;
+      const badge = this.badge(record);
+      const model = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(record.input.model.id), Math.max(1, leftWidth - visibleWidth(prefix + badge) - 3), "…"));
+      const label = row.original
+        ? `${active ? "›" : " "} ${record.status === "unsent" ? "○ Unsent ·" : "▾"} ${old ? "Earlier · " : ""}${record.input.draft.replace(/\s+/g, " ") || "Empty prompt"}`
+        : `${prefix}${model} · ${badge}`;
+      const clean = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(label), leftWidth, "…"));
+      const text = this.theme.fg(old ? "dim" : row.original ? "text" : this.color(record), clean);
+      return active ? this.theme.bg("selectedBg", text + " ".repeat(Math.max(0, leftWidth - visibleWidth(text)))) : text;
     });
-    const compact = layout.innerWidth < 80;
-    const action = selected?.status === "unsent"
-      ? (selected.archivedAt !== undefined ? (layout.innerWidth >= 60 ? "Refine (old context)" : "Refine old") : "Refine")
-      : selected?.candidate ? (compact ? "Apply" : "Apply result") : (compact ? "No result" : "No result yet");
-    // Pair the two rows into shared terminal-column tab stops, never literal tabs.
-    // Shorter labels keep the same columns useful on medium/narrow terminals.
-    const confirm = layout.innerWidth < 30 ? "↵" : "Enter";
-    const footer = alignedKeyHints([
-      [[confirm, action], ["Tab", this.reading ? "Select" : "Read"], ["g", compact ? "Run" : "Run with model"], ["x", "Stop"], ["o", "Original"]],
-      [["Esc", "Back"], ["m", "Model"], ["i", "Input"], ["n", compact ? "Copy" : "Copy to round"], ...(!this.usage ? [["h", "Earlier"] as const] : [])],
-    ], layout.innerWidth, this.theme);
-    if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["Esc", "Back"], [confirm, action], ["Tab", this.reading ? "Select" : "Read"]], layout.innerWidth, this.theme);
-    return panelFrame(layout, [this.theme.fg("text", this.theme.bold(this.usage ? "Usage · All rounds" : "Prompt refine · Tasks")),
-      this.theme.fg("muted", clean(this.notice || `${records.length} ${records.length === 1 ? "entry" : "entries"} · ${this.reading ? "Reading · ↑↓ scroll" : "↑↓ select"} · Run: ${this.actions.launchModel?.() ?? "selected model"}`))],
+    let right = selected ? this.pane(selected, rightWidth, height) : [this.muted("No prompts yet. Press n to create one.")];
+    let body: string[];
+    const other = this.inspecting && this.compareId !== undefined ? rows.find((row) => !row.original && row.record.id === this.compareId) : undefined;
+    if (other && layout.innerWidth >= 72) {
+      const half = Math.floor((layout.innerWidth - 3) / 2);
+      right = selected ? this.pane(selected, half, height - 1) : [];
+      const peer = this.pane(other, layout.innerWidth - half - 3, height - 1, false);
+      body = [this.muted("Selected result ← · Tab switches the result to accept")];
+      body.push(...Array.from({ length: height - 1 }, (_, i) => {
+        const line = right[i] ?? "";
+        return line + " ".repeat(Math.max(0, half - visibleWidth(line))) + this.theme.fg("borderMuted", " │ ") + (peer[i] ?? "");
+      }));
+    } else {
+      body = Array.from({ length: height }, (_, i) => {
+        if (!split) return this.inspecting || this.reading || !rows.length ? right[i] ?? "" : list[i] ?? "";
+        const line = list[i] ?? "";
+        return line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line))) + this.theme.fg("borderMuted", " │ ") + (right[i] ?? "");
+      });
+    }
+    const action = !this.inspecting && selected?.original && selected.record.status === "unsent" ? "Run" : "Inspect";
+    const primary: KeyHint[] = this.inspecting ? [["i", "Original"], ["m", "Run model"]]
+      : [["Enter", action], ["i", "Edit"], ["n", "New"], ["m", selected ? "Run model" : "Model"]];
+    if (selected && !selected.original && pending(selected.record)) primary.push(["x", "Stop"]);
+    if (selected && !selected.original && selected.record.candidate) primary.push(["a", "Accept"]);
+    const secondary: KeyHint[] = [["Esc", "Back"], ...(other || !this.inspecting ? [["Tab", other ? "Switch result" : this.reading ? "Select" : "Read"] as KeyHint] : [])];
+    if (this.inspecting && selected && !selected.original && selected.record.candidate) {
+      secondary.push(["c", other ? "Next comparison" : "Compare"], ["e", "Edit result"], ["f", "Revise"], ["s", "Send"]);
+    }
+    const footer = layout.innerWidth < 30
+      ? [fittingKeyHints(primary.map(([key, label]) => [key === "Enter" ? "↵" : key, label]), layout.innerWidth, this.theme), fittingKeyHints(secondary, layout.innerWidth, this.theme)]
+      : alignedKeyHints([primary, secondary], layout.innerWidth, this.theme);
+    if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["Esc", "Back"], ["Enter", action], ["Tab", this.reading ? "Select" : "Read"]], layout.innerWidth, this.theme);
+    const title = this.inspecting ? (other ? "Compare results" : "Prompt details") : this.usage ? "Usage · All rounds" : "Prompt refine · Tasks";
+    return panelFrame(layout, [this.heading(title), this.muted(this.notice || (this.inspecting
+      ? `${selected && !selected.original ? `Selected: #${selected.record.id} ${selected.record.input.model.id}` : "Original prompt"} · ↑↓ scroll${other ? " · Same original and conversation context" : ""}`
+      : `${rows.filter((row) => row.original).length} prompts · ${rows.filter((row) => !row.original).length} runs · ↑↓ select · Run: ${this.actions.launchModel?.() ?? "selected model"}`))],
     [...tabs, ...body], footer, (text) => this.theme.fg("borderMuted", text));
   }
 }

@@ -102,6 +102,7 @@ describe("shared refine workspace", () => {
     panel.scrollBy(20);
     const preview = workspace.render(100);
     workspace.handleInput("\x1b[C");
+    workspace.handleInput("\x1b[B"); // Original root → model run.
     workspace.handleInput("\r");
     expect(textOf(workspace.render(100))).toContain("Historical candidate");
     workspace.handleInput("\x1b[C");

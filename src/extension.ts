@@ -24,9 +24,9 @@ import { assembleProjectContext, captureProjectContext, collectDirectoryContext,
 
 const STATUS_KEY = "prompt-refine";
 
-type PreviewAction = "accept" | "edit" | "send" | "dismiss" | "restore" | "close" | "optimize" | "model" | "cycle" | "system-prompt";
+type PreviewAction = "accept" | "edit" | "send" | "dismiss" | "restore" | "close" | "optimize" | "model" | "run-model" | "cycle" | "system-prompt";
 
-function sameModel(model: Model<Api>, ref: ModelRef): boolean {
+function sameModel(model: ModelRef, ref: ModelRef): boolean {
   return model.provider === ref.provider && model.id === ref.id;
 }
 
@@ -113,6 +113,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   // Extension-runtime memory only; never coupled to candidate/request invalidation.
   const inputDrafts = new Map<string, string>();
   const taskPositions = new Map<string, TaskPanelPosition>();
+  const recentRunModels = new Map<string, string[]>();
   const usagePositions = new Map<string, TaskPanelPosition>();
   // Shared collection is independent of any one model's cancellation signal.
   const contextJobs = new Map<string, { abort: AbortController; promise: Promise<TreeSnapshot>; settled: boolean }>();
@@ -333,7 +334,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     return ctx.modelRegistry.getAvailable();
   }
 
-  async function selectModel(ctx: ExtensionContext): Promise<void> {
+  async function selectModel(ctx: ExtensionContext, runId?: number, runUsage = false): Promise<void> {
     useContext(ctx);
     if (ctx.mode !== "tui") {
       notify(ctx, "Optimizer model selection is only available in TUI mode.", "warning");
@@ -341,9 +342,17 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
 
     if (modelSwitchBlocked(ctx)) return;
-    const taskModels = controller.getTaskModels().map(modelKey);
+    const source = runId === undefined ? undefined : controller.getOriginalRecord(runId);
+    const baseline = runId === undefined ? undefined : controller.getRecord(runId);
+    if (runId !== undefined && !source) return;
+    const taskRecords = source ? controller.getHistory().filter((record) => record.taskId === source.taskId) : [];
+    const taskModels = source ? taskRecords.map((record) => modelKey(record.input.model)) : controller.getTaskModels().map(modelKey);
+    const recent = recentRunModels.get(ctx.sessionManager.getSessionId()) ?? [];
     const available = registeredModels(ctx).slice().sort((a, b) => {
-      const rank = (model: ModelRef) => taskModels.includes(modelKey(model)) ? 0 : config.favorites.some((favorite) => modelKey(favorite) === modelKey(model)) ? 1 : 2;
+      const rank = (model: ModelRef) => source
+        ? (baseline && sameModel(model, baseline.input.model) ? 1000 : recent.includes(modelKey(model)) ? recent.indexOf(modelKey(model))
+          : config.favorites.some((favorite) => modelKey(favorite) === modelKey(model)) ? 100 : 200)
+        : taskModels.includes(modelKey(model)) ? 0 : config.favorites.some((favorite) => modelKey(favorite) === modelKey(model)) ? 1 : 2;
       return rank(a) - rank(b);
     });
     if (available.length === 0) {
@@ -353,11 +362,12 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
 
     const startGeneration = controller.getGeneration();
     const startSessionId = ctx.sessionManager.getSessionId();
+    const startBranch = ctx.sessionManager.getLeafId();
     const selection = await ctx.ui.custom<{ modelKey: string; thinkingLevel?: ModelThinkingLevel; thinkingTouched: boolean } | undefined>((tui, theme, keybindings, done) => {
       let query = "";
       let list: SelectList;
       let thinkingStatus: Text;
-      let thinkingOverride = config.thinkingLevel;
+      let thinkingOverride = baseline?.input.thinkingLevel ?? config.thinkingLevel;
       let thinkingTouched = false;
       const container = new Container();
       const cycleThinkingKeys = keybindings.getKeys("app.thinking.cycle")
@@ -387,8 +397,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       const rebuild = () => {
         container.clear();
         container.addChild(new DynamicBorder((text) => theme.fg("borderMuted", text)));
-        container.addChild(new Text(theme.fg("accent", theme.bold("Choose optimizer model")), 1, 0));
-        container.addChild(new Text(theme.fg("muted", "Optimizer only · Main session unchanged"), 1, 0));
+        container.addChild(new Text(theme.fg("accent", theme.bold(source ? "Run original with another model" : "Choose optimizer model")), 1, 0));
+        container.addChild(new Text(theme.fg("muted", source ? "Same original and conversation context · Default model unchanged" : "Optimizer only · Main session unchanged"), 1, 0));
         container.addChild(new Text(`${theme.fg("muted", "Search:")} ${query ? theme.fg("text", query) : theme.fg("muted", "provider/model, name, or thinking")}`, 1, 1));
         const items = modelPickerItems(available, query, controller.getModel()).map((item) => ({
           ...item, description: `${taskModels.includes(item.value) ? "This task · " : ""}${item.description ?? ""}`,
@@ -402,7 +412,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         });
         const currentModel = controller.getModel();
         const currentIndex = items.findIndex((item) => item.value === (currentModel ? displayModel(currentModel) : ""));
-        if (currentIndex >= 0) list.setSelectedIndex(currentIndex);
+        if (!source && currentIndex >= 0) list.setSelectedIndex(currentIndex);
         list.onSelect = (item) => done({ modelKey: item.value, thinkingLevel: thinkingOverride, thinkingTouched });
         list.onCancel = () => done(undefined);
         list.onSelectionChange = (item) => {
@@ -410,7 +420,18 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           tui.requestRender();
         };
         container.addChild({
-          render: (width) => renderModelChoices(items, list.getSelectedItem()?.value, width, tui.terminal.rows, theme),
+          render: (width) => {
+            const retained = source ? controller.getHistory().filter((record) => record.taskId === source.taskId && record.status !== "unsent") : [];
+            return renderModelChoices(items.map((item) => {
+              if (!source) return item;
+              const runs = retained.filter((record) => displayModel(record.input.model) === item.value);
+              const running = runs.find((record) => record.status === "generating" || record.status === "queued");
+              const latest = running ?? runs.at(-1);
+              const status = latest ? ({ generating: "Running", queued: "Queued", generated: "Done", error: "Failed", cancelled: "Cancelled", unsent: "Unsent" })[latest.status] : "";
+              const favorite = config.favorites.some((model) => displayModel(model) === item.value);
+              return { ...item, description: [item.description, status, recent.includes(item.value) ? "Recent" : favorite ? "Favorite" : ""].filter(Boolean).join(" · ") };
+            }), list.getSelectedItem()?.value, width, tui.terminal.rows, theme);
+          },
           invalidate: () => list.invalidate(),
         });
         container.addChild(new DynamicBorder((text) => theme.fg("borderMuted", text)));
@@ -418,7 +439,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         container.addChild(thinkingStatus);
         const hints: KeyHint[] = [["↑↓", "Select"],
           ...(cycleThinkingKeys ? [[cycleThinkingKeys, "Thinking"] as KeyHint] : []),
-          ["Enter", "Confirm"], ["Esc", "Cancel"]];
+          ["Enter", source ? "Run" : "Confirm"], ["Esc", "Cancel"]];
         container.addChild(new Text(hints.map((hint) => formatKeyHint(hint, theme)).join(" · "), 1, 0));
         container.addChild(new DynamicBorder((text) => theme.fg("borderMuted", text)));
       };
@@ -467,7 +488,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     });
 
     if (!selection) return;
-    if (controller.getGeneration() !== startGeneration || controller.getSessionId() !== startSessionId) {
+    if ((!source && controller.getGeneration() !== startGeneration) || controller.getSessionId() !== startSessionId ||
+      ctx.sessionManager.getSessionId() !== startSessionId || ctx.sessionManager.getLeafId() !== startBranch) {
       notifyIfSameSession(startSessionId, "The session or result changed while the model picker was open; the previous selection was not applied.");
       return;
     }
@@ -478,6 +500,25 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
 
     if (modelSwitchBlocked(ctx)) return;
+    if (source) {
+      const current = controller.getOriginalRecord(runId!);
+      if (!current || current.input.draft !== source.input.draft) return;
+      const error = optimizationError(ctx, source.input.draft, modelRef(model));
+      if (error) { notify(ctx, error, "warning"); return; }
+      completionContext = ctx;
+      const thinking = effectiveThinkingLevel(model, selection.thinkingLevel, ctx.thinkingLevel);
+      const result = controller.runOriginal(runId!, modelRef(model), thinking);
+      if (result.kind === "started" || result.kind === "duplicate") {
+        recentRunModels.set(startSessionId, [selection.modelKey, ...recent.filter((key) => key !== selection.modelKey)].slice(0, 12));
+        if (result.kind === "duplicate") {
+          const existing = controller.getHistory().find((record) => record.taskId === source.taskId && sameModel(model, record.input.model) &&
+            record.input.thinkingLevel === thinking && !record.input.revision && ["queued", "generating"].includes(record.status));
+          if (existing) (runUsage ? usagePositions : taskPositions).set(startSessionId, { selectedId: existing.id });
+          notify(ctx, "This model is already running for the original prompt.", "info");
+        }
+      } else notify(ctx, `Request not started (${result.kind}); existing work kept.`, "warning");
+      return;
+    }
     const firstSelection = !controller.getModel();
     const selected = modelRef(model);
     let changed = controller.setModel(selected);
@@ -493,8 +534,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
     const persisted = await persistConfig(ctx);
     const level = effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel);
-    const source = thinkingSource(config.thinkingLevel, ctx.thinkingLevel);
-    const thinking = getSupportedThinkingLevels(model).length === 1 ? "not supported by this model" : `${level} (${source})`;
+    const levelSource = thinkingSource(config.thinkingLevel, ctx.thinkingLevel);
+    const thinking = getSupportedThinkingLevels(model).length === 1 ? "not supported by this model" : `${level} (${levelSource})`;
     const current = controller.getModel();
     if (controller.getSessionId() === startSessionId && ctx.sessionManager.getSessionId() === startSessionId && current?.provider === selected.provider && current.id === selected.id) {
       notifyCurrent(`Optimizer model set to ${displayModel(selected)}${persisted ? "" : " (current process only; not saved)"}; thinking level: ${thinking}; main session unchanged.${firstSelection ? " Use /refine <text> to start." : ""}`, "info");
@@ -566,7 +607,20 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     return undefined;
   }
 
-  function triggerOptimize(ctx: ExtensionContext, force = false, suppliedDraft?: string, keepEditor = false, captureOnly = false, copyToRound = false): TriggerResult | undefined {
+  function draftInput(ctx: ExtensionContext, draft: string): RefineRequestInput {
+    const history = selectHistory(ctx.sessionManager.getBranch(), config.context.maxMessages, config.context.maxChars);
+    const project = config.projectContext.enabled ? captureProjectContext(ctx, config.projectContext, draft) : undefined;
+    const generateTitle = canNameSession(ctx);
+    return {
+      draft, model: controller.getModel() ?? { provider: "", id: "" },
+      generateTitle, systemPrompt: buildRefineSystemPrompt(generateTitle, config.systemPrompt),
+      sessionId: ctx.sessionManager.getSessionId(), branchLeafId: ctx.sessionManager.getLeafId(), history,
+      ...(project ? { project: { cwd: ctx.cwd, snapshot: project,
+        revisionSnapshot: captureProjectContext(ctx, config.projectContext, draft, true), config: structuredClone(config.projectContext) } } : {}),
+    };
+  }
+
+  function triggerOptimize(ctx: ExtensionContext, force = false, suppliedDraft?: string, keepEditor = false, captureOnly = false): TriggerResult | undefined {
     useContext(ctx);
     if (ctx.mode !== "tui") {
       notify(ctx, "Background prompt refinement is only available in TUI mode; no model request was sent.", "warning");
@@ -609,7 +663,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       ...(project ? { project: { cwd: ctx.cwd, snapshot: project,
         revisionSnapshot: captureProjectContext(ctx, config.projectContext, draft, true), config: structuredClone(config.projectContext) } } : {}),
     };
-    const result = captureOnly ? controller.capture(input, copyToRound) : controller.trigger(input, { force });
+    const result = captureOnly ? controller.capture(input) : controller.trigger(input, { force });
     if (result.kind !== "started") {
       ({ historySnapshot, projectLabel, projectWarnings } = previousContext);
     }
@@ -812,7 +866,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
     if (closePreview) return; // One user-opened panel; never stack dialogs on repeated shortcuts.
     const sessionId = ctx.sessionManager.getSessionId();
-    type Selection = { action: PreviewAction; generation: number; token?: CandidateToken; settingsContext?: ContextSettings; returnUsage?: boolean };
+    type Selection = { action: PreviewAction; generation: number; token?: CandidateToken; recordId?: number; settingsContext?: ContextSettings; returnUsage?: boolean };
     let selection: Selection | undefined;
     try {
       selection = await ctx.ui.custom<Selection | undefined>((tui, theme, keybindings, done) => {
@@ -864,10 +918,41 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           const model = ctx.modelRegistry.find(selected.provider, selected.id)!;
           completionContext = ctx;
           const thinking = effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel);
-          const result = retry && record.status !== "unsent" ? controller.rerunRecord(id, selected, thinking) : controller.startRecord(id, selected, thinking);
+          const result = retry && record.status !== "unsent" ? controller.runOriginal(id, selected, thinking) : controller.startRecord(id, selected, thinking);
           if (result.kind !== "started") notify(ctx, `Request not started (${result.kind}); existing work kept.`, "info");
         };
         const workspace = new RefineWorkspace(panel, tui, theme, keybindings, {
+          original: (id) => {
+            if (closed || ctx.sessionManager.getSessionId() !== sessionId) return undefined;
+            const source = id === undefined ? undefined : controller.getOriginalRecord(id);
+            if (id !== undefined && !source) return undefined;
+            const inPlace = source?.status === "unsent" && source.archivedAt === undefined;
+            const text = source?.input.draft ?? "";
+            const created = inPlace ? undefined : controller.createDraft(draftInput(ctx, text));
+            if (!inPlace && created?.kind !== "captured") {
+              notify(ctx, `Could not create draft (${created?.kind}); existing work kept.`, "warning");
+              return undefined;
+            }
+            const targetId = inPlace ? source.id : (created as Extract<TriggerResult, { kind: "captured" }>).recordId;
+            const target = controller.getRecord(targetId)!;
+            const targetPosition = workspace.isUsage() ? usagePosition : position;
+            const previousPosition = { ...targetPosition };
+            Object.assign(targetPosition, { selectedId: targetId, selectedTaskId: target.taskId, scroll: 0 });
+            return {
+              text,
+              save: (value) => {
+                if (closed || ctx.sessionManager.getSessionId() !== sessionId || controller.getSessionId() !== sessionId) return "Session changed; draft not saved.";
+                if (value.length > config.maxDraftChars) return `The draft exceeds ${config.maxDraftChars} characters.`;
+                return controller.updateDraft(targetId, text, value) ? undefined : "The draft or conversation context changed; cancel and reopen to edit a new copy.";
+              },
+              cancel: () => {
+                if (!inPlace && controller.getSessionId() === sessionId) controller.removeDraft(targetId);
+                Object.assign(targetPosition, previousPosition);
+                targetPosition.selectedTaskId = previousPosition.selectedTaskId;
+                targetPosition.selectedId = previousPosition.selectedId;
+              },
+            };
+          },
           inputCaptureOnly: () => controller.hasWorkspaceContent(),
           inputDraft: {
             text: inputDrafts.get(sessionId) ?? "",
@@ -891,9 +976,9 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             },
             run: (id) => runRecord(id, true),
             stop: (id) => controller.stopRequest(id),
-            copy: (id) => {
-              const record = controller.getRecord(id);
-              if (record) triggerOptimize(ctx, false, record.input.draft, true, true, true);
+            chooseModel: (id) => finish({ action: "run-model", recordId: id, generation: controller.getGeneration() }),
+            accept: (id) => {
+              if (controller.applyResult(id)) finish({ action: "accept", generation: controller.getGeneration(), token: controller.getCandidateToken() });
             },
           },
           context: () => ({
@@ -1038,6 +1123,12 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const { action, token } = selection;
     if (action === "dismiss") controller.cancelAndDismiss();
     else if (action === "restore") await restoreDraft(ctx);
+    else if (action === "run-model" && selection.recordId !== undefined) {
+      await selectModel(ctx, selection.recordId, selection.returnUsage);
+      if (ctx.sessionManager.getSessionId() === sessionId && controller.getSessionId() === sessionId) {
+        await showPreviewContent(ctx, undefined, 3, selection.returnUsage ? "usage" : undefined);
+      }
+    }
     else if (action === "model") {
       await selectModel(ctx);
       if (ctx.sessionManager.getSessionId() === sessionId) {

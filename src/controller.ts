@@ -293,17 +293,62 @@ export class RefineController {
       systemPrompt: snapshot.systemPrompt, generateTitle: snapshot.generateTitle, branchLeafId: snapshot.branchLeafId });
   }
   /** Capture is a zero-call operation and never changes the applied preview. */
-  capture(input: RefineRequestInput, copyToRound = false): TriggerResult {
+  capture(input: RefineRequestInput): TriggerResult {
     const invalid = this.validate(input);
     if (invalid) return invalid;
     this.ensureSession(input.sessionId);
-    if (copyToRound ? this.getCurrentRecords().some((record) => record.input.draft === input.draft) : this.hasCapturedDraft(input.draft)) return { kind: "duplicate" };
+    if (this.hasCapturedDraft(input.draft)) return { kind: "duplicate" };
     if (!this.journal.canStart()) return { kind: "busy" };
     const frozen = this.freezeRound(input);
     const recordId = this.journal.start(++this.taskSequence, frozen, undefined, "refine", "unsent");
     this.lastCapturedDraft = input.draft;
     this.emitState();
     return { kind: "captured", recordId };
+  }
+  /** Explicit creation is independent of shortcut deduplication, model selection and submission. */
+  createDraft(input: RefineRequestInput): TriggerResult {
+    if (input.draft.length > this.options.maxDraftChars) return { kind: "too-long" };
+    this.ensureSession(input.sessionId);
+    if (!this.journal.canStart()) return { kind: "busy" };
+    const recordId = this.journal.start(++this.taskSequence, this.freezeRound(input), undefined, "refine", "unsent");
+    this.emitState();
+    return { kind: "captured", recordId };
+  }
+  updateDraft(id: number, expected: string, text: string): boolean {
+    const record = this.getRecord(id);
+    if (!record || record.status !== "unsent" || record.archivedAt !== undefined || record.input.draft !== expected ||
+      text.length > this.options.maxDraftChars) return false;
+    this.journal.editDraft(id, text);
+    this.emitState();
+    return true;
+  }
+  removeDraft(id: number): void {
+    this.journal.removeDraft(id);
+    if (this.round && !this.getCurrentRecords().length) this.round = undefined;
+    this.emitState();
+  }
+
+  /** Comparisons always start from the original, including when invoked on a revision/edit. */
+  getOriginalRecord(id: number): RefineRecord | undefined {
+    const record = this.getRecord(id);
+    if (!record) return undefined;
+    const source = this.getHistory().find((item) => item.taskId === record.taskId && !item.input.revision) ?? record;
+    return { ...source, input: source.originalInput ?? source.input };
+  }
+  runOriginal(id: number, model: ModelRef, thinkingLevel?: ModelThinkingLevel): TriggerResult {
+    const source = this.getOriginalRecord(id);
+    if (!source) return { kind: "stale-source" };
+    if (source.status === "unsent") return this.startRecord(source.id, model, thinkingLevel);
+    // A source can outlive its earliest record when bounded history evicts completed calls.
+    const input = { ...source.input, model, thinkingLevel, revision: undefined };
+    if (source.input.revision) { delete input.preparedInput; delete input.projectDiagnostics; }
+    const invalid = this.validate(input);
+    if (invalid) return invalid;
+    if (this.pendingSend || !this.journal.canStart()) return { kind: "busy" };
+    if ([...this.active.values()].some((run) => this.getRecord(run.request.recordId)?.taskId === source.taskId && fingerprint(run.request) === fingerprint(input))) return { kind: "duplicate" };
+    const recordId = this.journal.start(source.taskId, input, undefined, "refine");
+    if (source.archivedAt !== undefined) this.journal.update(recordId, { archivedAt: source.archivedAt });
+    return this.launch(recordId, false);
   }
   trigger(input: RefineRequestInput, options: { force?: boolean; revisionToken?: CandidateToken; sameTask?: boolean } = {}): TriggerResult {
     if (this.pendingSend) return { kind: input.revision ? "stale-source" : "busy" };
@@ -332,6 +377,8 @@ export class RefineController {
     if (!record || !model) return { kind: "stale-source" };
     if (this.pendingSend) return { kind: "busy" };
     if (record.status !== "unsent") return { kind: "duplicate" };
+    const invalid = this.validate({ ...record.input, model, thinkingLevel });
+    if (invalid) return invalid;
     this.journal.setModel(id, model, thinkingLevel);
     // Starting another item never steals the applied preview.
     return this.launch(id, !this.candidate && !this.viewedAccepted && this.foregroundId === undefined);
