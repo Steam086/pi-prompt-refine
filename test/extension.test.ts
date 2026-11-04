@@ -595,7 +595,7 @@ describe("persistent session-local Refine history", () => {
     await mkdir(path(h)); // A non-file destination must not be replaced.
     await trigger(h);
     await vi.waitFor(() => expect(h.notifications.join("\n")).toContain("history save failed"));
-    expect(h.statuses.at(-1)).toContain("1 new result");
+    expect(h.widgetLines().join("\n")).toContain("1 new result");
     expect(h.complete).toHaveBeenCalledTimes(1);
     expect(h.editorWrites).toEqual([]);
   });
@@ -752,7 +752,7 @@ describe("explicit candidate revision", () => {
     const harness = await makeHarness({ config: { projectContext: projectConfig(false) } });
     vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
     await trigger(harness);
-    await vi.waitFor(() => expect(harness.statuses.at(-1)).toContain("1 new result"));
+    await vi.waitFor(() => expect(harness.widgetLines().join("\n")).toContain("1 new result"));
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     harness.panelInput("\x1b[D");
@@ -1636,7 +1636,7 @@ describe("session naming", () => {
       const harness = await makeHarness();
       harness.complete.mockResolvedValueOnce({ content: [{ type: "text", text }], stopReason: "stop", usage: { totalTokens: 12 } });
       await trigger(harness);
-      expect(harness.statuses.at(-1)).toContain("1 failed");
+      expect(harness.widgetLines().join("\n")).toContain("1 failed");
       await panelAction(harness, "a");
       await panelAction(harness, "s");
       expect(harness.editorWrites).toEqual([]);
@@ -1725,19 +1725,20 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect([...harness.shortcuts.keys()]).toEqual(["ctrl+\\"]);
   });
 
-  it("shows background status without a card, editor changes or automatic dialogs", async () => {
+  it("shows one line above the editor without a result card, editor changes or automatic dialogs", async () => {
     const harness = await makeHarness({ useDefaultShortcuts: true });
     let resolve!: (value: any) => void;
     harness.complete.mockImplementation(() => new Promise((res) => { resolve = res; }));
     await shortcut(harness, "ctrl+\\")(harness.context);
-    expect(harness.statuses.at(-1)).toContain("1 running");
-    expect(harness.widgetLines()).toEqual([]);
+    expect(harness.widgetLines().join("\n")).toContain("1 running");
+    expect(harness.widgetLines()).toHaveLength(1);
+    expect(harness.context.ui.setWidget).toHaveBeenLastCalledWith(expect.any(String), expect.any(Function), { placement: "aboveEditor" });
     expect(harness.customCalls()).toBe(0);
     harness.setEditorText("Draft B");
     resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "Automatic visible result", title: "Background refinement" }) }], stopReason: "stop" });
     await flushPromises();
-    expect(harness.statuses.at(-1)).toContain("1 new result");
-    expect(harness.widgetLines()).toEqual([]);
+    expect(harness.widgetLines().join("\n")).toContain("1 new result");
+    expect(harness.widgetLines()).toHaveLength(1);
     expect(harness.customCalls()).toBe(0);
     expect(harness.getEditor()).toBe("Draft B");
     expect(harness.editorWrites).toEqual([]);
@@ -1775,11 +1776,11 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.complete.mockImplementationOnce(() => new Promise((res) => { resolve = res; }));
     await trigger(harness);
     await vi.advanceTimersByTimeAsync(12_000);
-    expect(harness.statuses.at(-1)).toContain("1 running");
+    expect(harness.widgetLines().join("\n")).toContain("1 running");
     resolve(refinement("Timed result"));
     await flushPromises();
-    expect(harness.widgetLines()).toEqual([]);
-    expect(harness.statuses.at(-1)).toContain("1 new result");
+    expect(harness.widgetLines()).toHaveLength(1);
+    expect(harness.widgetLines().join("\n")).toContain("1 new result");
     expect(vi.getTimerCount()).toBe(0);
 
     await vi.advanceTimersByTimeAsync(30_000);
@@ -1787,14 +1788,14 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.panelLines().join("\n")).toContain("Done · 12s");
     expect(harness.widgetLines()).toEqual([]);
     await panelAction(harness, "a");
-    expect(harness.statuses.at(-1)).toBeUndefined();
+    expect(harness.widgetLines()).toEqual([]);
     await vi.advanceTimersByTimeAsync(30_000);
     await panelAction(harness, "q");
     expect(harness.panelLines().join("\n")).toContain("Accepted · 12s");
     expect(harness.complete).toHaveBeenCalledTimes(1);
 
     await trigger(harness);
-    expect(harness.statuses.at(-1)).toContain("1 new result");
+    expect(harness.widgetLines().join("\n")).toContain("1 new result");
   });
 
   it("captures request-time subscription and SDK cost without repricing from later settings", async () => {
@@ -1857,13 +1858,13 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
       usage: { totalTokens: 25 },
     });
     await trigger(harness);
-    expect(harness.statuses.at(-1)).toContain("1 failed");
+    expect(harness.widgetLines().join("\n")).toContain("1 failed");
     await panelAction(harness, "q");
-    expect(harness.statuses.at(-1)).toBeUndefined();
+    expect(harness.widgetLines()).toEqual([]);
     harness.complete.mockImplementationOnce(() => new Promise(() => {}));
     await trigger(harness);
-    expect(harness.statuses.at(-1)).toContain("1 running");
-    expect(harness.statuses.at(-1)).not.toContain("failed");
+    expect(harness.widgetLines().join("\n")).toContain("1 running");
+    expect(harness.widgetLines().join("\n")).not.toContain("failed");
   });
 
   it.each(["\x1b", "\x1c"])("closes the preview with %j without changing the candidate or draft", async (key) => {
@@ -1873,7 +1874,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const view = harness.command("view", harness.context);
     harness.panelInput(key);
     await view;
-    expect(harness.statuses.at(-1)).toBeUndefined();
+    expect(harness.widgetLines()).toEqual([]);
     expect(harness.editorWrites).toEqual([]);
     expect(harness.sent).toEqual([]);
     expect(harness.complete).toHaveBeenCalledTimes(1);
@@ -1882,7 +1883,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
   it("shows a single result surface and toggles reading options without writing or sending", async () => {
     const harness = await makeHarness();
     await trigger(harness);
-    expect(harness.statuses.at(-1)).toContain("1 new result");
+    expect(harness.widgetLines().join("\n")).toContain("1 new result");
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     expect(harness.widgetLines()).toEqual([]);
@@ -1899,7 +1900,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.editorWrites).toEqual([]);
     harness.panelInput("\x1b");
     await view;
-    expect(harness.statuses.at(-1)).toBeUndefined();
+    expect(harness.widgetLines()).toEqual([]);
     expect(harness.getEditor()).toBe("Draft A");
     expect(harness.customCalls()).toBe(1);
   });
@@ -2250,19 +2251,20 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.getEditor()).toBe("Draft A");
   });
 
-  it("closing a live panel keeps generating and does not reopen it on completion", async () => {
+  it.each(["q", "\x1b", "\x1c"])("closing a live panel with %j restores the running line without reopening on completion", async (key) => {
     const harness = await makeHarness();
     let resolve!: (value: any) => void;
     harness.complete.mockImplementation(() => new Promise((res) => { resolve = res; }));
     await trigger(harness);
     harness.holdPanel();
     const view = harness.command("view", harness.context);
-    harness.panelInput("q");
+    expect(harness.widgetLines()).toEqual([]);
+    harness.panelInput(key);
     await view;
-    expect(harness.statuses.at(-1)).toContain("1 running");
+    expect(harness.widgetLines().join("\n")).toContain("1 running");
     resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "Background result" }) }], stopReason: "stop" });
     await flushPromises();
-    expect(harness.statuses.at(-1)).toContain("1 new result");
+    expect(harness.widgetLines().join("\n")).toContain("1 new result");
     expect(harness.customCalls()).toBe(1);
   });
 
@@ -2301,7 +2303,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("r");
     await view;
     await flushPromises();
-    expect(harness.statuses.at(-1)).toContain("1 new result");
+    expect(harness.widgetLines().join("\n")).toContain("1 new result");
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -3020,7 +3022,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await harness.command("view", harness.context);
     await flushPromises();
     expect(harness.complete).toHaveBeenCalledTimes(1);
-    expect(harness.statuses.at(-1)).toBeUndefined();
+    expect(harness.widgetLines()).toEqual([]);
     await panelAction(harness, "q");
     expect(harness.panelLines().join("\n")).toContain("Refined prompt");
     expect(harness.getEditor()).toBe(draft);
@@ -3111,13 +3113,13 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.sent).toEqual([{ text: "Refined prompt", options: undefined }]);
 
     harness.handlers.get("input")?.[0]?.({ type: "input", text: "Refined prompt", source: "extension" }, harness.context);
-    expect(harness.statuses.at(-1)).toBeUndefined();
+    expect(harness.widgetLines()).toEqual([]);
     harness.setCustomAction("s");
     await shortcut(harness, "f3")(harness.context);
     expect(harness.sent).toHaveLength(1);
 
     harness.handlers.get("before_agent_start")?.[0]?.({ type: "before_agent_start", messageType: "user", prompt: "Refined prompt" }, harness.context);
-    expect(harness.statuses.at(-1)).toBeUndefined();
+    expect(harness.widgetLines()).toEqual([]);
     harness.setCustomAction("q");
     await shortcut(harness, "f3")(harness.context);
     expect(harness.panelLines().join("\n")).toContain("Send pending");
@@ -3183,7 +3185,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\x1b");
     harness.panelInput("\x1b");
     await view;
-    expect(harness.statuses.at(-1)).toBeUndefined();
+    expect(harness.widgetLines()).toEqual([]);
     expect(harness.complete).toHaveBeenCalledTimes(1);
     expect(harness.editorWrites).toEqual([]);
   });
@@ -3248,7 +3250,7 @@ describe("main request deletion shortcut", () => {
     await view;
     resolve(refinement("Deleted result must not return"));
     await flushPromises();
-    expect(harness.statuses.at(-1)).toBeUndefined();
+    expect(harness.widgetLines()).toEqual([]);
     expect(harness.widgetLines()).toEqual([]);
     expect(harness.editorWrites).toEqual([]);
     expect(harness.sent).toEqual([]);
