@@ -39,6 +39,8 @@ export interface RefineConfig {
   model?: ModelRef;
   /** Explicit optimizer override; omitted means inherit the active Pi session level. */
   thinkingLevel?: ModelThinkingLevel;
+  /** Last confirmed thinking level per provider/model, including comparison-only models. */
+  modelThinkingLevels: Record<string, ModelThinkingLevel>;
   /** Custom editing policy; the fixed refiner protocol is always added. */
   systemPrompt?: string;
   favorites: ModelRef[];
@@ -70,6 +72,7 @@ export const DEFAULT_SHORTCUTS: ShortcutConfig = {
 
 export const DEFAULT_CONFIG: RefineConfig = {
   version: 1,
+  modelThinkingLevels: {},
   favorites: [],
   shortcuts: { ...DEFAULT_SHORTCUTS },
   timeoutMs: 60_000,
@@ -264,6 +267,18 @@ export function parseConfig(value: unknown): LoadedConfig {
     } else {
       warnings.push("thinkingLevel must be off, minimal, low, medium, high, xhigh, or max; inheriting the session level.");
     }
+  }
+
+  if (value.modelThinkingLevels !== undefined) {
+    if (isRecord(value.modelThinkingLevels)) {
+      for (const [key, level] of Object.entries(value.modelThinkingLevels)) {
+        const separator = key.indexOf("/");
+        const ref = modelRef({ provider: key.slice(0, separator), id: key.slice(separator + 1) });
+        if (separator > 0 && ref && modelKey(ref) === key && typeof level === "string" && THINKING_LEVELS.includes(level as ModelThinkingLevel)) {
+          config.modelThinkingLevels[key] = level as ModelThinkingLevel;
+        } else warnings.push(`modelThinkingLevels contains an invalid entry: ${key}; ignoring it.`);
+      }
+    } else warnings.push("modelThinkingLevels must be an object; ignoring it.");
   }
 
   if (Array.isArray(value.favorites)) {

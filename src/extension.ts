@@ -346,6 +346,22 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
   }
 
+  function rememberThinking(model: ModelRef, level: ModelThinkingLevel): boolean {
+    const key = modelKey(model);
+    if (config.modelThinkingLevels[key] === level) return false;
+    config.modelThinkingLevels[key] = level;
+    return true;
+  }
+
+  // Preserve legacy/default-model settings before switching away for the first time.
+  function rememberCurrentThinking(ctx: ExtensionContext): void {
+    const current = controller.getModel();
+    const model = current && ctx.modelRegistry.find(current.provider, current.id);
+    if (model && config.modelThinkingLevels[modelKey(model)] === undefined) {
+      rememberThinking(model, effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel));
+    }
+  }
+
   function registeredModels(ctx: ExtensionContext): Model<Api>[] {
     return ctx.modelRegistry.getAvailable();
   }
@@ -379,12 +395,15 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const startGeneration = controller.getGeneration();
     const startSessionId = ctx.sessionManager.getSessionId();
     const startBranch = ctx.sessionManager.getLeafId();
-    const selection = await ctx.ui.custom<{ modelKey: string; thinkingLevel?: ModelThinkingLevel; thinkingTouched: boolean } | undefined>((tui, theme, keybindings, done) => {
+    const selection = await ctx.ui.custom<{ modelKey: string; thinkingLevel?: ModelThinkingLevel } | undefined>((tui, theme, keybindings, done) => {
       let query = "";
       let list: SelectList;
       let thinkingStatus: Text;
-      let thinkingOverride = baseline?.input.thinkingLevel ?? config.thinkingLevel;
-      let thinkingTouched = false;
+      // Edits belong to individual models and stay local until confirmation.
+      const thinkingEdits = new Map<string, ModelThinkingLevel>();
+      const thinkingOverride = (model: ModelRef): ModelThinkingLevel | undefined =>
+        thinkingEdits.get(modelKey(model)) ?? config.modelThinkingLevels[modelKey(model)] ??
+        baseline?.input.thinkingLevel ?? config.thinkingLevel;
       const container = new Container();
       const cycleThinkingKeys = keybindings.getKeys("app.thinking.cycle")
         .map((key) => key.split("+").map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join("+"))
@@ -395,8 +414,11 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         if (!model) return "Thinking level: no model selected";
         const levels = getSupportedThinkingLevels(model);
         if (levels.length === 1 && levels[0] === "off") return "Thinking level: not supported by this model";
-        const level = effectiveThinkingLevel(model, thinkingOverride, ctx.thinkingLevel);
-        return `Thinking level: ${level} · ${thinkingSource(thinkingOverride, ctx.thinkingLevel)}`;
+        const override = thinkingOverride(model);
+        const level = effectiveThinkingLevel(model, override, ctx.thinkingLevel);
+        const source = !thinkingEdits.has(modelKey(model)) && config.modelThinkingLevels[modelKey(model)] !== undefined
+          ? "Last used for this model" : thinkingSource(override, ctx.thinkingLevel);
+        return `Thinking level: ${level} · ${source}`;
       };
       const selectedDetails = (model: Model<Api> | undefined): string => {
         if (!model) return theme.fg("muted", statusFor(model));
@@ -429,7 +451,10 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         const currentModel = controller.getModel();
         const currentIndex = items.findIndex((item) => item.value === (currentModel ? displayModel(currentModel) : ""));
         if (!source && currentIndex >= 0) list.setSelectedIndex(currentIndex);
-        list.onSelect = (item) => done({ modelKey: item.value, thinkingLevel: thinkingOverride, thinkingTouched });
+        list.onSelect = (item) => {
+          const model = highlightedModel(item.value);
+          if (model) done({ modelKey: item.value, thinkingLevel: thinkingOverride(model) });
+        };
         list.onCancel = () => done(undefined);
         list.onSelectionChange = (item) => {
           updateThinkingStatus(highlightedModel(item.value));
@@ -474,10 +499,9 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             if (!model) return;
             const levels = getSupportedThinkingLevels(model);
             if (levels.length <= 1) return;
-            const current = effectiveThinkingLevel(model, thinkingOverride, ctx.thinkingLevel);
+            const current = effectiveThinkingLevel(model, thinkingOverride(model), ctx.thinkingLevel);
             const currentIndex = levels.indexOf(current);
-            thinkingOverride = levels[(currentIndex + 1 + levels.length) % levels.length];
-            thinkingTouched = true;
+            thinkingEdits.set(modelKey(model), levels[(currentIndex + 1 + levels.length) % levels.length]!);
             updateThinkingStatus(model);
             tui.requestRender();
             return;
@@ -532,17 +556,20 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           if (existing) (runUsage ? usagePositions : taskPositions).set(startSessionId, { selectedId: existing.id });
           notify(ctx, "This model is already running for the original prompt.", "info");
         }
+        if (rememberThinking(model, thinking)) await persistConfig(ctx);
       } else notify(ctx, `Request not started (${result.kind}); existing work kept.`, "warning");
       return;
     }
     const firstSelection = !controller.getModel();
     const selected = modelRef(model);
+    if (!config.model || !sameModel(config.model, selected)) rememberCurrentThinking(ctx);
     let changed = controller.setModel(selected);
     if (changed) config.model = selected;
-    if (selection.thinkingTouched && selection.thinkingLevel !== undefined) {
+    if (selection.thinkingLevel !== undefined && selection.thinkingLevel !== config.thinkingLevel) {
       config.thinkingLevel = selection.thinkingLevel;
       changed = true;
     }
+    changed = rememberThinking(model, effectiveThinkingLevel(model, selection.thinkingLevel, ctx.thinkingLevel)) || changed;
     if (!changed) {
       const level = effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel);
       notify(ctx, `${displayModel(selected)} is already the current optimizer model; thinking level: ${level} (${thinkingSource(config.thinkingLevel, ctx.thinkingLevel)}).`, "info");
@@ -604,11 +631,13 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const currentIndex = usable.findIndex((favorite) => modelKey(favorite) === (current ? modelKey(current) : ""));
     const next = usable[(currentIndex + 1) % usable.length];
     if (!next) return;
+    rememberCurrentThinking(ctx);
     if (!controller.setModel(next)) {
       notify(ctx, `Favorites contain only the current model ${displayModel(next)}.`, "info");
       return;
     }
     config.model = { ...next };
+    config.thinkingLevel = config.modelThinkingLevels[modelKey(next)] ?? config.thinkingLevel;
     await persistConfig(ctx);
     notifyCurrent(`Optimizer model switched to ${displayModel(next)}; the main session model is unchanged.`, "info");
   }
@@ -1026,6 +1055,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             if (levels.length <= 1) return "Thinking level is fixed for this model.";
             const current = effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel);
             config.thinkingLevel = levels[(levels.indexOf(current) + 1) % levels.length];
+            rememberThinking(model, config.thinkingLevel!);
             return await persistConfig(ctx) ? "Thinking level saved" : "Thinking applied · Not persisted; check configuration";
           },
           saveContext: async (selected) => {
