@@ -16,6 +16,7 @@ import { BackgroundStatus, renderBackgroundStatus } from "./background-status.js
 import { renderModelChoices } from "./model-picker.js";
 import { formatKeyHint, type KeyHint } from "./key-hints.js";
 import { RefineWorkspace, type ContextSettings } from "./workspace.js";
+import { PreferenceStore } from "./preference-store.js";
 import { PreviewPanel, type PreviewOptions } from "./preview.js";
 import { RefineController, type Candidate, type CandidateToken, type ControllerState, type RefineRequest, type RefineRequestInput, type TriggerResult } from "./controller.js";
 import type { TaskPanelPosition } from "./task-panel.js";
@@ -977,6 +978,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           if (result.kind !== "started") notify(ctx, `Request not started (${result.kind}); existing work kept.`, "info");
         };
         const workspace = new RefineWorkspace(panel, tui, theme, keybindings, {
+          preferences: { repository: new PreferenceStore(getAgentDir(), ctx.cwd), key: config.preferencesKey, maxChars: config.maxDraftChars },
           original: (id) => {
             if (closed || ctx.sessionManager.getSessionId() !== sessionId) return undefined;
             const source = id === undefined ? undefined : controller.getOriginalRecord(id);

@@ -109,6 +109,17 @@ export class PreviewPanel implements Component {
 
   setNotice(notice: string): void { this.options = { ...this.options, notice }; }
 
+  /** A revision's source view must not follow later background completions. */
+  snapshot(): PreviewPanel {
+    const panel = new PreviewPanel(structuredClone(this.options), this.theme, this.rows, () => {});
+    panel.originalVisible = this.originalVisible;
+    panel.helpVisible = this.helpVisible;
+    panel.sourceVisible = this.sourceVisible;
+    panel.rebuildDocument();
+    panel.restorePosition = this.restorePosition ?? this.scroll.scrollTop;
+    return panel;
+  }
+
   toggleOriginal(): void {
     // The source is already the main document while generating or after a failed request.
     if (this.options.draft === undefined || this.options.candidateText === undefined) return;
@@ -179,6 +190,7 @@ export class PreviewPanel implements Component {
       if (this.hasActionableCandidate()) {
         helpLine(["a", "Accept into editor (no send)"], ["e", "Edit candidate (no model call)"]);
         if (!options.contextUnavailable) helpLine(["f", "Revise current result with new instructions (model call)"]);
+        if (!options.contextUnavailable) helpLine(["p", "Revise with saved preferences (no immediate model call)"]);
         helpLine(["s", "Send (follow-up if busy; draft kept)"]);
         paragraph("Accept puts the result in the editor; s sends directly.", "muted");
       }
@@ -317,6 +329,7 @@ export class PreviewPanel implements Component {
             ? [["a", "Accept"], ["e", "Edit"], ...(!options.contextUnavailable ? [["f", "Revise"] as KeyHint] : []), ["s", "Send"]]
             : [["r", options.state.phase === "error" ? "Retry" : "Refine"], ["m", "Model"], ["i", "Input"]];
     const secondary: KeyHint[] = [["q", "Back"], ["?", this.helpVisible ? "Hide help" : "Help"]];
+    if (this.hasActionableCandidate() && !options.contextUnavailable) secondary.push(["p", "Preferences"]);
     // Back/Help survive narrow widths; other hints are omitted rather than wrapped.
     // Empty/error primary actions already expose Input/Model. Tabs own page hints.
     if (!primary.some(([key]) => key === "i")) secondary.push(["i", "Input"]);

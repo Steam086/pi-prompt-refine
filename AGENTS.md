@@ -14,6 +14,7 @@ Pi Prompt Refine 是 TypeScript 编写的 Pi 扩展，入口由 `package.json` �
 | `src/config.ts` | 配置校验、默认值、迁移及持久化 |
 | `src/workspace.ts`、`preview.ts`、`prompt-input.ts` | Main / Context / Input 工作区、候选阅读和独立输入 |
 | `src/background-status.ts`、`presentation.ts`、`panel-layout.ts`、`key-hints.ts` | 后台状态与已查看提醒、展示格式、布局和按键提示 |
+| `src/revision-preferences.ts`、`preference-store.ts`、`preference-panel.ts` | 手动修订要求的快照与确定性组合、按项目／全局隔离的并发安全库、独立选择与管理子页；只有带回后显式提交才进入模型请求 |
 | `src/model-picker.ts`、`usage.ts` | 模型选项展示、响应 token 口径归一化与请求时 SDK 参考费用 |
 
 ## 数据流与验证

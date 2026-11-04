@@ -12,7 +12,7 @@ describe("workspace terminal rendering", () => {
   it.each([
     ["regular", 20, 12, "dark"], ["regular", 40, 24, "dark"], ["regular", 80, 40, "dark"], ["regular", 100, 40, "light"],
     ["fullscreen", 20, 12, "dark"], ["fullscreen", 40, 24, "dark"], ["fullscreen", 80, 40, "dark"], ["fullscreen", 100, 40, "light"],
-  ] as const)("switches without full redraw or screen clearing in %s at %ix%i (%s)", (mode, columns, rows, themeName) => {
+  ] as const)("switches without full redraw or screen clearing in %s at %ix%i (%s)", async (mode, columns, rows, themeName) => {
     vi.useFakeTimers();
     let input = (_data: string) => {};
     const writes: string[] = [];
@@ -37,6 +37,10 @@ describe("workspace terminal rendering", () => {
       candidate: index % 3 === 0 ? undefined : { ...requestInput, requestId: index + 1, version: index + 1, generation: 0, text: "Candidate 中文😀\n".repeat(50) },
     }));
     const workspace = new RefineWorkspace(panel, tui, theme, getKeybindings(), {
+      preferences: { key: "f2", maxChars: 16000, repository: {
+        load: async () => ({ errors: {}, entries: [{ id: "one", version: 1, scope: "global", name: "Keep commands 中文", body: "Preserve literals\n".repeat(100) }] }),
+        save: async () => { throw new Error("Read-only fixture"); }, remove: async () => {},
+      } },
       context: () => ({ instructions: "always" as const, tree: true, skills: false }), contextEnabled: () => true,
       optimizer: () => ({ model: "provider/long-model-identifier-with-extra-details", thinking: "high · Extension setting", thinkingEnabled: true }),
       chooseModel() {}, editSystemPrompt() {}, history: () => records,
@@ -82,6 +86,12 @@ describe("workspace terminal rendering", () => {
         });
         tui.requestRender();
         tui.renderNow();
+        expect(workspace.render(columns)).toHaveLength(initialHeight);
+      }
+      workspace.openResult(); input("f"); input("\x1bOQ");
+      await Promise.resolve();
+      for (const key of ["\r", " ", "\r", "\x1b[6~", "\x1b", "\t", "\t", "\t", "\t", "\t", "\r", "Saved name", "\t", "\r", "中文", "\x13", "\x1b", "n", "\x1b", "y", "\x1b"]) {
+        input(key); tui.renderNow();
         expect(workspace.render(columns)).toHaveLength(initialHeight);
       }
       expect(writes.length).toBeGreaterThan(0);

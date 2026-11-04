@@ -217,8 +217,8 @@ describe("result reading panel", () => {
     expect(text).not.toContain("Enter won't send");
     expect(text).not.toContain("Accept puts the result in the editor; s sends directly.");
     expect(panel.render(100).slice(-2)).toEqual([
-      "  a Accept · e Edit · f Revise · s Send",
-      "  q Back   · ? Help · i Input  · m Model",
+      "  a Accept · e Edit · f Revise      · s Send",
+      "  q Back   · ? Help · p Preferences · i Input · m Model",
     ]);
     expect(text.match(/Prompt refine/g)).toHaveLength(1);
     panel.toggleOriginal();
@@ -411,7 +411,7 @@ describe("result reading panel", () => {
     expect(panel.render(100).join("\n")).not.toMatch(/[\x00-\x09\x0b-\x1f\x7f-\x9f]/);
     panel.toggleHelp();
     panel.render(100);
-    panel.scrollBy(10);
+    panel.scrollBy(12);
     expect(panel.render(100).join("\n")).toContain("Model: openai-codex/example-model");
   });
 
@@ -457,8 +457,8 @@ describe("result reading panel", () => {
   it("aligns result actions with navigation using the same column stops as Tasks", () => {
     const panel = create({ navigation: { index: 1, count: 1, label: "#1 refine" } });
     expect(panel.render(100).slice(-2).map((line) => line.trim())).toEqual([
-      "a Accept · e Edit · f Revise · s Send",
-      "q Back   · ? Help · i Input  · m Model · g Same input",
+      "a Accept · e Edit · f Revise      · s Send",
+      "q Back   · ? Help · p Preferences · i Input · m Model · g Same input",
     ]);
   });
 
@@ -518,7 +518,7 @@ describe("result reading panel", () => {
 
   it("prioritizes return and help in the single-line footer, then fits primary actions", () => {
     const panel = create({}, 8);
-    expect(panel.render(100).at(-1)?.trim()).toBe("q Back · ? Help · a Accept · e Edit · f Revise · s Send · i Input · m Model");
+    expect(panel.render(100).at(-1)?.trim()).toBe("q Back · ? Help · a Accept · e Edit · f Revise · s Send · p Preferences · i Input · m Model");
     expect(panel.render(20).at(-1)?.trim()).toBe("q Back · ? Help");
     expect(panel.render(12).at(-1)?.trim()).toBe("q Back");
   });

@@ -18,6 +18,7 @@ export interface TaskPanelActions {
   chooseModel?(id: number): void;
   accept?(id: number): void;
   revise?(id: number): void;
+  preferences?(id: number): void;
   launchModel?(): string;
 }
 export interface TaskPanelPosition {
@@ -52,6 +53,17 @@ export class TaskPanel {
   invalidate(): void { this.cache.clear(); }
   setNotice(text: string): void { this.notice = text; }
   openList(): void { this.inspecting = false; this.compareId = undefined; this.reading = false; }
+  /** Preserve the source and reading position while a revision owns focus. */
+  snapshot(): TaskPanel {
+    const records = this.actions.records().map((record) => ({ ...record, input: { ...record.input },
+      candidate: record.candidate && { ...record.candidate } }));
+    const appliedId = this.actions.appliedId();
+    const panel = new TaskPanel({ ...this.actions, records: () => records, appliedId: () => appliedId },
+      this.theme, this.rows, this.keys, this.usage, structuredClone(this.position));
+    panel.inspecting = this.inspecting; panel.compareId = this.compareId; panel.reading = this.reading;
+    panel.original = this.original; panel.top = this.top; panel.notice = this.notice;
+    return panel;
+  }
   private entries(): Row[] {
     const groups = new Map<number, RefineRecord[]>();
     for (const record of this.actions.records()) {
@@ -157,6 +169,10 @@ export class TaskPanel {
     }
     if (this.inspecting && key === "o") { this.original = !this.original; this.position.scroll = 0; return true; }
     if (this.inspecting && key === "g") { if (row) this.actions.run(row.record.id); return true; }
+    if (this.inspecting && key === "p" && this.actions.preferences) {
+      if (row && !row.original && row.record.candidate && !row.record.input.contextUnavailable) this.actions.preferences(row.record.id);
+      return true;
+    }
     if (this.inspecting && key === "f" && this.actions.revise) {
       if (row && !row.original && row.record.candidate) this.actions.revise(row.record.id);
       return true;
@@ -357,6 +373,7 @@ export class TaskPanel {
     if (selected && !selected.original && pending(selected.record)) primary.push(["x", "Stop"]);
     if (selected && !selected.original && selected.record.candidate) primary.push(["a", "Accept"]);
     if (selected && this.actions.deleteRecords) primary.push(["d", "Delete"]);
+    if (this.inspecting && selected && !selected.original && selected.record.candidate && !restored && this.actions.preferences) primary.splice(1, 0, ["p", "Preferences"]);
     // Reserve both focus labels so Tab never shifts columns or changes which hints fit.
     const focusAction = (this.reading ? "Select" : "Read").padEnd("Select".length);
     const secondary: KeyHint[] = [["Esc", "Back"], ...(other || !this.inspecting ? [["Tab", other ? "Switch result" : focusAction] as KeyHint] : [])];
