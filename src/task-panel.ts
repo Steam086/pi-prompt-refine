@@ -96,6 +96,10 @@ export class TaskPanel {
     const key = parseKey(data)?.toLowerCase();
     if (key) this.notice = "";
     const row = this.selected();
+    if (row?.record.input.contextUnavailable && ["m", "g", "f"].includes(key ?? "")) {
+      this.notice = "Background not saved · Press i to copy into current round";
+      return true;
+    }
     if (this.inspecting && (key === "q" || this.keys.matches(data, "tui.select.cancel"))) {
       this.openList();
       return true;
@@ -251,6 +255,7 @@ export class TaskPanel {
         if (budget.message) body.push(this.theme.fg("warning", sanitizeTerminalText(`⚠ ${budget.message}`)));
       }
       body.push("", this.heading("Record"), this.muted(`Round ${record.input.roundId ?? "?"} · Task ${record.taskId}${record.archivedAt !== undefined ? " · Earlier context" : ""}`));
+      if (record.input.contextUnavailable) body.push(this.muted("Restored history · background not saved. Press i to copy the original into the current round."));
       if (!row.original) body.push(this.muted(`Run #${record.id} · ${record.kind}${record.parentId ? ` from #${record.parentId}` : ""}`));
       body.push(this.muted(`Created ${new Date(record.createdAt).toLocaleTimeString()}`));
       if (record.acceptedAt !== undefined) body.push(this.muted(`Accepted into Pi editor: ${new Date(record.acceptedAt).toLocaleTimeString()}`));
@@ -312,13 +317,14 @@ export class TaskPanel {
       });
     }
     const action = !this.inspecting && selected?.original && selected.record.status === "unsent" ? "Run" : "Inspect";
-    const primary: KeyHint[] = this.inspecting ? [["i", "Original"], ["m", "Run model"]]
-      : [["Enter", action], ["i", "Edit"], ["n", "New"], ["m", selected ? "Run model" : "Model"]];
+    const restored = selected?.record.input.contextUnavailable;
+    const primary: KeyHint[] = this.inspecting ? [["i", restored ? "Copy to current" : "Original"], ...(!restored ? [["m", "Run model"] as const] : [])]
+      : [["Enter", action], ["i", restored ? "Copy to current" : "Edit"], ["n", "New"], ...(!restored ? [["m", selected ? "Run model" : "Model"] as const] : [])];
     if (selected && !selected.original && pending(selected.record)) primary.push(["x", "Stop"]);
     if (selected && !selected.original && selected.record.candidate) primary.push(["a", "Accept"]);
     const secondary: KeyHint[] = [["Esc", "Back"], ...(other || !this.inspecting ? [["Tab", other ? "Switch result" : this.reading ? "Select" : "Read"] as KeyHint] : [])];
     if (this.inspecting && selected && !selected.original && selected.record.candidate) {
-      secondary.push(["c", other ? "Next comparison" : "Compare"], ["e", "Edit result"], ["f", "Revise"], ["s", "Send"]);
+      secondary.push(["c", other ? "Next comparison" : "Compare"], ["e", "Edit result"], ...(!restored ? [["f", "Revise"] as const] : []), ["s", "Send"]);
     }
     const footer = layout.innerWidth < 30
       ? [fittingKeyHints(primary.map(([key, label]) => [key === "Enter" ? "↵" : key, label]), layout.innerWidth, this.theme), fittingKeyHints(secondary, layout.innerWidth, this.theme)]

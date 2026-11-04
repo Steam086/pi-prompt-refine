@@ -15,7 +15,7 @@ const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 
 afterEach(async () => {
   for (const harness of activeHarnesses.splice(0)) {
-    harness.handlers.get("session_shutdown")?.[0]?.({ type: "session_shutdown" }, harness.context);
+    await harness.handlers.get("session_shutdown")?.[0]?.({ type: "session_shutdown" }, harness.context);
   }
   vi.useRealTimers();
   await Promise.all(agentDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
@@ -38,7 +38,7 @@ interface Harness {
   getSessionName(): string | undefined;
   manualName(name: string): void;
   sendUserMessage: ReturnType<typeof vi.fn>;
-  reload(): Promise<void>;
+  reload(reason?: "reload" | "resume" | "fork"): Promise<void>;
   editorWrites: string[];
   getEditor(): string;
   setEditorText(text: string): void;
@@ -56,7 +56,7 @@ interface Harness {
   customCalls(): number;
 }
 
-async function makeHarness(options: { freshInstall?: boolean; sessionName?: string; mode?: "tui" | "rpc" | "print"; busy?: boolean; configureModel?: boolean; noAvailableModels?: boolean; reasoning?: boolean; thinkingLevel?: ModelThinkingLevel; config?: Partial<RefineConfig>; useDefaultShortcuts?: boolean } = {}): Promise<Harness> {
+async function makeHarness(options: { persistHistory?: boolean; freshInstall?: boolean; sessionName?: string; mode?: "tui" | "rpc" | "print"; busy?: boolean; configureModel?: boolean; noAvailableModels?: boolean; reasoning?: boolean; thinkingLevel?: ModelThinkingLevel; config?: Partial<RefineConfig>; useDefaultShortcuts?: boolean } = {}): Promise<Harness> {
   const agentDir = await mkdtemp(join(tmpdir(), "pi-prompt-refine-agent-"));
   agentDirs.push(agentDir);
   process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -111,6 +111,7 @@ async function makeHarness(options: { freshInstall?: boolean; sessionName?: stri
   const renderedWidths: Array<{ width: number; lines: string[] }> = [];
   const sessionManager = {
     getSessionId: () => "session-one",
+    getSessionFile: () => options.persistHistory ? join(agentDir, "session.jsonl") : undefined,
     getLeafId: () => "leaf-one",
     getEntries: () => sessionEntries,
     getBranch: () => [
@@ -143,7 +144,7 @@ async function makeHarness(options: { freshInstall?: boolean; sessionName?: stri
     },
     editor: vi.fn(async () => "Edited candidate"),
     confirm: vi.fn((_title: string, message: string) => {
-      expect(message).toContain("Current draft:");
+      if (_title !== "Clear saved Refine history?") expect(message).toContain("Current draft:");
       if (shouldDeferConfirm) {
         return new Promise<boolean>((resolve) => { confirmResolve = resolve; });
       }
@@ -226,7 +227,7 @@ async function makeHarness(options: { freshInstall?: boolean; sessionName?: stri
 
   await promptRefineExtension(pi);
   const sessionStart = handlers.get("session_start")?.[0];
-  sessionStart?.({ type: "session_start", reason: "startup" }, context);
+  await sessionStart?.({ type: "session_start", reason: "startup" }, context);
 
   const harness: Harness = {
     context,
@@ -243,13 +244,13 @@ async function makeHarness(options: { freshInstall?: boolean; sessionName?: stri
     getSessionName: () => sessionName,
     manualName,
     sendUserMessage,
-    reload: async () => {
-      handlers.get("session_shutdown")?.[0]?.({ type: "session_shutdown" }, context);
+    reload: async (reason = "reload") => {
+      await handlers.get("session_shutdown")?.[0]?.({ type: "session_shutdown" }, context);
       handlers.clear();
       shortcuts.clear();
       await promptRefineExtension(pi);
       harness.command = command;
-      handlers.get("session_start")?.[0]?.({ type: "session_start", reason: "reload" }, context);
+      await handlers.get("session_start")?.[0]?.({ type: "session_start", reason }, context);
     },
     editorWrites,
     getEditor: () => editor,
@@ -474,6 +475,151 @@ describe("multi-model preview and unified Usage", () => {
     expect(harness.editorWrites).toEqual([]);
     expect(harness.internalMessages).toEqual([]);
     expect(harness.sessionWrites).toEqual([]);
+  });
+});
+
+describe("persistent session-local Refine history", () => {
+  const path = (h: Harness) => `${h.context.sessionManager.getSessionFile()}.prompt-refine.json`;
+
+  it("resumes minimal records with request-time cost, without restoring actions or private background", async () => {
+    const h = await makeHarness({ persistHistory: true });
+    h.complete.mockResolvedValueOnce({ ...refinement("Saved result"), usage: { input: 100, cacheRead: 200, cacheWrite: 0, output: 20, cost: { total: 0.012 } } });
+    await trigger(h);
+    h.setCustomAction("a");
+    await h.command("view", h.context);
+    const writes = [...h.editorWrites];
+    const leaf = h.context.sessionManager.getLeafId();
+    await h.reload("resume");
+    expect(h.editorWrites).toEqual(writes);
+    expect(h.sent).toEqual([]);
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    expect(h.context.sessionManager.getLeafId()).toBe(leaf);
+    expect(h.sessionWrites).toEqual([]);
+    expect(h.widgetLines().join("\n")).not.toContain("Saved result");
+    const saved = await readFile(path(h), "utf8");
+    for (const secret of ["earlier requirement", "visible answer", "systemPrompt", "preparedInput", "sentInput", "branchLeafId", "Draft refinement workflow"]) expect(saved).not.toContain(secret);
+    h.holdPanel();
+    const view = h.command("history", h.context);
+    h.panelInput("\x1b[B"); // Restored root -> saved run.
+    expect(h.panelLines(100).join("\n")).toContain("Saved result");
+    expect(h.panelLines(100).join("\n")).toContain("↑300 ↓20 · ≈$0.012");
+    h.panelInput("\r");
+    expect(h.panelLines(100).join("\n")).toContain("Copy to current");
+    for (const key of ["f", "g", "m"]) {
+      h.panelInput(key);
+      expect(h.panelLines(100).join("\n")).toContain("Background not saved");
+    }
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    h.panelInput("a");
+    await view;
+    expect(h.getEditor()).toBe("Saved result");
+    expect(h.sent).toEqual([]);
+  });
+
+  it("copies a restored original into a fresh round and captures current background only on explicit run", async () => {
+    const h = await makeHarness({ persistHistory: true });
+    await trigger(h);
+    await h.reload("resume");
+    vi.spyOn(h.context.sessionManager, "getBranch").mockReturnValue([{ type: "message", message: { role: "user", content: "New background" } }] as any);
+    h.holdPanel();
+    const view = h.command("history", h.context);
+    h.panelInput("i");
+    expect(h.panelLines(100).join("\n")).toContain("Draft A");
+    h.panelInput("\r"); // Save a new unsent draft, no model call.
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    h.panelInput("\r");
+    await flushPromises();
+    expect(h.complete).toHaveBeenCalledTimes(2);
+    const packet = JSON.parse((h.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
+    expect(JSON.stringify(packet.conversation)).toContain("New background");
+    expect(JSON.stringify(packet.conversation)).not.toContain("earlier requirement");
+    h.panelInput("q"); h.panelInput("q");
+    await view;
+    await h.reload();
+    const records = JSON.parse(await readFile(path(h), "utf8")).records;
+    expect(records.map((record: any) => record.id)).toEqual([1, 2]);
+    expect(records.map((record: any) => record.roundId)).toEqual([1, 2]);
+  });
+
+  it("restores interrupted work without restarting it or accepting late completion from the old runtime", async () => {
+    const h = await makeHarness({ persistHistory: true });
+    let finish!: (value: any) => void;
+    h.complete.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    await trigger(h);
+    await h.reload("resume");
+    finish(refinement("Late result must not persist"));
+    await flushPromises();
+    h.holdPanel();
+    const view = h.command("history", h.context);
+    expect(h.panelLines(100).join("\n")).toContain("Interrupted");
+    expect(h.panelLines(100).join("\n")).not.toContain("Late result");
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    h.panelInput("q"); h.panelInput("q");
+    await view;
+    await h.reload();
+    expect(await readFile(path(h), "utf8")).not.toContain("Late result");
+  });
+
+  it("keeps sessions/forks isolated and restores only the selected session", async () => {
+    const h = await makeHarness({ persistHistory: true });
+    await trigger(h);
+    const originalFile = h.context.sessionManager.getSessionFile()!;
+    await h.handlers.get("session_shutdown")?.[0]?.({}, h.context);
+    const id = vi.spyOn(h.context.sessionManager, "getSessionId").mockReturnValue("session-two");
+    const file = vi.spyOn(h.context.sessionManager, "getSessionFile").mockReturnValue(join(h.agentDir, "fork.jsonl"));
+    await h.reload("fork");
+    h.holdPanel();
+    let view = h.command("history", h.context);
+    expect(h.panelLines(100).join("\n")).toContain("No prompts yet");
+    h.panelInput("q"); h.panelInput("q"); await view;
+    id.mockReturnValue("session-one"); file.mockReturnValue(originalFile);
+    await h.reload("resume");
+    view = h.command("history", h.context);
+    expect(h.panelLines(100).join("\n")).toContain("Draft A");
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    h.panelInput("q"); h.panelInput("q"); await view;
+  });
+
+  it("rejects an old clear confirmation after runtime replacement", async () => {
+    const h = await makeHarness({ persistHistory: true });
+    await trigger(h); await h.reload();
+    h.deferConfirm();
+    const clear = h.command("history clear", h.context);
+    await h.reload("resume");
+    h.resolveConfirm(true);
+    await clear;
+    expect(await readFile(path(h), "utf8")).toContain("Draft A");
+  });
+
+  it("reports persistence failure without failing the model request", async () => {
+    const h = await makeHarness({ persistHistory: true });
+    await mkdir(path(h)); // A non-file destination must not be replaced.
+    await trigger(h);
+    await vi.waitFor(() => expect(h.notifications.join("\n")).toContain("history save failed"));
+    expect(h.widgetLines().join("\n")).toContain("Refined prompt");
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    expect(h.editorWrites).toEqual([]);
+  });
+
+  it("supports opt-out and confirmed deletion without old records recreating the file", async () => {
+    const off = await makeHarness({ persistHistory: true, config: { historyPersistence: false } });
+    await trigger(off); await off.reload();
+    await expect(readFile(path(off))).rejects.toMatchObject({ code: "ENOENT" });
+    const h = await makeHarness({ persistHistory: true });
+    await trigger(h); await h.reload();
+    h.setConfirm(false);
+    await h.command("history clear", h.context);
+    expect(await readFile(path(h), "utf8")).toContain("Draft A");
+    h.setConfirm(true);
+    await h.command("history clear", h.context);
+    await h.command("optimize New input", h.context);
+    await flushPromises();
+    await expect(readFile(path(h))).rejects.toMatchObject({ code: "ENOENT" });
+    await h.reload();
+    h.holdPanel();
+    const view = h.command("history", h.context);
+    expect(h.panelLines(100).join("\n")).toContain("No prompts yet");
+    h.panelInput("q"); h.panelInput("q"); await view;
   });
 });
 
@@ -1660,15 +1806,18 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.widgetLines().join("\n")).toContain("Done · 0s");
   });
 
-  it("captures SDK cost and subscription at completion without repricing from later settings", async () => {
+  it("captures request-time subscription and SDK cost without repricing from later settings", async () => {
     const harness = await makeHarness();
     vi.mocked(harness.context.modelRegistry.isUsingOAuth).mockReturnValue(true);
-    harness.complete.mockResolvedValueOnce({
+    let finish!: (value: any) => void;
+    harness.complete.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    await trigger(harness);
+    vi.mocked(harness.context.modelRegistry.isUsingOAuth).mockReturnValue(false);
+    finish({
       ...refinement("Priced result"),
       usage: { input: 200, output: 300, cacheRead: 1000, cacheWrite: 0, totalTokens: 1500, cost: { total: 0.012, input: 0.005, output: 0.006, cacheRead: 0.001, cacheWrite: 0 } },
     });
-    await trigger(harness);
-    vi.mocked(harness.context.modelRegistry.isUsingOAuth).mockReturnValue(false);
+    await flushPromises();
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     expect(harness.panelLines().join("\n")).toContain("↑1.2k ↓300 · ≈$0.012 (sub)");

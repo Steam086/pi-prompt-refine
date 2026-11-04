@@ -21,6 +21,7 @@ describe("response token usage", () => {
     }
     expect(readRunUsage({ ...counts, cost: { total: 0 } }, { hasPricing: true })?.cost?.total).toBe(0);
     expect(readRunUsage({ input: 0, cost: { total: 0 } }, { hasPricing: true })?.cost).toBeUndefined();
+    expect(readRunUsage({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } }, { hasPricing: true })?.cost).toBeUndefined();
   });
 
   it("distinguishes unknown, zero and tiny nonzero cost", () => {

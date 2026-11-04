@@ -18,6 +18,7 @@ export interface PreviewOptions extends SummaryOptions {
   navigation?: { index: number; count: number; label: string };
   viewKey?: string;
   thinkingLevel?: string;
+  contextUnavailable?: boolean;
 }
 
 type PreviewTheme = Pick<Theme, "bg" | "fg" | "bold" | "italic" | "underline" | "strikethrough">;
@@ -177,7 +178,7 @@ export class PreviewPanel implements Component {
       const helpLine = (...items: KeyHint[]) => lines.push(...wrapTextWithAnsi(items.map((hint) => formatKeyHint(hint, theme)).join(" · "), width));
       if (this.hasActionableCandidate()) {
         helpLine(["a", "Accept into editor (no send)"], ["e", "Edit candidate (no model call)"]);
-        helpLine(["f", "Revise current result with new instructions (model call)"]);
+        if (!options.contextUnavailable) helpLine(["f", "Revise current result with new instructions (model call)"]);
         helpLine(["s", "Send (follow-up if busy; draft kept)"]);
         paragraph("Accept puts the result in the editor; s sends directly.", "muted");
       }
@@ -185,7 +186,7 @@ export class PreviewPanel implements Component {
       helpLine(["z", "Restore draft before acceptance"]);
       lines.push("", theme.fg("muted", "Refine & navigate"));
       helpLine(["r", "Refine current draft in this round (model call)"]);
-      helpLine(["g", "Generate from the same frozen input (model call)"]);
+      if (!options.contextUnavailable) helpLine(["g", "Generate from the same frozen input (model call)"]);
       helpLine(["m", "Model"], ["c", "Cycle task models + favorites"]);
       helpLine(["[ / ]", "Previous / next candidate for this model"]);
       helpLine(["←/→", "Page: Preview / Usage / Settings"]);
@@ -203,6 +204,10 @@ export class PreviewPanel implements Component {
       lines.push("");
     }
     if (options.candidateText !== undefined) {
+      if (options.contextUnavailable) {
+        paragraph("Restored result · background not saved. In the task list, press i to copy the original into the current round.", "muted");
+        lines.push("");
+      }
       if (options.state.phase === "error") {
         paragraph(`Request failed; previous result kept. ${options.errorLabel ?? "Use g to generate again, or f to revise."}`, "warning");
         lines.push("");
@@ -309,7 +314,7 @@ export class PreviewPanel implements Component {
         : options.accepted
           ? [["r", "Refine draft"], ...(options.canRestore ? [["z", "Restore"] as KeyHint] : [])]
           : this.hasActionableCandidate()
-            ? [["a", "Accept"], ["e", "Edit"], ["f", "Revise"], ["s", "Send"]]
+            ? [["a", "Accept"], ["e", "Edit"], ...(!options.contextUnavailable ? [["f", "Revise"] as KeyHint] : []), ["s", "Send"]]
             : [["r", options.state.phase === "error" ? "Retry" : "Refine"], ["m", "Model"], ["i", "Input"]];
     const secondary: KeyHint[] = [["q", "Back"], ["?", this.helpVisible ? "Hide help" : "Help"]];
     // Back/Help survive narrow widths; other hints are omitted rather than wrapped.
@@ -317,7 +322,7 @@ export class PreviewPanel implements Component {
     if (!primary.some(([key]) => key === "i")) secondary.push(["i", "Input"]);
     if (options.state.phase !== "generating" && !options.state.pendingSend) {
       if (!primary.some(([key]) => key === "m")) secondary.push(["m", "Model"]);
-      if (options.navigation) secondary.push(["g", "Same input"]);
+      if (options.navigation && !options.contextUnavailable) secondary.push(["g", "Same input"]);
     }
     // Match Tasks/Usage's shared column stops. Very narrow terminals keep rows
     // independent so long status/action labels cannot crowd out Back/Help.

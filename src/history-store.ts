@@ -33,7 +33,6 @@ interface SavedRecord {
   usage?: TokenUsage;
   error?: string;
 }
-interface SavedHistory { version: 1; sessionId: string; records: SavedRecord[] }
 const object = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const number = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 const text = (value: unknown): value is string => typeof value === "string" && value.length <= HISTORY_MAX_BYTES;
@@ -102,17 +101,22 @@ function restore(saved: SavedRecord, sessionId: string): RefineRecord {
 }
 
 export function encodeHistory(records: RefineRecord[], sessionId: string): { content: string; omitted: number } {
-  const saved: SavedRecord[] = [];
+  const saved: string[] = [];
   const eligible = records.filter((record) => record.input.sessionId === sessionId && record.status !== "unsent");
   let omitted = 0;
-  const encode = () => JSON.stringify({ version: 1, sessionId, records: saved } satisfies SavedHistory) + "\n";
+  const prefix = `${JSON.stringify({ version: 1, sessionId }).slice(0, -1)},"records":[`;
+  let bytes = Buffer.byteLength(prefix) + 3; // ]}\n
+  // Serialize each record once; repeated whole-snapshot encoding stalls large-history UI actions.
   // Keep complete newest records; never silently truncate text that may be accepted later.
   for (const record of eligible.slice().sort((a, b) => b.id - a.id)) {
     if (saved.length >= HISTORY_LIMIT) { omitted++; continue; }
-    saved.unshift(project(record));
-    if (Buffer.byteLength(encode()) > HISTORY_MAX_BYTES) { saved.shift(); omitted++; }
+    const entry = JSON.stringify(project(record));
+    const size = Buffer.byteLength(entry) + (saved.length ? 1 : 0);
+    if (bytes + size > HISTORY_MAX_BYTES) { omitted++; continue; }
+    saved.unshift(entry);
+    bytes += size;
   }
-  return { content: encode(), omitted };
+  return { content: `${prefix}${saved.join(",")}]}` + "\n", omitted };
 }
 
 export function decodeHistory(content: string, sessionId: string): RefineRecord[] {
@@ -147,8 +151,10 @@ export class HistoryStore {
 
   async load(): Promise<RefineRecord[]> {
     try {
-      const file = await open(this.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const file = await open(this.path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       try {
+        const info = await file.stat();
+        if (!info.isFile() || info.size > HISTORY_MAX_BYTES) throw new Error("Not a bounded regular history file");
         const data = Buffer.alloc(HISTORY_MAX_BYTES + 1);
         let length = 0;
         while (length < data.length) {
@@ -175,7 +181,7 @@ export class HistoryStore {
     if (omitted) this.warning("Prompt Refine saved history limit reached (100 runs / 2 MiB); some records remain in memory only.");
     if ((!this.writing && content === this.last) || content === this.pending) return;
     // An untouched empty session should not create a sidecar.
-    if (!this.last && !JSON.parse(content).records.length) return;
+    if (!this.last && records.every((record) => record.input.sessionId !== this.sessionId || record.status === "unsent")) return;
     this.pending = content;
     this.start();
   }

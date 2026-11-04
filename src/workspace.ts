@@ -432,12 +432,10 @@ export class RefineWorkspace implements Component, Focusable {
     let footer: string[];
     if (this.mode === "input") {
       const cursor = this.activeInput.editor.getCursor();
-      const revising = this.inputKind === "revision";
-      const action = this.inputKind === "original" ? "Save" : revising ? "Revise" : this.actions.inputCaptureOnly?.() ? "Add unsent" : "Refine";
-      header = [theme.fg("text", theme.bold(this.inputKind === "original" ? "Edit original prompt" : revising ? "Revise current result" : "Input")),
-        theme.fg(this.inputError ? "warning" : "muted", sanitizeTerminalText(this.inputError || (revising
-          ? "Describe changes · Original task kept · Not sent"
-          : this.inputKind === "original" ? `Line ${cursor.line + 1} · Save only · Enter on the list to run` : `Line ${cursor.line + 1} · Not sent to main agent`)))];
+      const action = this.inputKind === "original" ? "Save" : this.actions.inputCaptureOnly?.() ? "Add unsent" : "Refine";
+      header = [theme.fg("text", theme.bold(this.inputKind === "original" ? "Edit original prompt" : "Input")),
+        theme.fg(this.inputError ? "warning" : "muted", sanitizeTerminalText(this.inputError || (this.inputKind === "original"
+          ? `Line ${cursor.line + 1} · Save only · Enter on the list to run` : `Line ${cursor.line + 1} · Not sent to main agent`)))];
       body = this.activeInput.render(innerWidth, bodyHeight);
       footer = alignedKeyHints(innerWidth < 30
         ? [[["↵", action], ["⇧↵", "NL"]], [["Esc", "Back"]]]
