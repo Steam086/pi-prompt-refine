@@ -625,6 +625,41 @@ describe("persistent session-local Refine history", () => {
 });
 
 describe("explicit candidate revision", () => {
+  it("shows completed revision details with original task, instruction and before-revision text", async () => {
+    const harness = await makeHarness();
+    harness.complete.mockResolvedValueOnce(refinement("BEFORE_REVISION_TEXT")); await trigger(harness);
+    harness.holdPanel(); const view = harness.command("view", harness.context);
+    harness.panelInput("f"); harness.panelInput("Keep literal commands.");
+    harness.complete.mockResolvedValueOnce(refinement("AFTER_REVISION_TEXT"));
+    harness.panelInput("\x13"); await flushPromises();
+    expect(harness.panelLines(100).join("\n")).toContain("Revised prompt");
+    let all = "";
+    for (let i = 0; i < 5; i++) { all += harness.panelLines(100).join("\n"); harness.panelInput("\x1b[6~"); }
+    for (const expected of ["AFTER_REVISION_TEXT", "Original draft", "Draft A", "Revision instruction", "Keep literal commands.", "Before revision", "BEFORE_REVISION_TEXT"]) expect(all).toContain(expected);
+    harness.panelInput("o"); expect(harness.panelLines(100).join("\n")).toContain("Draft A");
+    harness.panelInput("q"); await view;
+    const usage = harness.command("usage", harness.context);
+    harness.panelInput("\r");
+    expect(harness.panelLines(100).join("\n")).toContain("Revision of run #1");
+    all = "";
+    for (let i = 0; i < 6; i++) { all += harness.panelLines(100).join("\n"); harness.panelInput("\x1b[6~"); }
+    for (const expected of ["Original prompt", "Draft A", "Keep literal commands.", "BEFORE_REVISION_TEXT"]) expect(all).toContain(expected);
+    harness.panelInput("\x1b"); harness.panelInput("\x1b"); harness.panelInput("q"); await usage;
+    expect(harness.complete).toHaveBeenCalledTimes(2); expect(harness.sent).toEqual([]); expect(harness.editorWrites).toEqual([]);
+  });
+
+  it("does not attach a failed revision's instructions to the retained result", async () => {
+    const harness = await makeHarness(); await trigger(harness);
+    harness.holdPanel(); const view = harness.command("view", harness.context);
+    harness.panelInput("f"); harness.panelInput("FAILED_REVISION_INSTRUCTION");
+    harness.complete.mockRejectedValueOnce(new Error("offline"));
+    harness.panelInput("\x13"); await flushPromises();
+    let all = "";
+    for (let i = 0; i < 5; i++) { all += harness.panelLines(100).join("\n"); harness.panelInput("\x1b[6~"); }
+    expect(all).toContain("previous result kept"); expect(all).toContain("Refined prompt");
+    expect(all).not.toContain("Revised prompt"); expect(all).not.toContain("FAILED_REVISION_INSTRUCTION");
+    harness.panelInput("q"); await view;
+  });
   it("composes saved preference snapshots into the existing request, only after returning and Ctrl+S", async () => {
     const harness = await makeHarness();
     const store = new PreferenceStore(harness.agentDir, harness.context.cwd);

@@ -931,6 +931,9 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           const accepted = state.phase === "idle" ? controller.getViewedAccepted() : undefined;
           const displayed = candidate ?? accepted;
           const source = controller.getRequestSource();
+          // A failed revision may keep an older candidate. Its details must describe
+          // that displayed result, not the instructions of the failed request.
+          const revision = displayed ? displayed.revision : controller.getDisplayedInput()?.revision;
           const draft = displayed?.draft ?? source?.draft;
           const model = displayed?.model ?? state.model ?? controller.getModel();
           const registeredModel = model && registeredModels(ctx).find((candidate) => sameModel(candidate, model));
@@ -944,7 +947,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             candidateText: displayed?.text,
             sessionTitle: candidate?.title && canNameSession(ctx) ? candidate.title : undefined,
             draft,
-            revisionInstruction: source?.revisionInstruction,
+            revisionInstruction: displayed ? revision?.instruction : source?.revisionInstruction,
+            previousCandidate: revision?.previousCandidate,
             accepted: accepted ? { editorChanged: ctx.ui.getEditorText() !== accepted.text } : undefined,
             draftChanged: draft !== undefined && ctx.ui.getEditorText() !== draft,
             canRestore: !!controller.getRestore(),

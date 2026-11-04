@@ -207,7 +207,7 @@ export class TaskPanel {
     if (record.status === "interrupted") return "× Interrupted";
     if (record.sentAt !== undefined) return "✓ Sent to Pi";
     if (record.acceptedAt !== undefined) return "✓ Accepted";
-    return record.kind === "edit" ? "✓ Edited" : "✓ Done";
+    return record.kind === "edit" ? "✓ Edited" : record.kind === "revise" ? "✓ Revised" : "✓ Done";
   }
   private color(record: RefineRecord): "error" | "warning" | "accent" | "success" {
     return record.status === "error" ? "error" : record.status === "unsent" || record.status === "cancelled" || record.status === "interrupted" ? "warning"
@@ -236,6 +236,7 @@ export class TaskPanel {
       ? [titleText + " ".repeat(width - visibleWidth(titleText) - visibleWidth(status)) + status]
       : [truncateToWidth(titleText, width, "…"), status];
     if (!row.original) {
+      if (record.kind === "revise") header.push(...this.wrapped(this.muted(`Revision${record.parentId ? ` of run #${record.parentId}` : ""}${this.inspecting ? " · o Original" : ""}`), width));
       header.push(...this.wrapped(this.muted(`${record.input.model.provider} · Thinking ${record.input.thinkingLevel ?? "default"}`), width));
       const metrics: string[] = [];
       if (record.status !== "unsent" && record.status !== "queued" && record.elapsedSeconds !== undefined) {
@@ -259,11 +260,17 @@ export class TaskPanel {
     }
     const original = row.original || this.original || !record.candidate;
     const body = [
-      ...(!row.original ? [this.heading(original ? "Original prompt" : "Result"), ""] : []),
+      ...(!row.original ? [this.heading(original ? "Original prompt" : record.kind === "revise" ? "Revised result" : "Result"), ""] : []),
       this.theme.fg("text", sanitizeTerminalText(original ? record.input.draft || "Empty prompt · Press i to edit" : record.candidate!.text)),
     ];
     if (this.inspecting || this.usage) {
       if (!row.original && record.candidate && !original) body.push("", this.heading("Original prompt"), "", this.theme.fg("text", sanitizeTerminalText(record.input.draft)));
+      if (!row.original && record.input.revision) {
+        body.push("", this.heading("Revision instruction"), "", this.theme.fg("text", sanitizeTerminalText(record.input.revision.instruction)),
+          "", this.heading("Before revision"), "", record.input.revision.previousCandidate
+            ? this.theme.fg("text", sanitizeTerminalText(record.input.revision.previousCandidate))
+            : this.muted("Before-revision text was not retained in this record."));
+      }
       const value = (n: number | undefined) => n === undefined ? "—" : n.toLocaleString("en-US");
       const pairs = [
         ["Input (total)", value(totalInputTokens(record.usage)), "Output (total)", value(record.usage?.output)],
@@ -303,7 +310,6 @@ export class TaskPanel {
       body.push(this.muted(`Created ${new Date(record.createdAt).toLocaleTimeString()}`));
       if (record.acceptedAt !== undefined) body.push(this.muted(`Accepted into Pi editor: ${new Date(record.acceptedAt).toLocaleTimeString()}`));
       if (record.sentAt !== undefined) body.push(this.muted(`Pi started send: ${new Date(record.sentAt).toLocaleTimeString()}`));
-      if (record.input.revision) body.push(this.muted(`Revision: ${record.input.revision.instruction}`));
     }
     const fixed = header.slice(0, Math.max(0, height - 2));
     if (height > fixed.length + 2) fixed.push("");

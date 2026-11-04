@@ -148,6 +148,28 @@ describe("result reading panel", () => {
     expect(text).not.toMatch(/[\x00-\x09\x0b-\x1f\x7f-\x9f]/);
   });
 
+  it.each([40, 100])("shows revision provenance and original by default, with a direct original jump at width %s", (width) => {
+    const panel = create({ draft: "ORIGINAL_TASK **literal**", candidateText: "REVISED_OUTPUT\n".repeat(30),
+      revisionInstruction: "INSTRUCTION **literal**\x1b[2J", previousCandidate: "BEFORE_REVISION **literal**" });
+    expect(panel.render(width).join("\n")).toContain("Revised prompt");
+    let all = "";
+    for (let i = 0; i < 10; i++) { all += panel.render(width).join("\n") + "\n"; panel.page(1); }
+    for (const text of ["REVISED_OUTPUT", "Original draft", "ORIGINAL_TASK **literal**", "Revision instruction", "INSTRUCTION **literal**", "Before revision", "BEFORE_REVISION **literal**"]) {
+      expect(all).toContain(text);
+    }
+    expect(all).not.toContain("\x1b[2J");
+    panel.toggleOriginal();
+    expect(panel.render(width).join("\n")).toContain("ORIGINAL_TASK **literal**");
+  });
+
+  it("keeps restored revision provenance without pretending the missing previous candidate was saved", () => {
+    const panel = create({ draft: "Restored original", candidateText: "Restored revision", revisionInstruction: "Shorter", previousCandidate: "", contextUnavailable: true });
+    let all = "";
+    for (let i = 0; i < 4; i++) { all += panel.render(100).join("\n"); panel.page(1); }
+    expect(all).toContain("Revised prompt"); expect(all).toContain("Restored original");
+    expect(all).toContain("Revision instruction"); expect(all).toContain("Before-revision text was not retained");
+  });
+
   it("returns to failure feedback instead of leaving a long source scrolled to its end", () => {
     const pending = { ...options, state: { ...options.state, phase: "generating" as const }, candidateText: undefined, draft: "Source A\n".repeat(100) };
     const panel = create(pending);

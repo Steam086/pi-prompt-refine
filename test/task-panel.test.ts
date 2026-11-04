@@ -27,6 +27,29 @@ function create(name = "dark", usage = false, records = [record()]) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("prompt tree and inspection", () => {
+  it.each([false, true])("makes revisions explicit and keeps their source texts before usage metadata (usage: %s)", (usage) => {
+    const revised = record(2);
+    revised.kind = "revise"; revised.parentId = 1;
+    revised.input.revision = { instruction: "Keep **literal** commands", previousCandidate: "BEFORE_REVISION" };
+    const { panel, text } = create("dark", usage, [revised]);
+    panel.handleInput("\r");
+    expect(text()).toContain("✓ Revised"); expect(text()).toContain("Revision of run #1");
+    expect(text()).toContain("Revised result");
+    let all = "";
+    for (let i = 0; i < 8; i++) { all += text() + "\n"; panel.handleInput("\x1b[6~"); }
+    for (const expected of ["Original prompt", revised.input.draft, "Revision instruction", "Keep **literal** commands", "Before revision", "BEFORE_REVISION"]) expect(all).toContain(expected);
+    expect(all.indexOf("Revision instruction")).toBeLessThan(all.indexOf("Usage · tokens"));
+    panel.handleInput("o"); expect(text()).toContain(revised.input.draft);
+  });
+
+  it("labels unsuccessful revisions without claiming they produced a revised result", () => {
+    const revised = record(2);
+    revised.kind = "revise"; revised.parentId = 1; revised.status = "error"; revised.error = "timeout"; revised.candidate = undefined;
+    revised.input.revision = { instruction: "Keep commands", previousCandidate: "BEFORE_REVISION" };
+    const { panel, text } = create("dark", true, [revised]); panel.handleInput("\r");
+    expect(text()).toContain("Timed out"); expect(text()).toContain("Revision of run #1");
+    expect(text()).not.toContain("Revised result"); expect(text()).toContain(revised.input.draft);
+  });
   it.each(["dark", "light"])("prioritizes readable content and bold duration in %s", (name) => {
     const { panel, records, theme, text } = create(name);
     const result = records[0]!;
