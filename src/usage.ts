@@ -74,6 +74,13 @@ export function formatReferenceCost(usage: TokenUsage | undefined): string {
   return label + (usage?.subscription ? " (sub)" : "");
 }
 
+/** Explain truncation without treating reasoning tokens as final prompt text. */
+export function truncatedOutputHint(usage: TokenUsage | undefined): string {
+  const reasoningOnly = usage?.output !== undefined && usage.output > 0 && usage.reasoning === usage.output;
+  return (reasoningOnly ? "All reported output tokens were reasoning. " : "Output incomplete. ")
+    + "Increase maxOutputTokens or lower/disable thinking before retrying.";
+}
+
 export function formatRunUsage(usage: TokenUsage | undefined): string {
   return `↑${compactTokens(totalInputTokens(usage))} ↓${compactTokens(usage?.output)} · ${formatReferenceCost(usage)}`;
 }

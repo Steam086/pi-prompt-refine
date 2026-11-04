@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cacheHitRate, formatReferenceCost, formatRunUsage, formatTokenUsage, readRunUsage, readTokenUsage, totalInputTokens } from "../src/usage.js";
+import { cacheHitRate, formatReferenceCost, formatRunUsage, formatTokenUsage, readRunUsage, readTokenUsage, totalInputTokens, truncatedOutputHint } from "../src/usage.js";
 
 describe("response token usage", () => {
   it("sums only normalized input buckets and does not infer missing values", () => {
@@ -22,6 +22,14 @@ describe("response token usage", () => {
     expect(readRunUsage({ ...counts, cost: { total: 0 } }, { hasPricing: true })?.cost?.total).toBe(0);
     expect(readRunUsage({ input: 0, cost: { total: 0 } }, { hasPricing: true })?.cost).toBeUndefined();
     expect(readRunUsage({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } }, { hasPricing: true })?.cost).toBeUndefined();
+  });
+
+  it("explains reasoning-only truncation without inferring missing reasoning counts", () => {
+    expect(truncatedOutputHint({ output: 2048, reasoning: 2048 })).toContain("All reported output tokens were reasoning");
+    for (const usage of [undefined, {}, { output: 2048 }, { output: 2048, reasoning: 1000 }, { output: 0, reasoning: 0 }]) {
+      expect(truncatedOutputHint(usage)).not.toContain("All reported");
+      expect(truncatedOutputHint(usage)).toContain("Increase maxOutputTokens or lower/disable thinking");
+    }
   });
 
   it("distinguishes unknown, zero and tiny nonzero cost", () => {

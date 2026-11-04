@@ -2760,7 +2760,30 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.editorWrites).toEqual([]);
   });
 
-  it("bounds shared reasoning inside the configured and model output ceiling", async () => {
+  it("reports DeepSeek reasoning exhaustion without accepting a partial result or retrying automatically", async () => {
+    const harness = await makeHarness({ reasoning: true, thinkingLevel: "max", config: { maxOutputTokens: 2048 } });
+    const model = harness.context.modelRegistry.getAvailable()[0]!;
+    model.api = "openai-completions";
+    model.compat = { thinkingFormat: "deepseek" };
+    model.thinkingLevelMap = { max: "max" };
+    harness.complete.mockResolvedValueOnce({
+      content: [{ type: "thinking", thinking: "Synthetic reasoning" }], stopReason: "length",
+      usage: { input: 1513, cacheRead: 256, cacheWrite: 0, output: 2048, reasoning: 2048, totalTokens: 3817 },
+    });
+    await trigger(harness);
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    const call = harness.complete.mock.calls[0] as any[];
+    expect(call[2]).toMatchObject({ maxTokens: 2048, reasoning: "max" });
+    expect(call[2]).not.toHaveProperty("thinkingBudgets");
+    expect(harness.notifications.join(" ")).toContain("cannot reserve answer space");
+    expect(harness.widgetLines(100).join(" ")).toContain("All reported output tokens were reasoning");
+    expect(harness.widgetLines(100).join(" ")).toContain("Increase maxOutputTokens");
+    expect(harness.getEditor()).toBe("Draft A");
+    expect(harness.editorWrites).toEqual([]);
+    expect(harness.sessionWrites).toEqual([]);
+  });
+
+  it("keeps total output inside the configured and model ceiling when reasoning is enabled", async () => {
     const harness = await makeHarness({ reasoning: true, thinkingLevel: "high" });
     const model = harness.context.modelRegistry.getAvailable()[0]!;
     model.maxTokens = 6000;

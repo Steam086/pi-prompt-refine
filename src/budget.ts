@@ -1,4 +1,4 @@
-import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { Api, Model, ModelThinkingLevel, OpenAICompletionsCompat } from "@earendil-works/pi-ai";
 import type { HistoryItem } from "./context.js";
 
 /** A practical heuristic, not a tokenizer or a provider-reported count.
@@ -16,7 +16,13 @@ export interface BudgetReport {
   removedProjectParts: string[];
   message?: string;
 }
-export interface BudgetModel { contextWindow: number; maxTokens: number; api?: string }
+export interface BudgetModel {
+  contextWindow: number;
+  maxTokens: number;
+  api?: string;
+  provider?: string;
+  compat?: Model<Api>["compat"];
+}
 interface Packet {
   draft?: string;
   original_draft?: string;
@@ -70,13 +76,20 @@ export function budgetRequest(systemPrompt: string, preparedInput: string, model
     .map((text) => estimateTextTokens(JSON.stringify({ prompt: text }))));
   const preferredAnswer = Math.ceil(outputSize * 1.25) + 256;
   const reasoning = thinkingLevel !== undefined && thinkingLevel !== "off";
-  // Match the host adapters' answer-room floor when thinking is enabled.
+  // Planning allowance, not a guaranteed answer reserve: effort-only providers
+  // can spend the entire shared ceiling on reasoning.
   const minimumAnswer = Math.min(reasoning ? 1024 : 256, outputLimit);
   const desiredThinking = thinkingLevel === "minimal" ? 1024 : thinkingLevel === "low" ? 2048
     : thinkingLevel === "medium" ? 8192 : 16384;
   // Anthropic/Bedrock streamSimple adapters add thinking to maxTokens; other
   // adapters share the supplied ceiling. Do not reserve the same thinking twice.
   const additiveThinking = model.api === "anthropic-messages" || model.api === "bedrock-converse-stream";
+  // Pi's DeepSeek completion adapter sends thinking + reasoning_effort, but
+  // ignores thinkingBudgets unless an explicit numeric-budget capability exists.
+  const completionsCompat = model.api === "openai-completions" ? model.compat as OpenAICompletionsCompat | undefined : undefined;
+  const unboundedDeepSeekThinking = reasoning && model.api === "openai-completions"
+    && (model.provider === "deepseek" || completionsCompat?.thinkingFormat === "deepseek")
+    && !completionsCompat?.supportsThinkingTokenBudget && !completionsCompat?.thinkingTokenBudgetField;
   const thinkingTokens = reasoning
     ? Math.min(desiredThinking, Math.max(1024, Math.floor(outputLimit / 4)), outputLimit - minimumAnswer) : 0;
   const minimumOutput = minimumAnswer + thinkingTokens;
@@ -151,6 +164,11 @@ export function budgetRequest(systemPrompt: string, preparedInput: string, model
     report.status = "trimmed";
     report.message = `Budget trimmed background: ${report.removedMessages} history messages; ${report.removedProjectParts.join(", ") || "no project sections"}. Draft unchanged.`;
   }
+  if (unboundedDeepSeekThinking) {
+    report.message = [report.message,
+      `DeepSeek thinking shares the ${report.outputTokens}-token output limit; thinkingBudgets cannot reserve answer space. Lower/disable thinking for short rewrites, or increase maxOutputTokens if truncated.`,
+    ].filter(Boolean).join(" ");
+  }
   return { report, input, maxTokens: report.outputTokens - (additiveThinking ? thinkingTokens : 0),
-    ...(reasoning ? { thinkingBudgets: { minimal: thinkingTokens, low: thinkingTokens, medium: thinkingTokens, high: thinkingTokens } } : {}) };
+    ...(reasoning && !unboundedDeepSeekThinking ? { thinkingBudgets: { minimal: thinkingTokens, low: thinkingTokens, medium: thinkingTokens, high: thinkingTokens } } : {}) };
 }

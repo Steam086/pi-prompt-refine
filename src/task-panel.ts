@@ -5,7 +5,7 @@ import type { RefineRecord } from "./history.js";
 import { panelFrame, panelLayout, workspaceTabs } from "./panel-layout.js";
 import { alignedKeyHints, fittingKeyHints, type KeyHint } from "./key-hints.js";
 import { sanitizeTerminalText } from "./presentation.js";
-import { cacheHitRate, formatReferenceCost, formatRunUsage, totalInputTokens } from "./usage.js";
+import { cacheHitRate, formatReferenceCost, formatRunUsage, totalInputTokens, truncatedOutputHint } from "./usage.js";
 
 export interface TaskPanelActions {
   records(): RefineRecord[];
@@ -156,7 +156,7 @@ export class TaskPanel {
     return false;
   }
   private badge(record: RefineRecord): string {
-    const warning = record.input.budget && record.input.budget.status !== "ok" ? "⚠ " : "";
+    const warning = record.input.budget && (record.input.budget.status !== "ok" || record.input.budget.message) ? "⚠ " : "";
     return warning + this.statusBadge(record);
   }
   private statusBadge(record: RefineRecord): string {
@@ -206,9 +206,13 @@ export class TaskPanel {
       if (metrics.length) header.push(...this.wrapped(metrics.join(this.muted(" · ")), width));
     }
     if (record.error) header.push(...this.wrapped(this.theme.fg("error", sanitizeTerminalText(`Error: ${record.error}`)), width));
+    if (!row.original && record.error === "truncated") {
+      header.push(...this.wrapped(this.theme.fg("warning", truncatedOutputHint(record.usage)), width));
+    }
     if (!row.original && record.input.budget?.message) {
       const message = record.input.budget.status === "blocked"
-        ? "Request not sent · budget exceeded" : "Background reduced · token budget";
+        ? "Request not sent · budget exceeded" : record.input.budget.status === "trimmed"
+          ? "Background reduced · token budget" : "Shared output limit · thinking may exhaust it";
       header.push(...this.wrapped(this.theme.fg("warning", sanitizeTerminalText(`⚠ ${message}`)), width));
     }
     for (const warning of record.input.projectDiagnostics?.warnings ?? record.input.project?.snapshot.warnings ?? []) {
@@ -223,7 +227,7 @@ export class TaskPanel {
       if (!row.original && record.candidate && !original) body.push("", this.heading("Original prompt"), "", this.theme.fg("text", sanitizeTerminalText(record.input.draft)));
       const value = (n: number | undefined) => n === undefined ? "—" : n.toLocaleString("en-US");
       const pairs = [
-        ["Input (total)", value(totalInputTokens(record.usage)), "Output", value(record.usage?.output)],
+        ["Input (total)", value(totalInputTokens(record.usage)), "Output (total)", value(record.usage?.output)],
         ["Uncached input", value(record.usage?.input), "Cache hit", cacheHitRate(record.usage) === undefined ? "—" : `${cacheHitRate(record.usage)!.toFixed(1)}%`],
         ["Cache read", value(record.usage?.cacheRead), "Cache write", value(record.usage?.cacheWrite)],
         ["Reasoning", value(record.usage?.reasoning), "Total", value(record.usage?.totalTokens)],
