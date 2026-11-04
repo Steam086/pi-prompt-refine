@@ -14,7 +14,7 @@
   - 按 Pi 规范化 usage 统计，缓存与 reasoning 不重复计费；优先保留响应 SDK cost。
   - 详情显示精确数、缓存拆分、命中率与费用来源/缺失解释；订阅标识只使用宿主认证信息，不按 provider 名推断。
   - 未知为 Cost —；零价模型目录可能是占位，不能据此宣称免费；非零小金额不舍入为零。
-- [ ] 3. `feat(ui): revise results inline without leaving inspection`
+- [x] 3. `feat(ui): revise results inline without leaving inspection`
   - Inspect 底部输入，保留原内容与位置；焦点归输入组件。
   - Enter 换行，Ctrl+S 明确提交，Ctrl+E 展开/收起；小屏自动展开。
   - Esc 返回且保留按结果身份隔离的草稿（仅当前工作区内存）；目标变化/会话变化不允许误发。

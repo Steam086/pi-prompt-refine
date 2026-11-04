@@ -16,6 +16,7 @@ export interface TaskPanelActions {
   editOriginal?(id?: number): void;
   chooseModel?(id: number): void;
   accept?(id: number): void;
+  revise?(id: number): void;
   launchModel?(): string;
 }
 export interface TaskPanelPosition {
@@ -129,6 +130,10 @@ export class TaskPanel {
     }
     if (this.inspecting && key === "o") { this.original = !this.original; this.position.scroll = 0; return true; }
     if (this.inspecting && key === "g") { if (row) this.actions.run(row.record.id); return true; }
+    if (this.inspecting && key === "f" && this.actions.revise) {
+      if (row && !row.original && row.record.candidate) this.actions.revise(row.record.id);
+      return true;
+    }
     if (this.inspecting && ["e", "f", "s"].includes(key ?? "")) {
       return !(row && !row.original && row.record.candidate && this.actions.activate(row.record.id));
     }

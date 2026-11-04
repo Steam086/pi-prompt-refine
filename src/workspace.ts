@@ -43,7 +43,7 @@ interface WorkspaceActions {
   /** Undefined means the request was accepted; errors stay beside the retained input. */
   submit(text: string): string | undefined;
   /** Captures one actionable candidate; the callback rejects stale targets. */
-  revision?(): { key: string; submit(text: string): string | undefined } | undefined;
+  revision?(id?: number): { key: string; label?: string; submit(text: string): string | undefined } | undefined;
 }
 
 /** One custom UI lifetime: internal navigation never restores the host editor/card. */
@@ -74,7 +74,9 @@ export class RefineWorkspace implements Component, Focusable {
   private readonly originalInput: PromptInput;
   private originalTarget?: ReturnType<NonNullable<WorkspaceActions["original"]>>;
   private inputKind: "draft" | "revision" | "original" = "draft";
-  private revisionTarget?: { key: string; submit(text: string): string | undefined };
+  private revisionTarget?: ReturnType<NonNullable<WorkspaceActions["revision"]>>;
+  private readonly revisionDrafts = new Map<string, string>();
+  private revisionExpanded = false;
 
   private get activeInput(): PromptInput { return this.inputKind === "original" ? this.originalInput : this.inputKind === "revision" ? this.revisionInput : this.input; }
 
@@ -86,7 +88,7 @@ export class RefineWorkspace implements Component, Focusable {
     private readonly actions: WorkspaceActions,
   ) {
     if (actions.tasks) {
-      const taskActions: TaskPanelActions = { ...actions.tasks, editOriginal: (id) => this.openOriginal(id), activate: (id) => {
+      const taskActions: TaskPanelActions = { ...actions.tasks, revise: (id) => this.openRevision(id), editOriginal: (id) => this.openOriginal(id), activate: (id) => {
         const applied = actions.tasks!.activate(id);
         if (applied) this.showApplied(id);
         return applied;
@@ -131,6 +133,18 @@ export class RefineWorkspace implements Component, Focusable {
     this.input.editor.focused = value && this.mode === "input" && this.inputKind === "draft";
     this.revisionInput.editor.focused = value && this.mode === "input" && this.inputKind === "revision";
     this.originalInput.editor.focused = value && this.mode === "input" && this.inputKind === "original";
+  }
+
+  private openRevision(id?: number): void {
+    const target = this.actions.revision?.(id);
+    if (!target) return;
+    this.revisionTarget = target;
+    this.revisionInput.editor.setText(this.revisionDrafts.get(target.key) ?? "");
+    this.inputKind = "revision";
+    this.inputReturnMode = this.mode === "usage" ? "usage" : this.mode === "result" ? "result" : "main";
+    this.inputError = "";
+    this.revisionExpanded = false;
+    this.switchMode("input");
   }
 
   private openOriginal(id?: number): void {
@@ -183,6 +197,7 @@ export class RefineWorkspace implements Component, Focusable {
       },
       run: (id) => actions?.run(id), stop: (id) => actions?.stop(id), launchModel: () => actions?.launchModel?.() ?? "No model",
       editOriginal: (id) => this.openOriginal(id),
+      revise: (id) => this.openRevision(id),
     }, this.theme, () => this.tui.terminal.rows, this.keys, true, this.actions.usagePosition);
     this.switchMode("usage");
   }
@@ -252,6 +267,11 @@ export class RefineWorkspace implements Component, Focusable {
     if (this.disposed) return true;
     const key = parseKey(data);
     if (this.mode === "input") {
+      if (this.inputKind === "revision" && key === "ctrl+e") {
+        this.revisionExpanded = !this.revisionExpanded;
+        this.tui.requestRender();
+        return true;
+      }
       if (this.keys.matches(data, "tui.select.cancel") || key === "ctrl+\\") {
         this.originalTarget?.cancel();
         this.originalTarget = undefined;
@@ -260,11 +280,17 @@ export class RefineWorkspace implements Component, Focusable {
         this.beforeInput = this.activeInput.editor.getExpandedText();
         this.inputError = "";
         const input = this.activeInput;
-        input.editor.handleInput(data);
+        if (this.inputKind === "revision" && key === "ctrl+s") input.editor.onSubmit?.(this.beforeInput);
+        else if (this.inputKind === "revision" && this.keys.matches(data, "tui.input.submit")) input.editor.insertTextAtCursor("\n");
+        else input.editor.handleInput(data);
         // Observe the final expanded value, not Editor's transient empty onSubmit value
         // or collapsed paste markers. Cursor movement and request refreshes do not save.
         const text = input.editor.getExpandedText();
         if (input === this.input && text !== this.beforeInput) this.actions.inputDraft?.save(text);
+        if (input === this.revisionInput && this.revisionTarget) {
+          this.revisionDrafts.set(this.revisionTarget.key, text);
+          if (this.revisionDrafts.size > 100) this.revisionDrafts.delete(this.revisionDrafts.keys().next().value!);
+        }
         this.tui.requestRender();
       }
       return true;
@@ -341,15 +367,7 @@ export class RefineWorkspace implements Component, Focusable {
       return true;
     }
     if (key?.toLowerCase() === "f") {
-      const target = this.actions.revision?.();
-      if (target) {
-        if (target.key !== this.revisionTarget?.key) this.revisionInput.editor.setText("");
-        this.revisionTarget = target;
-        this.inputKind = "revision";
-        this.inputReturnMode = this.mode === "result" ? "result" : "main";
-        this.inputError = "";
-        this.switchMode("input");
-      }
+      this.openRevision();
       return true;
     }
     if (key?.toLowerCase() === "i") {
@@ -362,8 +380,35 @@ export class RefineWorkspace implements Component, Focusable {
     return false;
   }
 
+  private renderRevision(width: number): string[] {
+    const layout = panelLayout(width, this.tui.terminal.rows);
+    const { theme } = this;
+    const inline = !this.revisionExpanded && layout.bodyHeight >= 12 && layout.innerWidth >= 36;
+    const editorHeight = inline ? Math.min(5, Math.max(3, this.revisionInput.editor.getText().split("\n").length)) : layout.bodyHeight;
+    const title = `Revise current result${this.revisionTarget?.label ? ` · ${this.revisionTarget.label}` : ""}`;
+    const status = this.inputError || "Describe changes · Original task kept · Not sent";
+    const header = [theme.fg("text", theme.bold(sanitizeTerminalText(title))), theme.fg(this.inputError ? "warning" : "muted", sanitizeTerminalText(status))];
+    const footer = alignedKeyHints([
+      [["Ctrl+S", "Revise"], ["Enter", "Newline"]],
+      [["Esc", "Back"], ["Ctrl+E", inline ? "Expand" : "Collapse"]],
+    ], layout.innerWidth, theme);
+    if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["^S", "Revise"], ["Esc", "Back"]], layout.innerWidth, theme);
+    const editor = this.revisionInput.render(layout.innerWidth, editorHeight);
+    if (!inline) return panelFrame(layout, header, editor, footer, (text) => theme.fg("borderMuted", text));
+    // Keep the source panel's viewport/scroll unchanged; only cover its lower rows.
+    // Browsing shortcuts are suspended while the editor owns focus.
+    const source = this.inputReturnMode === "usage" ? this.historyPanel?.render(width)
+      : this.inputReturnMode === "main" ? this.taskPanel?.render(width) ?? this.panel.render(width) : this.panel.render(width);
+    const pad = (line: string) => " ".repeat(layout.inset) + truncateToWidth(line, layout.innerWidth, "");
+    const bottom = [theme.fg("borderMuted", "─".repeat(layout.innerWidth)), ...header,
+      ...Array.from({ length: editorHeight }, (_, i) => editor[i] ?? ""),
+      ...footer.slice(0, layout.footerHeight)].map(pad);
+    return [...(source ?? []).slice(0, layout.height - bottom.length), ...bottom];
+  }
+
   render(width: number): string[] {
     if (width < 1) return [];
+    if (this.mode === "input" && this.inputKind === "revision") return this.renderRevision(width);
     if (this.mode === "result") return this.panel.render(width);
     if (this.mode === "main") return this.taskPanel?.render(width, () => this.panel.render(width)) ?? this.panel.render(width);
     if (this.mode === "usage") return this.historyPanel?.render(width) ?? [];

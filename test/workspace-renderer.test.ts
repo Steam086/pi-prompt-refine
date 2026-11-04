@@ -43,6 +43,7 @@ describe("workspace terminal rendering", () => {
       tasks: { records: () => records, appliedId: () => records[1]!.id,
         activate: (id) => !!records.find((record) => record.id === id)?.candidate, run() {}, stop() {} },
       saveContext: async () => "Saved", submit: () => undefined,
+      revision: () => ({ key: "source-1", label: "model · Run #1", submit: () => "Validation notice" }),
     });
     tui.addChild(workspace);
     tui.setFocus(workspace);
@@ -66,7 +67,7 @@ describe("workspace terminal rendering", () => {
         tui.renderNow();
         expect(workspace.render(columns)).toHaveLength(initialHeight);
         for (const key of [
-          "\t", "\x1b[6~", "\t", "\x1b[B", "\r", "\x1b[6~", "o", "\x1b", // Task browser and applied result
+          "\t", "\x1b[6~", "\t", "\x1b[B", "\r", "\x1b[6~", "f", "中文😀", "\r", "keep", "\x05", "\x05", "\x13", "\x1b", "o", "\x1b", // Task browser and applied result
           "\x1b[C", "\x1b[B", "\t", "\x1b[6~", "\r", "\x1b", // Unified Usage and Apply
           "\x1b[C", ...Array<string>(6).fill("\x1b[B"), ...Array<string>(6).fill("\x1b[A"), "\t", ...Array<string>(3).fill("\x1b[B"), "\t", "\x1b", "i", "\x1b",
         ]) {
