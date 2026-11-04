@@ -1165,7 +1165,33 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       const draft = ctx.ui.getEditorText();
       if (!controller.getModel() || !draft.trim()) return showPreview(ctx);
       if (controller.hasWorkspaceContent()) {
-        if (!controller.hasCapturedDraft(draft)) triggerOptimize(ctx, false, draft, true, true);
+        const knownDraft = controller.hasCapturedDraft(draft);
+        const captured = !knownDraft ? triggerOptimize(ctx, false, draft, true, true) : undefined;
+        const records = controller.getHistory();
+        const position = taskPositions.get(ctx.sessionManager.getSessionId());
+        const selected = records.find((record) => position?.selectedTaskId !== undefined
+          ? record.taskId === position.selectedTaskId
+          : record.id === (position?.selectedId ?? controller.getAppliedRecordId()));
+        // Opening with an editor draft is an explicit navigation intent. Background
+        // updates still preserve selection; a newly captured prompt must not inherit it.
+        let target = captured?.kind === "captured" ? records.find((record) => record.id === captured.recordId) : undefined;
+        let original = true;
+        if (!target && knownDraft) {
+          let matching = records.filter((record) => record.input.draft === draft);
+          if (!matching.length) {
+            matching = records.filter((record) => record.candidate?.text === draft && (record.acceptedAt !== undefined || record.sentAt !== undefined));
+            original = false;
+          }
+          const current = matching.filter((record) => record.archivedAt === undefined);
+          if (current.length) matching = current;
+          if (!matching.some((record) => original ? record.taskId === selected?.taskId : record.id === selected?.id && position?.selectedTaskId === undefined)) {
+            target = matching.at(-1);
+          }
+        }
+        if (target) taskPositions.set(ctx.sessionManager.getSessionId(), {
+          ...position, selectedId: target.id, selectedTaskId: original ? target.taskId : undefined, scroll: 0,
+          scrolls: { ...position?.scrolls, [`${original ? "task" : "run"}-${original ? target.taskId : target.id}`]: 0 },
+        });
         return showPreview(ctx);
       }
       triggerOptimize(ctx);

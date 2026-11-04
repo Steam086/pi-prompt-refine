@@ -1035,6 +1035,79 @@ describe("project context injection", () => {
 });
 
 describe("round workspace integration", () => {
+  it("focuses a new shortcut draft over a remembered result from an earlier round", async () => {
+    const harness = await makeHarness();
+    await trigger(harness);
+    harness.setCustomAction("q");
+    await harness.command("", harness.context); // Remember the model result selection.
+    harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Sent A" } }, harness.context);
+    harness.setEditorText("Current draft");
+    harness.holdPanel();
+    const view = shortcut(harness, "ctrl+\\")(harness.context);
+    const lines = harness.panelLines(100).join("\n");
+    expect(lines).toContain("› ○ Unsent · Current draft");
+    expect(lines).toContain("Original prompt");
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    harness.panelInput("\r"); // No navigation is needed before starting the current draft.
+    await flushPromises();
+    expect(harness.complete).toHaveBeenCalledTimes(2);
+    expect(JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text).draft).toBe("Current draft");
+    expect(harness.editorWrites).toEqual([]);
+    expect(harness.sent).toEqual([]);
+    harness.panelInput("q"); await view;
+  });
+
+  it("locates an existing shortcut draft instead of retaining another task or duplicating it", async () => {
+    const harness = await makeHarness();
+    await trigger(harness);
+    harness.setEditorText("Draft B");
+    harness.holdPanel();
+    let view = shortcut(harness, "ctrl+\\")(harness.context);
+    expect(harness.panelLines(100).join("\n")).toContain("› ○ Unsent · Draft B");
+    harness.panelInput("\x1b[B"); harness.panelInput("\x1b[B"); // Browse A's model result.
+    expect(harness.panelLines().join("\n")).toContain("Refined prompt");
+    harness.panelInput("q"); await view;
+
+    harness.setEditorText("");
+    view = shortcut(harness, "ctrl+\\")(harness.context);
+    expect(harness.panelLines().join("\n")).toContain("Refined prompt"); // Empty input restores selection.
+    harness.panelInput("q"); await view;
+
+    harness.setEditorText("Draft B");
+    view = shortcut(harness, "ctrl+\\")(harness.context);
+    const lines = harness.panelLines(100).join("\n");
+    expect(lines).toContain("› ○ Unsent · Draft B");
+    expect(lines).toContain("2 prompts");
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    harness.panelInput("i");
+    expect(harness.panelLines().join("\n")).toContain("Draft B");
+    harness.panelInput("\x1b");
+    harness.panelInput("q"); await view;
+  });
+
+  it("locates the accepted result matching the editor after browsing a different task", async () => {
+    const harness = await makeHarness();
+    await trigger(harness);
+    harness.complete.mockResolvedValueOnce(refinement("Accepted B result"));
+    await harness.command("optimize Draft B", harness.context);
+    await flushPromises();
+    harness.setCustomAction("a");
+    await harness.command("view", harness.context);
+    expect(harness.getEditor()).toBe("Accepted B result");
+    harness.holdPanel();
+    let view = harness.command("", harness.context);
+    harness.panelInput("\x1b[B"); harness.panelInput("\x1b[B");
+    expect(harness.panelLines().join("\n")).toContain("Refined prompt");
+    harness.panelInput("q"); await view;
+
+    view = shortcut(harness, "ctrl+\\")(harness.context);
+    expect(harness.panelLines().join("\n")).toContain("Accepted B result");
+    expect(harness.panelLines().join("\n")).toContain("a Accept");
+    expect(harness.panelLines().join("\n")).toContain("2 prompts");
+    expect(harness.complete).toHaveBeenCalledTimes(2);
+    harness.panelInput("q"); await view;
+  });
+
   it("saves a blank/new original without a default model and runs a one-off model choice", async () => {
     const harness = await makeHarness({ configureModel: false });
     harness.holdPanel();
@@ -2465,7 +2538,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.panelLines().join("\n")).toContain("Draft B");
     expect(harness.panelLines().join("\n")).toContain("Draft A");
     expect(harness.panelLines().join("\n")).toContain("Unsent");
-    harness.panelInput("\x1b[A"); harness.panelInput("\x1b[A"); // Newest original is at the top.
+    expect(harness.panelLines(100).join("\n")).toContain("› ○ Unsent · Draft B");
     harness.panelInput("\r"); // Explicitly start B while A may still be running.
     harness.panelInput("\x1b[B"); // Follow its model child, retaining this selection.
     const request = (harness.complete.mock.calls[1] as any[])[1];
