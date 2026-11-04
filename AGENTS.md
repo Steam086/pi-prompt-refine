@@ -22,4 +22,4 @@ round 首份输入捕获系统模板、历史与项目资源，同 round 多份�
 
 `test/` 使用 Vitest 覆盖纯逻辑、模拟 Pi/Provider 的生命周期与交互，以及实际 TUI 组件和渲染器。检查命令：`npm run typecheck`、`npm test`。
 
-当前行为见 [README](README.md) 和 `docs/`；长期设计取舍见 [DESIGN](DESIGN.md)，未实现方向见 [ROADMAP](ROADMAP.md)。
+当前行为见 [README](README.md) 和 `docs/`；长期设计取舍、待验证问题与演进方向见 [DESIGN](DESIGN.md)。

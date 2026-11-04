@@ -129,6 +129,6 @@ pi --extension git:github.com/Steam086/pi-prompt-refine
 | [配置参考](docs/configuration.md) | 模型、thinking、改写策略、快捷键、上下文开关与预算 |
 | [上下文与 Prompt 协议](docs/context.md) | 历史选择、规则与目录采集、输入输出协议、隐私边界 |
 | [快捷键排查](docs/shortcut-troubleshooting.md) | 命令备用入口与终端按键排查 |
-| [项目架构](AGENTS.md) · [设计取舍](DESIGN.md) · [后续方向](ROADMAP.md) | 模块职责、设计原因与尚未实现的方向 |
+| [项目架构](AGENTS.md) · [设计原则与演进方向](DESIGN.md) | 模块职责、设计原因与尚未实现的方向 |
 
 本地开发检查：`npm ci`、`npm run typecheck`、`npm test`。
