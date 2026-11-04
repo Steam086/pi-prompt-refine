@@ -55,7 +55,12 @@ describe("prompt tree and inspection", () => {
     expect(text()).toContain("Result 1");
     expect(position.selectedId).toBe(1);
     records[0]!.archivedAt = 1;
-    expect(text()).toContain("Uses earlier conversation context");
+    expect(text()).not.toContain("Uses earlier conversation context");
+    expect(text()).toContain("Earlier ·");
+    panel.handleInput("\r");
+    panel.handleInput("\x1b[6~");
+    expect(text()).toContain("Earlier context");
+    panel.handleInput("\x1b[5~");
     const fg = vi.spyOn(getThemeByName("dark")!, "fg");
     expect(text()).toContain("正文 中文😀");
     expect(fg).not.toHaveBeenCalledWith("dim", records[0]!.candidate!.text);
@@ -194,6 +199,18 @@ describe("prompt tree and inspection", () => {
       panel.handleInput("\x1b[6~");
     }
     expect(fg.mock.calls.some(([color, value]) => color === "text" && value.startsWith("# Literal heading\n**literal emphasis**"))).toBe(true);
+  });
+
+  it.each([80, 100, 160])("right-aligns variable statuses without reserving a fixed column at %s", (width) => {
+    const { records, text } = create("dark", false, [record(1), record(2), record(3)]);
+    records[0]!.input.model.id = "模型😀";
+    records[1]!.acceptedAt = 1;
+    records[2]!.status = "generating";
+    const children = text(width).split("\n").filter((line) => /[├└]/.test(line)).map((line) => line.split(" │ ")[0]!.trimEnd());
+    expect(children).toHaveLength(3);
+    expect(new Set(children.map(visibleWidth)).size).toBe(1);
+    expect(children.some((line) => line.includes("模型😀"))).toBe(true);
+    expect(children.every((line) => !line.includes(" · "))).toBe(true);
   });
 
   it("truncates long model names without escaping its own ANSI resets or hiding the status", () => {

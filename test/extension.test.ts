@@ -463,7 +463,7 @@ describe("multi-model preview and unified Usage", () => {
     const view = harness.command("history", harness.context);
     expect(harness.panelLines().join("\n")).toContain("Draft A");
     expect(harness.panelLines()[1]).toContain("Usage");
-    expect(harness.panelLines().join("\n")).toContain("Uses earlier conversation context");
+    expect(harness.panelLines().join("\n")).toContain("Earlier ·");
     expect(harness.panelLines().join("\n")).not.toContain("0 tokens");
     harness.panelInput("q");
     harness.panelInput("q");
@@ -1200,7 +1200,7 @@ describe("round workspace integration", () => {
     expect(harness.panelLines().join("\n")).not.toContain("Earlier round result");
     harness.panelInput("\x1b[C"); // Usage includes old rounds below current work.
     for (let i = 0; i < 4; i++) harness.panelInput("\x1b[B");
-    expect(harness.panelLines().join("\n")).toContain("Uses earlier conversation context");
+    expect(harness.panelLines().join("\n")).toContain("Earlier ·");
     expect(harness.panelLines().join("\n")).toContain("Earlier round result");
     harness.panelInput("\r");
     expect(harness.panelLines().join("\n")).toContain("Earlier round result");
@@ -1250,7 +1250,7 @@ describe("round workspace integration", () => {
     harness.holdPanel();
     const view = harness.command("usage", harness.context);
     harness.panelInput("\x1b[A"); harness.panelInput("\x1b[A");
-    expect(harness.panelLines().join("\n")).toContain("Uses earlier conversation context");
+    expect(harness.panelLines().join("\n")).toContain("Earlier context");
     harness.panelInput("i");
     expect(harness.panelLines().join("\n")).toContain("Edit original prompt");
     expect(harness.panelLines().join("\n")).toContain("Pending B");

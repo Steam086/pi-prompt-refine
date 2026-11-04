@@ -194,7 +194,6 @@ export class TaskPanel {
       if (record.usage?.totalTokens !== undefined) metrics.push(this.muted(`${record.usage.totalTokens.toLocaleString("en-US")} tokens`));
       if (metrics.length) header.push(...this.wrapped(metrics.join(this.muted(" · ")), width));
     }
-    if (record.archivedAt !== undefined) header.push(...this.wrapped(this.theme.fg("warning", "Uses earlier conversation context"), width));
     if (record.error) header.push(...this.wrapped(this.theme.fg("error", sanitizeTerminalText(`Error: ${record.error}`)), width));
     if (!row.original && record.input.budget?.message) {
       const message = record.input.budget.status === "blocked"
@@ -233,7 +232,7 @@ export class TaskPanel {
           this.muted(`Input ${budget.inputTokens} + output ${budget.outputTokens} + safety ${budget.safetyTokens} / window ${budget.contextWindow}`));
         if (budget.message) body.push(this.theme.fg("warning", sanitizeTerminalText(`⚠ ${budget.message}`)));
       }
-      body.push("", this.heading("Record"), this.muted(`Round ${record.input.roundId ?? "?"} · Task ${record.taskId}`));
+      body.push("", this.heading("Record"), this.muted(`Round ${record.input.roundId ?? "?"} · Task ${record.taskId}${record.archivedAt !== undefined ? " · Earlier context" : ""}`));
       if (!row.original) body.push(this.muted(`Run #${record.id} · ${record.kind}${record.parentId ? ` from #${record.parentId}` : ""}`));
       body.push(this.muted(`Created ${new Date(record.createdAt).toLocaleTimeString()}`));
       if (record.acceptedAt !== undefined) body.push(this.muted(`Accepted into Pi editor: ${new Date(record.acceptedAt).toLocaleTimeString()}`));
@@ -267,10 +266,10 @@ export class TaskPanel {
       const active = this.isSelected(row);
       const prefix = `${active ? "›" : " "} ${record.id === Math.min(...row.records.filter((r) => r.status !== "unsent").map((r) => r.id)) ? "└" : "├"} `;
       const badge = this.badge(record);
-      const model = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(record.input.model.id), Math.max(1, leftWidth - visibleWidth(prefix + badge) - 3), "…"));
+      const model = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(record.input.model.id), Math.max(1, leftWidth - visibleWidth(prefix + badge) - 1), "…"));
       const label = row.original
         ? `${active ? "›" : " "} ${record.status === "unsent" ? "○ Unsent ·" : "▾"} ${old ? "Earlier · " : ""}${record.input.draft.replace(/\s+/g, " ") || "Empty prompt"}`
-        : `${prefix}${model} · ${badge}`;
+        : `${prefix}${model}${" ".repeat(Math.max(1, leftWidth - visibleWidth(prefix + model + badge)))}${badge}`;
       const clean = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(label), leftWidth, "…"));
       const text = this.theme.fg(old ? "dim" : row.original ? "text" : this.color(record), clean);
       return active ? this.theme.bg("selectedBg", text + " ".repeat(Math.max(0, leftWidth - visibleWidth(text)))) : text;

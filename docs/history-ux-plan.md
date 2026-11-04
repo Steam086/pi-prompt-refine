@@ -6,7 +6,7 @@
 
 ## 分批顺序
 
-- [ ] 1. `fix(ui): simplify historical context and align run statuses`
+- [x] 1. `fix(ui): simplify historical context and align run statuses`
   - 去掉右侧顶部 earlier-context 警告；仅在详情 Record 中显示弱化上下文归属。
   - 左树子项状态靠右，模型名占剩余空间；原稿行不变。覆盖宽字符、ANSI、窄屏及长状态。
 - [ ] 2. `feat(usage): show per-run input output and reference cost`
