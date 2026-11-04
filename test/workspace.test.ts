@@ -612,8 +612,8 @@ describe("shared refine workspace", () => {
         for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       }
     }
-    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["Enter", "Revise"], theme));
-    workspace.handleInput("\r");
+    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["Ctrl+S", "Revise"], theme));
+    workspace.handleInput("\x13");
     expect(revise).toHaveBeenCalledWith("Shorter, keep 中文 😀 commands");
     expect(actions.submit).not.toHaveBeenCalled();
     expect(textOf(workspace.render(100))).toContain("Revision failed validation");
@@ -624,6 +624,10 @@ describe("shared refine workspace", () => {
     actions.revision.mockReturnValue({ key: "result-2", submit: revise });
     workspace.handleInput("f");
     expect(textOf(workspace.render(100))).not.toContain("Shorter, keep");
+    workspace.handleInput("\x1b");
+    actions.revision.mockReturnValue({ key: "result-1", submit: revise });
+    workspace.handleInput("f");
+    expect(textOf(workspace.render(100))).toContain("Shorter, keep");
     workspace.handleInput("\x1b");
     workspace.handleInput("i");
     expect(textOf(workspace.render(100))).toContain("New draft text");

@@ -1070,12 +1070,14 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             config.projectContext.skillsEnabled = selected.skills;
             return await persistConfig(ctx) ? "Context saved · Applies to next round" : "Context applied · Not persisted; check configuration";
           },
-          revision: () => {
+          revision: (id) => {
+            if (id !== undefined && !controller.applyResult(id)) return undefined;
             const token = controller.getCandidateToken();
             if (!token || controller.getState().pendingSend) return undefined;
             return {
               // Failure rebases generation but keeps this source identity; retain its feedback.
-              key: `${token.sessionId}:${token.requestId}:${token.version}`,
+              key: `${token.sessionId}:${controller.getCandidate()?.recordId ?? token.requestId}`,
+              label: `${displayModel(controller.getCandidate()!.model)} · Run #${controller.getCandidate()!.recordId ?? "?"}`,
               submit: (text: string) => {
                 if (closed || ctx.sessionManager.getSessionId() !== sessionId) return "Session changed; no request sent.";
                 return reviseCandidate(ctx, token, text);

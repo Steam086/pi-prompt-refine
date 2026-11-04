@@ -478,6 +478,39 @@ describe("multi-model preview and unified Usage", () => {
 });
 
 describe("explicit candidate revision", () => {
+  it("revises inline in Usage inspection, preserving the source viewport and explicit submit", async () => {
+    const harness = await makeHarness();
+    harness.complete.mockResolvedValueOnce(refinement("Source result\n" + Array.from({ length: 80 }, (_, i) => `Source line ${i}`).join("\n")));
+    await trigger(harness);
+    harness.holdPanel();
+    const view = harness.command("usage", harness.context);
+    harness.panelInput("\r");
+    harness.panelInput("\x1b[6~");
+    const before = harness.panelLines(100);
+    harness.panelInput("f");
+    expect(harness.panelLines(100).slice(0, 10)).toEqual(before.slice(0, 10));
+    expect(harness.panelLines(100).join("\n")).toContain("Run #1");
+    harness.panelInput("Shorter");
+    harness.panelInput("\r");
+    harness.panelInput("Keep constraints");
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    harness.panelInput("\x05"); // Expand, preserving the draft.
+    expect(harness.panelLines(100).join("\n")).toContain("Shorter");
+    harness.panelInput("\x05");
+    harness.panelInput("\x1b");
+    expect(harness.panelLines(100)).toEqual(before);
+    harness.panelInput("f");
+    expect(harness.panelLines(100).join("\n")).toContain("Keep constraints");
+    harness.panelInput("\x13");
+    await flushPromises();
+    const packet = JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
+    expect(packet.revision_instruction).toBe("Shorter\nKeep constraints");
+    expect(harness.sent).toEqual([]);
+    expect(harness.editorWrites).toEqual([]);
+    harness.panelInput("q");
+    await view;
+  });
+
   it("revises the latest candidate while preserving the original task and keeping Input independent", async () => {
     const harness = await makeHarness();
     await trigger(harness);
@@ -493,7 +526,7 @@ describe("explicit candidate revision", () => {
     harness.panelInput("再短一点，命令原样保留。");
     harness.setEditorText("Unrelated main editor changes");
     harness.complete.mockResolvedValueOnce({ content: [{ type: "text", text: JSON.stringify({ prompt: "Second result" }) }], stopReason: "stop" });
-    harness.panelInput("\r");
+    harness.panelInput("\x13");
     await flushPromises();
     const packet = JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
     expect(packet).toMatchObject({ operation: "revise", original_draft: "Draft A", previous_candidate: "Refined prompt", revision_instruction: "再短一点，命令原样保留。" });
@@ -506,7 +539,7 @@ describe("explicit candidate revision", () => {
     expect(harness.panelLines().join("\n")).not.toContain("再短一点");
     harness.panelInput("Use bullet points");
     harness.complete.mockResolvedValueOnce({ content: [{ type: "text", text: JSON.stringify({ prompt: "Third result" }) }], stopReason: "stop" });
-    harness.panelInput("\r");
+    harness.panelInput("\x13");
     await flushPromises();
     const next = JSON.parse((harness.complete.mock.calls[2] as any[])[1].messages[0].content[0].text);
     expect(next).toMatchObject({ operation: "revise", original_draft: "Draft A", previous_candidate: "Second result", revision_instruction: "Use bullet points" });
@@ -527,10 +560,10 @@ describe("explicit candidate revision", () => {
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     harness.panelInput("f");
-    harness.panelInput("\r");
+    harness.panelInput("\x13");
     expect(harness.panelLines().join("\n")).toContain("Enter revision instructions");
     harness.panelInput("x".repeat(31));
-    harness.panelInput("\r");
+    harness.panelInput("\x13");
     expect(harness.panelLines().join("\n")).toContain("exceed");
     expect(harness.complete).toHaveBeenCalledTimes(1);
     harness.panelInput("\x1b");
@@ -538,7 +571,7 @@ describe("explicit candidate revision", () => {
     expect(harness.panelLines().join("\n")).toContain("x".repeat(31));
     await harness.command("optimize New task", harness.context);
     await flushPromises();
-    harness.panelInput("\r");
+    harness.panelInput("\x13");
     expect(harness.panelLines().join("\n")).toContain("result changed");
     expect(harness.complete).toHaveBeenCalledTimes(2);
     expect(harness.editorWrites).toEqual([]);
@@ -555,13 +588,13 @@ describe("explicit candidate revision", () => {
     harness.panelInput("f");
     harness.panelInput("Shorter");
     harness.complete.mockRejectedValueOnce(new Error("offline"));
-    harness.panelInput("\r");
+    harness.panelInput("\x13");
     await flushPromises();
     expect(harness.panelLines().join("\n")).toContain("previous result kept");
     expect(harness.panelLines().join("\n")).toContain("Refined prompt");
     harness.panelInput("f");
     expect(harness.panelLines().join("\n")).toContain("Shorter");
-    harness.panelInput("\r");
+    harness.panelInput("\x13");
     await flushPromises();
     expect(harness.complete).toHaveBeenCalledTimes(3);
     expect(JSON.parse((harness.complete.mock.calls[2] as any[])[1].messages[0].content[0].text).revision_instruction).toBe("Shorter");
@@ -584,7 +617,7 @@ describe("explicit candidate revision", () => {
     harness.panelInput("\r"); // Inspect the selected result before revising.
     harness.panelInput("f");
     harness.panelInput("Shorter");
-    harness.panelInput("\r");
+    harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(2));
     const first = JSON.parse((harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
     const revision = JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
@@ -872,7 +905,7 @@ describe("project context injection", () => {
       for (let i = 1; i <= 2; i++) {
         harness.panelInput("f");
         harness.panelInput("Make it shorter");
-        harness.panelInput("\r");
+        harness.panelInput("\x13");
         await flushPromises();
         expect(harness.complete).toHaveBeenCalledTimes(i + 1);
         expect(inputAt(i).includes("Use the project venv.")).toBe(mode === "Always");
@@ -1231,7 +1264,7 @@ describe("round workspace integration", () => {
     const view = harness.command("view", harness.context);
     harness.panelInput("f");
     harness.panelInput("Shorter");
-    harness.panelInput("\r");
+    harness.panelInput("\x13");
     expect(harness.panelLines().join("\n")).toContain("missing or unavailable");
     expect(harness.complete).toHaveBeenCalledTimes(1);
     expect(harness.editorWrites).toEqual([]);
