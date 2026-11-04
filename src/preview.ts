@@ -8,6 +8,8 @@ import { resultHeading, sanitizeTerminalText, type SummaryOptions } from "./pres
 export interface PreviewOptions extends SummaryOptions {
   draft?: string;
   revisionInstruction?: string;
+  /** Literal candidate sent to Revise; absent/empty in restored minimal history. */
+  previousCandidate?: string;
   canRestore: boolean;
   /** An accepted snapshot is read-only, not an actionable candidate. */
   accepted?: { editorChanged: boolean };
@@ -53,6 +55,7 @@ export class PreviewPanel implements Component {
   private document: Component = new Text("", 0, 0);
   private draftDocument = new Text("", 0, 0);
   private revisionDocument = new Text("", 0, 0);
+  private previousDocument = new Text("", 0, 0);
   private scroll: ScrollView;
   private cachedBody?: { width: number; lines: string[] };
 
@@ -78,7 +81,7 @@ export class PreviewPanel implements Component {
     const changed = options.state.requestId !== this.options.state.requestId || options.state.phase !== this.options.state.phase ||
       options.candidateText !== this.options.candidateText;
     const textChanged = options.candidateText !== this.options.candidateText || options.draft !== this.options.draft ||
-      options.revisionInstruction !== this.options.revisionInstruction;
+      options.revisionInstruction !== this.options.revisionInstruction || options.previousCandidate !== this.options.previousCandidate;
     if (options.state.requestId !== this.options.state.requestId) this.helpVisible = false;
     if (options.state.requestId !== this.options.state.requestId ||
       (this.options.state.phase === "generating" && options.state.phase !== "generating")) {
@@ -153,6 +156,7 @@ export class PreviewPanel implements Component {
   private rebuildDocument(): void {
     this.draftDocument = new Text(sanitizeTerminalText(this.options.draft ?? ""), 0, 0);
     this.revisionDocument = new Text(sanitizeTerminalText(this.options.revisionInstruction ?? ""), 0, 0);
+    this.previousDocument = new Text(sanitizeTerminalText(this.options.previousCandidate ?? ""), 0, 0);
     const text = sanitizeTerminalText(this.options.candidateText ?? "");
     this.document = this.sourceVisible ? new Text(text, 0, 0) : new Markdown(
       text, 0, 0, markdownTheme(this.theme), { color: (value) => this.theme.fg("text", value) },
@@ -238,16 +242,25 @@ export class PreviewPanel implements Component {
         paragraph(`Title on accept: ${options.sessionTitle}`, "muted");
         lines.push("");
       }
-      const title = options.accepted ? "Accepted prompt · read-only" : "Refined prompt";
+      const revised = options.revisionInstruction !== undefined;
+      const title = options.accepted ? `Accepted prompt · read-only${revised ? " · revised" : ""}` : revised ? "Revised prompt" : "Refined prompt";
       lines.push(theme.fg("text", theme.bold(`${title}${this.sourceVisible ? " · source" : ""}`)), "");
       lines.push(...this.document.render(width));
-      if (this.originalVisible && options.draft !== undefined) {
+      // Revision provenance is part of the result details, not hidden behind Help.
+      // o still jumps straight to the original when a long result pushes it off screen.
+      if ((this.originalVisible || revised) && options.draft !== undefined) {
         this.originalLine = lines.length;
         lines.push("", theme.fg("borderMuted", "─".repeat(width)), "");
         paragraph("Original draft · at request time", "muted");
         lines.push("");
         // Keep the comparison literal and legible, rather than dimming its body.
         lines.push(...this.draftDocument.render(width));
+      }
+      if (revised) {
+        lines.push("", theme.fg("text", theme.bold("Revision instruction")), "", ...this.revisionDocument.render(width));
+        lines.push("", theme.fg("text", theme.bold("Before revision")), "");
+        if (options.previousCandidate) lines.push(...this.previousDocument.render(width));
+        else paragraph("Before-revision text was not retained in this record.", "muted");
       }
     } else if (options.state.phase === "generating" || options.state.phase === "error") {
       if (options.state.phase === "error") {

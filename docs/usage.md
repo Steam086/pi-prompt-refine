@@ -105,6 +105,8 @@ Enter 详情内保留 `e` 编辑结果、`f` 修订、`s` 发送、`o` 原稿对
 - **Context 设置**：规则 `First request only` / `Always` / `Off`、默认目录树和技能元数据。规则 First 模式对修订省略规则，策略在 round 捕获时冻结。配置修改用于**下一 round**，不偷偷改变当前任务。
 - **Optimizer 设置**：模型与 thinking 选择用于下一次显式启动，不改变主 Agent。系统编辑策略变更同样要等下一 round 捕获。配置持久化失败会明确提示仅进程内有效。
 
+Revise 成功后的结果详情标记为 `Revised prompt`；Tasks / Usage 显示 `Revised` 和来源运行编号。详情包含原始任务、完整修订要求和修订前候选，长正文可滚动阅读，按 `o` 可直接查看原稿。恢复的最小历史若未保留修订前正文，会明确提示缺失；失败后保留的旧结果仍展示它自身的修订信息。
+
 ## 保存与复用修订要求（Preferences）
 
 Revise 中按 **F2** 打开选择页；也可从结果详情或 Inspect 按 **p Preferences** 进入。只有返回 Revise 后的 **Ctrl+S** 才请求模型；浏览、勾选、临时编辑、保存和带回均不写 Pi 主编辑器、不发送 Pi 消息。
