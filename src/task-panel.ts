@@ -5,6 +5,7 @@ import type { RefineRecord } from "./history.js";
 import { panelFrame, panelLayout, workspaceTabs } from "./panel-layout.js";
 import { alignedKeyHints, fittingKeyHints, type KeyHint } from "./key-hints.js";
 import { sanitizeTerminalText } from "./presentation.js";
+import { cacheHitRate, formatReferenceCost, formatRunUsage, totalInputTokens } from "./usage.js";
 
 export interface TaskPanelActions {
   records(): RefineRecord[];
@@ -191,7 +192,7 @@ export class TaskPanel {
       if (record.status !== "unsent" && record.status !== "queued" && record.elapsedSeconds !== undefined) {
         metrics.push(this.theme.fg(record.status === "generating" ? "accent" : "text", this.theme.bold(`${record.elapsedSeconds}s`)));
       }
-      if (record.usage?.totalTokens !== undefined) metrics.push(this.muted(`${record.usage.totalTokens.toLocaleString("en-US")} tokens`));
+      if (record.kind !== "edit" && record.status !== "unsent" && record.status !== "queued") metrics.push(this.muted(formatRunUsage(record.usage)));
       if (metrics.length) header.push(...this.wrapped(metrics.join(this.muted(" · ")), width));
     }
     if (record.error) header.push(...this.wrapped(this.theme.fg("error", sanitizeTerminalText(`Error: ${record.error}`)), width));
@@ -212,7 +213,8 @@ export class TaskPanel {
       if (!row.original && record.candidate && !original) body.push("", this.heading("Original prompt"), "", this.theme.fg("text", sanitizeTerminalText(record.input.draft)));
       const value = (n: number | undefined) => n === undefined ? "—" : n.toLocaleString("en-US");
       const pairs = [
-        ["Input", value(record.usage?.input), "Output", value(record.usage?.output)],
+        ["Input (total)", value(totalInputTokens(record.usage)), "Output", value(record.usage?.output)],
+        ["Uncached input", value(record.usage?.input), "Cache hit", cacheHitRate(record.usage) === undefined ? "—" : `${cacheHitRate(record.usage)!.toFixed(1)}%`],
         ["Cache read", value(record.usage?.cacheRead), "Cache write", value(record.usage?.cacheWrite)],
         ["Reasoning", value(record.usage?.reasoning), "Total", value(record.usage?.totalTokens)],
       ];
@@ -224,6 +226,16 @@ export class TaskPanel {
             const half = Math.floor((width - 3) / 2);
             body.push(cell(a!, b!, half) + "   " + cell(c!, d!, width - half - 3));
           } else body.push(cell(a!, b!, width), cell(c!, d!, width));
+        }
+        if (record.kind !== "edit") {
+          body.push(this.muted("Input includes cache read/write; reasoning is included in output."), "", this.heading("Reference cost · USD"), this.muted(formatReferenceCost(record.usage)));
+          if (record.usage?.cost) {
+            for (const [key, label] of [["input", "Uncached input"], ["output", "Output"], ["cacheRead", "Cache read"], ["cacheWrite", "Cache write"]] as const) {
+              const cost = record.usage.cost[key];
+              body.push(this.muted(`${label}: ${cost === undefined ? "—" : `$${cost.toFixed(6)}`}`));
+            }
+            body.push(this.muted("Request-time SDK estimate; not actual billing or subscription quota."));
+          } else body.push(this.muted("No reliable SDK cost estimate; pricing or usage may be unavailable. Zero-price catalog defaults are treated as unknown."));
         }
       }
       if (!row.original && record.input.budget) {

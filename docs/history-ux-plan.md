@@ -9,7 +9,7 @@
 - [x] 1. `fix(ui): simplify historical context and align run statuses`
   - 去掉右侧顶部 earlier-context 警告；仅在详情 Record 中显示弱化上下文归属。
   - 左树子项状态靠右，模型名占剩余空间；原稿行不变。覆盖宽字符、ANSI、窄屏及长状态。
-- [ ] 2. `feat(usage): show per-run input output and reference cost`
+- [x] 2. `feat(usage): show per-run input output and reference cost`
   - 摘要保留耗时，显示 ↑总输入（含缓存）/↓输出、参考美元费用。
   - 按 Pi 规范化 usage 统计，缓存与 reasoning 不重复计费；优先保留响应 SDK cost。
   - 详情显示精确数、缓存拆分、命中率与费用来源/缺失解释；订阅标识只使用宿主认证信息，不按 provider 名推断。

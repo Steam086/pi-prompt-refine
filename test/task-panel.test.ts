@@ -32,7 +32,7 @@ describe("prompt tree and inspection", () => {
     const result = records[0]!;
     const output = panel.render(100).join("\n");
     expect(output).toContain(theme.fg("text", theme.bold("23s")));
-    expect(text()).toContain("2,989 tokens");
+    expect(text()).toContain("↑2.3k ↓670 · Cost —");
     expect(text()).toContain("Thinking xhigh");
     for (const hidden of ["Branch", "Frozen context", "Applied", "Round 1", "Cache read"]) expect(text()).not.toContain(hidden);
     result.status = "generating";
@@ -58,9 +58,10 @@ describe("prompt tree and inspection", () => {
     expect(text()).not.toContain("Uses earlier conversation context");
     expect(text()).toContain("Earlier ·");
     panel.handleInput("\r");
-    panel.handleInput("\x1b[6~");
-    expect(text()).toContain("Earlier context");
-    panel.handleInput("\x1b[5~");
+    let details = "";
+    for (let i = 0; i < 6; i++) { details += text(); panel.handleInput("\x1b[6~"); }
+    expect(details).toContain("Earlier context");
+    for (let i = 0; i < 6; i++) panel.handleInput("\x1b[5~");
     const fg = vi.spyOn(getThemeByName("dark")!, "fg");
     expect(text()).toContain("正文 中文😀");
     expect(fg).not.toHaveBeenCalledWith("dim", records[0]!.candidate!.text);
@@ -156,6 +157,19 @@ describe("prompt tree and inspection", () => {
     expect(all).toMatch(/Reasoning\s+10/);
     expect(all).not.toContain("120 tokens");
     expect(all).not.toContain("private-branch");
+  });
+
+  it("keeps cache and reference-cost explanations in details, not the summary", () => {
+    const { panel, records, text } = create();
+    records[0]!.usage = { input: 200, cacheRead: 800, cacheWrite: 0, output: 300, cost: { total: 0.012, cacheRead: 0.001 }, subscription: true };
+    expect(text()).toContain("↑1k ↓300 · ≈$0.012 (sub)");
+    expect(text()).not.toContain("Cache hit");
+    panel.handleInput("\r");
+    let details = "";
+    for (let i = 0; i < 7; i++) { details += text(); panel.handleInput("\x1b[6~"); }
+    expect(details).toContain("80.0%");
+    expect(details).toContain("Cache read: $0.001000");
+    expect(details).toContain("not actual billing or subscription quota");
   });
 
   it("does not rebuild the result body for elapsed-time ticks or scrolling", () => {
