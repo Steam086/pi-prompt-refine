@@ -116,6 +116,34 @@ describe("unified request budget", () => {
     expect(result.report.outputTokens).toBe(2048);
   });
 
+  it("warns about uncapped DeepSeek thinking without changing the requested ceiling or draft", () => {
+    const deepseek = { ...model, api: "openai-completions", provider: "deepseek" };
+    const input = packet("请确认记录能否恢复");
+    const result = budgetRequest("system", input, deepseek, 2048, "max");
+    expect(result.report).toMatchObject({ status: "ok", outputTokens: 2048 });
+    expect(result.report.message).toContain("2048-token output limit");
+    expect(result.report.message).toContain("cannot reserve answer space");
+    expect(result.maxTokens).toBe(2048);
+    expect(result.input).toBe(input);
+    expect(result.thinkingBudgets).toBeUndefined();
+    expect(budgetRequest("system", input, deepseek, 2048, "off").report.message).toBeUndefined();
+    // An explicitly configured compatible endpoint with a numeric cap still gets it.
+    const bounded = budgetRequest("system", input, { ...deepseek, compat: { supportsThinkingTokenBudget: true } }, 2048, "max");
+    expect(bounded.report.message).toBeUndefined();
+    expect(bounded.thinkingBudgets?.high).toBe(1024);
+    const proxy = budgetRequest("system", input, { ...deepseek, provider: "proxy", compat: { thinkingFormat: "deepseek" } }, 2048, "high");
+    expect(proxy.report.message).toContain("cannot reserve answer space");
+  });
+
+  it("retains both trimming and shared-thinking warnings", () => {
+    const history = selectHistory([message("old", "user", "O".repeat(9000))], 12, 16_000);
+    const result = budgetRequest("system", buildRefineInput("draft", history),
+      { ...model, contextWindow: 7000, api: "openai-completions", provider: "deepseek" }, 2048, "max");
+    expect(result.report.status).toBe("trimmed");
+    expect(result.report.message).toContain("Budget trimmed background");
+    expect(result.report.message).toContain("cannot reserve answer space");
+  });
+
   it("allows Chinese drafts with default output and inherited reasoning without cutting input", () => {
     const input = packet("保留路径和约束，优化这段需求。".repeat(300));
     const result = budgetRequest("system", input, model, 8192, "high");

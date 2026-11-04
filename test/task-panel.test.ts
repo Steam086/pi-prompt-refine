@@ -113,6 +113,30 @@ describe("prompt tree and inspection", () => {
     expect(actions.activate).toHaveBeenCalledWith(1);
   });
 
+  it("explains reasoning-only truncation even for restored runs without a budget snapshot", () => {
+    const failed: RefineRecord = { ...record(), status: "error", error: "truncated", candidate: undefined,
+      usage: { input: 1513, cacheRead: 256, cacheWrite: 0, output: 2048, reasoning: 2048, totalTokens: 3817 } };
+    failed.input.contextUnavailable = true;
+    const { panel, text } = create("dark", true, [failed]);
+    panel.handleInput("\r");
+    const output = text(120);
+    expect(output).toContain("All reported output tokens were reasoning.");
+    expect(output).toContain("Increase maxOutputTokens or lower/disable thinking");
+    expect(output).toMatch(/Output \(total\)\s+2,048/);
+    expect(output).not.toContain("Background reduced");
+  });
+
+  it("does not label an advisory budget warning as background trimming", () => {
+    const r = record();
+    r.input.budget = { status: "ok", inputTokens: 100, outputTokens: 2048, safetyTokens: 4096,
+      contextWindow: 128000, outputLimit: 2048, removedMessages: 0, removedProjectParts: [],
+      message: "DeepSeek thinking shares the output limit." };
+    const { text } = create("dark", true, [r]);
+    expect(text(140)).toContain("Shared output limit");
+    expect(text(140)).not.toContain("Background reduced");
+    expect(text(140)).toContain("⚠");
+  });
+
   it("compares sibling outputs and makes Tab change the exact acceptance target", () => {
     const { panel, text, actions, position } = create("dark", false, [record(), record(2)]);
     panel.handleInput("\r"); panel.handleInput("c");

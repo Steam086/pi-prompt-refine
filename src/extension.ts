@@ -20,7 +20,7 @@ import { PreviewPanel, type PreviewOptions } from "./preview.js";
 import { RefineController, type Candidate, type CandidateToken, type ControllerState, type RefineRequest, type RefineRequestInput, type TriggerResult } from "./controller.js";
 import type { TaskPanelPosition } from "./task-panel.js";
 
-import { readRunUsage } from "./usage.js";
+import { readRunUsage, truncatedOutputHint } from "./usage.js";
 import { HistoryStore, historyPath } from "./history-store.js";
 import { assembleProjectContext, captureProjectContext, collectDirectoryContext, type TreeSnapshot } from "./project-context.js";
 
@@ -88,7 +88,7 @@ function errorStatus(state: ControllerState): string {
     case "budget": return `⚠ ${state.budget?.message ?? "Request does not fit the model budget. Draft unchanged."}`;
     case "timeout": return "Refine: timed out. Retry.";
     case "empty": return "Refine: no prompt returned. Retry.";
-    case "truncated": return "Refine: incomplete output. Retry.";
+    case "truncated": return `Refine: ${truncatedOutputHint(state.usage)}`;
     case "tool-call": return "Refine: unexpected tool call. Retry.";
     case "invalid-output": return "Refine: invalid output. Retry.";
     default: return "Refine: request failed. Check model/network.";
