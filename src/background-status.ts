@@ -1,5 +1,6 @@
 import type { RefineRecord } from "./history.js";
-import { sanitizeTerminalText } from "./presentation.js";
+import { truncateToWidth } from "@earendil-works/pi-tui";
+import { READING_WIDTH, sanitizeTerminalText, type PresentationTheme } from "./presentation.js";
 
 /** Session-local attention state, separate from acceptance and persisted history. */
 export class BackgroundStatus {
@@ -30,4 +31,12 @@ export class BackgroundStatus {
     const parts = counts.filter(([count]) => count > 0).map(([count, label]) => `${count} ${count === 1 && label === "new results" ? "new result" : label}`);
     return parts.length ? `Refine · ${parts.join(" · ")} · ${sanitizeTerminalText(openHint)} Open` : undefined;
   }
+}
+
+/** A single line above the editor, independent of the host's footer and other statuses. */
+export function renderBackgroundStatus(status: string, width: number, theme: PresentationTheme): string[] {
+  if (width < 1) return [];
+  const available = Math.min(width, READING_WIDTH);
+  const inset = available >= 16 ? 2 : 0;
+  return [" ".repeat(inset) + theme.fg("muted", truncateToWidth(sanitizeTerminalText(status).replace(/\n/g, " "), available - inset * 2, ""))];
 }

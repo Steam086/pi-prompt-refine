@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { BackgroundStatus } from "../src/background-status.js";
+import { visibleWidth } from "@earendil-works/pi-tui";
+import { BackgroundStatus, renderBackgroundStatus } from "../src/background-status.js";
 import type { RefineRecord } from "../src/history.js";
 import { selectHistory } from "../src/context.js";
 
@@ -44,4 +45,16 @@ describe("background attention status", () => {
     status.update("s", [record(1, "generated")], true, "f6");
     expect(status.update("other", [record(1, "generated")], false, "f6")).toContain("1 new result");
   });
+});
+
+
+it("keeps the editor status on one bounded line even in narrow terminals", () => {
+  const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+  for (const width of [1, 10, 16, 40, 80, 200]) {
+    const lines = renderBackgroundStatus("Refine · 2 running · 1 queued · ctrl+\\ Open", width, theme);
+    expect(lines).toHaveLength(1);
+    expect(visibleWidth(lines[0]!)).toBeLessThanOrEqual(width);
+    expect(lines[0]).not.toContain("\n");
+  }
+  expect(renderBackgroundStatus("Refine", 0, theme)).toEqual([]);
 });

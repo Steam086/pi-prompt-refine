@@ -12,7 +12,7 @@ import {
 } from "./config.js";
 import { buildRefineInput, buildRefineSystemPrompt, parseRefineOutput, selectHistory, REFINE_SYSTEM_PROMPT, type HistorySnapshot } from "./context.js";
 import { budgetRequest } from "./budget.js";
-import { BackgroundStatus } from "./background-status.js";
+import { BackgroundStatus, renderBackgroundStatus } from "./background-status.js";
 import { renderModelChoices } from "./model-picker.js";
 import { formatKeyHint, type KeyHint } from "./key-hints.js";
 import { RefineWorkspace, type ContextSettings } from "./workspace.js";
@@ -302,7 +302,11 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const ctx = currentUiContext;
     if (ctx?.mode !== "tui") return;
     const status = backgroundStatus.update(controller.getSessionId() ?? "", controller.getHistory(), !!closePreview, openHint);
-    ctx.ui.setStatus(STATUS_KEY, interacting || closePreview ? undefined : status);
+    ctx.ui.setStatus(STATUS_KEY, undefined);
+    ctx.ui.setWidget(STATUS_KEY, interacting || closePreview || !status ? undefined : (_tui, theme) => ({
+      render: (width) => renderBackgroundStatus(status, width, theme),
+      invalidate() {},
+    }), { placement: "aboveEditor" });
     if (state.phase === "idle" && !state.runningCount && !state.queuedCount) {
       historySnapshot = undefined;
       projectLabel = "";
@@ -1120,6 +1124,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         // Opening the workspace acknowledges completed requests and hides the background status.
         backgroundStatus.update(sessionId, controller.getHistory(), true, openHint);
         ctx.ui.setStatus(STATUS_KEY, undefined);
+        ctx.ui.setWidget(STATUS_KEY, undefined);
         return {
           get focused() { return workspace.focused; },
           set focused(value: boolean) { workspace.focused = value; },
