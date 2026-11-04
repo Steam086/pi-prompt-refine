@@ -263,3 +263,36 @@ describe("prompt tree and inspection", () => {
     expect(output).not.toContain("[0m");
   });
 });
+
+describe("delete confirmation", () => {
+  it("requires explicit confirmation and captures the selected run", () => {
+    const { panel, actions, text, position } = create();
+    const remove = vi.fn(() => true);
+    Object.assign(actions, { deleteRecords: remove });
+    expect(text()).toContain("Delete");
+    panel.handleInput("\x1b[3~");
+    expect(text()).toContain("Delete run #1?");
+    expect(text()).toContain("Running requests will be stopped");
+    panel.handleInput("\r");
+    panel.handleInput("\x1b[B");
+    expect(remove).not.toHaveBeenCalled();
+    expect(position.selectedId).toBe(1);
+    panel.handleInput("\x1b");
+    expect(panel.isConfirmingDelete()).toBe(false);
+    panel.handleInput("\x1b[3~");
+    panel.handleInput("y");
+    expect(remove).toHaveBeenCalledWith([1]);
+  });
+
+  it("confirms the original's entire group without including later additions", () => {
+    const { panel, actions, position, records, text } = create("dark", false, [record(1), record(2)]);
+    const remove = vi.fn(() => true);
+    Object.assign(actions, { deleteRecords: remove });
+    position.selectedTaskId = 1;
+    panel.handleInput("\x1b[3~");
+    expect(text()).toContain("all 2 request(s)");
+    records.push(record(3));
+    panel.handleInput("y");
+    expect(remove).toHaveBeenCalledWith([1, 2]);
+  });
+});

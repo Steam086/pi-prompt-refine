@@ -13,6 +13,7 @@ export interface TaskPanelActions {
   activate(id: number): boolean;
   run(id: number): void;
   stop(id: number): void;
+  deleteRecords?(ids: readonly number[]): boolean;
   editOriginal?(id?: number): void;
   chooseModel?(id: number): void;
   accept?(id: number): void;
@@ -30,6 +31,8 @@ const pending = (record: RefineRecord) => record.status === "queued" || record.s
 
 /** Two-level original/run tree. Selection and scroll belong to identities, never row indexes. */
 export class TaskPanel {
+  private deletion?: { ids: number[]; label: string };
+  isConfirmingDelete(): boolean { return !!this.deletion; }
   private reading = false;
   private inspecting = false;
   private compareId?: number;
@@ -94,8 +97,28 @@ export class TaskPanel {
   }
   handleInput(data: string): boolean {
     const key = parseKey(data)?.toLowerCase();
+    if (this.deletion) {
+      if (key === "y") {
+        const target = this.deletion;
+        this.deletion = undefined;
+        const removed = this.actions.deleteRecords?.(target.ids);
+        this.openList();
+        this.cache.clear();
+        this.notice = removed ? "Deleted" : "Request changed or send pending; deletion cancelled";
+      } else if (key === "n" || key === "q" || key === "ctrl+\\" || this.keys.matches(data, "tui.select.cancel")) {
+        this.deletion = undefined;
+      }
+      return true;
+    }
     if (key) this.notice = "";
     const row = this.selected();
+    if (key === "delete") {
+      if (row && this.actions.deleteRecords) this.deletion = {
+        ids: (row.original ? row.records : [row.record]).map((record) => record.id),
+        label: row.original ? `original prompt and all ${row.records.length} request(s)` : `run #${row.record.id}`,
+      };
+      return true;
+    }
     if (row?.record.input.contextUnavailable && ["m", "g", "f"].includes(key ?? "")) {
       this.notice = "Background not saved · Press i to copy into current round";
       return true;
@@ -277,6 +300,13 @@ export class TaskPanel {
   render(width: number, _empty?: () => string[]): string[] {
     if (width < 1) return [];
     const layout = panelLayout(width, this.rows());
+    if (this.deletion) {
+      const body = this.wrapped(this.theme.fg("warning", `Delete ${this.deletion.label}?`) +
+        "\n\nRunning requests will be stopped; queued requests will be removed.\nThis removes Refine history. Pi editor and conversation stay unchanged.", layout.innerWidth);
+      return panelFrame(layout, [this.heading("Delete request"), this.muted("Confirmation required")],
+        body, [fittingKeyHints([["y", "Delete"], ["Esc / n", "Cancel"]], layout.innerWidth, this.theme)],
+        (text) => this.theme.fg("borderMuted", text));
+    }
     const tabs = workspaceTabs(layout, this.usage ? "Usage" : "Preview", this.theme);
     const height = Math.max(1, layout.bodyHeight - tabs.length);
     const rows = this.entries();
@@ -326,6 +356,7 @@ export class TaskPanel {
       : [["Enter", action], ["i", restored ? "Copy to current" : "Edit"], ["n", "New"], ...(!restored ? [["m", selected ? "Run model" : "Model"] as const] : [])];
     if (selected && !selected.original && pending(selected.record)) primary.push(["x", "Stop"]);
     if (selected && !selected.original && selected.record.candidate) primary.push(["a", "Accept"]);
+    if (selected && this.actions.deleteRecords) primary.push(["Delete", "Delete"]);
     const secondary: KeyHint[] = [["Esc", "Back"], ...(other || !this.inspecting ? [["Tab", other ? "Switch result" : this.reading ? "Select" : "Read"] as KeyHint] : [])];
     if (this.inspecting && selected && !selected.original && selected.record.candidate) {
       secondary.push(["c", other ? "Next comparison" : "Compare"], ["e", "Edit result"], ...(!restored ? [["f", "Revise"] as const] : []), ["s", "Send"]);

@@ -295,6 +295,11 @@ export class RefineWorkspace implements Component, Focusable {
       }
       return true;
     }
+    if (this.mode === "main" && this.taskPanel?.isConfirmingDelete()) {
+      this.taskPanel.handleInput(data);
+      this.tui.requestRender();
+      return true;
+    }
     // Input/Revise owns cursor keys. Settings visits its adjacent group before
     // leaving the page; arrows at the outer group boundaries still change pages.
     if (this.saving) return true;

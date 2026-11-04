@@ -84,6 +84,10 @@ export class RefineHistory {
     delete record.originalInput.projectDiagnostics;
   }
 
+  remove(ids: ReadonlySet<number>, sessionId: string): void {
+    this.records = this.records.filter((record) => record.input.sessionId !== sessionId || !ids.has(record.id));
+  }
+
   removeDraft(id: number): void {
     this.records = this.records.filter((record) => record.id !== id || record.status !== "unsent");
   }

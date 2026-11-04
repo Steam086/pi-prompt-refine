@@ -1037,6 +1037,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             },
             run: (id) => runRecord(id, true),
             stop: (id) => controller.stopRequest(id),
+            deleteRecords: (ids) => !closed && ctx.sessionManager.getSessionId() === sessionId && controller.deleteRecords(ids),
             chooseModel: (id) => finish({ action: "run-model", recordId: id, generation: controller.getGeneration() }),
             accept: (id) => {
               if (controller.applyResult(id)) finish({ action: "accept", generation: controller.getGeneration(), token: controller.getCandidateToken() });

@@ -477,6 +477,35 @@ export class RefineController {
     this.pump();
     this.emitState();
   }
+  /** Delete a confirmed snapshot atomically, before allowing queued work to start. */
+  deleteRecords(ids: readonly number[]): boolean {
+    if (this.pendingSend) return false;
+    const targets = new Set(ids.filter((id) => this.getRecord(id)));
+    if (!targets.size) return false;
+    const deleted = (value: Candidate | undefined) => value?.recordId !== undefined && targets.has(value.recordId);
+    const clearsDisplay = deleted(this.candidate) || deleted(this.viewedAccepted) ||
+      (this.state.recordId !== undefined && targets.has(this.state.recordId));
+    for (const active of [...this.active.values()]) {
+      if (deleted(active.previousCandidate)) active.previousCandidate = undefined;
+      if (!targets.has(active.request.recordId)) continue;
+      this.cancelRun(active);
+      if (this.foregroundId === active.request.requestId) this.foregroundId = undefined;
+    }
+    this.journal.remove(targets, this.sessionId ?? "");
+    if (deleted(this.candidate)) this.candidate = undefined;
+    if (deleted(this.viewedAccepted)) this.viewedAccepted = undefined;
+    if (clearsDisplay) {
+      this.requestSource = undefined;
+      this.taskId = undefined;
+      this.state = this.candidate ? this.candidateState(this.candidate)
+        : { phase: "idle", requestId: this.requestSequence, pendingSend: false };
+    }
+    // Accepted/restore snapshots describe actual editor writes, independent of the journal.
+    this.lastCapturedDraft = undefined;
+    this.pump();
+    this.emitState();
+    return true;
+  }
   updateCandidate(token: CandidateToken, text: string): boolean {
     if (!this.isCandidateCurrent(token) || !text.trim() || text.length > (this.options.maxOutputChars ?? 1_000_000) || !this.journal.canStart()) return false;
     this.clearPendingSend();
