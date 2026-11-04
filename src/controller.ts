@@ -27,6 +27,8 @@ export interface RefineRequestInput {
   project?: RequestProjectContext;
   projectDiagnostics?: { warnings: string[]; referencedDirectoryCount: number };
   roundId?: number;
+  /** Restored minimal history has no reusable request background. Never execute it. */
+  contextUnavailable?: boolean;
 }
 export interface RefineRequest extends RefineRequestInput {
   requestId: number;
@@ -244,6 +246,15 @@ export class RefineController {
       r.generation === this.generation && r.sessionId === this.sessionId;
   }
   setSession(sessionId: string): void { this.invalidateLifecycle(true); this.sessionId = sessionId; this.lastCapturedDraft = undefined; }
+  restoreHistory(records: RefineRecord[]): void {
+    if (this.active.size) return;
+    const own = records.filter((record) => record.input.sessionId === this.sessionId && record.input.contextUnavailable);
+    this.journal.restore(own);
+    this.taskSequence = Math.max(this.taskSequence, ...own.map((record) => record.taskId));
+    this.roundSequence = Math.max(this.roundSequence, ...own.map((record) => record.input.roundId ?? 0));
+    this.requestSequence = Math.max(this.requestSequence, ...own.map((record) => record.id));
+    this.emitState();
+  }
   ensureSession(sessionId: string): void { if (this.sessionId !== sessionId) this.setSession(sessionId); }
   setModel(model: ModelRef | undefined): boolean {
     if (sameModel(this.currentModel, model) || this.pendingSend) return false;
@@ -282,7 +293,7 @@ export class RefineController {
   }
   invalidateLifecycle(clearRestore = false): void {
     this.archiveRound();
-    for (const active of [...this.active.values()]) this.cancelRun(active);
+    for (const active of [...this.active.values()]) this.cancelRun(active, true);
     this.clearPendingSend();
     this.rebase();
     this.candidate = undefined;
@@ -295,6 +306,7 @@ export class RefineController {
     this.emitState();
   }
   private validate(input: RefineRequestInput): TriggerResult | undefined {
+    if (input.contextUnavailable) return { kind: "stale-source" };
     if (!input.draft.trim() || (input.revision && !input.revision.instruction.trim())) return { kind: "empty" };
     if (input.draft.length > this.options.maxDraftChars || (input.revision &&
       (input.revision.instruction.length > this.options.maxDraftChars || input.revision.previousCandidate.length > (this.options.maxOutputChars ?? 1_000_000)))) return { kind: "too-long" };
@@ -352,7 +364,7 @@ export class RefineController {
   }
   runOriginal(id: number, model: ModelRef, thinkingLevel?: ModelThinkingLevel): TriggerResult {
     const source = this.getOriginalRecord(id);
-    if (!source) return { kind: "stale-source" };
+    if (!source || source.input.contextUnavailable) return { kind: "stale-source" };
     if (source.status === "unsent") return this.startRecord(source.id, model, thinkingLevel);
     // A source can outlive its earliest record when bounded history evicts completed calls.
     const input = { ...source.input, model, thinkingLevel, revision: undefined };
@@ -371,7 +383,7 @@ export class RefineController {
     if (invalid) return invalid;
     if (input.revision && (!options.revisionToken || !this.isCandidateCurrent(options.revisionToken) ||
       input.sessionId !== this.sessionId || input.branchLeafId !== this.candidate!.branchLeafId ||
-      input.draft !== this.candidate!.draft || input.revision.previousCandidate !== this.candidate!.text)) return { kind: "stale-source" };
+      this.candidate!.contextUnavailable || input.draft !== this.candidate!.draft || input.revision.previousCandidate !== this.candidate!.text)) return { kind: "stale-source" };
     const source = this.getTaskInput();
     if (options.sameTask && (!source || input.sessionId !== this.sessionId || input.draft !== source.draft)) return { kind: "stale-source" };
     this.ensureSession(input.sessionId);
@@ -401,7 +413,7 @@ export class RefineController {
   /** Explicit retry / another-model run; source and earlier result are immutable. */
   rerunRecord(id: number, model = this.currentModel, thinkingLevel?: ModelThinkingLevel): TriggerResult {
     const record = this.getRecord(id);
-    if (!record || !model) return { kind: "stale-source" };
+    if (!record || !model || record.input.contextUnavailable) return { kind: "stale-source" };
     if (this.pendingSend || !this.journal.canStart()) return { kind: "busy" };
     const input = { ...record.input, model, thinkingLevel };
     if ([...this.active.values()].some((run) => fingerprint(run.request) === fingerprint(input))) return { kind: "duplicate" };
@@ -532,7 +544,10 @@ export class RefineController {
     try {
       const result = await this.options.complete(active.request, active.controller.signal);
       if (!this.isActive(active)) {
-        if (result.usage) this.journal.update(active.request.recordId, { usage: result.usage });
+        if (result.usage) {
+          this.journal.update(active.request.recordId, { usage: result.usage });
+          this.emitState();
+        }
         return;
       }
       this.journal.update(active.request.recordId, { usage: result.usage });
@@ -577,9 +592,9 @@ export class RefineController {
     this.active.delete(active.request.requestId);
     if (active.timeout !== undefined) this.scheduler.clearTimeout(active.timeout);
   }
-  private cancelRun(active: ActiveRequest): void {
+  private cancelRun(active: ActiveRequest, interrupted = false): void {
     this.release(active);
-    this.journal.update(active.request.recordId, { status: "cancelled", elapsedSeconds: elapsed(active) });
+    this.journal.update(active.request.recordId, { status: interrupted ? "interrupted" : "cancelled", elapsedSeconds: elapsed(active) });
     active.controller.abort();
   }
   private clearPendingSend(): void {
