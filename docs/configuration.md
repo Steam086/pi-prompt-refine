@@ -21,21 +21,23 @@
 | `maxOutputTokens` | 8192 | 16–65536；请求输出总预留上限（含 reasoning 余量），同时受模型输出能力和上下文窗口限制 |
 | `context.maxMessages` / `maxChars` | 12 / 16000 | 0–50 / 0–100000；任一为 0 禁用历史 |
 | `projectContext.enabled` | true | 项目背景总开关 |
-| `instructionsEnabled` / `skillsEnabled` | true / false | 项目规则 / 技能元数据 |
+| `instructionsEnabled` / `skillsEnabled` | false / false | 项目规则（如 AGENTS.md）/ 技能元数据，按需开启 |
 | `instructionsOnFollowUp` | true | 启用规则时，true 为首次优化及每次 Revise 都包含；false 为每个新优化任务首次包含、Revise 省略，与主会话历史无关 |
 | `maxChars` / `instructionsMaxChars` / `skillsMaxChars` | 28000 / 16000 / 6000 | 各为 512–100000 |
-| `tree.enabled` | true | 默认 tree；还要求本次选中的可见历史为空 |
+| `tree.enabled` | false | 按需开启默认 tree；还要求本次选中的可见历史为空 |
 | `referencedDirectories.enabled` / `maxReferences` | true / 8 | 显式目录独立开关；引用数 1–32 |
 | `tree.maxChars` / `maxDepth` | 4000 / 2 | 128–20000 / 1–6，根深度为 0 |
 | `tree.maxEntriesPerDirectory` / `maxEntries` | 20 / 120 | 1–100 / 1–1000 |
 | `tree.maxScannedEntries` / `timeoutMs` | 2000 / 200 ms | 1–20000 / 10–2000 ms |
 | `tree.exclude` | 依赖、产物、缓存等目录名 | 最多 100 个名称，无路径分隔符；替换默认列表 |
 
-字符限制使用 JavaScript UTF-16 字符单元，不是 token 计数。历史采集预算按角色标签加正文计算；项目采集预算含其标题与告警。发送前另有统一硬预算：完整系统提示词与实际 JSON 输入（含转义、元数据、修订字段）的保守 token 估算 + 输出预留 + 安全余量不得超过模型窗口。
+字符限制使用 JavaScript UTF-16 字符单元，不是 token 计数。历史采集预算按角色标签加正文计算；项目采集预算含其标题与告警。发送前另有统一容量预检：完整系统提示词与实际 JSON 输入（含转义、元数据、修订字段）的 token 估算 + 输出预留 + 安全余量不得超过模型窗口。
 
-Pi 没有跨 Provider 的精确 tokenizer 接口，因此本扩展按每个 UTF-8 字节一个 token 保守估算文本，安全余量为 4096 + 模型窗口的 1%（向上取整）。这是本地预检估算，不是 Provider 实测 token 数；模型容量依赖注册表信息正确，过于保守时可能提前裁减或拒绝请求。
+Pi 没有跨 Provider 的精确 tokenizer 接口，因此本扩展按 UTF-8 字节数 ÷ 3（向上取整）近似估算文本，不再将每个中文字按三个 tokens 计算。安全余量仍为 4096 + 模型窗口的 1%（向上取整），兼顾宿主适配器的预留。这不是 Provider 实测 token 数，也不是严格上界；模型容量依赖注册表信息正确，实际仍可能遇到 Provider 容量限制。
 
-输出至少为完整草稿／上一候选的 JSON 表示预留估算长度的 125% + 256 tokens；启用 reasoning 时还为共享输出和适配器可能追加的 thinking 预留空间，并传入有界 thinking budgets。先裁减可选背景，再考虑缩减多余输出空间；无法保留完整输入及最低输出预留时不调用模型，显示原因，草稿不变。长中文／代码草稿可能需要提高 `maxOutputTokens` 并选择更大输出能力的模型；配置上限不会被自动突破。
+完整草稿／上一候选 JSON 估算长度的 125% + 256 tokens 仅作为期望输出空间，不再因其超过输出上限直接拒绝。优先缩减多余输出空间，再裁减可选背景；仍不足时可进一步降低期望输出，最低保留 256 tokens（配置／模型输出上限更小时遵循该上限）。启用 reasoning 时答案最低空间为 1024 tokens（与宿主适配器一致），另外保留有界 thinking 空间：Anthropic／Bedrock 的追加型适配器先扣除这部分再传入 `maxTokens`，其他适配器直接共享总上限，不重复预留两份 thinking。旧配置 2048 配合 thinking 也可发送小请求。
+
+完整输入加最低输出空间仍超窗口、模型容量无效，或输出上限不足以容纳 thinking 时才拒绝；不会截断草稿或突破配置上限。估算不保证完整输出，长草稿仍可能需要提高 `maxOutputTokens`；模型输出被截断时不接受残缺候选。
 
 预算裁减和拒绝请求在摘要及运行条目上显示 `⚠`，详情显示估算输入、输出、安全余量和窗口。新默认值不覆盖已保存的有效 `maxOutputTokens`；旧的 2048 仍然生效，可自行调整。
 
@@ -48,12 +50,14 @@ Settings 中的 `Project instructions` 使用三个模式，Enter / Space 循环
 | 模式 | `instructionsEnabled` | `instructionsOnFollowUp` |
 | --- | --- | --- |
 | `First request only` | true | false |
-| `Always`（默认） | true | true |
-| `Off` | false | 保留原值，关闭时不生效 |
+| `Always` | true | true |
+| `Off`（默认） | false | 保留原值，关闭时不生效 |
 
 “首次”指每个新优化任务的首次请求。通过主草稿、命令正文、Input 或 `r` 开始新任务时重新包含规则；对当前候选按 `f` 发起的 Revise（包括重试）属于后续请求。每次模型调用仍然独立，选择仅首次不会使模型自动记住被省略的规则。
 
 ## 兼容旧配置与持久化
+
+- 新默认值关闭项目规则和默认目录树；已保存的显式 `true` 不自动覆盖。已有配置可在 Settings → Context 将 `Project instructions` / `Directory tree` 设为 Off 并保存；下一 round 生效。显式 `@目录` 仍独立启用。
 
 - 已保存的 `instructionsOnFollowUp: false` 保留，界面显示 `First request only`（规则启用时）。其生效范围从旧版“有主会话历史即省略”改为“仅 Revise 省略”，因此有主会话历史的新优化任务现在也会包含规则。加载本身不改写配置。
 - 自定义 `systemPrompt` 原样保留为编辑策略，不会自动换成新默认模板。旧 BEGIN/END 分区假设需适配 JSON 输入；删除字段可恢复内置策略。

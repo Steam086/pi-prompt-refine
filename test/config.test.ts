@@ -50,13 +50,13 @@ describe("Prompt Refine configuration", () => {
     expect(invalid.warnings.join(" ")).toContain("thinkingLevel");
   });
 
-  it("defaults context choices to instructions/tree on and skills off, preserving explicit choices", () => {
-    expect(parseConfig({ version: 1 }).config.projectContext).toMatchObject({ instructionsEnabled: true, skillsEnabled: false, tree: { enabled: true } });
-    const custom = parseConfig({ version: 1, projectContext: { instructionsEnabled: false, skillsEnabled: true } });
-    expect(custom.config.projectContext).toMatchObject({ instructionsEnabled: false, skillsEnabled: true });
+  it("defaults instructions, tree and skills off, preserving explicit opt-ins", () => {
+    expect(parseConfig({ version: 1 }).config.projectContext).toMatchObject({ instructionsEnabled: false, skillsEnabled: false, tree: { enabled: false } });
+    const custom = parseConfig({ version: 1, projectContext: { instructionsEnabled: true, skillsEnabled: true, tree: { enabled: true } } });
+    expect(custom.config.projectContext).toMatchObject({ instructionsEnabled: true, skillsEnabled: true, tree: { enabled: true } });
     expect(custom.warnings).toEqual([]);
     const invalid = parseConfig({ version: 1, projectContext: { instructionsEnabled: "no", skillsEnabled: 1 } });
-    expect(invalid.config.projectContext).toMatchObject({ instructionsEnabled: true, skillsEnabled: false });
+    expect(invalid.config.projectContext).toMatchObject({ instructionsEnabled: false, skillsEnabled: false });
     expect(invalid.warnings).toHaveLength(2);
   });
 
