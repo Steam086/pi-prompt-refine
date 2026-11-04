@@ -883,3 +883,60 @@ describe("RefineController explicit operations", () => {
     expect(controller.isRestoreCurrent(restoreToken)).toBe(false);
   });
 });
+
+describe("confirmed request deletion", () => {
+  it("removes unsent drafts and permits capturing the same draft again", () => {
+    const { controller } = setup();
+    controller.capture(input("Draft"));
+    const id = controller.getHistory()[0]!.id;
+    expect(controller.deleteRecords([id])).toBe(true);
+    expect(controller.getHistory()).toEqual([]);
+    expect(controller.capture(input("Draft")).kind).toBe("captured");
+  });
+
+  it("aborts running targets and removes queued targets before pumping, ignoring late completion", async () => {
+    const jobs: { signal: AbortSignal; pending: ReturnType<typeof deferred<RefineCompletion>> }[] = [];
+    const { controller, scheduler } = setup((_request, signal) => {
+      const pending = deferred<RefineCompletion>(); jobs.push({ signal, pending }); return pending.promise;
+    });
+    for (let i = 0; i < 6; i++) controller.trigger(input(`Draft ${i}`));
+    expect(jobs).toHaveLength(4);
+    const ids = controller.getHistory().map((record) => record.id);
+    expect(controller.deleteRecords(ids)).toBe(true);
+    expect(jobs).toHaveLength(4);
+    expect(jobs.every((job) => job.signal.aborted)).toBe(true);
+    expect(scheduler.size).toBe(0);
+    for (const job of jobs) job.pending.resolve({ ...success("Late"), usage: { output: 12 } });
+    await flushPromises();
+    expect(controller.getHistory()).toEqual([]);
+    expect(controller.getCandidate()).toBeUndefined();
+    expect(controller.getState()).toMatchObject({ phase: "idle", runningCount: 0, queuedCount: 0 });
+  });
+
+  it("deletes an applied result without invalidating other runs", async () => {
+    const { controller } = setup();
+    controller.trigger(input("One")); await flushPromises();
+    const token = controller.getCandidateToken()!;
+    const id = controller.getAppliedRecordId()!;
+    controller.trigger(input("Two")); await flushPromises();
+    controller.applyResult(id);
+    expect(controller.deleteRecords([id])).toBe(true);
+    expect(controller.getAppliedRecordId()).toBeUndefined();
+    expect(controller.getHistory()).toHaveLength(1);
+    expect(controller.acceptCandidate(token, "One", true, vi.fn())).toBe(false);
+    expect(controller.applyResult(controller.getHistory()[0]!.id)).toBe(true);
+  });
+
+  it("deletes accepted history while keeping the editor restore snapshot", async () => {
+    const { controller } = setup();
+    controller.trigger(input("One")); await flushPromises();
+    const id = controller.getAppliedRecordId()!;
+    const write = vi.fn();
+    controller.acceptCandidate(controller.getCandidateToken()!, "One", false, write);
+    const restore = controller.getRestoreToken()!;
+    expect(controller.deleteRecords([id])).toBe(true);
+    expect(controller.getViewedAccepted()).toBeUndefined();
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(controller.restoreDraft(restore, "Refined", false, write)).toBe(true);
+  });
+});
