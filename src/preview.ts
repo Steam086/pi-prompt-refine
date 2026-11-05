@@ -8,6 +8,7 @@ import { resultHeading, sanitizeTerminalText, type SummaryOptions } from "./pres
 export interface PreviewOptions extends SummaryOptions {
   draft?: string;
   revisionInstruction?: string;
+  editingInstruction?: string;
   /** Literal candidate sent to Revise; absent/empty in restored minimal history. */
   previousCandidate?: string;
   canRestore: boolean;
@@ -56,6 +57,7 @@ export class PreviewPanel implements Component {
   private document: Component = new Text("", 0, 0);
   private draftDocument = new Text("", 0, 0);
   private revisionDocument = new Text("", 0, 0);
+  private editingDocument = new Text("", 0, 0);
   private previousDocument = new Text("", 0, 0);
   private scroll: ScrollView;
   private cachedBody?: { width: number; lines: string[] };
@@ -82,7 +84,7 @@ export class PreviewPanel implements Component {
     const changed = options.state.requestId !== this.options.state.requestId || options.state.phase !== this.options.state.phase ||
       options.candidateText !== this.options.candidateText;
     const textChanged = options.candidateText !== this.options.candidateText || options.draft !== this.options.draft ||
-      options.revisionInstruction !== this.options.revisionInstruction || options.previousCandidate !== this.options.previousCandidate;
+      options.revisionInstruction !== this.options.revisionInstruction || options.editingInstruction !== this.options.editingInstruction || options.previousCandidate !== this.options.previousCandidate;
     if (options.state.requestId !== this.options.state.requestId) this.helpVisible = false;
     if (options.state.requestId !== this.options.state.requestId ||
       (this.options.state.phase === "generating" && options.state.phase !== "generating")) {
@@ -159,6 +161,7 @@ export class PreviewPanel implements Component {
     const literal = (text: string) => new Text(this.theme.fg("text", sanitizeTerminalText(text)), 0, 0);
     this.draftDocument = literal(this.options.draft ?? "");
     this.revisionDocument = literal(this.options.revisionInstruction ?? "");
+    this.editingDocument = literal(this.options.editingInstruction ?? "");
     this.previousDocument = literal(this.options.previousCandidate ?? "");
     const text = sanitizeTerminalText(this.options.candidateText ?? "");
     this.document = this.sourceVisible ? new Text(this.theme.fg("text", text), 0, 0) : new Markdown(
@@ -259,6 +262,9 @@ export class PreviewPanel implements Component {
         // Keep the comparison literal and legible, rather than dimming its body.
         lines.push(...this.draftDocument.render(width));
       }
+      if ((this.originalVisible || revised) && options.editingInstruction) {
+        lines.push("", theme.fg("text", theme.bold("Initial editing instruction")), "", ...this.editingDocument.render(width));
+      }
       if (revised) {
         lines.push("", theme.fg("text", theme.bold("Revision instruction")), "", ...this.revisionDocument.render(width));
         lines.push("", theme.fg("text", theme.bold("Before revision")), "");
@@ -285,6 +291,7 @@ export class PreviewPanel implements Component {
         const title = options.revisionInstruction !== undefined ? "Original task" : "Submitted original";
         lines.push(theme.fg("text", theme.bold(width >= 40 ? `${title} · ${options.draft.length} chars` : title)));
         lines.push(...this.draftDocument.render(width));
+        if (options.editingInstruction) lines.push("", theme.fg("text", theme.bold("Initial editing instruction")), ...this.editingDocument.render(width));
         if (options.revisionInstruction !== undefined) {
           lines.push("", theme.fg("text", theme.bold("Submitted revision instruction")));
           lines.push(...this.revisionDocument.render(width));

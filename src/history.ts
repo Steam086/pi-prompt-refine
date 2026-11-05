@@ -1,6 +1,7 @@
 import type { Candidate, RefineRequestInput } from "./controller.js";
 import type { TokenUsage } from "./usage.js";
 import type { BudgetReport } from "./budget.js";
+import type { SelectedPreference } from "./revision-preferences.js";
 
 export interface RefineRecord {
   id: number;
@@ -82,6 +83,18 @@ export class RefineHistory {
     delete record.input.projectDiagnostics;
     delete record.originalInput.preparedInput;
     delete record.originalInput.projectDiagnostics;
+  }
+
+  setDraftPreferences(id: number, selected: readonly SelectedPreference[], instruction: string): void {
+    const record = this.records.find((item) => item.id === id);
+    if (record?.status !== "unsent") return;
+    record.input.preferences = structuredClone([...selected]);
+    record.input.editingInstruction = instruction || undefined;
+    delete record.input.preparedInput;
+    delete record.input.projectDiagnostics;
+    delete record.input.budget;
+    delete record.input.sentInput;
+    record.originalInput = structuredClone(record.input);
   }
 
   remove(ids: ReadonlySet<number>, sessionId: string): void {

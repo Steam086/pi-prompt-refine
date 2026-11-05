@@ -41,7 +41,8 @@
 | --- | --- |
 | ↑↓ / Page Up / Page Down | 选择父节点或运行子节点 |
 | Tab | 切换选择／阅读焦点；阅读时方向键滚动正文，各条目保留滚动位置 |
-| Enter：Unsent 父节点 | 使用默认优化模型启动；空白不能启动，旧条目仍使用旧背景 |
+| Enter：Unsent 父节点 | 携带该原稿已选 Preferences，使用默认优化模型启动；空白不能启动，旧条目仍使用旧背景；不发送给 Pi |
+| `p`：Unsent 父节点 | 选择本次编辑用的 Preferences；不依赖可选快捷键，带回后仍需 Enter 才启动 |
 | Enter：其他条目 | 查看原稿或运行详情，包括排队、运行、失败和取消；不 Apply、不写 Pi、不发送 |
 | `n` | 顶部新增空白原稿并进入编辑；无需先配置模型 |
 | `i` | 编辑选中条目所属原稿；当前 Unsent 原地修改，已运行或旧轮次创建当前轮次副本 |
@@ -60,7 +61,7 @@
 
 Enter 进入 Preview 结果详情后，内容区至少 90 列（终端至少 94 列）时采用约 65/35 双栏：左侧当前结果，右侧原稿、本次修订要求及修订前结果。顶部模型与状态相邻，Provider、Thinking、耗时、Token 和费用合并为紧凑摘要，按需换行。`o` 在两栏间切换滚动焦点，↑↓ / Page Up / Page Down 只滚动当前栏；窄屏默认只显示结果，`o` 切换参考信息，两侧分别保留阅读位置。切换参考信息不改变接受、编辑或修订的目标。Preview 不常驻用量明细、设置或模板库；Compare 仍使用原有并排比较。
 
-详情内保留 `e` 编辑结果、`f` 修订、`s` 发送；`n` 仅在列表新建，列表不再把 `e` 作为原稿编辑别名。列表／详情不支持隐藏 `g` 重试，统一用 `m` 运行原稿；`p` 不再直接打开 Preferences。无效操作显示提示，不回落到其他已 Apply 结果。Usage 是实时视图，完整用量和记录信息在正文后，方向键滚动查看。手工编辑标注 `Manual edit · no model call`，不当作模型调用。
+详情内保留 `e` 编辑结果、`f` 修订、`s` 发送；`n` 仅在列表新建，列表不再把 `e` 作为原稿编辑别名。列表／详情不支持隐藏 `g` 重试，统一用 `m` 运行原稿；`p` 仅在有完整背景的 Unsent 原稿上打开 Preferences；结果仍通过 `f` → Preferences 修订。无效操作显示提示，不回落到其他已 Apply 结果。Usage 是实时视图，完整用量和记录信息在正文后，方向键滚动查看。手工编辑标注 `Manual edit · no model call`，不当作模型调用。
 
 ### 并行优化与对比
 
@@ -114,9 +115,23 @@ Revise 成功后的结果详情标记为 `Revised prompt`；Tasks / Usage 显示
 
 Revise 标题与来源 Run／模型分别强调：只有操作标题加粗，来源信息弱化。常规状态简写为 `Not sent`，Preferences 与完整要求入口在空间允许时同行显示，焦点仍分别切换。上方来源区标为 `Read-only reference`，不再显示被输入焦点暂停的滚动／切页提示。错误和快捷键冲突使用警告色，短窗口优先保留异常反馈，而不是将其随第二行标题一起隐藏。
 
-## 保存与复用修订要求（Preferences）
+## 保存与复用编辑要求（Preferences）
 
-Revise 中按 **Alt+P** 打开 Preferences，或用 **Tab / Shift+Tab** 在补充要求、Preferences、Review full requirements 间切换，Enter 打开焦点控件；详情不再提供独立 p 入口。Revise 显示本次已选偏好名称与数量，无选择时显示 None，星号表示仅本次修改。Review full requirements 是只读的完整组合要求预览，可翻页滚动，Esc 回到补充要求；其中 Ctrl+S 不提交。管理操作只有始终可见的 **Add / Edit / Delete** 三项，不使用功能键。只有返回 Revise 后的 **Ctrl+S** 才请求模型；浏览、勾选、保存和带回均不写 Pi 主编辑器、不发送 Pi 消息。
+### 首次 refine 前选择
+
+在 Preview 或 Usage 列表选中 `○ Unsent` **原稿父节点**，按 **p** 打开 Preferences，也可使用未禁用且不冲突的 `preferencesKey`（默认 Alt+P）。列表显示 `p Preferences` 提示，`?` 可查完整动作；Tab 仍只切换列表／阅读焦点，不增加隐藏焦点。子页沿用 Space 勾选、Enter 阅读、Alt+Enter 带回、Esc 放弃本次暂存选择。勾选、阅读、带回和库管理都不请求模型，也不写 Pi 输入框。返回原稿后，**Enter 才调用默认优化模型**；`m` → Enter 使用单次指定模型，同样携带已选要求，不发送给 Pi。
+
+原稿摘要显示 `Preferences: 数量 · 名称`，未选时为 None；窄屏列表以 `P:数量` 标记已选项，标题区保留偏好摘要。选择按原稿身份隔离，带回后关闭并重新打开工作区仍保留于当前 session 内存；不自动选中、不跨原稿继承，也不将 Unsent 或未提交选择写入 sidecar。当前 Unsent 的原稿编辑保留其选择；已运行或旧轮次原稿通过 `i` 创建新副本时不继承偏好，可重新显式选择。
+
+已选正文是快照，不在启动时重新读取库。首次运行携带独立的 `editing_instruction`，不拼入或修改 `draft`，也不改变 round 系统模板、历史或项目背景。开始排队即冻结要求；之后同原稿的重试／其他模型运行沿用同一份初始要求。已启动原稿不再允许修改其首次选择；希望换组合时用 `i` 创建独立原稿副本。详情参考区和 Usage 可阅读实际提交的 `Initial editing instruction`；sidecar 仅保留已提交的组合正文，不保存整份库、选择身份或背景，恢复后仍禁止原背景重跑。
+
+带回时检查原稿、选择、session、归档状态和运行状态是否仍匹配；发生变化或组合超过 `maxDraftChars` 时，保留子页暂存选择并显示警告，不套用到其他目标。已归档但背景仍完整的 Unsent 可重新打开选择器，运行继续使用旧背景；选择模板不刷新 round。模板 Add 表单不会预填原始任务。
+
+空工作区的 Ctrl+\\ 首次自动 refine 行为保持不变；想在第一次请求前选模板，可先用 `/refine` 打开工作台，按 `n` 新建并保存原稿，再按 `p` 选择。
+
+### 结果修订与共用模板库
+
+Revise 中按 **Alt+P** 打开 Preferences，或用 **Tab / Shift+Tab** 在补充要求、Preferences、Review full requirements 间切换，Enter 打开焦点控件；详情不再提供独立 p 入口。Revise 显示本次已选偏好名称与数量，无选择时显示 None，星号表示仅本次修改。Review full requirements 是只读的完整组合要求预览，可翻页滚动，Esc 回到补充要求；其中 Ctrl+S 不提交。管理操作只有始终可见的 **Add / Edit / Delete** 三项，不使用功能键。修订结果时，只有返回 Revise 后的 **Ctrl+S** 才请求模型；首次 refine 则返回 Unsent 后按 Enter。浏览、勾选、保存和带回均不写 Pi 主编辑器、不发送 Pi 消息。
 
 - 默认焦点在列表：↑↓选择条目，Space 勾选／取消，Enter 阅读全文，Esc 从全文返回。宽屏左侧列表、右侧只读预览，窄屏通过 Enter 阅读正文。
 - 在列表或操作栏直接按 **n 添加、e 修改、d 删除**，不用先 Tab 到按钮。搜索和表单中的这些字母仍是普通文字。
@@ -138,7 +153,7 @@ Revise 中按 **Alt+P** 打开 Preferences，或用 **Tab / Shift+Tab** 在补�
 - 全局：Pi agent directory 下 `prompt-refine-preferences.json`。
 - 项目：规范化 cwd 下 `.pi/prompt-refine-preferences.json`，不自动上探仓库、不跨 worktree 合并。
 - 每个库最多 500 条、1 MiB；名称最多 120 字符，单条正文最多 16,000 字符；提交组合另受 `maxDraftChars` 限制。文件以 `0600` 创建，不随 session 历史清理。
-- `preferencesKey` 默认 `"alt+p"`，可改为不冲突的非功能修饰键，设为 `null` 可禁用快捷键；Revise 内 Tab → Preferences → Enter 的焦点入口仍可用。普通输入键、保留键、F1–F12 及其修饰组合均不可用；旧默认 `f2` 自动迁移到 Alt+P，其他功能键设置会告警并回退；加载本身不改写配置文件。与本扩展或 Pi 已解析绑定冲突时会提示，不能保证识别其他扩展／终端截获。
+- `preferencesKey` 默认 `"alt+p"`，在 Unsent 原稿和 Revise 中可用；可改为不冲突的非功能修饰键，设为 `null` 可禁用快捷键。Unsent 的 `p`、Revise 内 Tab → Preferences → Enter 不依赖该快捷键。普通输入键、保留键、F1–F12 及其修饰组合均不可用；旧默认 `f2` 自动迁移到 Alt+P，其他功能键设置会告警并回退；加载本身不改写配置文件。与本扩展或 Pi 已解析绑定冲突时会提示，不能保证识别其他扩展／终端截获。
 - 库写入通过同目录 `.lock` 文件协调多进程，并检查编辑版本。忙时重试；冲突时保留表单内容，取消并重新打开 Preferences 后再编辑。崩溃遗留锁只在确认没有写入进程后手工移除。损坏、未知版本或超限库不会被空库覆盖。外部编辑器若绕过锁写文件，不受这套并发协调保证。
 
 实体终端的 Alt 组合键传递与中文 IME 仍需实际验收；自动测试覆盖组件、两种 Pi 渲染器、粘贴和异步状态，不能替代真实终端验证。

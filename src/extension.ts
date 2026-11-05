@@ -176,7 +176,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         // History gates only the default tree; explicit @directories are independent.
         const project = request.project;
         const roundKey = JSON.stringify([request.sessionId, request.roundId]);
-        const source = request.revision ? `${request.draft}\n${request.revision.instruction}` : request.draft;
+        const source = [request.draft, request.revision?.instruction ?? request.editingInstruction].filter((text) => text !== undefined).join("\n");
         // Reserve fixed shares so a frozen default tree and prompt-specific references
         // cannot double the configured per-request listing budgets. Both scopes run
         // under the same wall-clock collection deadline (in parallel).
@@ -206,7 +206,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         }
       }
 
-      const preparedInput = request.preparedInput ?? buildRefineInput(request.draft, request.history, projectText, request.revision);
+      const preparedInput = request.preparedInput ?? buildRefineInput(request.draft, request.history, projectText, request.revision, request.editingInstruction);
       if (signal.aborted) throw new Error("Request cancelled");
       controller.capturePreparedInput(request.requestId, request.generation, preparedInput, diagnostics);
       const budget = budgetRequest(systemPrompt, preparedInput, model, config.maxOutputTokens, request.thinkingLevel);
@@ -896,6 +896,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const result = controller.trigger({
       draft: source.draft,
       revision: { previousCandidate: source.text, instruction },
+      editingInstruction: source.editingInstruction,
+      preferences: source.preferences,
       model: source.model,
       thinkingLevel: effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel),
       generateTitle,
@@ -949,6 +951,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             sessionTitle: candidate?.title && canNameSession(ctx) ? candidate.title : undefined,
             draft,
             revisionInstruction: displayed ? revision?.instruction : source?.revisionInstruction,
+            editingInstruction: displayed?.editingInstruction ?? controller.getDisplayedInput()?.editingInstruction,
             previousCandidate: revision?.previousCandidate,
             accepted: accepted ? { editorChanged: ctx.ui.getEditorText() !== accepted.text } : undefined,
             draftChanged: draft !== undefined && ctx.ui.getEditorText() !== draft,
@@ -984,6 +987,18 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         };
         const workspace = new RefineWorkspace(panel, tui, theme, keybindings, {
           preferences: { repository: new PreferenceStore(getAgentDir(), ctx.cwd), key: config.preferencesKey, maxChars: config.maxDraftChars },
+          draftPreferences: (id) => {
+            if (closed || ctx.sessionManager.getSessionId() !== sessionId || controller.getState().pendingSend) return undefined;
+            const source = controller.getRecord(id);
+            if (!source || source.status !== "unsent" || source.input.contextUnavailable) return undefined;
+            return {
+              selected: source.input.preferences ?? [],
+              save: (selected) => {
+                if (closed || ctx.sessionManager.getSessionId() !== sessionId || controller.getSessionId() !== sessionId) return "Session changed; no selection applied.";
+                return controller.updateDraftPreferences(source, selected);
+              },
+            };
+          },
           original: (id) => {
             if (closed || ctx.sessionManager.getSessionId() !== sessionId) return undefined;
             const source = id === undefined ? undefined : controller.getOriginalRecord(id);

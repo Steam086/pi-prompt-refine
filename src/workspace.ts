@@ -32,6 +32,7 @@ export interface SettingsResult { message: string; persisted: boolean }
 
 interface WorkspaceActions {
   preferences?: { repository: PreferenceRepository; key: KeyId | null; maxChars: number };
+  draftPreferences?(id: number): { selected: SelectedPreference[]; save(selected: SelectedPreference[]): string | undefined } | undefined;
   original?(id?: number): { text: string; save(text: string): string | undefined; cancel(): void } | undefined;
   /** Session-owned text, independent of request snapshots and revision feedback. */
   inputDraft?: { text: string; save(text: string): void };
@@ -109,10 +110,13 @@ export class RefineWorkspace implements Component, Focusable {
     if (this.preferencesKey && Object.values(keys.getResolvedBindings()).some((binding) =>
       (Array.isArray(binding) ? binding : [binding]).some((key) => key && canonicalShortcut(key) === canonicalShortcut(this.preferencesKey!)))) {
       this.preferencesKey = null;
-      this.preferencesKeyNotice = "Preferences key conflicts with Pi bindings; use Tab then Enter. ";
+      this.preferencesKeyNotice = "Preferences key conflicts with Pi bindings; use p on Unsent or Tab then Enter in Revise. ";
     }
     if (actions.tasks) {
-      const taskActions: TaskPanelActions = { ...actions.tasks, revise: (id) => this.openRevision(id),
+      const taskActions: TaskPanelActions = { ...actions.tasks,
+        preferences: actions.draftPreferences && actions.preferences ? (id) => this.openDraftPreferences(id) : undefined,
+        preferencesKey: this.preferencesKey,
+        revise: (id) => this.openRevision(id),
         editOriginal: (id) => this.openOriginal(id), activate: (id) => {
         const applied = actions.tasks!.activate(id);
         if (applied) this.showApplied(id);
@@ -157,7 +161,7 @@ export class RefineWorkspace implements Component, Focusable {
   get focused(): boolean { return this.hasFocus; }
   set focused(value: boolean) {
     this.hasFocus = value;
-    this.input.editor.focused = value && this.mode === "input" && this.inputKind === "draft";
+    this.input.editor.focused = value && !this.preferencePanel && this.mode === "input" && this.inputKind === "draft";
     this.revisionInput.editor.focused = value && !this.preferencePanel && !this.reviewingRequirements && this.revisionFocus === "input" && this.mode === "input" && this.inputKind === "revision";
     this.originalInput.editor.focused = value && this.mode === "input" && this.inputKind === "original";
     if (this.preferencePanel) this.preferencePanel.focused = value;
@@ -209,6 +213,32 @@ export class RefineWorkspace implements Component, Focusable {
         this.focused = this.hasFocus;
         if (!this.disposed) this.tui.requestRender();
       });
+    this.focused = this.hasFocus;
+    this.tui.requestRender();
+  }
+
+  private openDraftPreferences(id: number): void {
+    const options = this.actions.preferences;
+    const target = this.actions.draftPreferences?.(id);
+    const parent = this.mode === "usage" ? this.historyPanel : this.taskPanel;
+    if (!options || !target || this.preferencePanel) {
+      parent?.setNotice("Select an Unsent original with available background to choose Preferences.", "warning");
+      return;
+    }
+    this.preferencePanel = new PreferencePanel(this.tui, this.theme, this.keys, options.repository,
+      target.selected, "", options.maxChars, (selected) => {
+        if (selected) {
+          const error = target.save(selected);
+          // Keep the child's working snapshots available on stale/over-limit failure.
+          if (error) return error;
+        }
+        this.preferencePanel?.dispose(); this.preferencePanel = undefined;
+        // The live per-original summary is the feedback; a sticky notice could
+        // incorrectly advertise this selection after navigating to another task.
+        if (selected) parent?.setNotice("", "muted");
+        this.focused = this.hasFocus;
+        if (!this.disposed) this.tui.requestRender();
+      }, "refine");
     this.focused = this.hasFocus;
     this.tui.requestRender();
   }
@@ -266,6 +296,8 @@ export class RefineWorkspace implements Component, Focusable {
       run: (id) => actions?.run(id), stop: (id) => actions?.stop(id), launchModel: () => actions?.launchModel?.() ?? "No model",
       editOriginal: (id) => this.openOriginal(id),
       revise: (id) => this.openRevision(id),
+      preferences: this.actions.draftPreferences && this.actions.preferences ? (id) => this.openDraftPreferences(id) : undefined,
+      preferencesKey: this.preferencesKey,
     }, this.theme, () => this.tui.terminal.rows, this.keys, true, this.actions.usagePosition);
     this.switchMode("usage");
   }

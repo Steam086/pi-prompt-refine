@@ -28,6 +28,7 @@ interface Packet {
   original_draft?: string;
   previous_candidate?: string;
   revision_instruction?: string;
+  editing_instruction?: string;
   project_context: string | null;
   conversation: {
     status: string;

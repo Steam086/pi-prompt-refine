@@ -48,6 +48,23 @@ describe("minimal history persistence", () => {
     expect(decodeHistory(content, "s")[0]).toMatchObject({ parentId: 1, kind: "revise", input: { revision: { instruction: "Shorter" } } });
   });
 
+  it("retains submitted initial editing text, not preference identities or unsubmitted selections", () => {
+    const source = record();
+    source.input.editingInstruction = "Use sections only when useful.";
+    source.input.preferences = [{ id: "private-preference-id", version: 1, scope: "project", name: "private-name", body: source.input.editingInstruction, sourceBody: source.input.editingInstruction }];
+    const content = encodeHistory([source], "s").content;
+    expect(content).not.toContain("private-");
+    expect(content).not.toContain("preferences");
+    const restored = decodeHistory(content, "s")[0]!;
+    expect(restored.input.editingInstruction).toBe(source.input.editingInstruction);
+    expect(restored.originalInput?.editingInstruction).toBe(source.input.editingInstruction);
+    expect(restored.input.preferences).toBeUndefined();
+    expect(restored.input.contextUnavailable).toBe(true);
+    expect(JSON.parse(encodeHistory([{ ...source, status: "unsent" }], "s").content).records).toEqual([]);
+    const malformed = JSON.parse(content); malformed.records[0].editingInstruction = 42;
+    expect(() => decodeHistory(JSON.stringify(malformed), "s")).toThrow();
+  });
+
   it("excludes unsubmitted drafts and other sessions; restores unfinished calls as interrupted", () => {
     const unsent = { ...record(), status: "unsent" as const };
     const pending = { ...record(2), status: "generating" as const, candidate: undefined, elapsedSeconds: 20 };

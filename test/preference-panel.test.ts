@@ -11,6 +11,8 @@ import * as preferences from "../src/revision-preferences.js";
 import * as presentation from "../src/presentation.js";
 import { panelLayout } from "../src/panel-layout.js";
 import { formatKeyHint, type KeyHint } from "../src/key-hints.js";
+import { RefineController } from "../src/controller.js";
+import { selectHistory } from "../src/context.js";
 
 const esc = "\x1b", enter = "\r", tab = "\t", backTab = "\x1b[Z", down = "\x1b[B", left = "\x1b[D", right = "\x1b[C";
 const ctrlS = "\x13", altP = "\x1bp", bringBack = "\x1b[13;3u";
@@ -312,6 +314,126 @@ describe("preference rendering and responsiveness", () => {
     expect(output).toContain("Write failed"); expect(output).not.toContain("\x1b[2J"); expect(output).not.toContain("\x1b]52");
     const firstLine = wrapTextWithAnsi(presentation.sanitizeTerminalText(message), panelLayout(40, 40).innerWidth)[0]!;
     expect(f.panel.render(40).slice(-2).join("\n")).toContain(f.theme.fg("error", firstLine));
+  });
+});
+
+function unsentWorkspaceSetup(key: KeyId | null = "alt+p", conflict = false, theme = "dark", maxChars = 16000) {
+  const f = setup([], "", theme); f.panel.dispose();
+  if (conflict) f.keys.setUserBindings({ "tui.editor.cursorLineEnd": "alt+p" });
+  const complete = vi.fn(async (_request: unknown) => ({ text: "Result", stopReason: "stop" as const }));
+  const model = { provider: "p", id: "m" };
+  const controller = new RefineController({ complete, maxDraftChars: maxChars, timeoutMs: 1000, onState() {} }, model);
+  controller.setSession("s");
+  for (const draft of ["Original task 中文😀 --literal", "Second original"]) controller.createDraft({ draft, model,
+    sessionId: "s", branchLeafId: null, systemPrompt: "Policy", history: selectHistory([], 0, 0) });
+  const originals = controller.getHistory();
+  const position = { selectedTaskId: originals[0]!.taskId };
+  const run = vi.fn((id: number) => { controller.startRecord(id); });
+  const preview = new PreviewPanel({ state: { phase: "idle", requestId: 0, pendingSend: false },
+    contextLabel: "Original", elapsedSeconds: 0, openHint: "ctrl+\\", canRestore: false }, f.theme, () => f.terminal.rows, () => {});
+  const workspace = new RefineWorkspace(preview, f.tui, f.theme, f.keys, {
+    preferences: { repository: f.repo, key, maxChars },
+    draftPreferences: (id) => {
+      const source = controller.getRecord(id);
+      if (!source || source.status !== "unsent") return undefined;
+      return { selected: source.input.preferences ?? [], save: (selected) => controller.updateDraftPreferences(source, selected) };
+    },
+    taskPosition: position,
+    tasks: { records: () => controller.getHistory(), appliedId: () => undefined, activate: () => false, run, stop() {} },
+    context: () => ({ instructions: "off", tree: false, skills: false }), contextEnabled: () => false,
+    saveContext: async () => ({ message: "", persisted: true }), submit: () => "Unused",
+  });
+  workspace.focused = true;
+  return { ...f, workspace, controller, complete, originals, position, run };
+}
+
+describe("Unsent preference selection", () => {
+  it.each(["dark", "light"])("uses p independently of optional keys, freezes snapshots, and requests only on parent Enter (%s)", async (theme) => {
+    const f = unsentWorkspaceSetup(null, false, theme); const w = f.workspace;
+    expect(text(w)).toContain("Preferences: None");
+    w.handleInput("p"); await loaded(w);
+    expect(text(w)).toContain("Preferences · Unsent original");
+    w.handleInput(" "); w.handleInput(ctrlS);
+    expect(text(w)).toContain("press Enter on the Unsent original");
+    expect(text(w)).not.toContain("Return to Revise");
+    w.handleInput(enter); expect(text(w)).toContain("Full editing instruction");
+    w.handleInput(ctrlS); expect(f.complete).not.toHaveBeenCalled();
+    w.handleInput(esc); w.handleInput(bringBack);
+    expect(f.complete).not.toHaveBeenCalled();
+    expect(f.repo.save).not.toHaveBeenCalled();
+    expect(text(w)).toContain(`Preferences: 1 · ${a.name}`);
+    expect(f.controller.getRecord(f.originals[0]!.id)!.input.draft).toBe(f.originals[0]!.input.draft);
+    f.library.entries[0]!.body = "Changed library text";
+    w.handleInput(enter);
+    expect(f.run).toHaveBeenCalledExactlyOnceWith(f.originals[0]!.id);
+    expect(f.complete.mock.calls[0]![0]).toMatchObject({ editingInstruction: a.body, draft: f.originals[0]!.input.draft });
+    await Promise.resolve(); w.dispose();
+  });
+
+  it("keeps p available when the configured modifier conflicts and does not leak child input", async () => {
+    const f = unsentWorkspaceSetup("alt+p", true); const w = f.workspace;
+    w.handleInput(altP); expect(text(w)).not.toContain("Bring back");
+    w.handleInput("p"); await loaded(w);
+    w.handleInput("n"); w.handleInput("New entry"); w.handleInput(tab);
+    // Add must not prefill the original task as a reusable editing requirement.
+    expect(text(w)).not.toContain(f.originals[0]!.input.draft);
+    for (const key of ["p", "i", "f", enter, ctrlS]) w.handleInput(key);
+    expect(f.run).not.toHaveBeenCalled(); expect(f.complete).not.toHaveBeenCalled();
+    w.handleInput(esc); w.handleInput("y"); w.handleInput(esc);
+    w.handleInput("p"); await loaded(w); w.handleInput(" "); w.handleInput(esc);
+    expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toBeUndefined();
+    w.dispose();
+  });
+
+  it("isolates selections by original, preserves deleted-source snapshots, and explicitly clears them", async () => {
+    const f = unsentWorkspaceSetup(); const w = f.workspace;
+    w.handleInput(altP); await loaded(w); w.handleInput(" "); w.handleInput(bringBack);
+    f.position.selectedTaskId = f.originals[1]!.taskId;
+    expect(text(w)).toContain("Preferences: None");
+    expect(text(w).split("\n")[2]).not.toContain(a.name);
+    w.handleInput("p"); await loaded(w); expect(text(w)).toContain("0 selected");
+    w.handleInput(esc);
+    f.position.selectedTaskId = f.originals[0]!.taskId;
+    f.library.entries = f.library.entries.filter((entry) => entry.id !== a.id);
+    w.handleInput("p"); await loaded(w);
+    expect(text(w)).toContain("1 selected");
+    expect(text(w)).toContain(a.name);
+    // Filter to the retained deleted snapshot and remove it explicitly.
+    w.handleInput("/"); w.handleInput(a.name); w.handleInput(enter); w.handleInput(" "); w.handleInput(bringBack);
+    expect(f.controller.getRecord(f.originals[0]!.id)!.input.editingInstruction).toBeUndefined();
+    expect(f.controller.getRecord(f.originals[1]!.id)!.input.preferences).toBeUndefined();
+    expect(f.complete).not.toHaveBeenCalled(); w.dispose();
+  });
+
+  it("retains over-limit working selections and shows semantic warnings through resize", async () => {
+    const f = unsentWorkspaceSetup(null, false, "light", 40); const w = f.workspace;
+    w.handleInput("p"); await loaded(w);
+    w.handleInput(" "); w.handleInput(down); w.handleInput(" "); w.handleInput(bringBack);
+    expect(text(w)).toContain("Editing requirements exceed 40");
+    expect(w.render(100).join("\n")).toContain(f.theme.fg("warning", "⚠ Editing requirements exceed 40 characters; reduce the selection."));
+    for (const [width, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [80, 30]]) {
+      f.terminal.rows = rows!;
+      const lines = w.render(width!);
+      expect(lines).toHaveLength(panelLayout(width!, rows!).height);
+      for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width!);
+    }
+    expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toBeUndefined();
+    w.handleInput(" "); w.handleInput(bringBack);
+    expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toHaveLength(1);
+    expect(f.complete).not.toHaveBeenCalled(); w.dispose();
+  });
+
+  it("keeps working snapshots in the child if the original changes before bring-back", async () => {
+    const f = unsentWorkspaceSetup(); const w = f.workspace;
+    w.handleInput("p"); await loaded(w); w.handleInput(" ");
+    const source = f.originals[0]!;
+    f.controller.updateDraft(source.id, source.input.draft, "Changed outside child");
+    w.handleInput(bringBack);
+    expect(text(w)).toContain("Cancel and reopen Preferences");
+    w.handleInput(enter); expect(text(w)).toContain("Saved snapshot");
+    expect(f.controller.getRecord(source.id)!.input.preferences).toBeUndefined();
+    expect(f.complete).not.toHaveBeenCalled();
+    w.handleInput(esc); w.handleInput(esc); w.dispose();
   });
 });
 
