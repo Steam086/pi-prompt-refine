@@ -52,13 +52,13 @@ export function panelFrame(layout: PanelLayout, header: string[], body: string[]
 }
 
 /** Shared terminal-column widths keep corresponding hints aligned across rows. */
-export function alignedHints(rows: string[][], width: number): string[] {
+export function alignedHints(rows: string[][], width: number, separator = " · "): string[] {
   const columns = Math.max(0, ...rows.map((row) => row.length));
   const selected: { index: number; width: number }[] = [];
   let used = 0;
   for (let index = 0; index < columns; index++) {
     const columnWidth = Math.max(...rows.map((row) => visibleWidth(row[index] ?? "")));
-    const required = columnWidth + (selected.length ? 3 : 0);
+    const required = columnWidth + (selected.length ? visibleWidth(separator) : 0);
     if (used + required > width) continue;
     selected.push({ index, width: columnWidth });
     used += required;
@@ -69,15 +69,15 @@ export function alignedHints(rows: string[][], width: number): string[] {
     return selected.slice(0, last + 1).map((column, i) => {
       const cell = row[column.index] ?? "";
       return cell + (i < last ? " ".repeat(column.width - visibleWidth(cell)) : "");
-    }).join(" · ");
+    }).join(separator);
   });
 }
 
 /** Omit secondary hints instead of wrapping chrome into the content viewport. */
-export function fittingHints(hints: string[], width: number): string {
+export function fittingHints(hints: string[], width: number, separator = " · "): string {
   let line = "";
   for (const hint of hints) {
-    const next = line ? `${line} · ${hint}` : hint;
+    const next = line ? `${line}${separator}${hint}` : hint;
     if (visibleWidth(next) <= width) line = next;
   }
   return line;
