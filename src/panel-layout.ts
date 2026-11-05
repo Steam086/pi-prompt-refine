@@ -23,8 +23,8 @@ export const WORKSPACE_PAGES = ["Preview", "Usage", "Settings"] as const;
 export type WorkspacePage = typeof WORKSPACE_PAGES[number];
 
 /** One persistent top-level strip; compact terminals retain the active page and arrows. */
-export function workspaceTabs(layout: PanelLayout, active: WorkspacePage, theme: Pick<Theme, "fg" | "bg" | "bold">): string[] {
-  const arrows = layout.innerWidth >= 8;
+export function workspaceTabs(layout: PanelLayout, active: WorkspacePage, theme: Pick<Theme, "fg" | "bg" | "bold">, interactive = true): string[] {
+  const arrows = interactive && layout.innerWidth >= 8;
   const tabs = panelTabs({ ...layout, innerWidth: Math.max(1, layout.innerWidth - (arrows ? 4 : 0)) }, [...WORKSPACE_PAGES], WORKSPACE_PAGES.indexOf(active), theme);
   return tabs.map((line) => line && arrows ? `${theme.fg("muted", "←")} ${line} ${theme.fg("muted", "→")}` : line);
 }

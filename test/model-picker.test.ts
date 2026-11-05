@@ -40,6 +40,18 @@ describe("model picker layout", () => {
     const output = renderModelChoices(items, items[12]!.value, 160, 40, getThemeByName("dark")!).join("\n");
     expect(output).toContain(items[12]!.value);
   });
+  it.each(["dark", "light"])("sanitizes external model identities and descriptions before styling (%s)", (name) => {
+    const theme = getThemeByName(name)!;
+    const unsafe = "\x1b[1m\x1b[31m\x1b]52;c;payload\x07";
+    const item = { value: `provider/model${unsafe}`, label: `provider/model${unsafe}`, description: `Model 中文😀${unsafe}` };
+    const output = renderModelChoices([item], item.value, 100, 40, theme).join("\n");
+    expect(output).not.toContain("\x1b[1m");
+    expect(output).not.toContain("\x1b[31m");
+    expect(output).not.toContain("\x1b]52");
+    expect(output).toContain("Model 中文😀�[1m�[31m�]52;c;payload�");
+    expect(output).toContain("provider/model�[1m�[31m�]52;c;payload�");
+  });
+
   it("handles no results and zero width", () => {
     const theme = getThemeByName("dark")!;
     expect(renderModelChoices([], undefined, 40, 24, theme).join("")).toContain("No matching models");

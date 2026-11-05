@@ -787,6 +787,20 @@ describe("shared refine workspace", () => {
     expect(actions.editSystemPrompt).not.toHaveBeenCalled();
   });
 
+  it.each(["dark", "light"])("keeps clean-settings save failures semantic without leaving stale warning styles (%s)", async (name) => {
+    const { workspace, actions, theme } = create(40, name, true);
+    actions.saveContext.mockRejectedValueOnce(new Error("write failed"));
+    workspace.openSettings(); workspace.handleInput("\x13");
+    await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain(theme.fg("warning", "Could not save context. Retry with Ctrl+S.")));
+    workspace.handleInput("\r"); workspace.handleInput("\r"); workspace.handleInput("\r");
+    expect(textOf(workspace.render(100))).toContain(theme.fg("muted", "Applies to future requests"));
+    actions.cycleThinking!.mockRejectedValueOnce(new Error("write failed"));
+    workspace.openSettings(undefined, 4); workspace.handleInput("\r");
+    await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain(theme.fg("warning", "Could not save thinking level.")));
+    workspace.handleInput("\r");
+    await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain(theme.fg("muted", "Thinking level saved")));
+  });
+
   it("keeps thinking save feedback visible above a short viewport", async () => {
     const { workspace } = create(12, "dark", true);
     workspace.openSettings(undefined, 4);

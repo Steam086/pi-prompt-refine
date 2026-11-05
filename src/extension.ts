@@ -14,6 +14,7 @@ import { buildRefineInput, buildRefineSystemPrompt, parseRefineOutput, selectHis
 import { budgetRequest } from "./budget.js";
 import { BackgroundStatus, renderBackgroundStatus } from "./background-status.js";
 import { renderModelChoices } from "./model-picker.js";
+import { sanitizeTerminalText } from "./presentation.js";
 import { formatKeyHint, type KeyHint } from "./key-hints.js";
 import { RefineWorkspace, type ContextSettings } from "./workspace.js";
 import { PreferenceStore } from "./preference-store.js";
@@ -431,9 +432,9 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         if (!model) return theme.fg("muted", statusFor(model));
         return [
           theme.fg("muted", "Selected model"),
-          theme.fg("text", theme.bold(model.name)),
-          theme.fg("muted", displayModel(modelRef(model))),
-          theme.fg("text", theme.bold(statusFor(model))),
+          theme.fg("text", theme.bold(sanitizeTerminalText(model.name))),
+          theme.fg("muted", sanitizeTerminalText(displayModel(modelRef(model)))),
+          theme.fg("muted", sanitizeTerminalText(statusFor(model))),
         ].join("\n");
       };
       const updateThinkingStatus = (model?: Model<Api>) => {
@@ -442,9 +443,9 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       const rebuild = () => {
         container.clear();
         container.addChild(new DynamicBorder((text) => theme.fg("borderMuted", text)));
-        container.addChild(new Text(theme.fg("accent", theme.bold(source ? "Run original with another model" : "Choose optimizer model")), 1, 0));
+        container.addChild(new Text(theme.fg("text", theme.bold(source ? "Run original with another model" : "Choose optimizer model")), 1, 0));
         container.addChild(new Text(theme.fg("muted", source ? "Same original and conversation context · Default model unchanged" : "Optimizer only · Main session unchanged"), 1, 0));
-        container.addChild(new Text(`${theme.fg("muted", "Search:")} ${query ? theme.fg("text", query) : theme.fg("muted", "provider/model, name, or thinking")}`, 1, 1));
+        container.addChild(new Text(`${theme.fg("muted", "Search:")} ${query ? theme.fg("text", sanitizeTerminalText(query)) : theme.fg("muted", "provider/model, name, or thinking")}`, 1, 1));
         const items = modelPickerItems(available, query, controller.getModel()).map((item) => ({
           ...item, description: `${taskModels.includes(item.value) ? "This task · " : ""}${item.description ?? ""}`,
         }));
