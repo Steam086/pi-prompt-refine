@@ -11,6 +11,14 @@ export const HISTORY_LIMIT = 100;
 export const HISTORY_MAX_BYTES = 2 * 1024 * 1024;
 export const historyPath = (sessionFile: string): string => `${sessionFile}.prompt-refine.json`;
 
+export interface HistoryStorageStatus {
+  state: "disabled" | "no-session-file" | "unavailable" | "empty" | "saving" | "saved" | "load-error" | "save-error" | "cleared" | "clear-error";
+  path?: string;
+  savedIds: number[];
+  memoryOnlyIds: number[];
+  omittedIds: number[];
+}
+
 /** Deliberately not a serialized RefineRequestInput/Candidate: background stays in RAM. */
 interface SavedRecord {
   id: number;
@@ -100,8 +108,9 @@ function restore(saved: SavedRecord, sessionId: string): RefineRecord {
   };
 }
 
-export function encodeHistory(records: RefineRecord[], sessionId: string): { content: string; omitted: number } {
+export function encodeHistory(records: RefineRecord[], sessionId: string): { content: string; omitted: number; savedIds: number[] } {
   const saved: string[] = [];
+  const savedIds: number[] = [];
   const eligible = records.filter((record) => record.input.sessionId === sessionId && record.status !== "unsent");
   let omitted = 0;
   const prefix = `${JSON.stringify({ version: 1, sessionId }).slice(0, -1)},"records":[`;
@@ -114,9 +123,10 @@ export function encodeHistory(records: RefineRecord[], sessionId: string): { con
     const size = Buffer.byteLength(entry) + (saved.length ? 1 : 0);
     if (bytes + size > HISTORY_MAX_BYTES) { omitted++; continue; }
     saved.unshift(entry);
+    savedIds.unshift(record.id);
     bytes += size;
   }
-  return { content: `${prefix}${saved.join(",")}]}` + "\n", omitted };
+  return { content: `${prefix}${saved.join(",")}]}` + "\n", omitted, savedIds };
 }
 
 export function decodeHistory(content: string, sessionId: string): RefineRecord[] {
@@ -140,8 +150,33 @@ export class HistoryStore {
   private last?: string;
   private writing?: Promise<void>;
   private enabled = true;
+  private paused?: "load-error" | "save-error" | "cleared" | "clear-error";
+  private savedIds: number[] = [];
+  private savedRecords = new Map<number, SavedRecord>();
+  private pendingIds: number[] = [];
+  private omittedIds: number[] = [];
   private warned = new Set<string>();
-  constructor(readonly path: string, readonly sessionId: string, private readonly warn: (message: string) => void) {}
+  constructor(readonly path: string, readonly sessionId: string, private readonly warn: (message: string) => void,
+    private readonly changed: () => void = () => {}) {}
+
+  getStatus(records: readonly RefineRecord[]): HistoryStorageStatus {
+    const eligible = records.filter((record) => record.input.sessionId === this.sessionId && record.status !== "unsent");
+    // A run ID alone cannot prove that its current result/accept/send state was saved.
+    const memoryOnlyIds = eligible.filter((record) => {
+      const saved = this.savedRecords.get(record.id);
+      return !saved || Object.entries(project(record)).some(([key, value]) => JSON.stringify(value) !== JSON.stringify(saved[key as keyof SavedRecord]));
+    }).map((record) => record.id);
+    return { state: this.paused ?? (this.writing || this.pending !== undefined ? "saving" : this.last ? "saved" : "empty"),
+      path: this.path, savedIds: [...this.savedIds], memoryOnlyIds, omittedIds: [...this.omittedIds] };
+  }
+
+  private remember(content: string): void {
+    this.last = content;
+    this.savedRecords = new Map((JSON.parse(content) as { records: unknown[] }).records.map((value) => {
+      const record = parseRecord(value)!;
+      return [record.id, record];
+    }));
+  }
 
   private warning(message: string): void {
     if (this.warned.has(message)) return;
@@ -164,12 +199,15 @@ export class HistoryStore {
         }
         const content = data.subarray(0, length).toString("utf8");
         const records = decodeHistory(content, this.sessionId);
-        this.last = content;
+        this.remember(content);
+        this.savedIds = records.map((record) => record.id);
         return records;
       } finally { await file.close(); }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       this.enabled = false;
+      this.paused = "load-error";
+      this.changed();
       this.warning("Prompt Refine history could not be loaded; saved file kept unchanged. Use /refine history clear to remove it.");
       return [];
     }
@@ -177,24 +215,29 @@ export class HistoryStore {
 
   save(records: RefineRecord[]): void {
     if (!this.enabled) return;
-    const { content, omitted } = encodeHistory(records, this.sessionId);
+    const { content, omitted, savedIds } = encodeHistory(records, this.sessionId);
+    const kept = new Set(savedIds);
+    this.omittedIds = records.filter((record) => record.input.sessionId === this.sessionId && record.status !== "unsent" && !kept.has(record.id)).map((record) => record.id);
     if (omitted) this.warning("Prompt Refine saved history limit reached (100 runs / 2 MiB); some records remain in memory only.");
     if ((!this.writing && content === this.last) || content === this.pending) return;
     // An untouched empty session should not create a sidecar.
     if (!this.last && records.every((record) => record.input.sessionId !== this.sessionId || record.status === "unsent")) return;
     this.pending = content;
+    this.pendingIds = savedIds;
     this.start();
   }
 
   private start(): void {
     if (!this.writing && this.enabled && this.pending !== undefined) {
-      this.writing = this.drain().finally(() => { this.writing = undefined; this.start(); });
+      this.writing = this.drain().finally(() => { this.writing = undefined; this.start(); this.changed(); });
+      this.changed();
     }
   }
 
   private async drain(): Promise<void> {
     while (this.pending !== undefined && this.enabled) {
       const content = this.pending;
+      const savedIds = this.pendingIds;
       this.pending = undefined;
       const temp = `${this.path}.${randomUUID()}.tmp`;
       try {
@@ -203,10 +246,12 @@ export class HistoryStore {
         await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
         await writeFile(temp, content, { encoding: "utf8", flag: "wx", mode: 0o600 });
         await rename(temp, this.path);
-        this.last = content;
+        this.remember(content);
+        this.savedIds = savedIds;
       } catch {
         this.pending = undefined;
         this.enabled = false;
+        this.paused = "save-error";
         this.warning("Prompt Refine history save failed; current records remain in memory. Saving paused until reload.");
       } finally { await rm(temp, { force: true }).catch(() => undefined); }
     }
@@ -219,7 +264,16 @@ export class HistoryStore {
     this.enabled = false;
     this.pending = undefined;
     await this.flush();
-    await rm(this.path, { force: true });
-    this.last = undefined;
+    try {
+      await rm(this.path, { force: true });
+      this.last = undefined;
+      this.savedIds = [];
+      this.savedRecords.clear();
+      this.omittedIds = [];
+      this.paused = "cleared";
+    } catch (error) {
+      this.paused = "clear-error";
+      throw error;
+    } finally { this.changed(); }
   }
 }

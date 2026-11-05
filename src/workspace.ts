@@ -8,6 +8,7 @@ import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { TaskPanel, type TaskPanelActions, type TaskPanelPosition } from "./task-panel.js";
 import type { RefineRecord } from "./history.js";
+import type { HistoryStorageStatus } from "./history-store.js";
 import { PreferencePanel } from "./preference-panel.js";
 import { composeRevision, type PreferenceRepository, type RevisionDraft, type SelectedPreference } from "./revision-preferences.js";
 import { canonicalShortcut } from "./config.js";
@@ -27,6 +28,8 @@ const instructionDescriptions = {
   off: "Do not include Pi rules (e.g. AGENTS.md) in refinement requests.",
 };
 
+export interface SettingsResult { message: string; persisted: boolean }
+
 interface WorkspaceActions {
   preferences?: { repository: PreferenceRepository; key: KeyId | null; maxChars: number };
   original?(id?: number): { text: string; save(text: string): string | undefined; cancel(): void } | undefined;
@@ -34,6 +37,7 @@ interface WorkspaceActions {
   inputDraft?: { text: string; save(text: string): void };
   inputCaptureOnly?(): boolean;
   history?(): RefineRecord[];
+  historyStorage?(): HistoryStorageStatus;
   tasks?: TaskPanelActions;
   taskPosition?: TaskPanelPosition;
   usagePosition?: TaskPanelPosition;
@@ -42,8 +46,8 @@ interface WorkspaceActions {
   optimizer?(): { model: string; thinking: string; thinkingEnabled: boolean };
   chooseModel?(context: ContextSettings): void;
   editSystemPrompt?(context: ContextSettings): void;
-  cycleThinking?(): Promise<string>;
-  saveContext(selected: ContextSettings): Promise<string>;
+  cycleThinking?(): Promise<SettingsResult>;
+  saveContext(selected: ContextSettings): Promise<SettingsResult>;
   /** Undefined means the request was accepted; errors stay beside the retained input. */
   submit(text: string): string | undefined;
   /** Captures one actionable candidate; the callback rejects stale targets. */
@@ -252,6 +256,7 @@ export class RefineWorkspace implements Component, Focusable {
     this.historyPanel = new TaskPanel({
       ...actions,
       records: () => this.actions.history?.() ?? [],
+      historyStorage: this.actions.historyStorage,
       appliedId: () => actions?.appliedId(),
       activate: (id) => {
         const applied = actions?.activate(id) ?? false;
@@ -318,7 +323,11 @@ export class RefineWorkspace implements Component, Focusable {
     if (!this.actions.cycleThinking || !this.settingsOptimizer?.thinkingEnabled) return;
     this.saving = true;
     this.settingsFailed = false;
-    void this.actions.cycleThinking().then((notice) => { this.settingsNotice = notice; })
+    void this.actions.cycleThinking().then((result) => {
+      if (this.disposed) return;
+      this.settingsNotice = result.message;
+      this.settingsFailed = !result.persisted;
+    })
       .catch(() => { this.settingsNotice = "Could not save thinking level."; this.settingsFailed = true; })
       .finally(() => {
         this.saving = false;
@@ -391,7 +400,7 @@ export class RefineWorkspace implements Component, Focusable {
       return true;
     }
     const activeTasks = this.mode === "main" ? this.taskPanel : this.mode === "usage" ? this.historyPanel : undefined;
-    if (activeTasks?.isConfirmingDelete()) {
+    if (activeTasks?.ownsInput()) {
       activeTasks.handleInput(data);
       this.tui.requestRender();
       return true;
@@ -430,10 +439,15 @@ export class RefineWorkspace implements Component, Focusable {
         this.saving = true;
         this.settingsFailed = false;
         this.tui.requestRender();
-        void this.actions.saveContext({ ...this.selected }).then((notice) => {
+        void this.actions.saveContext({ ...this.selected }).then((result) => {
           if (this.disposed) return;
-          this.panel.setNotice(notice);
-          this.taskPanel?.setNotice(notice);
+          if (!result.persisted) {
+            this.settingsNotice = result.message;
+            this.settingsFailed = true;
+            return;
+          }
+          this.panel.setNotice(result.message);
+          this.taskPanel?.setNotice(result.message);
           this.settingsInitialized = false;
           this.switchMode("main");
         }).catch(() => {

@@ -16,8 +16,8 @@ export function alignedKeyHints(rows: KeyHint[][], width: number, theme: HintThe
   return alignedHints(rows.map((row) => row.map((hint) => formatKeyHint(hint, theme))), width, theme.fg("muted", " · "));
 }
 
-export function fittingKeyHints(hints: KeyHint[], width: number, theme: HintTheme): string {
-  return fittingHints(hints.map((hint) => formatKeyHint(hint, theme)), width, theme.fg("muted", " · "));
+export function fittingKeyHints(hints: KeyHint[], width: number, theme: HintTheme, separator = " · "): string {
+  return fittingHints(hints.map((hint) => formatKeyHint(hint, theme)), width, theme.fg("muted", separator));
 }
 
 /** Fixed tab stops, measured in terminal columns (never literal tabs or ANSI length). */

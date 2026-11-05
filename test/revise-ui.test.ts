@@ -29,7 +29,7 @@ function setup(name: string, rows = 40, columns = 100, host?: TUI) {
   const label = "Run #3 · openai-codex/gpt-6-luna";
   const workspace = new RefineWorkspace(preview, tui, theme, getKeybindings(), {
     context: () => ({ instructions: "off", tree: false, skills: false }), contextEnabled: () => true,
-    submit: vi.fn(), saveContext: async () => "Saved",
+    submit: vi.fn(), saveContext: async () => ({ message: "Saved", persisted: true }),
     revision: () => ({ key: "run-3", label, submit }),
     preferences: { key: "alt+p", maxChars: 16000, repository: {
       load: async () => ({ entries: [], errors: {} }), save: async () => { throw new Error("Read-only fixture"); }, remove: async () => {},

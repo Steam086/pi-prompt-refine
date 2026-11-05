@@ -1025,6 +1025,14 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             },
           },
           history: () => controller.getHistory(),
+          historyStorage: () => {
+            const file = ctx.sessionManager.getSessionFile();
+            const records = controller.getHistory();
+            if (config.historyPersistence && historyStore?.sessionId === sessionId) return historyStore.getStatus(records);
+            return { state: !config.historyPersistence ? "disabled" : !file ? "no-session-file" : "unavailable",
+              path: file ? historyPath(file) : undefined, savedIds: [], omittedIds: [],
+              memoryOnlyIds: records.filter((record) => record.input.sessionId === sessionId && record.status !== "unsent").map((record) => record.id) };
+          },
           taskPosition: position,
           usagePosition,
           tasks: {
@@ -1066,25 +1074,27 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           chooseModel: (context) => finish({ action: "model", generation: controller.getGeneration(), settingsContext: context }),
           editSystemPrompt: (context) => finish({ action: "system-prompt", generation: controller.getGeneration(), settingsContext: context }),
           cycleThinking: async () => {
-            if (closed || ctx.sessionManager.getSessionId() !== sessionId) return "Session changed; settings not saved.";
+            if (closed || ctx.sessionManager.getSessionId() !== sessionId) return { message: "Session changed; settings not saved.", persisted: false };
             const ref = controller.getModel();
             const model = registeredModels(ctx).find((candidate) => ref && sameModel(candidate, ref));
-            if (!model) return "Choose an available model first.";
+            if (!model) return { message: "Choose an available model first.", persisted: false };
             const levels = getSupportedThinkingLevels(model);
-            if (levels.length <= 1) return "Thinking level is fixed for this model.";
+            if (levels.length <= 1) return { message: "Thinking level is fixed for this model.", persisted: false };
             const current = effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel);
             config.thinkingLevel = levels[(levels.indexOf(current) + 1) % levels.length];
             rememberThinking(model, config.thinkingLevel!);
-            return await persistConfig(ctx) ? "Thinking level saved" : "Thinking applied · Not persisted; check configuration";
+            const persisted = await persistConfig(ctx);
+            return { message: persisted ? "Thinking level saved" : "Thinking applied · Not persisted; check configuration", persisted };
           },
           saveContext: async (selected) => {
-            if (closed || ctx.sessionManager.getSessionId() !== sessionId) return "Session changed; settings not saved.";
+            if (closed || ctx.sessionManager.getSessionId() !== sessionId) return { message: "Session changed; settings not saved.", persisted: false };
             config.projectContext.instructionsEnabled = selected.instructions !== "off";
             // Off leaves the saved follow-up preference intact.
             if (selected.instructions !== "off") config.projectContext.instructionsOnFollowUp = selected.instructions === "always";
             config.projectContext.tree.enabled = selected.tree;
             config.projectContext.skillsEnabled = selected.skills;
-            return await persistConfig(ctx) ? "Context saved · Applies to next round" : "Context applied · Not persisted; check configuration";
+            const persisted = await persistConfig(ctx);
+            return { message: persisted ? "Context saved · Applies to next round" : "Context applied · Not persisted; check configuration", persisted };
           },
           revision: (id) => {
             const source = id === undefined ? controller.getCandidate() : controller.getRecord(id)?.candidate;
@@ -1299,7 +1309,9 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         const epoch = historyEpoch;
         if (!await ctx.ui.confirm("Clear saved Refine history?", "Delete this session's Refine sidecar only. In-memory records stay visible; saving pauses until reload. Pi conversation is unchanged.")) return;
         if (epoch !== historyEpoch || sessionId !== controller.getSessionId()) return;
-        historyStore ??= new HistoryStore(historyPath(file), sessionId, (message) => notify(ctx, message, "warning"));
+        historyStore ??= new HistoryStore(historyPath(file), sessionId, (message) => notify(ctx, message, "warning"), () => {
+          if (sessionId === controller.getSessionId()) refreshPreview?.();
+        });
         try {
           await historyStore.clear();
           if (epoch !== historyEpoch) return;
@@ -1363,11 +1375,14 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     if (config.historyPersistence && sessionFile) {
       const store = new HistoryStore(historyPath(sessionFile), ctx.sessionManager.getSessionId(), (message) => {
         if (store.sessionId === controller.getSessionId()) notify(ctx, message, "warning");
+      }, () => {
+        if (historyStore === store) refreshPreview?.();
       });
       const records = await store.load();
       if (epoch !== historyEpoch) return;
       controller.restoreHistory(records);
       historyStore = store;
+      refreshPreview?.();
       if (records.length) notify(ctx, `Restored ${records.length} Refine runs · background not saved · /refine history`, "info");
     }
     for (const warning of loaded.warnings) notify(ctx, warning, "warning");

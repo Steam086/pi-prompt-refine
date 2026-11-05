@@ -34,7 +34,7 @@ it.skipIf(!process.env.REFINE_BENCHMARK)("measures workspace navigation latency 
         const workspace = new RefineWorkspace(panel, tui, theme, getKeybindings(), {
           context: () => ({ instructions: "always" as const, tree: true, skills: false }), contextEnabled: () => true,
           optimizer: () => ({ model: "provider/long-model-identifier-with-extra-details", thinking: "high · Extension setting", thinkingEnabled: true }),
-          chooseModel() {}, editSystemPrompt() {}, saveContext: async () => "Saved", submit: () => undefined,
+          chooseModel() {}, editSystemPrompt() {}, saveContext: async () => ({ message: "Saved", persisted: true }), submit: () => undefined,
         });
         const component = {
           render: (width: number) => workspace.render(width), invalidate: () => workspace.invalidate(),

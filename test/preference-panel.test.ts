@@ -325,7 +325,7 @@ function workspaceSetup(key: KeyId | null = "alt+p", conflict = false, theme = "
   const workspace = new RefineWorkspace(preview, f.tui, f.theme, f.keys, {
     preferences: { repository: f.repo, key, maxChars: 16000 },
     context: () => ({ instructions: "off", tree: false, skills: false }), contextEnabled: () => false,
-    saveContext: async () => "", submit: vi.fn(), revision: () => ({ key: identity, submit }),
+    saveContext: async () => ({ message: "", persisted: true }), submit: vi.fn(), revision: () => ({ key: identity, submit }),
   });
   workspace.focused = true;
   return { ...f, workspace, submit, identity: (id: string) => { identity = id; } };

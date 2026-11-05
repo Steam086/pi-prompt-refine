@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -22,7 +22,8 @@ async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), "refine-history-")); dirs.push(dir);
   const path = join(dir, "session.jsonl.prompt-refine.json");
   const warn = vi.fn();
-  return { dir, path, warn, store: new HistoryStore(path, "s", warn) };
+  const changed = vi.fn();
+  return { dir, path, warn, changed, store: new HistoryStore(path, "s", warn, changed) };
 }
 
 describe("minimal history persistence", () => {
@@ -127,6 +128,61 @@ describe("minimal history persistence", () => {
     const { store, path } = await fixture();
     store.save([]); store.save([{ ...record(), status: "unsent" }]); await store.flush();
     await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("reports empty, pending, saved and changed versions without mistaking IDs for persisted state", async () => {
+    const { store, path, changed } = await fixture();
+    await store.load();
+    const source = record();
+    const unsent = { ...record(2), status: "unsent" as const };
+    const other = record(3); other.input.sessionId = "other";
+    const records = [source, unsent, other];
+    expect(store.getStatus(records)).toEqual({ state: "empty", path, savedIds: [], memoryOnlyIds: [1], omittedIds: [] });
+    store.save(records);
+    expect(store.getStatus(records)).toMatchObject({ state: "saving", savedIds: [], memoryOnlyIds: [1] });
+    await store.flush();
+    expect(store.getStatus(records)).toEqual({ state: "saved", path, savedIds: [1], memoryOnlyIds: [], omittedIds: [] });
+    source.candidate!.text = "New result version"; source.sentAt = 789;
+    expect(store.getStatus(records)).toMatchObject({ state: "saved", savedIds: [1], memoryOnlyIds: [1] });
+    store.save(records);
+    expect(store.getStatus(records).state).toBe("saving");
+    await store.flush();
+    expect(store.getStatus(records).memoryOnlyIds).toEqual([]);
+    const reloaded = new HistoryStore(path, "s", vi.fn());
+    await reloaded.load();
+    expect(reloaded.getStatus(records)).toMatchObject({ state: "saved", savedIds: [1], memoryOnlyIds: [] });
+    await store.clear();
+    store.save(records);
+    expect(store.getStatus(records)).toEqual({ state: "cleared", path, savedIds: [], memoryOnlyIds: [1], omittedIds: [] });
+    expect(changed).toHaveBeenCalled();
+  });
+
+  it("keeps load/write/clear failures queryable after their notification", async () => {
+    const { store, path, warn } = await fixture();
+    await writeFile(path, "invalid history"); await store.load();
+    expect(store.getStatus([record()])).toMatchObject({ state: "load-error", savedIds: [], memoryOnlyIds: [1] });
+    await store.clear();
+    await mkdir(path);
+    const writer = new HistoryStore(path, "s", warn);
+    writer.save([record()]); await writer.flush();
+    expect(writer.getStatus([record()])).toMatchObject({ state: "save-error", path, savedIds: [], memoryOnlyIds: [1] });
+    writer.save([record(2)]);
+    expect(writer.getStatus([record(2)]).state).toBe("save-error");
+    await expect(writer.clear()).rejects.toThrow();
+    expect(writer.getStatus([record()]).state).toBe("clear-error");
+  });
+
+  it("identifies exact capacity omissions without treating them as saved", async () => {
+    const { store, path } = await fixture();
+    const records = Array.from({ length: 9 }, (_, index) => record(index + 1));
+    records.forEach((item) => { item.candidate!.text = "中".repeat(100_000); });
+    store.save(records); await store.flush();
+    const saved = decodeHistory(await readFile(path, "utf8"), "s").map((item) => item.id);
+    const omitted = records.map((item) => item.id).filter((id) => !saved.includes(id));
+    expect(omitted.length).toBeGreaterThan(0);
+    expect(store.getStatus(records)).toMatchObject({ state: "saved", savedIds: saved, omittedIds: omitted, memoryOnlyIds: omitted });
+    store.save([records.at(-1)!]); await store.flush();
+    expect(store.getStatus([records.at(-1)!])).toMatchObject({ omittedIds: [], memoryOnlyIds: [] });
   });
 
   it("restores records without activating candidates, and guards every old-background execution path", () => {
