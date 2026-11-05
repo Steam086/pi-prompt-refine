@@ -3,7 +3,7 @@ import { stripVTControlCharacters } from "node:util";
 import { CURSOR_MARKER, KeybindingsManager, TUI_KEYBINDINGS, visibleWidth, type TUI } from "@earendil-works/pi-tui";
 import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { PreviewPanel, type PreviewOptions } from "../src/preview.js";
-import { RefineWorkspace } from "../src/workspace.js";
+import { RefineWorkspace, type SettingsResult } from "../src/workspace.js";
 import { panelLayout } from "../src/panel-layout.js";
 import { formatKeyHint } from "../src/key-hints.js";
 import type { RefineRecord } from "../src/history.js";
@@ -26,9 +26,9 @@ function create(rows = 40, themeName = "dark", optimizer = false, inputText = ""
     context: () => ({ instructions: "always" as const, tree: true, skills: false }), contextEnabled: () => true,
     ...(optimizer ? {
       optimizer: () => ({ model: "provider/long-model-identifier-with-extra-details", thinking: "high · Extension setting", thinkingEnabled: true }),
-      chooseModel: vi.fn(), editSystemPrompt: vi.fn(), cycleThinking: vi.fn(async () => "Thinking level saved"),
+      chooseModel: vi.fn(), editSystemPrompt: vi.fn(), cycleThinking: vi.fn(async (): Promise<SettingsResult> => ({ message: "Thinking level saved", persisted: true })),
     } : {}),
-    saveContext: vi.fn(async () => "Context saved"),
+    saveContext: vi.fn(async (): Promise<SettingsResult> => ({ message: "Context saved", persisted: true })),
     submit: vi.fn((_text: string): string | undefined => undefined),
     revision: vi.fn((): { key: string; submit(text: string): string | undefined } | undefined => undefined),
   };
@@ -761,7 +761,7 @@ describe("shared refine workspace", () => {
 
   it("keeps Shift+Tab for thinking and blocks group/page navigation while saving", async () => {
     const { workspace, actions } = create(40, "dark", true);
-    let resolve!: (notice: string) => void;
+    let resolve!: (notice: SettingsResult) => void;
     actions.cycleThinking!.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
     workspace.openSettings();
     workspace.handleInput("\x1b[C");
@@ -775,7 +775,7 @@ describe("shared refine workspace", () => {
       workspace.handleInput(key);
       expect(workspace.render(100)).toEqual(saving);
     }
-    resolve("Thinking level saved");
+    resolve({ message: "Thinking level saved", persisted: true });
     await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain("Thinking level saved"));
     const status = workspace.render(100)[2];
     expect(status).not.toContain("Applies to future requests");
@@ -799,6 +799,46 @@ describe("shared refine workspace", () => {
     await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain(theme.fg("warning", "Could not save thinking level.")));
     workspace.handleInput("\r");
     await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain(theme.fg("muted", "Thinking level saved")));
+  });
+
+  it.each(["dark", "light"])("warns on applied-but-unpersisted settings and allows retry in %s", async (name) => {
+    const { workspace, actions, terminal, theme } = create(40, name, true);
+    const failure = { message: "Context applied · Not persisted; check configuration", persisted: false };
+    actions.saveContext.mockResolvedValueOnce(failure);
+    workspace.openSettings(); workspace.handleInput("\r"); workspace.handleInput("\x13");
+    await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain(theme.fg("warning", `${failure.message} · Unsaved context changes`)));
+    expect(textOf(workspace.render(100))).toContain("Settings");
+    expect(textOf(workspace.render(100))).not.toContain("Context saved");
+    for (const rows of [8, 12, 40]) {
+      terminal.rows = rows;
+      expect(textOf(workspace.render(100))).toContain("Not persisted");
+      expect(workspace.render(100)).toHaveLength(panelLayout(100, rows).height);
+    }
+    workspace.handleInput("\x13");
+    await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain("Context saved"));
+    terminal.rows = 40;
+    actions.cycleThinking!.mockResolvedValueOnce({ message: "Thinking applied · Not persisted; check configuration", persisted: false });
+    workspace.openSettings(undefined, 4); workspace.handleInput("\r");
+    await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain(theme.fg("warning", "Thinking applied · Not persisted; check configuration")));
+    workspace.handleInput("\r");
+    await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain(theme.fg("muted", "Thinking level saved")));
+  });
+
+  it("keeps history storage and help read-only, including page arrows and submission keys", () => {
+    const { workspace, actions } = create();
+    Object.assign(actions, { historyStorage: () => ({ state: "no-session-file", savedIds: [], memoryOnlyIds: [], omittedIds: [] }) });
+    workspace.openUsage(); workspace.handleInput("b");
+    expect(textOf(workspace.render(100))).toContain("History storage");
+    expect(textOf(workspace.render(100))).toContain("No session file");
+    for (const key of ["\x1b[C", "\x1b[D", "\r", "a", "s", "f", "i", "d"]) {
+      workspace.handleInput(key);
+      expect(textOf(workspace.render(100))).toContain("History storage");
+    }
+    workspace.handleInput("\x1b"); expect(textOf(workspace.render(100))).toContain("Usage · All rounds");
+    workspace.handleInput("?");
+    workspace.handleInput("\x1b[C"); expect(textOf(workspace.render(100))).toContain("Available actions");
+    workspace.handleInput("\x1b"); expect(textOf(workspace.render(100))).toContain("Usage · All rounds");
+    expect(actions.submit).not.toHaveBeenCalled(); expect(actions.saveContext).not.toHaveBeenCalled();
   });
 
   it("keeps thinking save feedback visible above a short viewport", async () => {
@@ -843,7 +883,7 @@ describe("shared refine workspace", () => {
 
   it("ignores late save completion and stale input after disposal", async () => {
     const { workspace, actions } = create();
-    let resolve!: (notice: string) => void;
+    let resolve!: (notice: SettingsResult) => void;
     actions.saveContext.mockImplementation(() => new Promise((done) => { resolve = done; }));
     workspace.handleInput("\x1b[D");
     workspace.handleInput(" ");
@@ -852,7 +892,7 @@ describe("shared refine workspace", () => {
     workspace.handleInput("\x13");
     expect(actions.saveContext).toHaveBeenCalledTimes(1);
     workspace.dispose();
-    resolve("saved");
+    resolve({ message: "saved", persisted: true });
     await Promise.resolve();
     expect(textOf(workspace.render(80))).toContain("Settings");
     workspace.handleInput("i");

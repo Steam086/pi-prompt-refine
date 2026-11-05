@@ -592,6 +592,43 @@ describe("persistent session-local Refine history", () => {
     expect(await readFile(path(h), "utf8")).toContain("Draft A");
   });
 
+  it.each([
+    { persistHistory: false, enabled: true, label: "No session file · memory only" },
+    { persistHistory: true, enabled: false, label: "Disabled by historyPersistence=false" },
+    { persistHistory: true, enabled: true, label: "Enabled · no savable records yet" },
+  ])("queries history storage without changing work ($label)", async ({ persistHistory, enabled, label }) => {
+    const h = await makeHarness({ persistHistory, config: { historyPersistence: enabled } });
+    h.holdPanel();
+    const view = h.command("usage", h.context);
+    expect(h.panelLines(40).join("\n")).toContain("b Storage");
+    h.panelInput("b");
+    expect(h.panelLines(100).join("\n")).toContain("History storage");
+    expect(h.panelLines(100).join("\n")).toContain(label);
+    for (const key of ["a", "s", "i", "m", "d", "\r", "\x1b[C", "\x1b[D"]) h.panelInput(key);
+    expect(h.panelLines(100).join("\n")).toContain("History storage");
+    expect(h.complete).not.toHaveBeenCalled(); expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
+    h.panelInput("q"); h.panelInput("q"); h.panelInput("q"); await view;
+  });
+
+  it("queries confirmed snapshots, file location and the paused-after-clear state", async () => {
+    const h = await makeHarness({ persistHistory: true });
+    await trigger(h); await h.reload();
+    h.holdPanel();
+    let view = h.command("usage", h.context);
+    h.panelInput("b");
+    expect(h.panelLines(100).join("\n")).toContain("Saved");
+    expect(h.panelLines(100).join("\n")).toContain("Confirmed saved runs");
+    expect(h.panelLines(100).join("\n")).toContain("#1");
+    expect(h.panelLines(100).join("\n")).toContain("session.jsonl.prompt-refine.json");
+    h.panelInput("q"); h.panelInput("q"); h.panelInput("q"); await view;
+    h.setConfirm(true); await h.command("history clear", h.context);
+    view = h.command("usage", h.context); h.panelInput("b");
+    expect(h.panelLines(100).join("\n")).toContain("Cleared · saving paused until reload");
+    expect(h.panelLines(100).join("\n")).toContain("Memory-only / pending runs");
+    h.panelInput("q"); h.panelInput("q"); h.panelInput("q"); await view;
+    expect(h.complete).toHaveBeenCalledTimes(1);
+  });
+
   it("reports persistence failure without failing the model request", async () => {
     const h = await makeHarness({ persistHistory: true });
     await mkdir(path(h)); // A non-file destination must not be replaced.
@@ -600,6 +637,11 @@ describe("persistent session-local Refine history", () => {
     expect(h.widgetLines().join("\n")).toContain("1 new");
     expect(h.complete).toHaveBeenCalledTimes(1);
     expect(h.editorWrites).toEqual([]);
+    h.notifications.length = 0;
+    h.holdPanel(); const view = h.command("usage", h.context); h.panelInput("b");
+    expect(h.panelLines(100).join("\n")).toContain("Save failed · saving paused until reload");
+    expect(h.panelLines(100).join("\n")).toContain("Memory-only / pending runs");
+    h.panelInput("q"); h.panelInput("q"); h.panelInput("q"); await view;
   });
 
   it("supports opt-out and confirmed deletion without old records recreating the file", async () => {
@@ -2365,6 +2407,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Not persisted"));
     expect(harness.panelLines().join("\n")).not.toContain("Context saved");
+    expect(harness.panelLines().join("\n")).toContain("Settings");
+    harness.panelInput("q"); // Failed persistence stays in Settings for retry.
     harness.panelInput("q");
     await view;
   });

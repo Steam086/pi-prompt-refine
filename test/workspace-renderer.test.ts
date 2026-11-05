@@ -44,9 +44,10 @@ describe("workspace terminal rendering", () => {
       context: () => ({ instructions: "always" as const, tree: true, skills: false }), contextEnabled: () => true,
       optimizer: () => ({ model: "provider/long-model-identifier-with-extra-details", thinking: "high · Extension setting", thinkingEnabled: true }),
       chooseModel() {}, editSystemPrompt() {}, history: () => records,
+      historyStorage: () => ({ state: "save-error", path: "/项目/会话中文😀.jsonl.prompt-refine.json", savedIds: [1], memoryOnlyIds: [2], omittedIds: [2] }),
       tasks: { records: () => records, appliedId: () => records[1]!.id,
         activate: (id) => !!records.find((record) => record.id === id)?.candidate, run() {}, stop() {} },
-      saveContext: async () => "Saved", submit: () => undefined,
+      saveContext: async () => ({ message: "Saved", persisted: true }), submit: () => undefined,
       revision: () => ({ key: "source-1", label: "model · Run #1", submit: () => "Validation notice" }),
     });
     tui.addChild(workspace);
@@ -86,6 +87,11 @@ describe("workspace terminal rendering", () => {
         });
         tui.requestRender();
         tui.renderNow();
+        expect(workspace.render(columns)).toHaveLength(initialHeight);
+      }
+      workspace.openTasks();
+      for (const key of ["?", "\x1b[6~", "\x1b[5~", "a", "s", "\x1b[C", "\x1b", "\x1b[C", "b", "\x1b[6~", "\x1b[5~", "i", "\x1b[D", "\x1b"]) {
+        input(key); tui.renderNow();
         expect(workspace.render(columns)).toHaveLength(initialHeight);
       }
       workspace.openResult(); input("f"); input("\x1bp");
