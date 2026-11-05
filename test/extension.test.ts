@@ -660,13 +660,30 @@ describe("explicit candidate revision", () => {
     expect(all).not.toContain("Revised prompt"); expect(all).not.toContain("FAILED_REVISION_INSTRUCTION");
     harness.panelInput("q"); await view;
   });
+  it("opens list Revise for the selected run and returns through its details without sending", async () => {
+    const harness = await makeHarness(); await trigger(harness);
+    harness.holdPanel(); const view = harness.command("", harness.context);
+    // Select the run rather than the original root.
+    if (harness.panelLines(100).join("\n").includes("› ▾")) harness.panelInput("\x1b[B");
+    harness.panelInput("f");
+    expect(harness.panelLines(100).join("\n")).toContain("Run #1");
+    harness.panelInput("Retain this feedback"); harness.panelInput("\x1b");
+    expect(harness.panelLines(100).join("\n")).toContain("Prompt details");
+    harness.panelInput("f"); expect(harness.panelLines(100).join("\n")).toContain("Retain this feedback");
+    harness.panelInput("\x1b"); harness.panelInput("\x1b");
+    expect(harness.panelLines(100).join("\n")).toContain("Prompt refine · Tasks");
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    expect(harness.editorWrites).toEqual([]); expect(harness.sent).toEqual([]);
+    harness.panelInput("q"); await view;
+  });
+
   it("composes saved preference snapshots into the existing request, only after returning and Ctrl+S", async () => {
     const harness = await makeHarness();
     const store = new PreferenceStore(harness.agentDir, harness.context.cwd);
     const entry = await store.save("global", { name: "Keep literal", body: "Keep all commands unchanged." });
     await trigger(harness);
     harness.holdPanel(); const view = harness.command("view", harness.context);
-    harness.panelInput("p");
+    harness.panelInput("f"); harness.panelInput("\x1bp");
     await vi.waitFor(() => expect(harness.panelLines(100).join("\n")).toContain("Keep literal"));
     harness.panelInput(" ");
     harness.panelInput("\x13");
@@ -696,7 +713,7 @@ describe("explicit candidate revision", () => {
     harness.setEditorText("New original"); await trigger(harness);
     harness.panelInput("\x13");
     expect(harness.panelLines(100).join("\n")).toContain("result changed");
-    expect(harness.panelLines(100).join("\n")).toContain("1 preference");
+    expect(harness.panelLines(100).join("\n")).toContain("Preferences: 1");
     expect(harness.panelLines(100).join("\n")).not.toContain("New background candidate");
     expect(harness.panelLines(60).join("\n")).not.toContain("New background candidate");
     expect(harness.complete).toHaveBeenCalledTimes(2);
@@ -785,7 +802,7 @@ describe("explicit candidate revision", () => {
     const view = harness.command("view", harness.context);
     harness.panelInput("f");
     harness.panelInput("\x13");
-    expect(harness.panelLines().join("\n")).toContain("Enter revision instructions");
+    expect(harness.panelLines().join("\n")).toContain("Select preferences or enter additional requirements");
     harness.panelInput("x".repeat(31));
     harness.panelInput("\x13");
     expect(harness.panelLines().join("\n")).toContain("exceed");
@@ -1370,7 +1387,7 @@ describe("round workspace integration", () => {
     expect(harness.panelLines().join("\n")).toContain("Empty prompt");
     harness.panelInput("\r");
     expect(harness.complete).not.toHaveBeenCalled();
-    harness.panelInput("e"); harness.panelInput("Independent original"); harness.panelInput("\r");
+    harness.panelInput("i"); harness.panelInput("Independent original"); harness.panelInput("\r");
     expect(harness.panelLines().join("\n")).toContain("1 prompts");
     harness.panelInput("m"); await flushPromises(); harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).not.toContain("Run original with another model"));
@@ -3070,7 +3087,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.panelLines().join("\n")).not.toContain("Draft B");
   });
 
-  it("uses the shortcut to inspect failures for the same draft and requires r for retry", async () => {
+  it("uses the shortcut to inspect failures and blocks the legacy r retry",  async () => {
     const harness = await makeHarness({ useDefaultShortcuts: true });
     harness.complete.mockRejectedValueOnce(new Error("offline"));
     await trigger(harness);
@@ -3081,7 +3098,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.setCustomAction("r");
     await shortcut(harness, "ctrl+\\")(harness.context);
     await flushPromises();
-    expect(harness.complete).toHaveBeenCalledTimes(2);
+    expect(harness.complete).toHaveBeenCalledTimes(1);
   });
 
   it("honors an explicit optimize command even when a ready result has the same source draft", async () => {

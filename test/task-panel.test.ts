@@ -19,7 +19,7 @@ function create(name = "dark", usage = false, records = [record()]) {
   const size = { rows: 40 };
   const position: TaskPanelPosition = { selectedId: records[0]?.id };
   const actions = { records: () => records, appliedId: () => undefined, activate: vi.fn(() => true), run: vi.fn(), stop: vi.fn(), copy: vi.fn(),
-    editOriginal: vi.fn(), chooseModel: vi.fn(), accept: vi.fn(), launchModel: () => "Default model" };
+    editOriginal: vi.fn(), chooseModel: vi.fn(), accept: vi.fn(), revise: vi.fn(), launchModel: () => "Default model" };
   const panel = new TaskPanel(actions, theme, () => size.rows, getKeybindings(), usage, position);
   const text = (width = 100) => stripVTControlCharacters(panel.render(width).join("\n"));
   return { panel, theme, size, position, actions, records, text };
@@ -27,6 +27,24 @@ function create(name = "dark", usage = false, records = [record()]) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("prompt tree and inspection", () => {
+  it("opens selected result details before direct Revise and blocks removed shortcuts", () => {
+    const { panel, actions, text, position, records } = create("dark", false, [record(1), record(2)]);
+    position.selectedId = 2;
+    panel.handleInput("e"); expect(actions.editOriginal).not.toHaveBeenCalled();
+    panel.handleInput("f");
+    expect(actions.revise).toHaveBeenCalledExactlyOnceWith(2);
+    expect(text()).toContain("Prompt details");
+    expect(actions.activate).not.toHaveBeenCalled();
+    for (const key of ["n", "g", "p", "r", "z", "?", "v", "[", "]"]) expect(panel.handleInput(key)).toBe(true);
+    expect(actions.editOriginal).not.toHaveBeenCalled(); expect(actions.run).not.toHaveBeenCalled();
+    panel.handleInput("\x1b"); expect(text()).toContain("Prompt refine · Tasks");
+    records[1]!.input.contextUnavailable = true;
+    panel.handleInput("f"); expect(text()).toContain("Background not saved");
+    expect(actions.revise).toHaveBeenCalledTimes(1);
+    position.selectedTaskId = 1; panel.handleInput("f");
+    expect(actions.revise).toHaveBeenCalledTimes(1);
+  });
+
   it.each([false, true])("makes revisions explicit and exposes their source texts (usage: %s)", (usage) => {
     const revised = record(2);
     revised.kind = "revise"; revised.parentId = 1;
@@ -185,7 +203,7 @@ describe("prompt tree and inspection", () => {
     expect(text()).toContain("Original prompt");
     expect(position.selectedTaskId).toBe(1);
     panel.handleInput("i"); panel.handleInput("e"); panel.handleInput("n"); panel.handleInput("m");
-    expect(actions.editOriginal.mock.calls).toEqual([[1], [1], []]);
+    expect(actions.editOriginal.mock.calls).toEqual([[1], []]);
     expect(actions.chooseModel).toHaveBeenCalledWith(1);
     panel.handleInput("\r");
     expect(actions.run).toHaveBeenCalledWith(1);
@@ -221,7 +239,7 @@ describe("prompt tree and inspection", () => {
     panel.handleInput("e");
     expect(actions.activate).not.toHaveBeenCalled();
     records[0] = record();
-    expect(panel.handleInput("f")).toBe(false);
+    expect(panel.handleInput("e")).toBe(false);
     expect(actions.activate).toHaveBeenCalledWith(1);
   });
 

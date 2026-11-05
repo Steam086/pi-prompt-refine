@@ -268,8 +268,8 @@ describe("preference rendering and responsiveness", () => {
   });
 });
 
-function workspaceSetup(key: KeyId | null = "alt+p", conflict = false) {
-  const f = setup(); f.panel.dispose();
+function workspaceSetup(key: KeyId | null = "alt+p", conflict = false, theme = "dark") {
+  const f = setup([], "Extra", theme); f.panel.dispose();
   if (conflict) f.keys.setUserBindings({ "tui.editor.cursorLineEnd": "alt+p" });
   const preview = new PreviewPanel({ state: { phase: "ready", requestId: 1, pendingSend: false }, candidateText: "Source",
     contextLabel: "Original", elapsedSeconds: 0, openHint: "ctrl+\\", canRestore: false }, f.theme, () => f.terminal.rows, () => {});
@@ -284,19 +284,46 @@ function workspaceSetup(key: KeyId | null = "alt+p", conflict = false) {
   return { ...f, workspace, submit, identity: (id: string) => { identity = id; } };
 }
 describe("workspace preference integration", () => {
+  it.each(["dark", "light"])("reviews exact snapshots without submitting, restores input, and fits resized %s views", async (theme) => {
+    const f = workspaceSetup("alt+p", false, theme); const w = f.workspace;
+    w.handleInput("f"); w.handleInput("补充 中文😀\x1b[2J");
+    w.handleInput(altP); await loaded(w); w.handleInput(" "); w.handleInput(bringBack);
+    expect(text(w)).toContain("Preferences: 1");
+    w.handleInput("\t"); w.handleInput("\t"); w.handleInput(enter);
+    expect(text(w)).toContain("Full revision requirements");
+    expect(text(w)).toContain(a.body);
+    w.handleInput(ctrlS); expect(f.submit).not.toHaveBeenCalled();
+    for (const [width, rows] of [[100, 40], [36, 16], [12, 8], [80, 30]]) {
+      f.terminal.rows = rows!;
+      const lines = w.render(width!);
+      expect(lines).toHaveLength(panelLayout(width!, rows!).height);
+      for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width!);
+      expect(lines.join("\n")).not.toContain("\x1b[2J");
+      w.handleInput("\x1b[6~"); w.handleInput("\x1b[5~");
+    }
+    f.terminal.rows = 40;
+    expect(w.render(100).join("\n")).toContain(f.theme.fg("text", f.theme.bold("Full revision requirements")));
+    w.handleInput(esc); w.handleInput("!"); w.handleInput(ctrlS);
+    expect(f.submit.mock.calls.at(-1)![0]).toContain(`${a.body}\n\n补充 中文😀`);
+    expect(f.submit.mock.calls.at(-1)![0]).toContain("!");
+    w.handleInput(esc); w.handleInput("f");
+    expect(text(w)).toContain("Preferences: 1");
+  });
+
   it("disables a local key that conflicts with Pi's resolved bindings", async () => {
     const f = workspaceSetup("alt+p", true); const w = f.workspace;
     w.handleInput("f"); expect(text(w)).toContain("Preferences key conflicts");
     w.handleInput(altP); expect(text(w)).toContain("Revise current result");
-    w.handleInput(esc); w.handleInput("p"); await loaded(w);
-    expect(text(w)).toContain("Preferences");
+    w.handleInput("\t"); w.handleInput(enter); await loaded(w);
+    expect(text(w)).toContain("Bring back");
   });
   it("does not let Undo restore another candidate's free input", () => {
     const f = workspaceSetup(); const w = f.workspace;
     w.handleInput("f"); w.handleInput("Private first feedback"); w.handleInput(esc);
     f.identity("two"); w.handleInput("f"); w.handleInput("Second feedback");
     w.handleInput("\x1b[45;5u"); w.handleInput(ctrlS);
-    expect(f.submit.mock.calls.at(-1)![0]).toBe("");
+    expect(f.submit).not.toHaveBeenCalled();
+    expect(text(w)).toContain("Select preferences or enter additional requirements");
   });
   it("submits only on Revise Ctrl+S; preserves cursor, selection and candidate isolation", async () => {
     const f = workspaceSetup(); const w = f.workspace;
@@ -321,11 +348,13 @@ describe("workspace preference integration", () => {
     w.handleInput(" "); w.handleInput(esc); w.handleInput(ctrlS);
     expect(f.submit).toHaveBeenLastCalledWith(pasted);
   });
-  it("keeps the result p entry when the Revise binding is disabled, and never uses F2", async () => {
+  it("offers a focusable Preferences control without a binding and removes result p", async () => {
     const f = workspaceSetup(null); const w = f.workspace;
-    w.openResult(); w.handleInput("p"); await loaded(w);
-    expect(text(w)).toContain("Preferences"); w.handleInput(esc);
+    w.openResult(); w.handleInput("p");
+    expect(text(w)).toContain("Press f to revise");
+    w.handleInput("f"); w.handleInput("\t"); w.handleInput(enter); await loaded(w);
+    expect(text(w)).toContain("Bring back"); w.handleInput(esc);
     w.handleInput("\x1bOQ"); expect(text(w)).toContain("Revise current result");
-    w.handleInput(ctrlS); expect(f.submit).toHaveBeenLastCalledWith(composeRevision([], ""));
+    w.handleInput(ctrlS); expect(f.submit).not.toHaveBeenCalled();
   });
 });

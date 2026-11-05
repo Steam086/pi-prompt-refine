@@ -94,6 +94,11 @@ describe("workspace terminal rendering", () => {
         input(key); tui.renderNow();
         expect(workspace.render(columns)).toHaveLength(initialHeight);
       }
+      workspace.openResult(); input("f");
+      for (const key of ["\t", "\t", "\r", "\x1b[6~", "\x1b[5~", "\x13", "\x1b", "More 中文😀", "\x1b"]) {
+        input(key); tui.renderNow();
+        expect(workspace.render(columns)).toHaveLength(initialHeight);
+      }
       expect(writes.length).toBeGreaterThan(0);
       expect(tui.fullRedraws).toBe(initialRedraws);
       expect(terminal.clearScreen).toHaveBeenCalledTimes(clearCalls);
