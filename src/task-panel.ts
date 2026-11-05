@@ -52,7 +52,7 @@ export class TaskPanel {
   ) {}
   invalidate(): void { this.cache.clear(); }
   setNotice(text: string): void { this.notice = text; }
-  openList(): void { this.inspecting = false; this.compareId = undefined; this.reading = false; }
+  openList(): void { this.inspecting = false; this.compareId = undefined; this.reading = false; this.original = false; }
   /** Preserve the source and reading position while a revision owns focus. */
   snapshot(): TaskPanel {
     const records = this.actions.records().map((record) => ({ ...record, input: { ...record.input },
@@ -165,9 +165,14 @@ export class TaskPanel {
       const peers = row?.records.filter((record) => record.id !== row.record.id && record.candidate) ?? [];
       const index = peers.findIndex((record) => record.id === this.compareId);
       this.compareId = row && !row.original ? peers[index + 1]?.id : undefined;
+      this.original = false;
       return true;
     }
-    if (this.inspecting && key === "o") { this.original = !this.original; this.position.scroll = 0; return true; }
+    if (this.inspecting && key === "o") {
+      this.original = !this.original;
+      if (this.usage || this.compareId !== undefined) this.position.scroll = 0;
+      return true;
+    }
     if (this.inspecting && key === "g") { if (row) this.actions.run(row.record.id); return true; }
     if (this.inspecting && key === "p" && this.actions.preferences) {
       if (row && !row.original && row.record.candidate && !row.record.input.contextUnavailable) this.actions.preferences(row.record.id);
@@ -182,7 +187,13 @@ export class TaskPanel {
     }
     const delta = key === "up" ? -1 : key === "down" ? 1 : key === "pageup" ? -this.viewport : key === "pagedown" ? this.viewport : 0;
     if (delta) {
-      if (row && (this.reading || this.inspecting)) this.scroll(row, delta);
+      if (row && (this.reading || this.inspecting)) {
+        if (this.inspecting && !this.usage && this.compareId === undefined && !row.original && row.record.candidate && this.original) {
+          const key = `${this.rowKey(row)}-reference`;
+          const scrolls = this.position.scrolls ??= {};
+          scrolls[key] = Math.max(0, (scrolls[key] ?? 0) + delta);
+        } else this.scroll(row, delta);
+      }
       else {
         const rows = this.entries();
         const index = rows.findIndex((item) => this.isSelected(item));
@@ -225,24 +236,26 @@ export class TaskPanel {
     }
     return lines;
   }
-  private pane(row: Row, width: number, height: number, active = true): string[] {
+  private pane(row: Row, width: number, height: number, active = true, previewDetails = false): string[] {
     const { record, records } = row;
     const title = row.original ? "Original prompt" : record.input.model.id;
     const status = row.original && record.status !== "unsent"
       ? this.muted(`${records.filter((r) => r.status !== "unsent").length} runs · ${records.filter(pending).length} active`)
       : this.theme.fg(this.color(record), this.badge(record));
     const titleText = this.heading(title);
-    const header = visibleWidth(titleText) + visibleWidth(status) + 2 <= width
-      ? [titleText + " ".repeat(width - visibleWidth(titleText) - visibleWidth(status)) + status]
+    const header = visibleWidth(titleText) + visibleWidth(status) + 3 <= width
+      ? [titleText + (previewDetails ? " · " : " ".repeat(width - visibleWidth(titleText) - visibleWidth(status))) + status]
       : [truncateToWidth(titleText, width, "…"), status];
     if (!row.original) {
-      if (record.kind === "revise") header.push(...this.wrapped(this.muted(`Revision${record.parentId ? ` of run #${record.parentId}` : ""}${this.inspecting ? " · o Original" : ""}`), width));
-      header.push(...this.wrapped(this.muted(`${record.input.model.provider} · Thinking ${record.input.thinkingLevel ?? "default"}`), width));
+      if (!previewDetails && record.kind === "revise") header.push(...this.wrapped(this.muted(`Revision${record.parentId ? ` of run #${record.parentId}` : ""}${this.inspecting ? " · o Original" : ""}`), width));
+      const metadata = this.muted(`${record.input.model.provider} · Thinking ${record.input.thinkingLevel ?? "default"}`);
+      if (!previewDetails) header.push(...this.wrapped(metadata, width));
       const metrics: string[] = [];
       if (record.status !== "unsent" && record.status !== "queued" && record.elapsedSeconds !== undefined) {
         metrics.push(this.theme.fg(record.status === "generating" ? "accent" : "text", this.theme.bold(`${record.elapsedSeconds}s`)));
       }
       if (record.kind !== "edit" && record.status !== "unsent" && record.status !== "queued") metrics.push(this.muted(formatRunUsage(record.usage)));
+      if (previewDetails) metrics.unshift(metadata);
       if (metrics.length) header.push(...this.wrapped(metrics.join(this.muted(" · ")), width));
     }
     if (record.error) header.push(...this.wrapped(this.theme.fg("error", sanitizeTerminalText(`Error: ${record.error}`)), width));
@@ -258,6 +271,7 @@ export class TaskPanel {
     for (const warning of record.input.projectDiagnostics?.warnings ?? record.input.project?.snapshot.warnings ?? []) {
       header.push(...this.wrapped(this.theme.fg("warning", sanitizeTerminalText(`Context warning: ${warning}`)), width));
     }
+    if (previewDetails) return this.previewDetails(row, width, height, header);
     const original = row.original || this.original || !record.candidate;
     const body = [
       ...(!row.original ? [this.heading(original ? "Original prompt" : record.kind === "revise" ? "Revised result" : "Result"), ""] : []),
@@ -319,6 +333,46 @@ export class TaskPanel {
     if (active) { this.position.scroll = offset; this.viewport = available; }
     return [...fixed, ...lines.slice(offset, offset + available)];
   }
+  /** Preview keeps reference material separate from the result and Usage details. */
+  private previewDetails(row: Row, width: number, height: number, header: string[]): string[] {
+    const { record } = row;
+    // The shared reading frame is capped at 100 columns; reserve at least 30 for references.
+    const wide = width >= 90;
+    const leftWidth = wide ? Math.floor((width - 3) * 0.65) : width;
+    const rightWidth = wide ? width - leftWidth - 3 : width;
+    const fixed = header.slice(0, Math.max(0, height - 2));
+    if (height > fixed.length + 2) fixed.push("");
+    const available = Math.max(1, height - fixed.length);
+    this.viewport = available;
+    const literal = (text: string) => this.theme.fg("text", sanitizeTerminalText(text));
+    const result = [this.heading(record.kind === "revise" ? "Revised result" : "Result"), "", literal(record.candidate!.text)];
+    const reference = [this.heading("Original prompt"), "", literal(record.input.draft)];
+    if (record.input.revision) {
+      reference.push("", this.heading("Revision instruction"), "", literal(record.input.revision.instruction),
+        "", this.muted(`Revision${record.parentId ? ` of run #${record.parentId}` : ""}`),
+        "", this.heading("Before revision"), "", record.input.revision.previousCandidate
+          ? literal(record.input.revision.previousCandidate)
+          : this.muted("Before-revision text was not retained in this record."));
+    }
+    reference.push("", this.muted(`Round ${record.input.roundId ?? "?"} · Task ${record.taskId}${record.archivedAt !== undefined ? " · Earlier context" : ""}`));
+    if (record.input.contextUnavailable) reference.push(this.muted("Restored history · background not saved. Press i to copy the original into the current round."));
+    const clip = (body: string[], columns: number, isReference: boolean): string[] => {
+      const lines = this.wrapped(body.join("\n"), columns);
+      const key = `${this.rowKey(row)}${isReference ? "-reference" : ""}`;
+      const scrolls = this.position.scrolls ??= {};
+      const offset = Math.min(isReference ? scrolls[key] ?? 0 : this.position.scroll ?? 0, Math.max(0, lines.length - available));
+      scrolls[key] = offset;
+      if (!isReference) this.position.scroll = offset;
+      return lines.slice(offset, offset + available);
+    };
+    if (!wide) return [...fixed, ...clip(this.original ? reference : result, width, this.original)];
+    const left = clip(result, leftWidth, false);
+    const right = clip(reference, rightWidth, true);
+    return [...fixed, ...Array.from({ length: available }, (_, i) => {
+      const line = left[i] ?? "";
+      return line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line))) + this.theme.fg("borderMuted", " │ ") + (right[i] ?? "");
+    })];
+  }
   render(width: number, _empty?: () => string[]): string[] {
     if (width < 1) return [];
     const layout = panelLayout(width, this.rows());
@@ -353,7 +407,8 @@ export class TaskPanel {
       const text = this.theme.fg(old ? "dim" : row.original ? "text" : this.color(record), clean);
       return active ? this.theme.bg("selectedBg", text + " ".repeat(Math.max(0, leftWidth - visibleWidth(text)))) : text;
     });
-    let right = selected ? this.pane(selected, rightWidth, height) : [this.muted("No prompts yet. Press n to create one.")];
+    const previewDetails = this.inspecting && !this.usage && this.compareId === undefined && !!selected && !selected.original && !!selected.record.candidate;
+    let right = selected ? this.pane(selected, rightWidth, height, true, previewDetails) : [this.muted("No prompts yet. Press n to create one.")];
     let body: string[];
     const other = this.inspecting && this.compareId !== undefined ? rows.find((row) => !row.original && row.record.id === this.compareId) : undefined;
     if (other && layout.innerWidth >= 72) {
@@ -382,7 +437,7 @@ export class TaskPanel {
     if (this.inspecting && selected && !selected.original && selected.record.candidate && !restored && this.actions.preferences) primary.splice(1, 0, ["p", "Preferences"]);
     // Reserve both focus labels so Tab never shifts columns or changes which hints fit.
     const focusAction = (this.reading ? "Select" : "Read").padEnd("Select".length);
-    const secondary: KeyHint[] = [["Esc", "Back"], ...(other || !this.inspecting ? [["Tab", other ? "Switch result" : focusAction] as KeyHint] : [])];
+    const secondary: KeyHint[] = [["Esc", "Back"], ...(previewDetails ? [["o", this.original ? "Result" : "Reference"] as KeyHint] : []), ...(other || !this.inspecting ? [["Tab", other ? "Switch result" : focusAction] as KeyHint] : [])];
     if (this.inspecting && selected && !selected.original && selected.record.candidate) {
       secondary.push(["c", other ? "Next comparison" : "Compare"], ["e", "Edit result"], ...(!restored ? [["f", "Revise"] as const] : []), ["s", "Send"]);
     }
@@ -392,7 +447,7 @@ export class TaskPanel {
     if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["Esc", "Back"], ["Enter", action], ["Tab", focusAction]], layout.innerWidth, this.theme);
     const title = this.inspecting ? (other ? "Compare results" : "Prompt details") : this.usage ? "Usage · All rounds" : "Prompt refine · Tasks";
     return panelFrame(layout, [this.heading(title), this.muted(this.notice || (this.inspecting
-      ? `${selected && !selected.original ? `Selected: #${selected.record.id} ${selected.record.input.model.id}` : "Original prompt"} · ↑↓ scroll${other ? " · Same original and conversation context" : ""}`
+      ? `${selected && !selected.original ? `Selected: #${selected.record.id} ${selected.record.input.model.id}` : "Original prompt"} · ↑↓ scroll${previewDetails ? (this.original ? " reference · o Result" : " result · o Reference") : other ? " · Same original and conversation context" : ""}`
       : `${rows.filter((row) => row.original).length} prompts · ${rows.filter((row) => !row.original).length} runs · ↑↓ select · Run: ${this.actions.launchModel?.() ?? "selected model"}`))],
     [...tabs, ...body], footer, (text) => this.theme.fg("borderMuted", text));
   }
