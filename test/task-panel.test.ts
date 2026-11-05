@@ -27,7 +27,7 @@ function create(name = "dark", usage = false, records = [record()]) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("prompt tree and inspection", () => {
-  it.each([false, true])("makes revisions explicit and keeps their source texts before usage metadata (usage: %s)", (usage) => {
+  it.each([false, true])("makes revisions explicit and exposes their source texts (usage: %s)", (usage) => {
     const revised = record(2);
     revised.kind = "revise"; revised.parentId = 1;
     revised.input.revision = { instruction: "Keep **literal** commands", previousCandidate: "BEFORE_REVISION" };
@@ -35,11 +35,99 @@ describe("prompt tree and inspection", () => {
     panel.handleInput("\r");
     expect(text()).toContain("✓ Revised"); expect(text()).toContain("Revision of run #1");
     expect(text()).toContain("Revised result");
+    if (!usage) panel.handleInput("o"); // Scroll the reference column, not the result.
     let all = "";
     for (let i = 0; i < 8; i++) { all += text() + "\n"; panel.handleInput("\x1b[6~"); }
     for (const expected of ["Original prompt", revised.input.draft, "Revision instruction", "Keep **literal** commands", "Before revision", "BEFORE_REVISION"]) expect(all).toContain(expected);
-    expect(all.indexOf("Revision instruction")).toBeLessThan(all.indexOf("Usage · tokens"));
-    panel.handleInput("o"); expect(text()).toContain(revised.input.draft);
+    if (usage) expect(all.indexOf("Revision instruction")).toBeLessThan(all.indexOf("Usage · tokens"));
+    else expect(all).not.toContain("Usage · tokens");
+    if (usage) panel.handleInput("o");
+    else for (let i = 0; i < 8; i++) panel.handleInput("\x1b[5~");
+    expect(text()).toContain(revised.input.draft);
+  });
+
+  it.each(["dark", "light"])("uses a 65/35 Preview with compact metadata in %s", (name) => {
+    const revised = record(2);
+    revised.kind = "revise";
+    revised.input.revision = { instruction: "Keep commands 中文😀", previousCandidate: "Previous result" };
+    const { panel, text } = create(name, false, [revised]);
+    panel.handleInput("\r");
+    const output = text(100);
+    expect(output).toContain("model-2 · ✓ Revised");
+    expect(output).toContain("openai-codex · Thinking xhigh · 23s · ↑2.3k ↓670 · Cost —");
+    const columns = output.split("\n").filter((line) => line.includes(" │ "));
+    const left = columns.map((line) => line.split(" │ ")[0]!).join("\n");
+    const right = columns.map((line) => line.split(" │ ")[1]!).join("\n");
+    expect(visibleWidth(columns[0]!.split(" │ ")[0]!) - 2).toBe(Math.floor((panelLayout(100, 40).innerWidth - 3) * 0.65));
+    expect(left).toContain("Revised result");
+    expect(left).toContain("Result 2");
+    expect(left).not.toContain("Original prompt");
+    expect(right).toContain(revised.input.draft);
+    expect(right).toContain("Revision instruction");
+    expect(right).toContain("Keep commands 中文😀");
+    for (const hidden of ["Usage · tokens", "Cache read", "Reference cost · USD", "Preferences"]) expect(output).not.toContain(hidden);
+    const narrow = text(80);
+    expect(narrow).not.toContain(" │ ");
+    expect(narrow).toContain("Result 2");
+    expect(narrow).not.toContain(revised.input.draft);
+    panel.handleInput("o");
+    expect(text(80)).toContain(revised.input.draft);
+    expect(text(80)).toContain("Keep commands 中文😀");
+    expect(text(80)).not.toContain("Result 2");
+    panel.handleInput("o");
+    expect(text(80)).toContain("Result 2");
+  });
+
+  it("scrolls result and reference independently across resize and snapshots without changing action targets", () => {
+    const revised = record(2);
+    revised.kind = "revise";
+    revised.input.draft = Array.from({ length: 70 }, (_, i) => `Original line ${i}`).join("\n");
+    revised.input.revision = { instruction: "REFERENCE_END", previousCandidate: "BEFORE_END" };
+    revised.candidate!.text = Array.from({ length: 70 }, (_, i) => `Result line ${i}`).join("\n");
+    const { panel, text, actions } = create("dark", false, [revised]);
+    panel.handleInput("\r");
+    text();
+    panel.handleInput("\x1b[6~");
+    const resultPage = text().split("\n").filter((line) => line.includes(" │ ")).map((line) => line.split(" │ ")[0]);
+    expect(text()).not.toContain("Result line 0");
+    expect(text()).toContain("Original line 0");
+    panel.handleInput("o");
+    let references = "";
+    for (let i = 0; i < 10; i++) { references += text(); panel.handleInput("\x1b[6~"); }
+    expect(references).toContain("REFERENCE_END");
+    expect(references).toContain("BEFORE_END");
+    expect(text().split("\n").filter((line) => line.includes(" │ ")).map((line) => line.split(" │ ")[0])).toEqual(resultPage);
+    expect(text(80)).toContain("REFERENCE_END");
+    const frozen = panel.snapshot();
+    expect(frozen.render(100)).toEqual(panel.render(100));
+    panel.handleInput("o");
+    expect(text(80)).not.toContain("Result line 0");
+    panel.handleInput("a");
+    expect(actions.accept).toHaveBeenCalledWith(2);
+    expect(actions.activate).not.toHaveBeenCalled();
+    panel.handleInput("o"); panel.handleInput("\x1b");
+    expect(text()).toContain("Prompt refine · Tasks");
+    expect(text().split("\n").filter((line) => line.includes(" │ ")).map((line) => line.split(" │ ")[1]).join("\n")).not.toContain("Original line 0");
+  });
+
+  it.each(["dark", "light"])("bounds revised references at the split breakpoint and sanitizes literal text in %s", (name) => {
+    const revised = record(2);
+    revised.kind = "revise";
+    const unsafe = "中文😀 **literal**\x1b[2J\x1b]52;c;payload\x07";
+    revised.input.draft = unsafe.repeat(30);
+    revised.input.revision = { instruction: unsafe.repeat(30), previousCandidate: unsafe.repeat(30) };
+    const { panel, size } = create(name, false, [revised]);
+    panel.handleInput("\r");
+    for (size.rows of [40, 16, 8, 5]) for (const width of [1, 12, 40, 80, 93, 94, 100, 200]) {
+      for (const key of ["o", "\x1b[6~", "o", "\x1b[5~"]) {
+        panel.handleInput(key);
+        const lines = panel.render(width);
+        expect(lines).toHaveLength(panelLayout(width, size.rows).height);
+        expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+        expect(lines.join("\n")).not.toContain("\x1b[2J");
+        expect(lines.join("\n")).not.toContain("\x1b]52");
+      }
+    }
   });
 
   it("labels unsuccessful revisions without claiming they produced a revised result", () => {
@@ -81,8 +169,9 @@ describe("prompt tree and inspection", () => {
     expect(text()).not.toContain("Uses earlier conversation context");
     expect(text()).toContain("Earlier ·");
     panel.handleInput("\r");
+    panel.handleInput("o");
     let details = "";
-    for (let i = 0; i < 6; i++) { details += text(); panel.handleInput("\x1b[6~"); }
+    for (let i = 0; i < 6; i++) { details += text(80); panel.handleInput("\x1b[6~"); }
     expect(details).toContain("Earlier context");
     for (let i = 0; i < 6; i++) panel.handleInput("\x1b[5~");
     const fg = vi.spyOn(getThemeByName("dark")!, "fg");
@@ -206,8 +295,8 @@ describe("prompt tree and inspection", () => {
     expect(all).not.toContain("private-branch");
   });
 
-  it("keeps cache and reference-cost explanations in details, not the summary", () => {
-    const { panel, records, text } = create();
+  it("keeps cache and reference-cost explanations in Usage details, not the summary", () => {
+    const { panel, records, text } = create("dark", true);
     records[0]!.usage = { input: 200, cacheRead: 800, cacheWrite: 0, output: 300, cost: { total: 0.012, cacheRead: 0.001 }, subscription: true };
     expect(text()).toContain("↑1k ↓300 · ≈$0.012 (sub)");
     expect(text()).not.toContain("Cache hit");
