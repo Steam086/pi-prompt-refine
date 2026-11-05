@@ -18,7 +18,6 @@ export interface TaskPanelActions {
   chooseModel?(id: number): void;
   accept?(id: number): void;
   revise?(id: number): void;
-  preferences?(id: number): void;
   launchModel?(): string;
 }
 export interface TaskPanelPosition {
@@ -129,6 +128,7 @@ export class TaskPanel {
         ids: (row.original ? row.records : [row.record]).map((record) => record.id),
         label: row.original ? `original prompt and all ${row.records.length} request(s)` : `run #${row.record.id}`,
       };
+      else this.notice = "Select an original or request to delete";
       return true;
     }
     if (row?.record.input.contextUnavailable && ["m", "g", "f"].includes(key ?? "")) {
@@ -151,39 +151,63 @@ export class TaskPanel {
       else if (row) { this.inspecting = true; this.reading = true; }
       return true;
     }
-    if (key === "n") { this.actions.editOriginal?.(); return true; }
-    if (key === "i" || (key === "e" && !this.inspecting)) {
-      this.actions.editOriginal?.(row?.record.id); return true;
+    if (key === "n") {
+      if (!this.inspecting) this.actions.editOriginal?.();
+      else this.notice = "Return to the list to create a new original (n).";
+      return true;
     }
-    if (key === "m") { if (!row) return false; this.actions.chooseModel?.(row.record.id); return true; }
-    if (key === "x") { if (row && !row.original && pending(row.record)) this.actions.stop(row.record.id); return true; }
+    if (key === "i") {
+      if (row) this.actions.editOriginal?.(row.record.id);
+      else this.notice = "No original selected · Press n to create one";
+      return true;
+    }
+    if (key === "m") {
+      if (row) this.actions.chooseModel?.(row.record.id);
+      else this.notice = "Select an original or request first";
+      return true;
+    }
+    if (key === "x") {
+      if (row && !row.original && pending(row.record)) this.actions.stop(row.record.id);
+      else this.notice = "Select a queued or running request to stop";
+      return true;
+    }
     if (key === "a") {
       if (row && !row.original && row.record.candidate) this.actions.accept?.(row.record.id);
+      else this.notice = "Select a request with a result to accept";
       return true;
     }
     if (this.inspecting && key === "c") {
       const peers = row?.records.filter((record) => record.id !== row.record.id && record.candidate) ?? [];
+      if (!peers.length || row?.original) this.notice = "No other result for this original to compare";
       const index = peers.findIndex((record) => record.id === this.compareId);
       this.compareId = row && !row.original ? peers[index + 1]?.id : undefined;
       this.original = false;
       return true;
     }
     if (this.inspecting && key === "o") {
+      if (!row || row.original || !row.record.candidate) {
+        this.notice = "No result/reference pair for this item";
+        return true;
+      }
       this.original = !this.original;
       if (this.usage || this.compareId !== undefined) this.position.scroll = 0;
       return true;
     }
-    if (this.inspecting && key === "g") { if (row) this.actions.run(row.record.id); return true; }
-    if (this.inspecting && key === "p" && this.actions.preferences) {
-      if (row && !row.original && row.record.candidate && !row.record.input.contextUnavailable) this.actions.preferences(row.record.id);
+    if (key === "g" || key === "p") {
+      this.notice = key === "g" ? "Press m to run the original with a model" : "Press f to revise, then open Preferences";
       return true;
     }
-    if (this.inspecting && key === "f" && this.actions.revise) {
-      if (row && !row.original && row.record.candidate) this.actions.revise(row.record.id);
+    if (key === "f") {
+      if (row && !row.original && row.record.candidate && this.actions.revise) {
+        this.inspecting = true; this.reading = true; this.compareId = undefined; this.original = false;
+        this.actions.revise(row.record.id);
+      } else this.notice = "Select a request with a result and saved background to revise";
       return true;
     }
-    if (this.inspecting && ["e", "f", "s"].includes(key ?? "")) {
-      return !(row && !row.original && row.record.candidate && this.actions.activate(row.record.id));
+    if (this.inspecting && ["e", "s"].includes(key ?? "")) {
+      if (row && !row.original && row.record.candidate && this.actions.activate(row.record.id)) return false;
+      this.notice = "Result unavailable or send pending · Select an actionable result";
+      return true;
     }
     const delta = key === "up" ? -1 : key === "down" ? 1 : key === "pageup" ? -this.viewport : key === "pagedown" ? this.viewport : 0;
     if (delta) {
@@ -201,8 +225,13 @@ export class TaskPanel {
       }
       return true;
     }
+    if (key === "h" || key === "u") return true;
     // Main actions never leak to a different, previously applied result.
-    if (["g", "c", "o", "h", "f", "s", "[", "]", "d", "z"].includes(key ?? "")) return true;
+    if (["e", "c", "o", "s", "[", "]", "d", "z", "r", "?", "v"].includes(key ?? "")) {
+      this.notice = key === "e" ? "Press i to edit the original, or Enter then e to edit the result"
+        : "Action unavailable here · Inspect the selected request with Enter";
+      return true;
+    }
     return false;
   }
   private badge(record: RefineRecord): string {
@@ -429,17 +458,16 @@ export class TaskPanel {
     }
     const action = !this.inspecting && selected?.original && selected.record.status === "unsent" ? "Run" : "Inspect";
     const restored = selected?.record.input.contextUnavailable;
-    const primary: KeyHint[] = this.inspecting ? [["i", restored ? "Copy to current" : "Original"], ...(!restored ? [["m", "Run model"] as const] : [])]
-      : [["Enter", action], ["i", restored ? "Copy to current" : "Edit"], ["n", "New"], ...(!restored ? [["m", selected ? "Run model" : "Model"] as const] : [])];
+    const primary: KeyHint[] = this.inspecting ? [["i", restored ? "Copy to current" : "Edit original"], ...(!restored ? [["m", "Run model"] as const] : [])]
+      : [["Enter", action], ["i", restored ? "Copy to current" : "Edit original"], ["n", "New"], ...(!restored ? [["m", selected ? "Run model" : "Model"] as const] : [])];
     if (selected && !selected.original && pending(selected.record)) primary.push(["x", "Stop"]);
     if (selected && !selected.original && selected.record.candidate) primary.push(["a", "Accept"]);
     if (selected && this.actions.deleteRecords) primary.push(["d", "Delete"]);
-    if (this.inspecting && selected && !selected.original && selected.record.candidate && !restored && this.actions.preferences) primary.splice(1, 0, ["p", "Preferences"]);
     // Reserve both focus labels so Tab never shifts columns or changes which hints fit.
     const focusAction = (this.reading ? "Select" : "Read").padEnd("Select".length);
-    const secondary: KeyHint[] = [["Esc", "Back"], ...(previewDetails ? [["o", this.original ? "Result" : "Reference"] as KeyHint] : []), ...(other || !this.inspecting ? [["Tab", other ? "Switch result" : focusAction] as KeyHint] : [])];
+    const secondary: KeyHint[] = [["Esc", "Back"], ...(!this.inspecting && selected && !selected.original && selected.record.candidate && !restored && this.actions.revise ? [["f", "Revise"] as KeyHint] : []), ...(previewDetails ? [["o", this.original ? "Result" : "Reference"] as KeyHint] : []), ...(other || !this.inspecting ? [["Tab", other ? "Switch result" : focusAction] as KeyHint] : [])];
     if (this.inspecting && selected && !selected.original && selected.record.candidate) {
-      secondary.push(["c", other ? "Next comparison" : "Compare"], ["e", "Edit result"], ...(!restored ? [["f", "Revise"] as const] : []), ["s", "Send"]);
+      secondary.push(...(selected.records.some((record) => record.id !== selected.record.id && record.candidate) ? [["c", other ? "Next comparison" : "Compare"] as KeyHint] : []), ["e", "Edit result"], ...(!restored ? [["f", "Revise"] as const] : []), ["s", "Send to Pi"]);
     }
     const footer = layout.innerWidth < 30
       ? [fittingKeyHints(primary.map(([key, label]) => [key === "Enter" ? "↵" : key, label]), layout.innerWidth, this.theme), fittingKeyHints(secondary, layout.innerWidth, this.theme)]

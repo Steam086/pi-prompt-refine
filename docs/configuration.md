@@ -69,5 +69,5 @@ Settings 中的 `Project instructions` 使用三个模式，Enter / Space 循环
 - 已保存的 `instructionsOnFollowUp: false` 保留，界面显示 `First request only`（规则启用时）。其生效范围从旧版“有主会话历史即省略”改为“仅 Revise 省略”，因此有主会话历史的新优化任务现在也会包含规则。加载本身不改写配置。
 - 自定义 `systemPrompt` 原样保留为编辑策略，不会自动换成新默认模板。旧 BEGIN/END 分区假设需适配 JSON 输入；删除字段可恢复内置策略。
 - 完整的旧默认 F2–F7 或 Alt+Shift 六键映射会在加载时迁移为单入口默认值；其他有效的非功能键自定义映射保留。F1–F12 及其修饰组合不再允许，自定义功能键条目会告警并回退对应默认值。加载本身不改写配置文件。
-- Preferences 的 Revise 内入口 `preferencesKey` 默认 `"alt+p"`，可设为非功能修饰键或 `null`；旧默认 `"f2"` 自动迁移到 Alt+P，不产生阻止后续保存的配置告警；其他功能键值会告警并回退。结果详情的 `p` 入口不受此项禁用影响。
+- Preferences 的 Revise 内入口 `preferencesKey` 默认 `"alt+p"`，可设为非功能修饰键或 `null`；旧默认 `"f2"` 自动迁移到 Alt+P，不产生阻止后续保存的配置告警；其他功能键值会告警并回退。禁用或冲突时仍可在 Revise 内用 Tab 聚焦 Preferences，Enter 打开；结果详情不再提供 `p` 入口。
 - 无效配置回退并告警，有告警时不自动覆盖原文件。有效配置通过临时文件原子替换，权限 `0600`；写入失败时提示仅内存生效。Provider 认证仍由 Pi 管理，不在本文件保存 API Key。

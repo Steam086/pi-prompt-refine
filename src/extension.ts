@@ -1041,6 +1041,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             chooseModel: (id) => finish({ action: "run-model", recordId: id, generation: controller.getGeneration() }),
             accept: (id) => {
               if (controller.applyResult(id)) finish({ action: "accept", generation: controller.getGeneration(), token: controller.getCandidateToken() });
+              else notify(ctx, "Result unavailable or send pending; nothing accepted.", "warning");
             },
           },
           context: () => ({
@@ -1093,7 +1094,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             return {
               // Failure rebases generation but keeps this source identity; retain its feedback.
               key: `${token.sessionId}:${controller.getCandidate()?.recordId ?? token.requestId}`,
-              label: `${displayModel(controller.getCandidate()!.model)} · Run #${controller.getCandidate()!.recordId ?? "?"}`,
+              label: `Run #${controller.getCandidate()!.recordId ?? "?"} · ${displayModel(controller.getCandidate()!.model)}`,
               submit: (text: string) => {
                 if (closed || ctx.sessionManager.getSessionId() !== sessionId) return "Session changed; no request sent.";
                 return reviseCandidate(ctx, token, text);
