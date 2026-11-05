@@ -50,6 +50,7 @@ export class PreviewPanel implements Component {
   private originalVisible = false;
   private helpVisible = false;
   private sourceVisible = false;
+  private referenceOnly = false;
   private revealOriginal = false;
   private originalLine = 0;
   private document: Component = new Text("", 0, 0);
@@ -113,10 +114,11 @@ export class PreviewPanel implements Component {
   setNotice(notice: string): void { this.options = { ...this.options, notice }; }
 
   /** A revision's source view must not follow later background completions. */
-  snapshot(): PreviewPanel {
+  snapshot(referenceOnly = false): PreviewPanel {
     const panel = new PreviewPanel(structuredClone(this.options), this.theme, this.rows, () => {});
+    panel.referenceOnly = referenceOnly;
     panel.originalVisible = this.originalVisible;
-    panel.helpVisible = this.helpVisible;
+    panel.helpVisible = !referenceOnly && this.helpVisible;
     panel.sourceVisible = this.sourceVisible;
     panel.rebuildDocument();
     panel.restorePosition = this.restorePosition ?? this.scroll.scrollTop;
@@ -154,11 +156,12 @@ export class PreviewPanel implements Component {
   }
 
   private rebuildDocument(): void {
-    this.draftDocument = new Text(sanitizeTerminalText(this.options.draft ?? ""), 0, 0);
-    this.revisionDocument = new Text(sanitizeTerminalText(this.options.revisionInstruction ?? ""), 0, 0);
-    this.previousDocument = new Text(sanitizeTerminalText(this.options.previousCandidate ?? ""), 0, 0);
+    const literal = (text: string) => new Text(this.theme.fg("text", sanitizeTerminalText(text)), 0, 0);
+    this.draftDocument = literal(this.options.draft ?? "");
+    this.revisionDocument = literal(this.options.revisionInstruction ?? "");
+    this.previousDocument = literal(this.options.previousCandidate ?? "");
     const text = sanitizeTerminalText(this.options.candidateText ?? "");
-    this.document = this.sourceVisible ? new Text(text, 0, 0) : new Markdown(
+    this.document = this.sourceVisible ? new Text(this.theme.fg("text", text), 0, 0) : new Markdown(
       text, 0, 0, markdownTheme(this.theme), { color: (value) => this.theme.fg("text", value) },
       { preserveOrderedListMarkers: true, preserveBackslashEscapes: true, renderLatex: false },
     );
@@ -309,7 +312,7 @@ export class PreviewPanel implements Component {
     const { theme, options } = this;
     const layout = panelLayout(width, this.rows());
     const { innerWidth } = layout;
-    const navigation = workspaceTabs(layout, "Preview", theme);
+    const navigation = workspaceTabs(layout, "Preview", theme, !this.referenceOnly);
     if (options.navigation && layout.bodyHeight - navigation.length >= 4) {
       const position = options.navigation;
       navigation.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(
@@ -329,7 +332,7 @@ export class PreviewPanel implements Component {
       ...(options.state.phase === "generating" || options.state.phase === "error" ? [options.contextLabel] : []),
     ].join(" · "));
     const status = [heading, theme.fg("muted", metadata)].filter(Boolean).join(" · ");
-    header.push(options.notice ? theme.fg("muted", sanitizeTerminalText(options.notice)) : status);
+    header.push(this.referenceOnly ? theme.fg("muted", "Read-only reference") : options.notice ? theme.fg("muted", sanitizeTerminalText(options.notice)) : status);
     // Keep the main decision visible; secondary actions remain available in Help.
     // Pending/generating states take priority even if a previous candidate is retained.
     const primary: KeyHint[] = options.state.pendingSend
@@ -376,7 +379,7 @@ export class PreviewPanel implements Component {
         ...visible.map((line) => " ".repeat(Math.max(0, Math.floor((innerWidth - visibleWidth(line)) / 2))) + line),
       ];
     }
-    if (body.length > bodyHeight) {
+    if (body.length > bodyHeight && !this.referenceOnly) {
       const position = `↑↓ ${start + 1}–${Math.min(body.length, start + bodyHeight)}/${body.length}`;
       // Position is secondary to notices; scrolling must not hide request feedback.
       header[1] = options.notice

@@ -729,7 +729,10 @@ describe("explicit candidate revision", () => {
     harness.panelInput("\x1b[6~");
     const before = harness.panelLines(100);
     harness.panelInput("f");
-    expect(harness.panelLines(100).slice(0, 10)).toEqual(before.slice(0, 10));
+    // Reference content keeps its viewport; only suspended navigation chrome changes.
+    expect(harness.panelLines(100).slice(6, 10)).toEqual(before.slice(6, 10));
+    expect(harness.panelLines(100).slice(0, 6).join("\n")).toContain("Read-only reference");
+    expect(harness.panelLines(100).slice(0, 6).join("\n")).not.toContain("↑↓ scroll");
     expect(harness.panelLines(100).join("\n")).toContain("Run #1");
     harness.panelInput("Shorter");
     harness.panelInput("\r");

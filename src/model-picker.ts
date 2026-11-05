@@ -1,5 +1,6 @@
 import { truncateToWidth, visibleWidth, type SelectItem } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
+import { sanitizeTerminalText } from "./presentation.js";
 
 /** Render independently of SelectList's fixed label/description columns; keep its input behavior. */
 export function renderModelChoices(
@@ -17,11 +18,11 @@ export function renderModelChoices(
     const prefix = active ? "› " : "  ";
     const badges = `${item.label?.includes(" [thinking]") ? " · Thinking capable" : ""}${item.label?.endsWith(" (current)") ? " · Current" : ""}`;
     // On narrow terminals keep badges separate so they never consume the model name's space.
-    const name = item.description || item.value;
+    const name = sanitizeTerminalText(item.description || item.value);
     const compact = visibleWidth(prefix + name + badges) > width;
     const primary = theme.fg("accent", prefix) + theme.fg("text", truncateToWidth(name, Math.max(1, width - 2)));
     const entry = [compact ? primary : primary + theme.fg("muted", badges),
-      theme.fg("muted", `  ${item.value}`)];
+      theme.fg("muted", sanitizeTerminalText(`  ${item.value}`))];
     if (compact && badges) entry.push(theme.fg("muted", `  ${badges.slice(3)}`));
     for (const line of entry) {
       const fitted = truncateToWidth(line, width);

@@ -224,6 +224,53 @@ describe("preference rendering and responsiveness", () => {
     expect(f.panel.render(20).at(-1)).toContain(formatKeyHint(["Esc", "Keep"], f.theme));
   });
 
+  it.each(["dark", "light"])("separates reference headings, metadata and literal bodies (%s)", async (name) => {
+    const f = setup([selectPreference(a)], "Extra", name); await loaded(f.panel);
+    vi.spyOn(f.theme, "bold").mockImplementation((value) => `\x1b[1m${value}\x1b[22m`);
+    f.panel.invalidate();
+    const preview = f.panel.render(100).join("\n");
+    expect(preview).toContain(f.theme.fg("text", f.theme.bold(a.name)));
+    expect(preview).toContain(f.theme.fg("muted", `${a.scope} · ${a.id}`));
+    expect(preview).toContain(f.theme.fg("text", a.body));
+    expect(preview).not.toContain(f.theme.bold(a.body));
+    f.panel.handleInput(enter);
+    const reading = f.panel.render(100).join("\n");
+    expect(reading).toContain(f.theme.fg("text", a.body));
+    expect(reading).toContain(f.theme.fg("text", f.theme.bold("Selected snapshot")));
+    expect(reading).toContain(f.theme.fg("muted", "Saved snapshot"));
+  });
+
+  it.each(["dark", "light"])("keeps load/write/validation failures visible and semantic at short sizes (%s)", async (name) => {
+    const f = setup([], "Extra", name); await loaded(f.panel);
+    f.panel.handleInput("n"); save(f.panel);
+    expect(f.panel.render(100).join("\n")).toContain(f.theme.fg("warning", "⚠ Name must contain 1–120 characters."));
+    f.panel.handleInput(tab); f.panel.handleInput("Name");
+    f.repo.save.mockRejectedValueOnce(new Error("Write conflict 中文😀")); save(f.panel); await loaded(f.panel);
+    for (const rows of [40, 12, 8, 5]) for (const width of [20, 40, 100]) {
+      f.terminal.rows = rows; f.terminal.columns = width;
+      const lines = f.panel.render(width);
+      expect(lines).toHaveLength(panelLayout(width, rows).height);
+      expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+      expect(stripVTControlCharacters(lines.join("\n"))).toContain("Write conflict");
+      expect(lines.join("\n")).toContain(f.theme.fg("error", "⚠ Write conflict 中文😀").split("⚠")[0]);
+      if (rows >= 8) expect(lines.at(-1)).toContain(formatKeyHint(["Esc", "Back"], f.theme));
+    }
+    const failure = setup([], "Extra", name); await loaded(failure.panel);
+    failure.library.errors.project = "Permission denied";
+    failure.panel.handleInput("n"); failure.panel.handleInput("Saved"); save(failure.panel); await loaded(failure.panel);
+    expect(failure.panel.render(100).join("\n")).toContain(failure.theme.fg("error", "⚠ Load failed · Permission denied"));
+  });
+
+  it.each(["dark", "light"])("marks over-limit requirements without submitting or losing selection (%s)", async (name) => {
+    const f = setup([selectPreference(a)], "Extra".repeat(4000), name); await loaded(f.panel);
+    const lines = f.panel.render(100);
+    const chars = composeRevision([selectPreference(a)], "Extra".repeat(4000)).length;
+    expect(lines.join("\n")).toContain(f.theme.fg("warning", `⚠ Too long · ${chars}/16000 chars`));
+    f.panel.handleInput(bringBack);
+    expect(f.close).toHaveBeenCalledWith([selectPreference(a)]);
+    expect(f.repo.save).not.toHaveBeenCalled();
+  });
+
   it("does not repeat library I/O, filtering or long-document layout on focus changes and scrolling", async () => {
     const body = "LONG_LITERAL 中文😀 command\n".repeat(80);
     const entries = Array.from({ length: 500 }, (_, i) => ({ ...a, id: `${i}`, name: `Preference ${i}`, body }));
@@ -264,7 +311,7 @@ describe("preference rendering and responsiveness", () => {
     const output = f.panel.render(40).join("\n");
     expect(output).toContain("Write failed"); expect(output).not.toContain("\x1b[2J"); expect(output).not.toContain("\x1b]52");
     const firstLine = wrapTextWithAnsi(presentation.sanitizeTerminalText(message), panelLayout(40, 40).innerWidth)[0]!;
-    expect(f.panel.render(40).slice(-2).join("\n")).toContain(f.theme.fg("muted", firstLine));
+    expect(f.panel.render(40).slice(-2).join("\n")).toContain(f.theme.fg("error", firstLine));
   });
 });
 

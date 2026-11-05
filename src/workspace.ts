@@ -72,6 +72,7 @@ export class RefineWorkspace implements Component, Focusable {
   private disposed = false;
   private inputError = "";
   private settingsNotice = "";
+  private settingsFailed = false;
   private beforeInput = "";
   private readonly input: PromptInput;
   private revisionInput: PromptInput;
@@ -177,8 +178,8 @@ export class RefineWorkspace implements Component, Focusable {
     this.revisionSelected = structuredClone(draft?.selected ?? []);
     this.inputKind = "revision";
     this.inputReturnMode = this.mode === "usage" ? "usage" : this.mode === "result" ? "result" : "main";
-    this.revisionSource = this.inputReturnMode === "usage" ? this.historyPanel?.snapshot()
-      : this.inputReturnMode === "main" ? this.taskPanel?.snapshot() ?? this.panel.snapshot() : this.panel.snapshot();
+    this.revisionSource = this.inputReturnMode === "usage" ? this.historyPanel?.snapshot(true)
+      : this.inputReturnMode === "main" ? this.taskPanel?.snapshot(true) ?? this.panel.snapshot(true) : this.panel.snapshot(true);
     this.inputError = "";
     this.revisionExpanded = false;
     this.revisionFocus = "input";
@@ -299,6 +300,7 @@ export class RefineWorkspace implements Component, Focusable {
     this.groupCursors[this.cursor < 3 ? 0 : 1] = this.cursor;
     this.settingsScrollTop = 0;
     this.settingsNotice = "";
+    this.settingsFailed = false;
     this.switchMode("context");
     this.refreshSettings();
   }
@@ -315,8 +317,9 @@ export class RefineWorkspace implements Component, Focusable {
   private cycleThinking(): void {
     if (!this.actions.cycleThinking || !this.settingsOptimizer?.thinkingEnabled) return;
     this.saving = true;
+    this.settingsFailed = false;
     void this.actions.cycleThinking().then((notice) => { this.settingsNotice = notice; })
-      .catch(() => { this.settingsNotice = "Could not save thinking level."; })
+      .catch(() => { this.settingsNotice = "Could not save thinking level."; this.settingsFailed = true; })
       .finally(() => {
         this.saving = false;
         if (!this.disposed) { this.refreshSettings(); this.tui.requestRender(); }
@@ -354,7 +357,7 @@ export class RefineWorkspace implements Component, Focusable {
         this.openPreferences(); return true;
       }
       if (this.inputKind === "revision" && key === "ctrl+e") {
-        this.revisionExpanded = !this.revisionExpanded;
+        if (this.canInlineRevision(this.tui.terminal.columns)) this.revisionExpanded = !this.revisionExpanded;
         this.tui.requestRender();
         return true;
       }
@@ -425,6 +428,7 @@ export class RefineWorkspace implements Component, Focusable {
         this.switchSettingsGroup();
       } else if (key === "ctrl+s") {
         this.saving = true;
+        this.settingsFailed = false;
         this.tui.requestRender();
         void this.actions.saveContext({ ...this.selected }).then((notice) => {
           if (this.disposed) return;
@@ -435,6 +439,7 @@ export class RefineWorkspace implements Component, Focusable {
         }).catch(() => {
           if (this.disposed) return;
           this.settingsNotice = "Could not save context. Retry with Ctrl+S.";
+          this.settingsFailed = true;
         }).finally(() => {
           this.saving = false;
           if (!this.disposed) this.tui.requestRender();
@@ -450,6 +455,7 @@ export class RefineWorkspace implements Component, Focusable {
             this.selected[field] = !this.selected[field];
           }
           this.settingsNotice = "";
+          this.settingsFailed = false;
           this.tui.requestRender();
         } else if (this.cursor === 3) this.actions.chooseModel?.({ ...this.selected });
         else if (this.cursor === 5) this.actions.editSystemPrompt?.({ ...this.selected });
@@ -498,32 +504,47 @@ export class RefineWorkspace implements Component, Focusable {
       (line) => this.theme.fg("borderMuted", line));
   }
 
+  private canInlineRevision(width: number): boolean {
+    const layout = panelLayout(width, this.tui.terminal.rows);
+    return layout.bodyHeight >= 12 && layout.innerWidth >= 36;
+  }
+
   private renderRevision(width: number): string[] {
     const layout = panelLayout(width, this.tui.terminal.rows);
     const { theme } = this;
-    const inline = !this.revisionExpanded && layout.bodyHeight >= 12 && layout.innerWidth >= 36;
+    const canInline = this.canInlineRevision(width);
+    const inline = !this.revisionExpanded && canInline;
     const editorHeight = inline ? Math.min(5, Math.max(3, this.revisionInput.editor.getText().split("\n").length)) : layout.bodyHeight;
-    const title = `${layout.innerWidth < 64 && this.revisionTarget?.label ? "Revise" : "Revise current result"}${this.revisionTarget?.label ? ` · ${this.revisionTarget.label}` : ""}`;
+    const title = layout.innerWidth < 64 ? "Revise" : "Revise current result";
+    const identity = this.revisionTarget?.label ? theme.fg("muted", sanitizeTerminalText(` · ${this.revisionTarget.label}`)) : "";
     const selected = this.revisionSelected.length ? `${this.revisionSelected.length} · ${this.revisionSelected.map((item) => item.name + (item.body !== item.sourceBody ? "*" : "")).join(", ")}` : "None";
-    const status = this.inputError || `${this.preferencesKeyNotice}Not sent · Selected snapshots + additional requirements${this.revisionSelected.some((item) => item.body !== item.sourceBody) ? " · * Edited for this revision only" : ""}`;
+    const status = this.inputError || this.preferencesKeyNotice.trim() || `Not sent${this.revisionSelected.some((item) => item.body !== item.sourceBody) ? " · * Edited for this revision only" : ""}`;
+    const warning = !!(this.inputError || this.preferencesKeyNotice);
+    const feedback = theme.fg(warning ? "warning" : "muted", sanitizeTerminalText(`${warning ? "⚠ " : ""}${status}`));
     const control = (label: string, active: boolean) => active ? theme.bg("selectedBg", theme.fg("text", theme.bold(`› ${label}`))) : theme.fg("muted", label);
-    const controls = [control(sanitizeTerminalText(`Preferences: ${selected}`), this.revisionFocus === "preferences"),
-      control("Review full requirements", this.revisionFocus === "requirements"),
-      control("Additional requirements:", this.revisionFocus === "input")];
-    const header = [theme.fg("text", theme.bold(sanitizeTerminalText(title))), theme.fg(this.inputError ? "warning" : "muted", sanitizeTerminalText(status))];
+    const preferences = this.actions.preferences ? control(sanitizeTerminalText(`Preferences: ${selected}`), this.revisionFocus === "preferences") : undefined;
+    const review = control("Review full requirements", this.revisionFocus === "requirements");
+    const inputs = control("Additional requirements:", this.revisionFocus === "input");
+    const tools = preferences ? [preferences, review] : [review];
+    const strip = tools.join(theme.fg("muted", " · "));
+    // Keep both explicit navigation targets, but avoid a separate row for every control.
+    const controls = [...(visibleWidth(strip) <= layout.innerWidth ? [strip] : tools), inputs];
+    const header = [theme.fg("text", theme.bold(title)) + identity, feedback];
+    if (layout.headerHeight === 1 && warning) header[0] = feedback;
     const footer = alignedKeyHints([
       [["Ctrl+S", "Revise"], ["Enter", "Newline"], ...(this.preferencesKey ? [[this.preferencesKey.toUpperCase(), "Preferences"] as const] : [])],
-      [["Esc", "Back"], ["Tab", "Focus"], ["Ctrl+E", inline ? "Expand" : "Collapse"]],
+      [["Esc", "Back"], ["Tab", "Focus"], ...(canInline ? [["Ctrl+E", inline ? "Expand" : "Collapse"] as const] : [])],
     ], layout.innerWidth, theme);
     if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["Esc", "Back"], ["^S", "Revise"], ["Tab", "Focus"]], layout.innerWidth, theme);
     if (this.revisionFocus !== "input") footer[0] = fittingKeyHints([
       ...(layout.footerHeight === 1 ? [["Esc", "Back"] as const] : []),
       ["Enter", this.revisionFocus === "preferences" ? "Preferences" : "Review"], ["Tab", "Focus"], ["Ctrl+S", "Revise"]], layout.innerWidth, theme);
-    const visibleControls = layout.bodyHeight <= 1 && this.revisionFocus === "input" ? [] : layout.bodyHeight >= 5 ? controls : [control(sanitizeTerminalText(this.revisionFocus === "preferences" ? `Preferences: ${selected}` : this.revisionFocus === "requirements" ? "Review full requirements" : `Additional requirements · Preferences: ${selected}`), true)];
+    const visibleControls = layout.bodyHeight <= 1 && this.revisionFocus === "input" ? [] : layout.bodyHeight >= controls.length + 1 ? controls
+      : [this.revisionFocus === "preferences" ? preferences! : this.revisionFocus === "requirements" ? review : inputs];
     const editor = this.revisionInput.render(layout.innerWidth, Math.max(1, inline ? editorHeight : layout.bodyHeight - visibleControls.length));
-    if (!inline) return panelFrame(layout, header, [...visibleControls, ...editor], footer, (text) => theme.fg("borderMuted", text));
-    // Keep the source panel's viewport/scroll unchanged; only cover its lower rows.
-    // Browsing shortcuts are suspended while the editor owns focus.
+    const body = layout.headerHeight === 0 && warning ? [feedback, ...editor] : [...visibleControls, ...editor];
+    if (!inline) return panelFrame(layout, header, body, footer, (text) => theme.fg("borderMuted", text));
+    // Keep the source panel's viewport/scroll unchanged; its snapshot has no live action hints.
     const source = this.revisionSource?.render(width);
     const pad = (line: string) => " ".repeat(layout.inset) + truncateToWidth(line, layout.innerWidth, "");
     const bottom = [theme.fg("borderMuted", "─".repeat(layout.innerWidth)), ...header,
@@ -545,7 +566,7 @@ export class RefineWorkspace implements Component, Focusable {
     let frameKey = "";
     if (this.mode === "context") {
       const cacheKey = JSON.stringify([width, layout.height, this.selected, this.original, this.settingsOptimizer,
-        this.settingsContextEnabled, this.saving, this.settingsNotice]);
+        this.settingsContextEnabled, this.saving, this.settingsNotice, this.settingsFailed]);
       if (cacheKey !== this.settingsCacheKey) {
         this.settingsFrames.clear();
         this.settingsCacheKey = cacheKey;
@@ -574,7 +595,7 @@ export class RefineWorkspace implements Component, Focusable {
       const notice = [this.saving ? "Saving..." : this.settingsNotice, dirty ? "Unsaved context changes" : ""].filter(Boolean).join(" · ");
       const optimizer = this.settingsOptimizer;
       const group = this.cursor < 3 ? "Context" : "Optimizer";
-      const status = theme.fg(dirty ? "warning" : "muted", sanitizeTerminalText(notice || "Applies to future requests"));
+      const status = theme.fg(dirty || this.settingsFailed ? "warning" : "muted", sanitizeTerminalText(notice || "Applies to future requests"));
       header = [layout.headerHeight === 1 && notice ? status : theme.fg("text", theme.bold("Settings")), status];
       const navigation = workspaceTabs(layout, "Settings", theme);
       const contentHeight = bodyHeight - navigation.length;

@@ -34,6 +34,7 @@ export class TaskPanel {
   private deletion?: { ids: number[]; label: string };
   isConfirmingDelete(): boolean { return !!this.deletion; }
   private reading = false;
+  private referenceOnly = false;
   private inspecting = false;
   private compareId?: number;
   private original = false;
@@ -53,12 +54,13 @@ export class TaskPanel {
   setNotice(text: string): void { this.notice = text; }
   openList(): void { this.inspecting = false; this.compareId = undefined; this.reading = false; this.original = false; }
   /** Preserve the source and reading position while a revision owns focus. */
-  snapshot(): TaskPanel {
+  snapshot(referenceOnly = false): TaskPanel {
     const records = this.actions.records().map((record) => ({ ...record, input: { ...record.input },
       candidate: record.candidate && { ...record.candidate } }));
     const appliedId = this.actions.appliedId();
     const panel = new TaskPanel({ ...this.actions, records: () => records, appliedId: () => appliedId },
       this.theme, this.rows, this.keys, this.usage, structuredClone(this.position));
+    panel.referenceOnly = referenceOnly;
     panel.inspecting = this.inspecting; panel.compareId = this.compareId; panel.reading = this.reading;
     panel.original = this.original; panel.top = this.top; panel.notice = this.notice;
     return panel;
@@ -238,6 +240,10 @@ export class TaskPanel {
     const warning = record.input.budget && (record.input.budget.status !== "ok" || record.input.budget.message) ? "⚠ " : "";
     return warning + this.statusBadge(record);
   }
+  private styledBadge(record: RefineRecord): string {
+    const warning = this.badge(record).startsWith("⚠") ? this.theme.fg("warning", "⚠ ") : "";
+    return warning + this.theme.fg(this.color(record), this.statusBadge(record));
+  }
   private statusBadge(record: RefineRecord): string {
     if (record.status === "unsent") return "○ Unsent";
     if (record.status === "queued") return "… Queued";
@@ -270,13 +276,13 @@ export class TaskPanel {
     const title = row.original ? "Original prompt" : record.input.model.id;
     const status = row.original && record.status !== "unsent"
       ? this.muted(`${records.filter((r) => r.status !== "unsent").length} runs · ${records.filter(pending).length} active`)
-      : this.theme.fg(this.color(record), this.badge(record));
+      : this.styledBadge(record);
     const titleText = previewDetails ? this.theme.fg("text", sanitizeTerminalText(title)) : this.heading(title);
     const header = visibleWidth(titleText) + visibleWidth(status) + 3 <= width
       ? [titleText + (previewDetails ? this.muted(" · ") : " ".repeat(width - visibleWidth(titleText) - visibleWidth(status))) + status]
       : [truncateToWidth(titleText, width, "…"), status];
     if (!row.original) {
-      if (!previewDetails && record.kind === "revise") header.push(...this.wrapped(this.muted(`Revision${record.parentId ? ` of run #${record.parentId}` : ""}${this.inspecting ? " · o Original" : ""}`), width));
+      if (!previewDetails && record.kind === "revise") header.push(...this.wrapped(this.muted(`Revision${record.parentId ? ` of run #${record.parentId}` : ""}${this.inspecting && !this.referenceOnly ? " · o Original" : ""}`), width));
       const metadata = this.muted(`${record.input.model.provider} · Thinking ${record.input.thinkingLevel ?? "default"}`);
       if (!previewDetails) header.push(...this.wrapped(metadata, width));
       const metrics: string[] = [];
@@ -305,7 +311,8 @@ export class TaskPanel {
     const original = row.original || this.original || !record.candidate;
     const body = [
       ...(!row.original ? [this.heading(original ? "Original prompt" : record.kind === "revise" ? "Revised result" : "Result"), ""] : []),
-      this.theme.fg("text", sanitizeTerminalText(original ? record.input.draft || "Empty prompt · Press i to edit" : record.candidate!.text)),
+      original && !record.input.draft ? this.muted("Empty prompt · ") + formatKeyHint(["i", "Edit original"], this.theme)
+        : this.theme.fg("text", sanitizeTerminalText(original ? record.input.draft : record.candidate!.text)),
     ];
     if (this.inspecting || this.usage) {
       if (!row.original && record.candidate && !original) body.push("", this.heading("Original prompt"), "", this.theme.fg("text", sanitizeTerminalText(record.input.draft)));
@@ -413,7 +420,7 @@ export class TaskPanel {
         body, [fittingKeyHints([["y", "Delete"], ["Esc / n", "Cancel"]], layout.innerWidth, this.theme)],
         (text) => this.muted(text));
     }
-    const tabs = workspaceTabs(layout, this.usage ? "Usage" : "Preview", this.theme);
+    const tabs = workspaceTabs(layout, this.usage ? "Usage" : "Preview", this.theme, !this.referenceOnly);
     const height = Math.max(1, layout.bodyHeight - tabs.length);
     const rows = this.entries();
     const selected = this.selected(rows);
@@ -434,7 +441,10 @@ export class TaskPanel {
         ? `${active ? "›" : " "} ${record.status === "unsent" ? "○ Unsent ·" : "▾"} ${old ? "Earlier · " : ""}${record.input.draft.replace(/\s+/g, " ") || "Empty prompt"}`
         : `${prefix}${model}${" ".repeat(Math.max(1, leftWidth - visibleWidth(prefix + model + badge)))}${badge}`;
       const clean = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(label), leftWidth, "…"));
-      const text = this.theme.fg(old ? "dim" : row.original ? "text" : this.color(record), clean);
+      const color = old ? "dim" : row.original ? "text" : this.color(record);
+      const warningAt = !row.original && badge.startsWith("⚠") ? clean.lastIndexOf("⚠") : -1;
+      const text = warningAt < 0 ? this.theme.fg(color, clean)
+        : this.theme.fg(color, clean.slice(0, warningAt)) + this.theme.fg("warning", "⚠") + this.theme.fg(color, clean.slice(warningAt + 1));
       return active ? this.theme.bg("selectedBg", text + " ".repeat(Math.max(0, leftWidth - visibleWidth(text)))) : text;
     });
     const previewDetails = this.inspecting && !this.usage && this.compareId === undefined && !!selected && !selected.original && !!selected.record.candidate;
@@ -475,14 +485,15 @@ export class TaskPanel {
       : alignedKeyHints([primary, secondary], layout.innerWidth, this.theme);
     if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["Esc", "Back"], ["Enter", action], ["Tab", focusAction]], layout.innerWidth, this.theme);
     const title = this.inspecting ? (other ? "Compare results" : "Prompt details") : this.usage ? "Usage · All rounds" : "Prompt refine · Tasks";
-    const subtitle = this.notice ? this.muted(this.notice) : this.inspecting
+    const subtitle = this.referenceOnly ? this.muted("Read-only reference") : this.notice ? this.muted(this.notice) : this.inspecting
       ? (selected && !selected.original
         ? this.muted("Selected: ") + this.heading(`#${selected.record.id} ${selected.record.input.model.id}`)
         : this.heading("Original prompt")) + this.muted(" · ")
         + formatKeyHint(["↑↓", `scroll${previewDetails ? (this.original ? " reference" : " result") : ""}`], this.theme)
         + (previewDetails ? this.muted(" · ") + formatKeyHint(["o", this.original ? "Result" : "Reference"], this.theme)
           : other ? this.muted(" · Same original and conversation context") : "")
-      : this.muted(`${rows.filter((row) => row.original).length} prompts · ${rows.filter((row) => !row.original).length} runs · ↑↓ select · Run: ${this.actions.launchModel?.() ?? "selected model"}`);
+      : this.muted(`${rows.filter((row) => row.original).length} prompts · ${rows.filter((row) => !row.original).length} runs · `)
+        + formatKeyHint(["↑↓", "select"], this.theme) + this.muted(` · Run: ${this.actions.launchModel?.() ?? "selected model"}`);
     return panelFrame(layout, [this.heading(title), subtitle],
       [...tabs, ...body], footer, (text) => this.muted(text));
   }

@@ -18,7 +18,9 @@ type Form = {
   initial: string;
   focus: number;
 };
-type Page = { kind: "list" } | { kind: "read"; title: string; text: string; scroll: number }
+type DocumentPart = { text: string; color: "text" | "muted" | "warning" | "error"; heading?: boolean };
+type PreferenceDocument = DocumentPart[];
+type Page = { kind: "list" } | { kind: "read"; title: string; document: PreferenceDocument; scroll: number }
   | { kind: "form"; form: Form } | { kind: "discard"; form: Form } | { kind: "delete"; entry: RevisionPreference };
 type Action = "new" | "edit" | "delete";
 const ACTIONS = [
@@ -38,9 +40,10 @@ export class PreferencePanel {
   private index = 0;
   private contentVersion = 0;
   private entriesCache?: { query: string; version: number; entries: RevisionPreference[] };
-  private descriptionCache?: { entry: RevisionPreference; version: number; text: string };
-  private documents: { text: string; width: number; lines: string[] }[] = [];
+  private descriptionCache?: { entry: RevisionPreference; version: number; document: PreferenceDocument };
+  private documents: { document: PreferenceDocument; width: number; lines: string[] }[] = [];
   private notice = "";
+  private noticeColor: "muted" | "warning" | "error" = "muted";
   private busy = false;
   private disposed = false;
   private hasFocus = false;
@@ -88,13 +91,18 @@ export class PreferencePanel {
     return entry && this.working.find((item) => preferenceKey(item) === preferenceKey(entry));
   }
   /** Only rewrap literal documents when content or width changes, not on Tab/scroll. */
-  private document(text: string, width: number): string[] {
-    const cached = this.documents.find((item) => item.text === text && item.width === width);
+  private document(document: PreferenceDocument, width: number): string[] {
+    const cached = this.documents.find((item) => item.document === document && item.width === width);
     if (cached) return cached.lines;
-    const lines = wrapTextWithAnsi(sanitizeTerminalText(text), width);
+    const lines = document.flatMap((part) => wrapTextWithAnsi(sanitizeTerminalText(part.text), width)
+      .map((line) => this.theme.fg(part.color, part.heading ? this.theme.bold(line) : line)));
     if (this.documents.length >= 3) this.documents.shift();
-    this.documents.push({ text, width, lines });
+    this.documents.push({ document, width, lines });
     return lines;
+  }
+  private setNotice(text: string, color: "muted" | "warning" | "error" = "muted"): void {
+    this.notice = text;
+    this.noticeColor = color;
   }
   private async refresh(): Promise<void> {
     const identity = this.highlighted();
@@ -116,7 +124,7 @@ export class PreferencePanel {
     if (!entry) return;
     const index = this.working.findIndex((item) => preferenceKey(item) === preferenceKey(entry));
     if (index >= 0) this.working.splice(index, 1);
-    else if (this.working.length >= PREFERENCE_SELECTION_LIMIT) this.notice = `Select at most ${PREFERENCE_SELECTION_LIMIT} preferences for one revision.`;
+    else if (this.working.length >= PREFERENCE_SELECTION_LIMIT) this.setNotice(`Select at most ${PREFERENCE_SELECTION_LIMIT} preferences for one revision.`, "warning");
     else this.working.push(selectPreference(entry));
     this.contentVersion++;
     this.requirementsChars = composeRevision(this.working, this.freeText).length;
@@ -125,18 +133,26 @@ export class PreferencePanel {
   private source(entry: RevisionPreference): RevisionPreference | undefined {
     return this.library.entries.find((item) => preferenceKey(item) === preferenceKey(entry));
   }
-  private description(entry: RevisionPreference): string {
-    if (this.descriptionCache?.entry === entry && this.descriptionCache.version === this.contentVersion) return this.descriptionCache.text;
+  private description(entry: RevisionPreference): PreferenceDocument {
+    if (this.descriptionCache?.entry === entry && this.descriptionCache.version === this.contentVersion) return this.descriptionCache.document;
     const local = this.local(entry);
     const source = this.source(entry);
+    const changed = local && source && (source.version !== local.version || source.body !== local.sourceBody || source.name !== local.name);
+    const unavailable = !!this.library.errors[entry.scope];
     const status = local ? [local.body !== local.sourceBody ? "Edited for this revision" : "Saved snapshot",
-      this.library.errors[local.scope] ? "Library unavailable" : !source ? "Source deleted" : source.version !== local.version || source.body !== local.sourceBody || source.name !== local.name ? "Library changed; snapshot kept" : ""].filter(Boolean).join(" · ") : "Library entry";
-    const library = `${entry.name}\n${entry.scope} · ${entry.id}\n${source ? "Library entry" : "Deleted source"}\n\n${entry.body}`;
-    const text = local ? `${library}\n\nSelected snapshot · ${status}\n${local.body}` : library;
-    this.descriptionCache = { entry, version: this.contentVersion, text };
-    return text;
+      unavailable ? "Library unavailable" : !source ? "Source deleted" : changed ? "Library changed; snapshot kept" : ""].filter(Boolean).join(" · ") : "Library entry";
+    const document: PreferenceDocument = [
+      { text: entry.name, color: "text", heading: true },
+      { text: `${entry.scope} · ${entry.id}`, color: "muted" },
+      { text: unavailable ? "Library unavailable" : source ? "Library entry" : "Deleted source", color: unavailable || !source ? "warning" : "muted" },
+      { text: "", color: "text" }, { text: entry.body, color: "text" },
+    ];
+    if (local) document.push({ text: "", color: "text" }, { text: "Selected snapshot", color: "text", heading: true },
+      { text: status, color: unavailable || !source || changed ? "warning" : "muted" }, { text: local.body, color: "text" });
+    this.descriptionCache = { entry, version: this.contentVersion, document };
+    return document;
   }
-  private read(title: string, text: string): void { this.page = { kind: "read", title, text, scroll: 0 }; }
+  private read(title: string, document: PreferenceDocument): void { this.page = { kind: "read", title, document, scroll: 0 }; }
   private bodyText(form: Form): string {
     const text = form.body.editor.getExpandedText();
     // Native Editor normalizes tabs on setText; preserve untouched saved literals.
@@ -156,15 +172,15 @@ export class PreferencePanel {
     const form: Form = { kind, scope: entry?.scope ?? "project", name, body, rawBody, initialEditorBody: body.editor.getExpandedText(),
       expected: kind === "library" ? structuredClone(entry) : undefined, initial: "", focus: 0 };
     form.initial = this.stamp(form);
-    this.page = { kind: "form", form }; this.notice = "";
+    this.page = { kind: "form", form }; this.setNotice("");
   }
   private activate(action: Action): void {
     const entry = this.highlighted();
-    this.notice = "";
+    this.setNotice("");
     if (action === "new") this.openForm("new");
     else {
       const source = entry && this.source(entry);
-      if (!source) { this.notice = "Select a saved preference to edit or delete."; return; }
+      if (!source) { this.setNotice("Select a saved preference to edit or delete.", "warning"); return; }
       if (action === "edit") this.openForm("library", source);
       else this.page = { kind: "delete", entry: structuredClone(source) };
     }
@@ -172,14 +188,14 @@ export class PreferencePanel {
   private async save(form: Form): Promise<void> {
     const value = this.formValue(form);
     const error = preferenceValidation(value);
-    if (error) { this.notice = error; return; }
+    if (error) { this.setNotice(error, "warning"); return; }
     this.busy = true; this.redraw();
     try {
       await this.repository.save(form.scope, value, form.expected);
       if (this.disposed) return;
-      this.page = { kind: "list" }; this.notice = "Saved to library; not added to selection; no request sent.";
+      this.page = { kind: "list" }; this.setNotice("Saved to library; not added to selection; no request sent.");
       await this.refresh();
-    } catch (error) { if (!this.disposed) this.notice = this.error(error); }
+    } catch (error) { if (!this.disposed) this.setNotice(this.error(error), "error"); }
     finally { this.busy = false; this.redraw(); }
   }
   private async remove(entry: RevisionPreference): Promise<void> {
@@ -187,9 +203,9 @@ export class PreferencePanel {
     try {
       await this.repository.remove(entry);
       if (this.disposed) return;
-      this.page = { kind: "list" }; this.notice = "Deleted from library; selected snapshots kept.";
+      this.page = { kind: "list" }; this.setNotice("Deleted from library; selected snapshots kept.");
       await this.refresh();
-    } catch (error) { if (!this.disposed) { this.page = { kind: "list" }; this.notice = this.error(error); } }
+    } catch (error) { if (!this.disposed) { this.page = { kind: "list" }; this.setNotice(this.error(error), "error"); } }
     finally { this.busy = false; this.redraw(); }
   }
 
@@ -197,7 +213,7 @@ export class PreferencePanel {
     if (this.disposed) return;
     const key = parseKey(data);
     if (key && /(^|\+)f\d+$/.test(key)) return;
-    if (key === "ctrl+s") { this.notice = "Return to Revise to request revision with Ctrl+S."; this.redraw(); return; }
+    if (key === "ctrl+s") { this.setNotice("Return to Revise to request revision with Ctrl+S."); this.redraw(); return; }
     const cancel = this.keys.matches(data, "tui.select.cancel") || key === "ctrl+\\";
     if (this.busy) {
       // A load can be abandoned; writes remain until their result is known.
@@ -205,7 +221,7 @@ export class PreferencePanel {
       return;
     }
     const enter = this.keys.matches(data, "tui.input.submit");
-    if (this.page.kind === "list" && key) this.notice = "";
+    if (this.page.kind === "list" && key) this.setNotice("");
     if (this.page.kind === "read") {
       if (cancel) this.page = { kind: "list" };
       else if (key === "up" || key === "pageup") this.page.scroll = Math.max(0, this.page.scroll - (key === "up" ? 1 : this.viewport));
@@ -213,7 +229,7 @@ export class PreferencePanel {
       else if (key === "home") this.page.scroll = 0;
       else if (key === "end") this.page.scroll = Number.MAX_SAFE_INTEGER;
     } else if (this.page.kind === "discard") {
-      if (key === "y") { this.page = { kind: "list" }; this.notice = "Form discarded."; }
+      if (key === "y") { this.page = { kind: "list" }; this.setNotice("Form discarded."); }
       else if (cancel || key === "n") this.page = { kind: "form", form: this.page.form };
     } else if (this.page.kind === "delete") {
       if (key === "y") void this.remove(this.page.entry);
@@ -265,7 +281,9 @@ export class PreferencePanel {
     const wrap = (text: string, columns = w) => wrapTextWithAnsi(clean(text), columns);
     const button = (text: string, active: boolean) => active ? this.theme.bg("selectedBg", this.theme.fg("text", `› ${clean(text)}`)) : this.theme.fg("muted", `  ${clean(text)}`);
     let title = "Preferences";
-    let subtitle = `Focus: ${["Search", "Library", "Actions"][this.focus]} · ${this.working.length} selected · ${this.requirementsChars}/${this.maxChars} chars${this.requirementsChars > this.maxChars ? " · Too long" : ""}`;
+    const tooLong = this.requirementsChars > this.maxChars;
+    let subtitle = `Focus: ${["Search", "Library", "Actions"][this.focus]} · ${this.working.length} selected · ${this.requirementsChars}/${this.maxChars} chars`;
+    let subtitleColor: DocumentPart["color"] = "muted";
     let body: string[] = [];
     let hints: KeyHint[][] = [[["Alt+Enter", "Bring back"], ["Enter", this.focus === 0 ? "Browse" : this.focus === 1 ? "Read" : "Choose"],
       ...(this.focus === 1 ? [["Space", "Select"] as KeyHint] : this.focus === 2 ? [["←→", "Choose action"] as KeyHint] : [])],
@@ -273,14 +291,16 @@ export class PreferencePanel {
     const page = this.page;
     if (page.kind === "read") {
       title = page.title; subtitle = "Read-only · No request sent";
-      const lines = this.document(page.text, w); this.viewport = Math.max(1, h);
+      const lines = this.document(page.document, w); this.viewport = Math.max(1, h);
       page.scroll = Math.min(page.scroll, Math.max(0, lines.length - h));
       body = lines.slice(page.scroll, page.scroll + h);
       hints = [[["↑↓ / PgUp / PgDn", "Scroll"], ["", `${Math.min(lines.length, page.scroll + 1)}–${Math.min(lines.length, page.scroll + h)} / ${lines.length} lines`]],
         [["Esc", "Back"], ["", "No request sent"]]];
     } else if (page.kind === "discard" || page.kind === "delete") {
       title = page.kind === "discard" ? "Discard unsaved form?" : "Delete library entry?";
-      body = wrap(page.kind === "discard" ? "Unsaved form changes will be discarded. Pending selection and saved library entries stay unchanged." : this.description(page.entry));
+      body = page.kind === "discard"
+        ? wrap("Unsaved form changes will be discarded. Pending selection and saved library entries stay unchanged.").map((line) => this.theme.fg("warning", line))
+        : this.document(this.description(page.entry), w);
       hints = [[["y", page.kind === "discard" ? "Discard" : "Delete"], ["", "Selected snapshots stay unchanged"]],
         [["n / Esc", page.kind === "discard" ? "Keep editing" : "Cancel"]]];
     } else if (page.kind === "form") {
@@ -338,7 +358,7 @@ export class PreferencePanel {
         const styled = this.theme.fg("text", cell);
         return active ? this.theme.bg("selectedBg", styled + " ".repeat(Math.max(0, leftWidth - visibleWidth(cell)))) : styled;
       });
-      if (!entries.length) list.push(...wrap(status, leftWidth).map((line) => this.theme.fg("muted", line)));
+      if (!entries.length) list.push(...wrap(status, leftWidth).map((line) => this.theme.fg(errors.length ? "error" : "muted", line)));
       if (!room) {
         body = this.focus === 0 ? this.search.render(w) : this.focus === 2
           ? toolbar.slice(Math.min(Math.floor(this.actionIndex / columns), Math.max(0, toolbar.length - h))) : list;
@@ -355,10 +375,14 @@ export class PreferencePanel {
           + this.theme.fg("borderMuted", " │ ") + this.theme.fg("muted", "Preview · Enter reads full text") : heading;
         body = [...chrome, section, ...panes];
       }
-      if (errors.length && !this.notice) subtitle = `Load failed · ${errors.join(" · ")}`;
+      if (errors.length) { subtitle = `Load failed · ${errors.join(" · ")}`; subtitleColor = "error"; }
+      else if (tooLong) { subtitle = `Too long · ${this.requirementsChars}/${this.maxChars} chars`; subtitleColor = "warning"; }
     }
-    if (this.busy) subtitle = "Working…";
-    else if (this.notice) subtitle = page.kind === "list" ? `Focus: ${["Search", "Library", "Actions"][this.focus]} · ${this.notice}` : this.notice;
+    if (this.busy) { subtitle = "Working…"; subtitleColor = "muted"; }
+    else if (this.notice && (this.noticeColor !== "muted" || subtitleColor === "muted")) {
+      subtitleColor = this.noticeColor;
+      subtitle = page.kind === "list" && subtitleColor === "muted" ? `Focus: ${["Search", "Library", "Actions"][this.focus]} · ${this.notice}` : this.notice;
+    }
     if (w < 30) {
       const labels: Record<string, string> = { "Cancel selection": "Cancel", "Keep editing": "Keep", "Next field": "Next",
         "Save to library": "Save", "Save this revision's edit": "Save edit", "Change scope": "Scope", "Scope fixed": "Fixed" };
@@ -372,9 +396,13 @@ export class PreferencePanel {
     // already-styled key hints, which would strip their ANSI emphasis/colors.
     if (this.notice && visibleWidth(clean(this.notice)) > w && page.kind !== "read" && layout.footerHeight > 1) {
       // A long notice must not hide Back/Cancel or region navigation.
-      footer[0] = this.theme.fg("muted", wrap(this.notice)[0] ?? "");
+      footer[0] = this.theme.fg(this.noticeColor, wrap(this.notice)[0] ?? "");
     }
-    return panelFrame(layout, [this.theme.fg("text", this.theme.bold(clean(title))), this.theme.fg("muted", clean(subtitle))],
-      body, footer, (text) => this.theme.fg("borderMuted", text));
+    const severe = subtitleColor !== "muted";
+    const feedback = this.theme.fg(subtitleColor, clean(`${severe ? "⚠ " : ""}${subtitle}`));
+    const header = [this.theme.fg("text", this.theme.bold(clean(title))), feedback];
+    if (severe && layout.headerHeight === 1) header[0] = feedback;
+    if (severe && layout.headerHeight === 0) body = [feedback, ...body];
+    return panelFrame(layout, header, body, footer, (text) => this.theme.fg("borderMuted", text));
   }
 }
