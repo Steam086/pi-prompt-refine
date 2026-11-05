@@ -719,6 +719,80 @@ describe("explicit candidate revision", () => {
     harness.panelInput("q"); await view;
   });
 
+  it("selects Preferences before first refine without a modifier, preserves literal task and snapshots across reopening", async () => {
+    const h = await makeHarness({ config: { preferencesKey: null }, persistHistory: true });
+    const store = new PreferenceStore(h.agentDir, h.context.cwd);
+    const entry = await store.save("project", { name: "Bullet Points", body: "Ask the main agent to use bullets only where useful." });
+    const original = "  Explain this command; do not run it.\n```sh\nnpm test -- --run\n```\n";
+    const configBefore = await readFile(join(h.agentDir, "prompt-refine.json"), "utf8");
+    h.holdPanel(); let view = h.command("", h.context);
+    h.panelInput("n"); h.panelInput(`\x1b[200~${original}\x1b[201~`); h.panelInput("\r");
+    h.panelInput("p");
+    await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Bullet Points"));
+    h.panelInput(" "); h.panelInput("\x13");
+    expect(h.complete).not.toHaveBeenCalled();
+    h.panelInput("\r"); h.panelInput("\x1b"); h.panelInput("\x1b[13;3u");
+    expect(h.panelLines().join("\n")).toContain("Preferences: 1 · Bullet Points");
+    expect(h.complete).not.toHaveBeenCalled();
+    expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
+    h.panelInput("q"); await view;
+    await store.save("project", { name: "Renamed", body: "Changed library body" }, entry);
+    view = h.command("", h.context);
+    expect(h.panelLines().join("\n")).toContain("Preferences: 1 · Bullet Points");
+    h.panelInput("\r"); await flushPromises();
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    const context = (h.complete.mock.calls[0] as any[])[1];
+    const packet = JSON.parse(context.messages[0].content[0].text);
+    expect(packet).toMatchObject({ operation: "refine", draft: original, editing_instruction: entry.body });
+    expect(packet).not.toHaveProperty("revision_instruction");
+    expect(packet).not.toHaveProperty("previous_candidate");
+    expect(context.systemPrompt).not.toContain(entry.body);
+    expect(h.getEditor()).toBe("Draft A");
+    expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
+    expect(await readFile(join(h.agentDir, "prompt-refine.json"), "utf8")).toBe(configBefore);
+    h.panelInput("q"); await view;
+    await h.handlers.get("session_shutdown")![0]!({ type: "session_shutdown" }, h.context);
+    const history = JSON.parse(await readFile(`${h.context.sessionManager.getSessionFile()}.prompt-refine.json`, "utf8"));
+    expect(history.records[0]).toMatchObject({ draft: original, editingInstruction: entry.body });
+    expect(history.records[0]).not.toHaveProperty("preferences");
+  });
+
+  it("uses selected initial requirements on the one-off model path without changing defaults", async () => {
+    const h = await makeHarness({ configureModel: false });
+    const entry = await new PreferenceStore(h.agentDir, h.context.cwd).save("global", { name: "Steps", body: "Ask for ordered steps when sequence matters." });
+    h.holdPanel(); const view = h.command("", h.context);
+    h.panelInput("n"); h.panelInput("Explain setup, do not implement."); h.panelInput("\r");
+    h.panelInput("\x1bp"); await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Steps"));
+    h.panelInput(" "); h.panelInput("\x1b[13;3u");
+    expect(h.complete).not.toHaveBeenCalled();
+    h.panelInput("m"); await flushPromises(); h.panelInput("\r");
+    await vi.waitFor(() => expect(h.panelLines().join("\n")).not.toContain("Run original with another model"));
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    const packet = JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
+    expect(packet).toMatchObject({ draft: "Explain setup, do not implement.", editing_instruction: entry.body });
+    expect(JSON.parse(await readFile(join(h.agentDir, "prompt-refine.json"), "utf8"))).not.toHaveProperty("model");
+    expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
+    h.panelInput("q"); await view;
+  });
+
+  it("copies an already-run original without inheriting its preferences into the new task", async () => {
+    const h = await makeHarness();
+    await new PreferenceStore(h.agentDir, h.context.cwd).save("global", { name: "Sections", body: "Ask for useful topic headings." });
+    h.holdPanel(); const view = h.command("", h.context);
+    h.panelInput("n"); h.panelInput("Original"); h.panelInput("\r"); h.panelInput("p");
+    await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Sections"));
+    h.panelInput(" "); h.panelInput("\x1b[13;3u"); h.panelInput("\r"); await flushPromises();
+    h.panelInput("i"); h.panelInput(" copied"); h.panelInput("\r");
+    expect(h.panelLines().join("\n")).toContain("Preferences: None");
+    h.panelInput("\r"); await flushPromises();
+    expect(h.complete).toHaveBeenCalledTimes(2);
+    const packets = h.complete.mock.calls.map((call: any[]) => JSON.parse(call[1].messages[0].content[0].text));
+    expect(packets[0]).toHaveProperty("editing_instruction", "Ask for useful topic headings.");
+    expect(packets[1]).not.toHaveProperty("editing_instruction");
+    expect(packets[1].draft).toBe("Original copied");
+    h.panelInput("q"); await view;
+  });
+
   it("composes saved preference snapshots into the existing request, only after returning and Ctrl+S", async () => {
     const harness = await makeHarness();
     const store = new PreferenceStore(harness.agentDir, harness.context.cwd);

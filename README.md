@@ -17,7 +17,7 @@ Pi Prompt Refine 是 Pi Coding Agent 的提示词改写扩展。它结合当前�
 | 接受 | 按 `a` 写入主编辑器，不发送 |
 | 微调 | 详情中按 `e` 手工编辑 |
 | 修订 | 列表选中结果或详情按 `f`，默认输入补充要求；Enter 换行，Ctrl+S 请求，Ctrl+E 展开 |
-| 复用修订要求 | Revise 按 `Alt+P` 或 Tab 聚焦 Preferences 后 Enter；Space 勾选，Alt+Enter 带回，只有回 Revise 后 Ctrl+S 请求；Tab 可进入完整要求预览 |
+| 复用编辑要求 | Unsent 原稿按 `p`（或 Alt+P）选择 Preferences，Space 勾选、Alt+Enter 带回后仍需 Enter 才首次 refine；Revise 中 Alt+P 或 Tab → Preferences，带回后 Ctrl+S 修订。原始任务不变，要求独立传递 |
 | 切换模型 | 按 `m` 选模型，Enter 重新优化原稿 |
 
 结果对比、直接发送及其他操作见[使用说明](docs/usage.md)。

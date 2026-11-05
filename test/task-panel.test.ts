@@ -6,6 +6,7 @@ import { selectHistory } from "../src/context.js";
 import type { RefineRecord } from "../src/history.js";
 import { panelLayout } from "../src/panel-layout.js";
 import { TaskPanel, type TaskPanelPosition } from "../src/task-panel.js";
+import { sanitizeTerminalText } from "../src/presentation.js";
 
 function record(id = 1, taskId = 1): RefineRecord {
   const input = { draft: "本项目的原始要求", model: { provider: "openai-codex", id: `model-${id}` }, thinkingLevel: "xhigh" as const,
@@ -19,7 +20,7 @@ function create(name = "dark", usage = false, records = [record()]) {
   const size = { rows: 40 };
   const position: TaskPanelPosition = { selectedId: records[0]?.id };
   const actions = { records: () => records, appliedId: () => undefined, activate: vi.fn(() => true), run: vi.fn(), stop: vi.fn(), copy: vi.fn(),
-    editOriginal: vi.fn(), chooseModel: vi.fn(), accept: vi.fn(), revise: vi.fn(), launchModel: () => "Default model" };
+    editOriginal: vi.fn(), chooseModel: vi.fn(), accept: vi.fn(), revise: vi.fn(), preferences: vi.fn(), preferencesKey: "alt+p" as const, launchModel: () => "Default model" };
   const panel = new TaskPanel(actions, theme, () => size.rows, getKeybindings(), usage, position);
   const text = (width = 100) => stripVTControlCharacters(panel.render(width).join("\n"));
   return { panel, theme, size, position, actions, records, text };
@@ -270,6 +271,65 @@ describe("prompt tree and inspection", () => {
     panel.handleInput("\r");
     expect(text()).toContain("Prompt details");
     expect(actions.activate).not.toHaveBeenCalled();
+  });
+
+  it("opens Preferences only for the selected Unsent original via p or its optional shortcut", () => {
+    const unsent = { ...record(), status: "unsent" as const, candidate: undefined };
+    const f = create("dark", false, [unsent, record(2, 2)]);
+    f.position.selectedTaskId = 1;
+    f.panel.handleInput("p"); f.panel.handleInput("\x1bp");
+    expect(f.actions.preferences.mock.calls).toEqual([[1], [1]]);
+    expect(f.actions.run).not.toHaveBeenCalled();
+    f.panel.handleInput("?"); expect(f.text()).toContain("p Preferences before first refine");
+    f.panel.handleInput("p"); expect(f.actions.preferences).toHaveBeenCalledTimes(2);
+    f.panel.handleInput("\x1b");
+    f.position.selectedTaskId = undefined; f.position.selectedId = 2;
+    f.panel.handleInput("p"); expect(f.actions.preferences).toHaveBeenCalledTimes(2);
+    expect(f.text()).toContain("Select an Unsent original");
+    f.position.selectedTaskId = 1; unsent.input.contextUnavailable = true;
+    f.panel.handleInput("p"); expect(f.actions.preferences).toHaveBeenCalledTimes(2);
+    expect(f.actions.activate).not.toHaveBeenCalled();
+  });
+
+  it.each(["dark", "light"])("shows selected Unsent snapshots with neutral semantic styling and bounded %s layouts", (name) => {
+    const source = { ...record(), status: "unsent" as const, candidate: undefined };
+    source.input.preferences = [{ id: "a", scope: "project", version: 1, name: "Bullets 中文😀\x1b[2J", body: "Keep **literal** 中文😀", sourceBody: "Keep **literal** 中文😀" }];
+    source.input.editingInstruction = source.input.preferences[0]!.body;
+    const f = create(name, false, [source]);
+    const full = f.panel.render(100).join("\n");
+    expect(full).toContain(f.theme.fg("muted", sanitizeTerminalText(`Preferences: 1 · ${source.input.preferences[0]!.name}`)));
+    expect(f.text()).toContain("p Preferences");
+    expect(full).not.toContain("\x1b[2J");
+    for (const [width, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [100, 40]]) {
+      f.size.rows = rows!;
+      for (const key of ["\t", "\x1b[B", "\x1b[6~", "\x1b[5~", "\t"]) {
+        f.panel.handleInput(key);
+        const lines = f.panel.render(width!);
+        expect(lines).toHaveLength(panelLayout(width!, rows!).height);
+        for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width!);
+        expect(lines.join("\n")).not.toContain("\x1b[2J");
+      }
+    }
+    expect(f.text(40)).toContain("P:1");
+    expect(f.actions.run).not.toHaveBeenCalled();
+    f.panel.handleInput("\r"); expect(f.actions.run).toHaveBeenCalledExactlyOnceWith(1);
+  });
+
+  it.each(["dark", "light"])("keeps submitted initial requirements literal in result references and Usage (%s)", (name) => {
+    const source = record();
+    source.input.editingInstruction = "Keep **literal** 中文😀";
+    for (const usage of [false, true]) {
+      const f = create(name, usage, [source]);
+      f.panel.handleInput("\r");
+      if (!usage) f.panel.handleInput("o");
+      const full = f.panel.render(100).join("\n");
+      expect(full).toContain(f.theme.fg("text", source.input.editingInstruction));
+      expect(f.text()).toContain("Initial editing instruction");
+      const narrow = f.panel.render(80);
+      expect(narrow).toHaveLength(panelLayout(80, f.size.rows).height);
+      expect(stripVTControlCharacters(narrow.join("\n"))).toContain(source.input.editingInstruction);
+      expect(f.actions.run).not.toHaveBeenCalled();
+    }
   });
 
   it("directly accepts/stops only the selected child, never its siblings or parent", () => {

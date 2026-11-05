@@ -36,6 +36,7 @@ interface SavedRecord {
   originalDraft?: string;
   result?: string;
   instruction?: string;
+  editingInstruction?: string;
   model: { provider: string; id: string };
   thinkingLevel?: RefineRequestInput["thinkingLevel"];
   usage?: TokenUsage;
@@ -63,6 +64,7 @@ function project(record: RefineRecord): SavedRecord {
     elapsedSeconds: ["generating", "queued"].includes(record.status) ? undefined : record.elapsedSeconds,
     draft: record.input.draft, originalDraft: record.originalInput?.draft,
     result: record.candidate?.text, instruction: record.input.revision?.instruction,
+    editingInstruction: record.input.editingInstruction,
     model: { provider: record.input.model.provider, id: record.input.model.id }, thinkingLevel: record.input.thinkingLevel,
     usage: savedUsage(record.usage), error: errors.includes(record.error ?? "") ? record.error : undefined,
   };
@@ -79,13 +81,13 @@ function parseRecord(value: unknown): SavedRecord | undefined {
     if (value[key] !== undefined && !number(value[key])) return undefined;
   }
   for (const key of ["id", "taskId", "roundId", "parentId"] as const) if (typeof value[key] === "number" && value[key] > 1_000_000_000) return undefined;
-  for (const key of ["originalDraft", "result", "instruction"] as const) if (value[key] !== undefined && !text(value[key])) return undefined;
+  for (const key of ["originalDraft", "result", "instruction", "editingInstruction"] as const) if (value[key] !== undefined && !text(value[key])) return undefined;
   if (value.thinkingLevel !== undefined && !thinking.includes(value.thinkingLevel as string)) return undefined;
   return {
     id: value.id, taskId: value.taskId, createdAt: value.createdAt, draft: value.draft,
     model: { provider: value.model.provider, id: value.model.id },
     kind: value.kind as SavedRecord["kind"], status: value.status as SavedRecord["status"],
-    ...Object.fromEntries(["roundId", "parentId", "archivedAt", "acceptedAt", "sentAt", "elapsedSeconds", "originalDraft", "result", "instruction", "thinkingLevel"]
+    ...Object.fromEntries(["roundId", "parentId", "archivedAt", "acceptedAt", "sentAt", "elapsedSeconds", "originalDraft", "result", "instruction", "editingInstruction", "thinkingLevel"]
       .filter((key) => value[key] !== undefined).map((key) => [key, value[key]])),
     usage: savedUsage(value.usage), error: errors.includes(value.error as string) ? value.error as string : undefined,
   };
@@ -95,6 +97,7 @@ function restore(saved: SavedRecord, sessionId: string): RefineRecord {
   const input: RefineRequestInput = {
     draft: saved.draft, model: saved.model, thinkingLevel: saved.thinkingLevel, sessionId,
     roundId: saved.roundId, branchLeafId: null, history: selectHistory([], 0, 0), systemPrompt: "", contextUnavailable: true,
+    ...(saved.editingInstruction !== undefined ? { editingInstruction: saved.editingInstruction } : {}),
     ...(saved.instruction !== undefined ? { revision: { instruction: saved.instruction, previousCandidate: "" } } : {}),
   };
   return {

@@ -54,7 +54,8 @@ export class PreferencePanel {
     private readonly tui: TUI, private readonly theme: Theme, private readonly keys: KeybindingsManager,
     private readonly repository: PreferenceRepository, selected: readonly SelectedPreference[],
     private readonly freeText: string, private readonly maxChars: number,
-    private readonly close: (selected?: SelectedPreference[]) => void,
+    private readonly close: (selected?: SelectedPreference[]) => string | void,
+    private readonly purpose: "revise" | "refine" = "revise",
   ) {
     this.working = structuredClone([...selected]);
     this.requirementsChars = composeRevision(this.working, freeText).length;
@@ -124,7 +125,7 @@ export class PreferencePanel {
     if (!entry) return;
     const index = this.working.findIndex((item) => preferenceKey(item) === preferenceKey(entry));
     if (index >= 0) this.working.splice(index, 1);
-    else if (this.working.length >= PREFERENCE_SELECTION_LIMIT) this.setNotice(`Select at most ${PREFERENCE_SELECTION_LIMIT} preferences for one revision.`, "warning");
+    else if (this.working.length >= PREFERENCE_SELECTION_LIMIT) this.setNotice(`Select at most ${PREFERENCE_SELECTION_LIMIT} preferences for one ${this.purpose === "refine" ? "refinement" : "revision"}.`, "warning");
     else this.working.push(selectPreference(entry));
     this.contentVersion++;
     this.requirementsChars = composeRevision(this.working, this.freeText).length;
@@ -213,7 +214,10 @@ export class PreferencePanel {
     if (this.disposed) return;
     const key = parseKey(data);
     if (key && /(^|\+)f\d+$/.test(key)) return;
-    if (key === "ctrl+s") { this.setNotice("Return to Revise to request revision with Ctrl+S."); this.redraw(); return; }
+    if (key === "ctrl+s") {
+      this.setNotice(this.purpose === "refine" ? "Bring back with Alt+Enter, then press Enter on the Unsent original to refine." : "Return to Revise to request revision with Ctrl+S.");
+      this.redraw(); return;
+    }
     const cancel = this.keys.matches(data, "tui.select.cancel") || key === "ctrl+\\";
     if (this.busy) {
       // A load can be abandoned; writes remain until their result is known.
@@ -248,7 +252,10 @@ export class PreferencePanel {
         if (enter) form.focus = 1; else form.name.handleInput(data);
       }
     } else if (cancel) this.close();
-    else if (key === "alt+enter") this.close(structuredClone(this.working));
+    else if (key === "alt+enter") {
+      const error = this.close(structuredClone(this.working));
+      if (error) this.setNotice(error, "warning");
+    }
     else if (key === "tab" || key === "shift+tab") this.focus = (this.focus + (key === "tab" ? 1 : 2)) % 3;
     else if (this.focus === 0) {
       if (enter || key === "down") this.focus = 1;
@@ -264,7 +271,7 @@ export class PreferencePanel {
       else if (key === "home") this.index = 0;
       else if (key === "end") this.index = max;
       else if (key === "space") this.toggle();
-      else if (enter) { const entry = this.highlighted(); if (entry) this.read("Full revision instruction", this.description(entry)); }
+      else if (enter) { const entry = this.highlighted(); if (entry) this.read(this.purpose === "refine" ? "Full editing instruction" : "Full revision instruction", this.description(entry)); }
     } else {
       if (key === "left" || key === "up") this.actionIndex = (this.actionIndex + ACTIONS.length - 1) % ACTIONS.length;
       else if (key === "right" || key === "down") this.actionIndex = (this.actionIndex + 1) % ACTIONS.length;
@@ -280,7 +287,7 @@ export class PreferencePanel {
     const clean = (text: string) => sanitizeTerminalText(text);
     const wrap = (text: string, columns = w) => wrapTextWithAnsi(clean(text), columns);
     const button = (text: string, active: boolean) => active ? this.theme.bg("selectedBg", this.theme.fg("text", `› ${clean(text)}`)) : this.theme.fg("muted", `  ${clean(text)}`);
-    let title = "Preferences";
+    let title = this.purpose === "refine" ? "Preferences · Unsent original" : "Preferences";
     const tooLong = this.requirementsChars > this.maxChars;
     let subtitle = `Focus: ${["Search", "Library", "Actions"][this.focus]} · ${this.working.length} selected · ${this.requirementsChars}/${this.maxChars} chars`;
     let subtitleColor: DocumentPart["color"] = "muted";

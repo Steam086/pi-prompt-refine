@@ -5,6 +5,7 @@ import type { HistorySnapshot, RevisionInput } from "./context.js";
 import type { TokenUsage } from "./usage.js";
 import type { ProjectSnapshot } from "./project-context.js";
 import { RefineHistory, type RefineRecord } from "./history.js";
+import { composeRevision, preferenceKey, preferenceValidation, PREFERENCE_SELECTION_LIMIT, type SelectedPreference } from "./revision-preferences.js";
 
 interface RequestProjectContext { cwd: string; snapshot: ProjectSnapshot; revisionSnapshot?: ProjectSnapshot; config?: ProjectContextConfig }
 export type RefinePhase = "idle" | "generating" | "ready" | "error";
@@ -12,6 +13,10 @@ export type RefineStopReason = "stop" | "length" | "toolUse" | "error" | "aborte
 export interface RefineRequestInput {
   draft: string;
   revision?: RevisionInput;
+  /** Per-original editing requirements, separate from the untouched task and round policy. */
+  editingInstruction?: string;
+  /** Frozen selected bodies and identities; never resolved against the library at launch. */
+  preferences?: SelectedPreference[];
   model: ModelRef;
   thinkingLevel?: ModelThinkingLevel;
   generateTitle?: boolean;
@@ -99,7 +104,7 @@ const defaultScheduler: Scheduler = {
 };
 function sameModel(a: ModelRef | undefined, b: ModelRef | undefined): boolean { return a?.provider === b?.provider && a?.id === b?.id; }
 function fingerprint(input: RefineRequestInput): string {
-  return JSON.stringify([input.draft, input.model, input.thinkingLevel, input.sessionId, input.roundId, input.revision]);
+  return JSON.stringify([input.draft, input.model, input.thinkingLevel, input.sessionId, input.roundId, input.revision, input.editingInstruction]);
 }
 function elapsed(active: ActiveRequest): number { return active.startedAt === undefined ? 0 : Math.max(0, Math.floor((Date.now() - active.startedAt) / 1000)); }
 
@@ -308,7 +313,7 @@ export class RefineController {
   private validate(input: RefineRequestInput): TriggerResult | undefined {
     if (input.contextUnavailable) return { kind: "stale-source" };
     if (!input.draft.trim() || (input.revision && !input.revision.instruction.trim())) return { kind: "empty" };
-    if (input.draft.length > this.options.maxDraftChars || (input.revision &&
+    if (input.draft.length > this.options.maxDraftChars || (input.editingInstruction?.length ?? 0) > this.options.maxDraftChars || (input.revision &&
       (input.revision.instruction.length > this.options.maxDraftChars || input.revision.previousCandidate.length > (this.options.maxOutputChars ?? 1_000_000)))) return { kind: "too-long" };
     if (!input.model.provider || !input.model.id) return { kind: "no-model" };
     return undefined;
@@ -348,6 +353,24 @@ export class RefineController {
     this.journal.editDraft(id, text);
     this.emitState();
     return true;
+  }
+  /** Compare-and-set the captured Unsent target; browsing and library writes never call this. */
+  updateDraftPreferences(expected: RefineRecord, selected: readonly SelectedPreference[]): string | undefined {
+    const record = this.getRecord(expected.id);
+    if (this.pendingSend || !record || record.status !== "unsent" || record.input.contextUnavailable ||
+      record.input.sessionId !== expected.input.sessionId || record.taskId !== expected.taskId ||
+      record.archivedAt !== expected.archivedAt || record.input.draft !== expected.input.draft ||
+      record.input.editingInstruction !== expected.input.editingInstruction ||
+      JSON.stringify(record.input.preferences) !== JSON.stringify(expected.input.preferences)) {
+      return "Original/session changed or already started. Cancel and reopen Preferences.";
+    }
+    if (selected.length > PREFERENCE_SELECTION_LIMIT || new Set(selected.map(preferenceKey)).size !== selected.length ||
+      selected.some((entry) => preferenceValidation(entry))) return "Invalid preference selection; no selection applied.";
+    const instruction = composeRevision(selected, "");
+    if (instruction.length > this.options.maxDraftChars) return `Editing requirements exceed ${this.options.maxDraftChars} characters; reduce the selection.`;
+    this.journal.setDraftPreferences(record.id, selected, instruction);
+    this.emitState();
+    return undefined;
   }
   removeDraft(id: number): void {
     this.journal.removeDraft(id);

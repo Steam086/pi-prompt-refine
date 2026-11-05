@@ -1,5 +1,5 @@
 import { stripVTControlCharacters } from "node:util";
-import { parseKey, Text, truncateToWidth, visibleWidth, type KeybindingsManager } from "@earendil-works/pi-tui";
+import { matchesKey, parseKey, Text, truncateToWidth, visibleWidth, type KeybindingsManager, type KeyId } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { RefineRecord } from "./history.js";
 import type { HistoryStorageStatus } from "./history-store.js";
@@ -19,6 +19,8 @@ export interface TaskPanelActions {
   chooseModel?(id: number): void;
   accept?(id: number): void;
   revise?(id: number): void;
+  preferences?(id: number): void;
+  preferencesKey?: KeyId | null;
   launchModel?(): string;
   historyStorage?(): HistoryStorageStatus;
 }
@@ -112,6 +114,13 @@ export class TaskPanel {
   private scroll(row: Row, delta: number): void {
     this.position.scroll = Math.max(0, (this.position.scroll ?? 0) + delta);
     (this.position.scrolls ??= {})[this.rowKey(row)] = this.position.scroll;
+  }
+  private canChoosePreferences(row?: Row): boolean {
+    return !!(row?.original && row.record.status === "unsent" && !row.record.input.contextUnavailable && this.actions.preferences);
+  }
+  private preferenceSummary(record: RefineRecord): string {
+    const selected = record.input.preferences ?? [];
+    return `Preferences: ${selected.length ? `${selected.length} · ${selected.map((entry) => entry.name).join(", ")}` : "None"}`;
   }
   handleInput(data: string): boolean {
     const key = parseKey(data)?.toLowerCase();
@@ -213,8 +222,13 @@ export class TaskPanel {
       if (this.usage || this.compareId !== undefined) this.position.scroll = 0;
       return true;
     }
-    if (key === "g" || key === "p") {
-      this.notice = key === "g" ? "Press m to run the original with a model" : "Press f to revise, then open Preferences";
+    if (key === "p" || (this.actions.preferencesKey && matchesKey(data, this.actions.preferencesKey))) {
+      if (this.canChoosePreferences(row)) this.actions.preferences!(row!.record.id);
+      else this.notice = "Select an Unsent original for Preferences, or press f on a result to revise";
+      return true;
+    }
+    if (key === "g") {
+      this.notice = "Press m to run the original with a model";
       return true;
     }
     if (key === "f") {
@@ -300,6 +314,9 @@ export class TaskPanel {
       ? [titleText + (previewDetails ? this.muted(" · ") : " ".repeat(width - visibleWidth(titleText) - visibleWidth(status))) + status]
       : [truncateToWidth(titleText, width, "…"), status];
     const identityLines = header.length;
+    if ((row.original && record.status === "unsent" && this.actions.preferences) || record.input.preferences?.length) {
+      header.push(...this.wrapped(this.muted(this.preferenceSummary(record)), width));
+    }
     if (!row.original) {
       if (!previewDetails && record.kind === "revise") header.push(...this.wrapped(this.muted(`Revision${record.parentId ? ` of run #${record.parentId}` : ""}${this.inspecting && !this.referenceOnly ? " · o Original" : ""}`), width));
       const metadata = this.muted(`${record.input.model.provider} · Thinking ${record.input.thinkingLevel ?? "default"}`);
@@ -336,6 +353,7 @@ export class TaskPanel {
         : this.theme.fg("text", sanitizeTerminalText(original ? record.input.draft : record.candidate!.text)),
     ];
     if (this.inspecting || this.usage) {
+      if (record.input.editingInstruction) body.push("", this.heading("Initial editing instruction"), "", this.theme.fg("text", sanitizeTerminalText(record.input.editingInstruction)));
       if (!row.original && record.candidate && !original) body.push("", this.heading("Original prompt"), "", this.theme.fg("text", sanitizeTerminalText(record.input.draft)));
       if (!row.original && record.input.revision) {
         body.push("", this.heading("Revision instruction"), "", this.theme.fg("text", sanitizeTerminalText(record.input.revision.instruction)),
@@ -406,6 +424,7 @@ export class TaskPanel {
     const literal = (text: string) => this.theme.fg("text", sanitizeTerminalText(text));
     const result = [...header.slice(Math.max(0, height - 2)), this.heading(record.kind === "revise" ? "Revised result" : "Result"), "", literal(record.candidate!.text)];
     const reference = [this.heading("Original prompt"), "", literal(record.input.draft)];
+    if (record.input.editingInstruction) reference.push("", this.heading("Initial editing instruction"), "", literal(record.input.editingInstruction));
     if (record.input.revision) {
       reference.push("", this.heading("Revision instruction"), "", literal(record.input.revision.instruction),
         "", this.muted(`Revision${record.parentId ? ` of run #${record.parentId}` : ""}`),
@@ -472,6 +491,7 @@ export class TaskPanel {
       if (!this.inspecting) hints.push(["Enter", row?.original && row.record.status === "unsent" ? "Run" : "Inspect"], ["Tab", this.reading ? "Select" : "Read"], ["n", "New"]);
       if (row) {
         hints.push(["i", row.record.input.contextUnavailable ? "Copy to current" : "Edit original"]);
+        if (this.canChoosePreferences(row)) hints.push(["p", "Preferences before first refine"]);
         if (!row.record.input.contextUnavailable) hints.push(["m", "Run model"]);
         if (!row.original && pending(row.record)) hints.push(["x", "Stop"]);
         if (!row.original && row.record.candidate) {
@@ -524,7 +544,7 @@ export class TaskPanel {
       const badge = this.badge(record);
       const model = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(record.input.model.id), Math.max(1, leftWidth - visibleWidth(prefix + badge) - 1), "…"));
       const label = row.original
-        ? `${active ? "›" : " "} ${record.status === "unsent" ? "○ Unsent ·" : "▾"} ${old ? "Earlier · " : ""}${record.input.draft.replace(/\s+/g, " ") || "Empty prompt"}`
+        ? `${active ? "›" : " "} ${record.status === "unsent" ? `○ Unsent ·${record.input.preferences?.length ? ` P:${record.input.preferences.length} ·` : ""}` : "▾"} ${old ? "Earlier · " : ""}${record.input.draft.replace(/\s+/g, " ") || "Empty prompt"}`
         : `${prefix}${model}${" ".repeat(Math.max(1, leftWidth - visibleWidth(prefix + model + badge)))}${badge}`;
       const clean = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(label), leftWidth, "…"));
       const color = old ? "dim" : row.original ? "text" : this.color(record);
@@ -557,6 +577,7 @@ export class TaskPanel {
     const restored = selected?.record.input.contextUnavailable;
     const primary: KeyHint[] = this.inspecting ? [["i", restored ? "Copy to current" : "Edit original"], ...(!restored ? [["m", "Run model"] as const] : [])]
       : [["Enter", action], ["i", restored ? "Copy to current" : "Edit original"], ["n", "New"], ...(!restored ? [["m", selected ? "Run model" : "Model"] as const] : [])];
+    if (this.canChoosePreferences(selected)) primary.splice(this.inspecting ? 0 : 1, 0, ["p", "Preferences"]);
     if (selected && !selected.original && pending(selected.record)) primary.unshift(["x", "Stop"]);
     if (selected && !selected.original && selected.record.candidate) {
       primary.unshift(...(this.inspecting ? [["s", "Send to Pi"] as const] : []));
@@ -586,6 +607,11 @@ export class TaskPanel {
       : this.muted(`${rows.filter((row) => row.original).length} prompts · ${rows.filter((row) => !row.original).length} runs · `)
         + formatKeyHint(["↑↓", this.reading ? "scroll" : "select"], this.theme) + this.muted(` · Run: ${this.actions.launchModel?.() ?? "selected model"}`);
     const header = [this.heading(title), subtitle];
+    if (!this.notice && !this.referenceOnly && this.canChoosePreferences(selected)) {
+      const summary = this.muted(this.preferenceSummary(selected!.record));
+      header[1] = summary + this.muted(" · ") + subtitle;
+      if (layout.headerHeight === 1) header[0] = summary;
+    }
     if (this.notice && !this.referenceOnly && layout.headerHeight < 2) {
       if (layout.headerHeight === 1) header[0] = truncateToWidth(feedback, layout.innerWidth, "…");
       else body = [feedback, ...body];

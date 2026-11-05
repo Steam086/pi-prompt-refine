@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { getKeybindings, TuiAltScreen, TuiMainScreen, type Terminal } from "@earendil-works/pi-tui";
+import { getKeybindings, TuiAltScreen, TuiMainScreen, visibleWidth, type Terminal } from "@earendil-works/pi-tui";
 import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { PreviewPanel } from "../src/preview.js";
 import { RefineWorkspace } from "../src/workspace.js";
 import type { RefineRecord } from "../src/history.js";
 import { selectHistory } from "../src/context.js";
+import { composeRevision } from "../src/revision-preferences.js";
+import type { TaskPanelPosition } from "../src/task-panel.js";
 
 // Exercise the real Pi diff renderers, not just component snapshots. Terminal I/O
 // is captured, so these tests make no claims about a physical terminal's latency/IME.
@@ -36,17 +38,29 @@ describe("workspace terminal rendering", () => {
       usage: index % 3 === 0 ? undefined : { totalTokens: index * 1200, input: index * 1000, output: index * 200 },
       candidate: index % 3 === 0 ? undefined : { ...requestInput, requestId: index + 1, version: index + 1, generation: 0, text: "Candidate 中文😀\n".repeat(50) },
     }));
+    const unsent: RefineRecord = { id: 31, taskId: 2, kind: "refine", createdAt: 31, input: structuredClone(requestInput), status: "unsent" };
+    records.push(unsent);
+    const taskPosition: TaskPanelPosition = { selectedId: 2 };
+    const run = vi.fn();
     const workspace = new RefineWorkspace(panel, tui, theme, getKeybindings(), {
       preferences: { key: "alt+p", maxChars: 16000, repository: {
         load: async () => ({ errors: {}, entries: [{ id: "one", version: 1, scope: "global", name: "Keep commands 中文", body: "Preserve literals\n".repeat(100) }] }),
         save: async () => { throw new Error("Read-only fixture"); }, remove: async () => {},
       } },
+      taskPosition,
+      draftPreferences: (id) => id !== unsent.id ? undefined : {
+        selected: unsent.input.preferences ?? [], save: (selected) => {
+          unsent.input.preferences = structuredClone(selected);
+          unsent.input.editingInstruction = composeRevision(selected, "");
+          return undefined;
+        },
+      },
       context: () => ({ instructions: "always" as const, tree: true, skills: false }), contextEnabled: () => true,
       optimizer: () => ({ model: "provider/long-model-identifier-with-extra-details", thinking: "high · Extension setting", thinkingEnabled: true }),
       chooseModel() {}, editSystemPrompt() {}, history: () => records,
       historyStorage: () => ({ state: "save-error", path: "/项目/会话中文😀.jsonl.prompt-refine.json", savedIds: [1], memoryOnlyIds: [2], omittedIds: [2] }),
       tasks: { records: () => records, appliedId: () => records[1]!.id,
-        activate: (id) => !!records.find((record) => record.id === id)?.candidate, run() {}, stop() {} },
+        activate: (id) => !!records.find((record) => record.id === id)?.candidate, run, stop() {} },
       saveContext: async () => ({ message: "Saved", persisted: true }), submit: () => undefined,
       revision: () => ({ key: "source-1", label: "model · Run #1", submit: () => "Validation notice" }),
     });
@@ -94,6 +108,21 @@ describe("workspace terminal rendering", () => {
         input(key); tui.renderNow();
         expect(workspace.render(columns)).toHaveLength(initialHeight);
       }
+      workspace.openTasks(); taskPosition.selectedTaskId = unsent.taskId;
+      input("p"); await Promise.resolve();
+      const callsBefore = run.mock.calls.length;
+      for (const key of [" ", "\r", "\x1b[6~", "\x1b[5~", "\x1b", "\x13", "\x1b[13;3u"]) {
+        input(key); tui.renderNow();
+        const lines = workspace.render(columns);
+        expect(lines).toHaveLength(initialHeight);
+        for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(columns);
+      }
+      expect(unsent.input.preferences).toHaveLength(1);
+      expect(unsent.input.draft).toBe(requestInput.draft);
+      expect(run).toHaveBeenCalledTimes(callsBefore);
+      input("\r"); tui.renderNow();
+      expect(run).toHaveBeenLastCalledWith(unsent.id);
+      taskPosition.selectedTaskId = undefined; taskPosition.selectedId = 2;
       workspace.openResult(); input("f"); input("\x1bp");
       await Promise.resolve();
       for (const key of [" ", "\r", "\x1b[6~", "\x1b", "\t", "\x1b[C", "\x1b[D", "\t", "\t", "n", "Saved name", "\t", "\r", "中文", "\x13", "\x1b", "n", "\x1b", "y", "\x1b[13;3u"]) {

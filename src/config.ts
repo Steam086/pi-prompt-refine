@@ -328,7 +328,7 @@ export function parseConfig(value: unknown): LoadedConfig {
   }
   if (config.preferencesKey && Object.values(config.shortcuts).some((shortcut) => shortcut && canonicalShortcut(shortcut) === canonicalShortcut(config.preferencesKey!))) {
     config.preferencesKey = null;
-    warnings.push("preferencesKey conflicts with an extension shortcut; disabled. Use Tab then Enter inside Revise.");
+    warnings.push("preferencesKey conflicts with an extension shortcut; disabled. Use p on an Unsent original, or Tab then Enter inside Revise.");
   }
   config.timeoutMs = boundedInteger(value.timeoutMs, DEFAULT_CONFIG.timeoutMs, 1_000, 300_000, "timeoutMs", warnings);
   config.maxDraftChars = boundedInteger(value.maxDraftChars, DEFAULT_CONFIG.maxDraftChars, 1, 100_000, "maxDraftChars", warnings);

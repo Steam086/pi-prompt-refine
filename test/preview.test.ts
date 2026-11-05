@@ -67,6 +67,27 @@ describe("result reading panel", () => {
     if (width >= 40) expect(lines.slice(-2).join("\n")).toContain("? Help");
   });
 
+  it.each(["dark", "light"])("shows initial editing requirements as literal references and refreshes their cached body (%s)", (name) => {
+    const theme = getThemeByName(name)!;
+    const instruction = "Keep **literal** 中文😀";
+    const initial = { ...options, candidateText: "Result", draft: "Original", editingInstruction: instruction };
+    const panel = new PreviewPanel(initial, theme, () => 40, vi.fn());
+    expect(stripVTControlCharacters(panel.render(100).join("\n"))).not.toContain("Initial editing instruction");
+    panel.toggleOriginal();
+    const shown = panel.render(100).join("\n");
+    expect(shown).toContain(theme.fg("text", instruction));
+    expect(stripVTControlCharacters(shown)).toContain("Initial editing instruction");
+    panel.update({ ...initial, editingInstruction: "Updated requirements" });
+    expect(stripVTControlCharacters(panel.render(100).join("\n"))).toContain("Updated requirements");
+    panel.update({ ...initial, state: { ...initial.state, phase: "generating" }, candidateText: undefined });
+    for (const width of [100, 40, 20, 12, 80]) {
+      const lines = panel.render(width);
+      expect(lines).toHaveLength(panelLayout(width, 40).height);
+      for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+    }
+    expect(stripVTControlCharacters(panel.render(100).join("\n"))).toContain(instruction);
+  });
+
   it("remembers candidate reading positions across navigation and model-picker reopen", () => {
     const positions = new Map<string, number>();
     const first = { ...options, viewKey: "record-1", candidateText: Array.from({ length: 100 }, (_, i) => `A line ${i}`).join("\n") };

@@ -73,6 +73,19 @@ describe("unified request budget", () => {
     expect(result.report.message).toContain("Request not sent");
   });
 
+  it("never trims initial editing requirements when optional background is reduced or input is blocked", () => {
+    const draft = "Keep the original task unchanged.";
+    const instruction = "Ask the main agent for useful bullet points.\n".repeat(30);
+    const input = buildRefineInput(draft, empty, "optional project".repeat(2000), undefined, instruction);
+    const trimmed = budgetRequest("system", input, { ...model, contextWindow: 6500 }, 1024);
+    expect(trimmed.report.status).toBe("trimmed");
+    expect(JSON.parse(trimmed.input)).toMatchObject({ draft, editing_instruction: instruction });
+    const tooLong = instruction.repeat(20);
+    const blocked = budgetRequest("system", buildRefineInput(draft, empty, "", undefined, tooLong), { ...model, contextWindow: 6500 }, 1024);
+    expect(blocked.report.status).toBe("blocked");
+    expect(JSON.parse(blocked.input)).toMatchObject({ draft, editing_instruction: tooLong });
+  });
+
   it("does not reject based on an estimated full-prompt output reserve", () => {
     for (const [maxTokens, configLimit] of [[100, 8192], [16_384, 100]]) {
       const input = packet("中文".repeat(500));

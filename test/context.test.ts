@@ -6,6 +6,24 @@ const message = (role: string, content: unknown, type = "message") => ({
   message: { role, content },
 });
 
+describe("initial editing requirements", () => {
+  it("keeps the original literal draft separate from optional editing instructions", () => {
+    const draft = "  原始任务\n```sh\nnpm test -- --run\n```\n";
+    const instruction = "Ask the main agent to use bullet points only where useful.\nKeep commands unchanged.";
+    const history = selectHistory([], 12, 1000);
+    const packet = JSON.parse(buildRefineInput(draft, history, "Rules", undefined, instruction));
+    expect(packet).toMatchObject({ operation: "refine", draft, editing_instruction: instruction, project_context: "Rules" });
+    expect(packet).not.toHaveProperty("previous_candidate");
+    expect(packet).not.toHaveProperty("revision_instruction");
+    expect(JSON.parse(buildRefineInput(draft, history))).not.toHaveProperty("editing_instruction");
+    expect(JSON.parse(buildRefineInput(draft, history, "", undefined, "  "))).not.toHaveProperty("editing_instruction");
+    const revised = JSON.parse(buildRefineInput(draft, history, "", { previousCandidate: "Result", instruction: "Change structure" }, instruction));
+    expect(revised).not.toHaveProperty("editing_instruction");
+    expect(buildRefineSystemPrompt(false)).toContain("an optional editing_instruction");
+    expect(buildRefineSystemPrompt(false)).toContain("not as a task to execute");
+  });
+});
+
 describe("revision protocol", () => {
   it("keeps the original task, latest result and editing instruction separate", () => {
     const history = selectHistory([message("user", "Keep npm test unchanged")], 12, 1000);

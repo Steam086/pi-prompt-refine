@@ -4,6 +4,7 @@ import type { ModelRef } from "../src/config.js";
 import type { BudgetReport } from "../src/budget.js";
 import { buildRefineSystemPrompt, selectHistory } from "../src/context.js";
 import { deferred, FakeScheduler, flushPromises, success } from "./helpers.js";
+import { selectPreference } from "../src/revision-preferences.js";
 
 const model: ModelRef = { provider: "provider-a", id: "chat-model" };
 
@@ -79,6 +80,104 @@ describe("request budget diagnostics", () => {
     expect(controller.getState()).toMatchObject({ phase: "error", error: "budget", budget: { status: "blocked" } });
     expect(controller.getCandidate()?.text).toBe("Previous");
     expect(controller.getHistory().at(-1)).toMatchObject({ status: "error", error: "budget" });
+  });
+});
+
+describe("Unsent preference requirements", () => {
+  const preference = (body = "Ask the main agent to use bullets.") => selectPreference({ id: "bullets", scope: "project", version: 1, name: "Bullet Points", body });
+  const create = (controller: RefineController, draft = "Original task") => {
+    const result = controller.createDraft(input(draft));
+    if (result.kind !== "captured") throw new Error(result.kind);
+    return controller.getRecord(result.recordId)!;
+  };
+
+  it("isolates originals, snapshots literal bodies, and clears without changing the task or round", () => {
+    const complete = vi.fn(async () => success("Result"));
+    const { controller } = setup(complete);
+    const first = create(controller); const second = create(controller);
+    const selected = preference();
+    expect(controller.updateDraftPreferences(first, [selected])).toBeUndefined();
+    selected.body = "Library changed"; selected.name = "Renamed";
+    const saved = controller.getRecord(first.id)!;
+    expect(saved.input).toMatchObject({ draft: first.input.draft, systemPrompt: first.input.systemPrompt,
+      history: first.input.history, roundId: first.input.roundId, editingInstruction: preference().body, preferences: [preference()] });
+    expect(saved.originalInput).toEqual(saved.input);
+    expect(controller.getRecord(second.id)!.input.preferences).toBeUndefined();
+    expect(complete).not.toHaveBeenCalled();
+    expect(controller.updateDraftPreferences(saved, [])).toBeUndefined();
+    expect(controller.getRecord(first.id)!.input.editingInstruction).toBeUndefined();
+    expect(controller.getRecord(first.id)!.input.draft).toBe(first.input.draft);
+  });
+
+  it("rejects stale targets and over-limit combinations while retaining the saved selection", () => {
+    const { controller } = setup();
+    const source = create(controller);
+    const long = preference("a".repeat(60));
+    expect(controller.updateDraftPreferences(source, [long, { ...long, id: "other" }])).toContain("exceed 100");
+    expect(controller.getRecord(source.id)!.input.preferences).toBeUndefined();
+    expect(controller.updateDraftPreferences(source, [preference()])).toBeUndefined();
+    expect(controller.updateDraftPreferences(source, [])).toContain("changed");
+    const selected = controller.getRecord(source.id)!;
+    expect(controller.updateDraft(source.id, source.input.draft, "Edited task")).toBe(true);
+    expect(controller.getRecord(source.id)!.input.preferences).toEqual(selected.input.preferences);
+    expect(controller.updateDraftPreferences(selected, [])).toContain("changed");
+    const current = controller.getRecord(source.id)!;
+    controller.onMessageStarted("Pi message");
+    expect(controller.updateDraftPreferences(current, [])).toContain("changed");
+    const archived = controller.getRecord(source.id)!;
+    // Explicitly reopening an old Unsent original keeps its old background.
+    expect(controller.updateDraftPreferences(archived, [preference()])).toBeUndefined();
+    controller.setSession("other-session");
+    expect(controller.updateDraftPreferences(archived, [])).toContain("changed");
+  });
+
+  it("includes independent editing requirements in deduplication", () => {
+    const pending = deferred<RefineCompletion>();
+    const complete = vi.fn(() => pending.promise);
+    const { controller } = setup(complete);
+    expect(controller.trigger(input("Same", { editingInstruction: "Bullets" })).kind).toBe("started");
+    expect(controller.trigger(input("Same", { editingInstruction: "Bullets" })).kind).toBe("duplicate");
+    expect(controller.trigger(input("Same", { editingInstruction: "Steps" })).kind).toBe("started");
+    expect(controller.trigger(input("Same", { editingInstruction: "x".repeat(101) })).kind).toBe("too-long");
+    expect(complete).toHaveBeenCalledTimes(2);
+  });
+
+  it("freezes queued requests and retains the same requirements for another-model comparisons", async () => {
+    const jobs: Array<{ request: RefineRequest; pending: ReturnType<typeof deferred<RefineCompletion>> }> = [];
+    const complete = vi.fn((request: RefineRequest) => {
+      const pending = deferred<RefineCompletion>(); jobs.push({ request, pending }); return pending.promise;
+    });
+    const controller = new RefineController({ complete, timeoutMs: 100, maxDraftChars: 100, maxConcurrent: 1,
+      scheduler: new FakeScheduler(), onState() {} }, model);
+    controller.setSession("session-1");
+    controller.trigger(input("Busy"));
+    const queued = create(controller);
+    const selected = preference();
+    controller.updateDraftPreferences(queued, [selected]);
+    const saved = controller.getRecord(queued.id)!;
+    controller.startRecord(queued.id);
+    expect(controller.getRecord(queued.id)!.status).toBe("queued");
+    expect(complete).toHaveBeenCalledTimes(1);
+    expect(controller.updateDraftPreferences(saved, [])).toContain("already started");
+    selected.body = "Mutated library";
+    jobs[0]!.pending.resolve(success("Busy result")); await flushPromises();
+    expect(jobs[1]!.request).toMatchObject({ draft: queued.input.draft, editingInstruction: preference().body, preferences: [preference()] });
+    jobs[1]!.pending.resolve(success("Refined")); await flushPromises();
+    controller.runOriginal(queued.id, { provider: "another", id: "model" });
+    expect(jobs[2]!.request).toMatchObject({ draft: queued.input.draft, editingInstruction: preference().body, preferences: [preference()] });
+    expect(controller.getRecord(queued.id)!.input.editingInstruction).toBe(preference().body);
+    jobs[2]!.pending.resolve(success("Other result")); await flushPromises();
+  });
+
+  it("does not inherit preferences into a newly created original or the next round", () => {
+    const { controller } = setup();
+    const source = create(controller);
+    controller.updateDraftPreferences(source, [preference()]);
+    controller.onMessageStarted();
+    const next = create(controller);
+    expect(next.input.roundId).not.toBe(source.input.roundId);
+    expect(next.input.preferences).toBeUndefined();
+    expect(next.input.editingInstruction).toBeUndefined();
   });
 });
 
