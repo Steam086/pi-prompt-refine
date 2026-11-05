@@ -96,6 +96,65 @@ describe("prompt tree and inspection", () => {
     expect(text(80)).toContain("Result 2");
   });
 
+  it.each(["dark", "light"])("keeps Prompt details typography semantic in %s across focus and resize", (name) => {
+    const revised = record(2);
+    revised.kind = "revise"; revised.parentId = 1;
+    revised.input.model.id = "模型😀\x1b[1m";
+    revised.input.draft = "Original 中文😀";
+    revised.input.revision = { instruction: "Keep **literal**", previousCandidate: "Before 中文" };
+    revised.candidate!.text = "Result **literal**\x1b[1m";
+    const { panel, theme, size, position, actions } = create(name, false, [revised, record(1)]);
+    Object.assign(actions, { deleteRecords: vi.fn(() => true) });
+    // Chalk disables attributes in a non-TTY test process; exercise real SGR weight boundaries.
+    vi.spyOn(theme, "bold").mockImplementation((value) => `\x1b[1m${value}\x1b[22m`);
+    panel.handleInput("\r");
+    const heading = (text: string) => theme.fg("text", theme.bold(text));
+    const muted = (text: string) => theme.fg("muted", text);
+    const output = panel.render(100).join("\n");
+    for (const label of ["Prompt details", "#2 模型😀�[1m", "Revised result", "Original prompt", "Revision instruction"]) {
+      expect(output).toContain(heading(label));
+    }
+    expect(output).toContain(theme.bg("toolPendingBg", heading(" Preview ")));
+    for (const label of ["Selected: ", " Usage ", " Settings ", "openai-codex · Thinking xhigh", "23s", "Revision of run #1", " │ ", " · "]) {
+      expect(output).toContain(muted(label));
+    }
+    expect(output).toContain(muted("─".repeat(panelLayout(100, size.rows).innerWidth)));
+    expect(output).toContain(theme.fg("text", "模型😀�[1m") + muted(" · ") + theme.fg("success", "✓ Revised"));
+    expect(output).not.toContain(theme.bold("23s"));
+    for (const label of ["Result **literal**�[1m", revised.input.draft, revised.input.revision.instruction]) {
+      expect(output).toContain(theme.fg("text", label));
+      expect(output).not.toContain(theme.bold(label));
+    }
+    for (const [key, label] of [["↑↓", "scroll result"], ["o", "Reference"], ["i", "Edit original"], ["a", "Accept"], ["s", "Send to Pi"]] as const) {
+      expect(output).toContain(heading(key));
+      expect(output).toContain(muted(label));
+      expect(output).not.toContain(theme.bold(label));
+    }
+    panel.handleInput("o");
+    const narrow = panel.render(80).join("\n");
+    expect(narrow).toContain(heading("o") + " " + muted("Result"));
+    expect(narrow).toContain(theme.fg("text", revised.input.draft));
+    expect(position.selectedId).toBe(2);
+    panel.handleInput("\x1b[6~"); panel.render(80);
+    panel.handleInput("\x1b[5~");
+    expect(panel.render(100).join("\n")).toContain(heading("Revision instruction"));
+    for (const [width, rows] of [[28, 40], [40, 8]] as const) {
+      size.rows = rows;
+      const lines = panel.render(width);
+      expect(lines).toHaveLength(panelLayout(width, rows).height);
+      expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+      expect(lines.at(-1)).toContain(heading("Esc") + " " + muted("Back"));
+    }
+    size.rows = 40;
+    panel.handleInput("d");
+    const confirmation = panel.render(100).join("\n");
+    expect(confirmation).toContain(heading("Delete request"));
+    expect(confirmation).toContain(theme.fg("warning", "Delete run #2?"));
+    expect(confirmation).toContain(heading("Esc / n") + " " + muted("Cancel"));
+    panel.handleInput("\x1b");
+    expect(panel.render(100).join("\n")).toContain(heading("Prompt details"));
+  });
+
   it("scrolls result and reference independently across resize and snapshots without changing action targets", () => {
     const revised = record(2);
     revised.kind = "revise";

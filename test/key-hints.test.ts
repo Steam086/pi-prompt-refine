@@ -17,6 +17,11 @@ describe("fixed-column key hints", () => {
     expect(fittingKeyHints([["Enter", "Save"], ["Space", "Toggle"]], 10, styled)).toBe(save);
     expect(formatKeyHint(["", "Send pending"], styled)).toBe(styled.fg("muted", "Send pending"));
     expect(formatKeyHint(["↑↓", ""], styled)).toBe(styled.fg("text", styled.bold("↑↓")));
+    const pair: KeyHint[] = [["a", "Accept"], ["s", "Send to Pi"]];
+    const joined = pair.map((hint) => formatKeyHint(hint, styled)).join(styled.fg("muted", " · "));
+    expect(alignedKeyHints([pair], 23, styled)).toEqual([joined]);
+    expect(fittingKeyHints(pair, 23, styled)).toBe(joined);
+    expect(fittingKeyHints(pair, 22, styled)).toBe(formatKeyHint(pair[0]!, styled));
   });
 
   it("wraps whole cells at fixed tab stops when resized", () => {

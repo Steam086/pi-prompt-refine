@@ -3,7 +3,7 @@ import { parseKey, Text, truncateToWidth, visibleWidth, type KeybindingsManager 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { RefineRecord } from "./history.js";
 import { panelFrame, panelLayout, workspaceTabs } from "./panel-layout.js";
-import { alignedKeyHints, fittingKeyHints, type KeyHint } from "./key-hints.js";
+import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { cacheHitRate, formatReferenceCost, formatRunUsage, totalInputTokens, truncatedOutputHint } from "./usage.js";
 
@@ -271,9 +271,9 @@ export class TaskPanel {
     const status = row.original && record.status !== "unsent"
       ? this.muted(`${records.filter((r) => r.status !== "unsent").length} runs · ${records.filter(pending).length} active`)
       : this.theme.fg(this.color(record), this.badge(record));
-    const titleText = this.heading(title);
+    const titleText = previewDetails ? this.theme.fg("text", sanitizeTerminalText(title)) : this.heading(title);
     const header = visibleWidth(titleText) + visibleWidth(status) + 3 <= width
-      ? [titleText + (previewDetails ? " · " : " ".repeat(width - visibleWidth(titleText) - visibleWidth(status))) + status]
+      ? [titleText + (previewDetails ? this.muted(" · ") : " ".repeat(width - visibleWidth(titleText) - visibleWidth(status))) + status]
       : [truncateToWidth(titleText, width, "…"), status];
     if (!row.original) {
       if (!previewDetails && record.kind === "revise") header.push(...this.wrapped(this.muted(`Revision${record.parentId ? ` of run #${record.parentId}` : ""}${this.inspecting ? " · o Original" : ""}`), width));
@@ -281,7 +281,8 @@ export class TaskPanel {
       if (!previewDetails) header.push(...this.wrapped(metadata, width));
       const metrics: string[] = [];
       if (record.status !== "unsent" && record.status !== "queued" && record.elapsedSeconds !== undefined) {
-        metrics.push(this.theme.fg(record.status === "generating" ? "accent" : "text", this.theme.bold(`${record.elapsedSeconds}s`)));
+        metrics.push(this.inspecting ? this.muted(`${record.elapsedSeconds}s`)
+          : this.theme.fg(record.status === "generating" ? "accent" : "text", this.theme.bold(`${record.elapsedSeconds}s`)));
       }
       if (record.kind !== "edit" && record.status !== "unsent" && record.status !== "queued") metrics.push(this.muted(formatRunUsage(record.usage)));
       if (previewDetails) metrics.unshift(metadata);
@@ -399,7 +400,7 @@ export class TaskPanel {
     const right = clip(reference, rightWidth, true);
     return [...fixed, ...Array.from({ length: available }, (_, i) => {
       const line = left[i] ?? "";
-      return line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line))) + this.theme.fg("borderMuted", " │ ") + (right[i] ?? "");
+      return line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line))) + this.muted(" │ ") + (right[i] ?? "");
     })];
   }
   render(width: number, _empty?: () => string[]): string[] {
@@ -410,7 +411,7 @@ export class TaskPanel {
         "\n\nRunning requests will be stopped; queued requests will be removed.\nThis removes Refine history. Pi editor and conversation stay unchanged.", layout.innerWidth);
       return panelFrame(layout, [this.heading("Delete request"), this.muted("Confirmation required")],
         body, [fittingKeyHints([["y", "Delete"], ["Esc / n", "Cancel"]], layout.innerWidth, this.theme)],
-        (text) => this.theme.fg("borderMuted", text));
+        (text) => this.muted(text));
     }
     const tabs = workspaceTabs(layout, this.usage ? "Usage" : "Preview", this.theme);
     const height = Math.max(1, layout.bodyHeight - tabs.length);
@@ -447,13 +448,13 @@ export class TaskPanel {
       body = [this.muted("Selected result ← · Tab switches the result to accept")];
       body.push(...Array.from({ length: height - 1 }, (_, i) => {
         const line = right[i] ?? "";
-        return line + " ".repeat(Math.max(0, half - visibleWidth(line))) + this.theme.fg("borderMuted", " │ ") + (peer[i] ?? "");
+        return line + " ".repeat(Math.max(0, half - visibleWidth(line))) + this.muted(" │ ") + (peer[i] ?? "");
       }));
     } else {
       body = Array.from({ length: height }, (_, i) => {
         if (!split) return this.inspecting || this.reading || !rows.length ? right[i] ?? "" : list[i] ?? "";
         const line = list[i] ?? "";
-        return line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line))) + this.theme.fg("borderMuted", " │ ") + (right[i] ?? "");
+        return line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line))) + this.muted(" │ ") + (right[i] ?? "");
       });
     }
     const action = !this.inspecting && selected?.original && selected.record.status === "unsent" ? "Run" : "Inspect";
@@ -474,9 +475,15 @@ export class TaskPanel {
       : alignedKeyHints([primary, secondary], layout.innerWidth, this.theme);
     if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["Esc", "Back"], ["Enter", action], ["Tab", focusAction]], layout.innerWidth, this.theme);
     const title = this.inspecting ? (other ? "Compare results" : "Prompt details") : this.usage ? "Usage · All rounds" : "Prompt refine · Tasks";
-    return panelFrame(layout, [this.heading(title), this.muted(this.notice || (this.inspecting
-      ? `${selected && !selected.original ? `Selected: #${selected.record.id} ${selected.record.input.model.id}` : "Original prompt"} · ↑↓ scroll${previewDetails ? (this.original ? " reference · o Result" : " result · o Reference") : other ? " · Same original and conversation context" : ""}`
-      : `${rows.filter((row) => row.original).length} prompts · ${rows.filter((row) => !row.original).length} runs · ↑↓ select · Run: ${this.actions.launchModel?.() ?? "selected model"}`))],
-    [...tabs, ...body], footer, (text) => this.theme.fg("borderMuted", text));
+    const subtitle = this.notice ? this.muted(this.notice) : this.inspecting
+      ? (selected && !selected.original
+        ? this.muted("Selected: ") + this.heading(`#${selected.record.id} ${selected.record.input.model.id}`)
+        : this.heading("Original prompt")) + this.muted(" · ")
+        + formatKeyHint(["↑↓", `scroll${previewDetails ? (this.original ? " reference" : " result") : ""}`], this.theme)
+        + (previewDetails ? this.muted(" · ") + formatKeyHint(["o", this.original ? "Result" : "Reference"], this.theme)
+          : other ? this.muted(" · Same original and conversation context") : "")
+      : this.muted(`${rows.filter((row) => row.original).length} prompts · ${rows.filter((row) => !row.original).length} runs · ↑↓ select · Run: ${this.actions.launchModel?.() ?? "selected model"}`);
+    return panelFrame(layout, [this.heading(title), subtitle],
+      [...tabs, ...body], footer, (text) => this.muted(text));
   }
 }

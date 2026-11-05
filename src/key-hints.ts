@@ -13,11 +13,11 @@ export function formatKeyHint([key, label]: KeyHint, theme: HintTheme, keyWidth 
 }
 
 export function alignedKeyHints(rows: KeyHint[][], width: number, theme: HintTheme): string[] {
-  return alignedHints(rows.map((row) => row.map((hint) => formatKeyHint(hint, theme))), width);
+  return alignedHints(rows.map((row) => row.map((hint) => formatKeyHint(hint, theme))), width, theme.fg("muted", " · "));
 }
 
 export function fittingKeyHints(hints: KeyHint[], width: number, theme: HintTheme): string {
-  return fittingHints(hints.map((hint) => formatKeyHint(hint, theme)), width);
+  return fittingHints(hints.map((hint) => formatKeyHint(hint, theme)), width, theme.fg("muted", " · "));
 }
 
 /** Fixed tab stops, measured in terminal columns (never literal tabs or ANSI length). */
