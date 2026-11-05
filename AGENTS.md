@@ -24,3 +24,16 @@ round 首份输入捕获系统模板、历史与项目资源，同 round 多份�
 `test/` 使用 Vitest 覆盖纯逻辑、模拟 Pi/Provider 的生命周期与交互，以及实际 TUI 组件和渲染器。检查命令：`npm run typecheck`、`npm test`。
 
 当前行为见 [README](README.md) 和 `docs/`；长期设计取舍、待验证问题与演进方向见 [DESIGN](DESIGN.md)。
+
+## TUI and interface conventions
+
+- Reuse `panelLayout` / `panelFrame` and the shared workspace tabs. Keep views bounded to the same reading width and viewport height; scroll content rather than growing the panel.
+- Use `src/key-hints.ts` for keyboard hints: keys use neutral `text` color and bold weight; descriptions use regular `muted` text. Use ANSI-aware aligned/fitting helpers, omit whole secondary hints when space is limited, and preserve the same styling in compact and single-line footers. Prioritize Back/Cancel and the relevant primary action.
+- Do not use function-key shortcuts (F1, F2, F3, etc.), including modified variants. Use ordinary keys outside text inputs or non-function modified keys, and check conflicts with Pi bindings. Keep text-entry keys isolated from navigation and management actions.
+- Keep Preferences management limited to three visible actions: Add, Edit, and Delete. Tab switches between Search, Library, and Actions, not between hidden menu items. Preserve explicit selection/bring-back and save/confirmation boundaries; cache filtering and long-document wrapping so focus changes do not repeat library I/O or expensive layout.
+- Use semantic theme tokens, not hard-coded colors. Headings use neutral `text` plus bold; secondary metadata uses `muted`; status and warning colors retain their semantic meaning. Support both light and dark themes.
+- Measure terminal columns with Pi TUI helpers (`visibleWidth`, `truncateToWidth`, and ANSI-aware wrapping), not string length. Sanitize external text before styling; never sanitize already-styled UI chrome, which would remove or corrupt its ANSI formatting.
+- Each view has one horizontal split owner. The task browser already splits the tree and summary; do not split that summary again. Only the result details opened with Enter use the approximately 65/35 result/reference layout. Compare owns its separate two-result layout. Narrow details switch between result and reference with `o`; keep reading positions separate and never change the selected action target when switching reading focus.
+- Keep default Preview focused on the result and its references. Do not embed persistent Usage, Settings, or Preferences panels. Retain explicit navigation to those views and the existing compact run summary.
+- Hints must describe the action at the current focus. Browsing, selecting, bringing back preferences, and saving library entries never submit a revision; only Ctrl+S back in Revise does. Preserve editor focus, candidate/session guards, explicit save/confirm boundaries, and input-event consumption across child pages.
+- Test changed views in both themes, at narrow/short and wide sizes, with ANSI and wide Unicode text, resize, focus changes, scrolling, and confirmation flows. Assert actual styled output as well as visible text and bounds. Keep regular/fullscreen renderer coverage; automated terminal capture is not a substitute for human visual or IME validation.

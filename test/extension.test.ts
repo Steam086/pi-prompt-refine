@@ -68,7 +68,7 @@ async function makeHarness(options: { persistHistory?: boolean; freshInstall?: b
   if (!options.config?.projectContext) config.projectContext = { ...config.projectContext, enabled: false };
   if (options.config?.context) config.context = { ...DEFAULT_CONFIG.context, ...options.config.context };
   // Keep explicit secondary bindings in the older workflow tests; test defaults separately.
-  if (!options.useDefaultShortcuts) config.shortcuts = { ...config.shortcuts, view: "f3", selectModel: "f5", restore: "f7" };
+  if (!options.useDefaultShortcuts) config.shortcuts = { ...config.shortcuts, view: "alt+v", selectModel: "alt+m", restore: "alt+z" };
   if (options.config?.shortcuts) config.shortcuts = { ...DEFAULT_CONFIG.shortcuts, ...options.config.shortcuts };
   if (options.configureModel !== false) config.model = { provider: "fake-provider", id: "fake-chat" };
   if (!options.freshInstall) await writeFile(join(agentDir, "prompt-refine.json"), `${JSON.stringify(config)}\n`, "utf8");
@@ -308,7 +308,7 @@ function resourcePrompt(skillDescription = "Extract PDF tables", instructions = 
 describe("startup hint", () => {
   it.each([
     ["ctrl+\\", "Ctrl + \\"],
-    ["f6", "f6"],
+    ["alt+r", "alt + r"],
     [null, "/refine optimize"],
   ] as const)("uses the configured optimize binding %s", async (optimize, label) => {
     const harness = await makeHarness({ config: { shortcuts: { ...DEFAULT_CONFIG.shortcuts, optimize } } });
@@ -668,10 +668,10 @@ describe("explicit candidate revision", () => {
     harness.holdPanel(); const view = harness.command("view", harness.context);
     harness.panelInput("p");
     await vi.waitFor(() => expect(harness.panelLines(100).join("\n")).toContain("Keep literal"));
-    harness.panelInput("\r"); harness.panelInput(" ");
+    harness.panelInput(" ");
     harness.panelInput("\x13");
     expect(harness.complete).toHaveBeenCalledTimes(1);
-    harness.panelInput("\t"); harness.panelInput("\r"); // Bring back
+    harness.panelInput("\x1b[13;3u"); // Alt+Enter brings back; it does not request a revision.
     await store.save("global", { name: "Changed", body: "New library body" }, entry);
     harness.panelInput("Shorten examples."); harness.panelInput("\x13");
     await flushPromises();
@@ -686,9 +686,9 @@ describe("explicit candidate revision", () => {
     const harness = await makeHarness({ config: { maxDraftChars: 30 } });
     await new PreferenceStore(harness.agentDir, harness.context.cwd).save("global", { name: "Long", body: "1234567890123456789012345" });
     await trigger(harness); harness.holdPanel(); const view = harness.command("view", harness.context);
-    harness.panelInput("f"); harness.panelInput("Extra"); harness.panelInput("\x1bOQ");
+    harness.panelInput("f"); harness.panelInput("Extra"); harness.panelInput("\x1bp");
     await vi.waitFor(() => expect(harness.panelLines(100).join("\n")).toContain("Long"));
-    harness.panelInput("\r"); harness.panelInput(" "); harness.panelInput("\t"); harness.panelInput("\r");
+    harness.panelInput(" "); harness.panelInput("\x1b[13;3u");
     harness.panelInput("\x13");
     expect(harness.panelLines(100).join("\n")).toContain("exceed 30");
     expect(harness.complete).toHaveBeenCalledTimes(1);
@@ -2735,7 +2735,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await trigger(unavailable);
     expect(unavailable.complete).not.toHaveBeenCalled();
     expect(unavailable.notifications.join(" ")).toContain("is missing or unavailable");
-    await shortcut(unavailable, "f5")(unavailable.context);
+    await shortcut(unavailable, "alt+m")(unavailable.context);
     expect(unavailable.notifications.join(" ")).toContain("No authorized text-generation models are available");
   });
 
@@ -2915,14 +2915,14 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const harness = await makeHarness();
     await trigger(harness);
     harness.setCustomAction("a");
-    await shortcut(harness, "f3")(harness.context);
+    await shortcut(harness, "alt+v")(harness.context);
     expect(harness.getEditor()).toBe("Refined prompt");
     expect(harness.sent).toEqual([]);
     expect(harness.internalMessages).toEqual([]);
     expect(harness.sessionWrites).toEqual([]);
     expect(harness.editorWrites).toEqual(["Refined prompt"]);
 
-    await shortcut(harness, "f7")(harness.context);
+    await shortcut(harness, "alt+z")(harness.context);
     expect(harness.getEditor()).toBe("Draft A");
     expect(harness.sent).toEqual([]);
 
@@ -2930,7 +2930,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.setEditorText("Draft B");
     harness.setConfirm(false);
     harness.setCustomAction("a");
-    await shortcut(harness, "f3")(harness.context);
+    await shortcut(harness, "alt+v")(harness.context);
     await flushPromises();
     expect(harness.getEditor()).toBe("Draft B");
     expect(harness.editorWrites).toEqual(["Refined prompt", "Draft A"]);
@@ -3130,7 +3130,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.setEditorText("Draft B");
     harness.deferConfirm();
     harness.setCustomAction("a");
-    await shortcut(harness, "f3")(harness.context);
+    await shortcut(harness, "alt+v")(harness.context);
     expect(harness.context.ui.confirm).toHaveBeenCalledTimes(1);
     harness.handlers.get("session_before_tree")?.[0]?.({ type: "session_before_tree" }, harness.context);
     harness.resolveConfirm(true);
@@ -3145,7 +3145,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.setEditorText("Draft B");
     harness.setConfirm(true, "Draft C");
     harness.setCustomAction("a");
-    await shortcut(harness, "f3")(harness.context);
+    await shortcut(harness, "alt+v")(harness.context);
     await flushPromises();
     expect(harness.getEditor()).toBe("Draft C");
     expect(harness.editorWrites).toEqual([]);
@@ -3166,7 +3166,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.getEditor()).toBe("Draft A");
     expect(harness.editorWrites).toEqual([]);
     harness.setCustomAction("a");
-    await shortcut(harness, "f3")(harness.context);
+    await shortcut(harness, "alt+v")(harness.context);
     expect(harness.editorWrites).toEqual(["stale result"]);
   });
 
@@ -3188,22 +3188,22 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const harness = await makeHarness();
     await trigger(harness);
     harness.setCustomAction("s");
-    await shortcut(harness, "f3")(harness.context);
+    await shortcut(harness, "alt+v")(harness.context);
     expect(harness.sent).toEqual([{ text: "Refined prompt", options: undefined }]);
 
     harness.handlers.get("input")?.[0]?.({ type: "input", text: "Refined prompt", source: "extension" }, harness.context);
     expect(harness.widgetLines()).toEqual([]);
     harness.setCustomAction("s");
-    await shortcut(harness, "f3")(harness.context);
+    await shortcut(harness, "alt+v")(harness.context);
     expect(harness.sent).toHaveLength(1);
 
     harness.handlers.get("before_agent_start")?.[0]?.({ type: "before_agent_start", messageType: "user", prompt: "Refined prompt" }, harness.context);
     expect(harness.widgetLines()).toEqual([]);
     harness.setCustomAction("q");
-    await shortcut(harness, "f3")(harness.context);
+    await shortcut(harness, "alt+v")(harness.context);
     expect(harness.panelLines().join("\n")).toContain("Send pending");
     harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Refined prompt" } }, harness.context);
-    await shortcut(harness, "f3")(harness.context);
+    await shortcut(harness, "alt+v")(harness.context);
     expect(harness.panelLines().join("\n")).toContain("Accepted prompt");
     expect(harness.getEditor()).toBe("Draft A");
   });
@@ -3213,14 +3213,14 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await trigger(harness);
     harness.setEditorText("unrelated main draft");
     harness.setCustomAction("s");
-    await shortcut(harness, "f3")(harness.context);
+    await shortcut(harness, "alt+v")(harness.context);
     expect(harness.sent).toEqual([{ text: "Refined prompt", options: { deliverAs: "followUp" } }]);
     expect(harness.getEditor()).toBe("unrelated main draft");
     expect(harness.editorWrites).toEqual([]);
 
     harness.handlers.get("input")?.[0]?.({ type: "input", text: "Refined prompt", source: "extension", streamingBehavior: "followUp" }, harness.context);
     harness.setCustomAction("s");
-    await shortcut(harness, "f3")(harness.context);
+    await shortcut(harness, "alt+v")(harness.context);
     expect(harness.sent).toHaveLength(1);
   });
 
@@ -3293,7 +3293,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     }));
     await trigger(harness);
     harness.setCustomAction("q");
-    await shortcut(harness, "f3")(harness.context);
+    await shortcut(harness, "alt+v")(harness.context);
     expect(harness.renderedWidths).toHaveLength(3);
     for (const rendered of harness.renderedWidths) {
       for (const line of rendered.lines) expect(visibleWidth(line)).toBeLessThanOrEqual(rendered.width);

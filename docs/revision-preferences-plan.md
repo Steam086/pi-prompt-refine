@@ -1,6 +1,6 @@
 # Revise Preference：手动保存、查找与复用修订要求
 
-> 状态：首版已实现；第 12 节为实施契约，优先于前文讨论选项。使用说明见 [usage.md](usage.md#保存与复用修订要求preferences)。
+> 状态：首版已实现。本文保留初版设计记录，**交互方案已被简化版替代**：仅 Add / Edit / Delete 三个可见管理操作，Tab 只切三个区域，Alt+P 进入、Alt+Enter 带回，不使用功能键。原有 F2、多操作按钮及临时编辑页不再适用；当前交互以 [usage.md](usage.md#保存与复用修订要求preferences) 为准。第 12 节中的存储、快照隔离与显式提交边界仍保留。
 > 实施顺序：状态设计 → 一致性 review → 代码与测试 → 提交、推送。实体终端与 IME 仍需实际验收。
 
 相关文档：[设计原则与演进方向](../DESIGN.md#手动保存修订要求与模板复用)、[现有使用说明](usage.md#inputrevise-与-settings)。

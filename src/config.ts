@@ -79,7 +79,7 @@ export const DEFAULT_CONFIG: RefineConfig = {
   modelThinkingLevels: {},
   favorites: [],
   shortcuts: { ...DEFAULT_SHORTCUTS },
-  preferencesKey: "f2",
+  preferencesKey: "alt+p",
   timeoutMs: 60_000,
   historyPersistence: true,
   context: { maxMessages: 12, maxChars: 16_000 },
@@ -180,6 +180,10 @@ function validateShortcuts(value: unknown, warnings: string[]): ShortcutConfig {
     }
     if (typeof proposed !== "string" || !canonicalShortcut(proposed)) {
       warnings.push(`Shortcut ${action} is invalid; using the default value.`);
+      continue;
+    }
+    if (/(^|\+)f\d+$/.test(canonicalShortcut(proposed)!)) {
+      warnings.push(`Shortcut ${action} cannot use function keys; using the default value.`);
       continue;
     }
     shortcuts[action] = proposed as KeyId;
@@ -313,11 +317,14 @@ export function parseConfig(value: unknown): LoadedConfig {
   if (value.preferencesKey === null) config.preferencesKey = null;
   else if (value.preferencesKey !== undefined) {
     const key = typeof value.preferencesKey === "string" ? canonicalShortcut(value.preferencesKey) : undefined;
-    if (key && (/^f\d+$/.test(key) || key.includes("ctrl+") || key.includes("alt+")) &&
+    // Migrate the previous shipped default without making every existing
+    // configuration invalid (warnings intentionally disable settings writes).
+    if (key === "f2") config.preferencesKey = DEFAULT_CONFIG.preferencesKey;
+    else if (key && !/(^|\+)f\d+$/.test(key) && (key.includes("ctrl+") || key.includes("alt+")) &&
       !["ctrl+s", "ctrl+e", "ctrl+c", "ctrl+\\", "tab", "shift+tab", "escape", "enter"].includes(key) &&
       !Object.values(config.shortcuts).some((shortcut) => shortcut && canonicalShortcut(shortcut) === key)) {
       config.preferencesKey = key as KeyId;
-    } else warnings.push("preferencesKey must be a function/modified key without a reserved Revise or extension conflict; using F2.");
+    } else warnings.push("preferencesKey must be a non-function modified key without a reserved Revise or extension conflict; using Alt+P.");
   }
   if (config.preferencesKey && Object.values(config.shortcuts).some((shortcut) => shortcut && canonicalShortcut(shortcut) === canonicalShortcut(config.preferencesKey!))) {
     config.preferencesKey = null;
