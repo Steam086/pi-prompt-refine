@@ -19,12 +19,15 @@ describe("Prompt Refine configuration", () => {
   it("validates the local Preferences key separately from global shortcuts", () => {
     expect(parseConfig({ version: 1, preferencesKey: null }).config.preferencesKey).toBeNull();
     expect(parseConfig({ version: 1, preferencesKey: "alt+p" }).config.preferencesKey).toBe("alt+p");
-    for (const key of ["p", "tab", "shift+tab", "ctrl+s", "ctrl+e", "ctrl+\\", "ctrl+c", "invalid"]) {
+    for (const key of ["p", "tab", "shift+tab", "ctrl+s", "ctrl+e", "ctrl+\\", "ctrl+c", "invalid", "f1", "f3", "alt+f2", "ctrl+shift+f12"]) {
       const parsed = parseConfig({ version: 1, preferencesKey: key });
       expect(parsed.warnings.join(" ")).toContain("preferencesKey");
-      expect(parsed.config.preferencesKey).toBe("f2");
+      expect(parsed.config.preferencesKey).toBe("alt+p");
     }
-    const conflict = parseConfig({ version: 1, shortcuts: { view: "f2" } });
+    const migrated = parseConfig({ version: 1, preferencesKey: "f2" });
+    expect(migrated.config.preferencesKey).toBe("alt+p");
+    expect(migrated.warnings).toEqual([]); // The previous default must not block later settings saves.
+    const conflict = parseConfig({ version: 1, shortcuts: { view: "alt+p" } });
     expect(conflict.config.preferencesKey).toBeNull();
     expect(conflict.warnings.join(" ")).toContain("conflicts");
   });
@@ -150,8 +153,12 @@ describe("Prompt Refine configuration", () => {
     }
     const custom = parseConfig({ version: 1, shortcuts: { optimize: "f2", view: "f3", dismiss: "f4", selectModel: "f5", cycleModel: "f6", restore: "f8" } });
     expect(custom.shortcutsMigrated).toBeUndefined();
-    expect(custom.config.shortcuts.restore).toBe("f8");
-    expect(custom.config.shortcuts.optimize).toBe("f2");
+    expect(custom.config.shortcuts).toEqual(DEFAULT_SHORTCUTS);
+    expect(custom.warnings.every((warning) => warning.includes("cannot use function keys"))).toBe(true);
+    const modified = parseConfig({ version: 1, shortcuts: { view: "ctrl+f3", restore: "alt+shift+f12", optimize: "alt+r" } });
+    expect(modified.config.shortcuts.view).toBeNull();
+    expect(modified.config.shortcuts.restore).toBeNull();
+    expect(modified.config.shortcuts.optimize).toBe("alt+r");
     const disabled = parseConfig({ version: 1, shortcuts: { optimize: null } });
     expect(disabled.warnings).toEqual([]);
     expect(Object.values(disabled.config.shortcuts)).toEqual([null, null, null, null, null, null]);
