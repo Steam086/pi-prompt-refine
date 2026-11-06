@@ -223,6 +223,107 @@ const listRows = (panel: PreferencePanel, width = 70) => text(panel, width).spli
 const highlightedRow = (panel: PreferencePanel, width = 70) => listRows(panel, width).find((line) => line.includes("›"));
 
 describe("selected-only preference audit", () => {
+  it.each(["dark", "light"])("labels retained snapshot and actual updated source separately, snapshot first (%s)", async (themeName) => {
+    const original: RevisionPreference = { ...a, name: "Retained name", body: "RETAINED_BODY", metadata: {
+      kind: "rewrite", activation: "auto", match: "always", description: "Retained description" } };
+    const selected = { ...selectPreference(original), adoption: "auto" as const };
+    const current: RevisionPreference = { ...a, version: 2, name: "Current name", body: "CURRENT_BODY", metadata: {
+      kind: "task", activation: "manual", description: "Current description" } };
+    const f = setup([selected], "", themeName, [current]); await loaded(f.panel);
+    vi.spyOn(f.theme, "bold").mockImplementation((value) => `\x1b[1m${value}\x1b[22m`);
+    f.panel.invalidate();
+    // Cache All's source-first preview before switching to the audit document.
+    expect(text(f.panel)).toContain(current.name);
+    f.panel.handleInput("s");
+    const preview = text(f.panel);
+    expect(preview.indexOf("Selected snapshot")).toBeLessThan(preview.indexOf("Current library entry"));
+    expect(preview).toContain("Library changed; snapshot kept");
+    f.panel.handleInput(enter);
+    const output = text(f.panel);
+    const [snapshot, source] = output.split("Current library entry");
+    for (const value of ["Selected snapshot", original.name, original.body, original.metadata!.description,
+      "Prompt rewriting · auto · always", "Automatically selected · always"]) expect(snapshot).toContain(value);
+    for (const value of [current.name, current.body, current.metadata!.description, "Task requirements · manual"]) {
+      expect(source).toContain(value);
+      expect(snapshot).not.toContain(value);
+    }
+    expect(source).not.toContain(original.body);
+    expect(output.split(original.body)).toHaveLength(2); // Never render the old snapshot twice.
+    const styled = f.panel.render(100).join("\n");
+    expect(styled).toContain(f.theme.fg("text", f.theme.bold("Selected snapshot")));
+    expect(styled).toContain(f.theme.fg("text", f.theme.bold("Current library entry")));
+    expect(styled).toContain(f.theme.fg("text", current.body));
+    expect(styled).toContain(f.theme.fg("muted", current.metadata!.description));
+    expect(styled).toContain(f.theme.fg("warning", "Saved snapshot · Library changed; snapshot kept"));
+    f.panel.handleInput(esc); f.panel.handleInput("s"); f.panel.handleInput(enter);
+    const all = text(f.panel);
+    expect(all.indexOf(current.body)).toBeLessThan(all.indexOf("Selected snapshot"));
+    expect(all.indexOf("Selected snapshot")).toBeLessThan(all.indexOf(original.body));
+    expect(all).not.toContain("Current library entry"); // All keeps its existing source-first presentation.
+  });
+
+  it.each(["dark", "light"])("labels a deleted source as a retained snapshot, not a library entry (%s)", async (themeName) => {
+    const f = setup([selectPreference(a)], "", themeName, []); await loaded(f.panel);
+    f.panel.handleInput("s"); f.panel.handleInput(enter);
+    const output = text(f.panel);
+    expect(output).toContain("Selected snapshot");
+    expect(output).toContain("Source deleted");
+    expect(output).toContain(a.name);
+    expect(output.split(a.body)).toHaveLength(2);
+    expect(output).not.toContain("Library entry");
+    expect(output).not.toContain("Current library entry");
+  });
+
+  it.each(["dark", "light"])("does not present unavailable or cached source text as current (%s)", async (themeName) => {
+    for (const cached of [false, true]) {
+      const current = { ...a, version: 2, name: "Unverified name", body: "UNVERIFIED_BODY" };
+      const f = setup([selectPreference(a)], "", themeName); await loaded(f.panel); f.panel.dispose();
+      f.repo.load.mockResolvedValueOnce({ entries: cached ? [current] : [], errors: { global: "Offline" } });
+      const panel = new PreferencePanel(f.tui, f.theme, f.keys, f.repo, [selectPreference(a)], "", 16000, f.close);
+      await loaded(panel); panel.handleInput("s"); panel.handleInput(enter);
+      const output = text(panel);
+      expect(output).toContain("Selected snapshot");
+      expect(output).toContain("Library unavailable");
+      expect(output.split(a.body)).toHaveLength(2);
+      for (const value of ["Source deleted", "Library entry", "Current library entry", current.name, current.body]) expect(output).not.toContain(value);
+      panel.dispose();
+    }
+  });
+
+  it("does not duplicate an unchanged snapshot and reuses its document across focus changes", async () => {
+    const f = setup([selectPreference(a)]); await loaded(f.panel);
+    f.panel.handleInput("s"); text(f.panel);
+    const sanitize = vi.spyOn(presentation, "sanitizeTerminalText");
+    for (let i = 0; i < 6; i++) { f.panel.handleInput(tab); text(f.panel); }
+    expect(sanitize.mock.calls.some(([value]) => value === a.body)).toBe(false);
+    f.panel.handleInput(enter);
+    expect(text(f.panel).split(a.body)).toHaveLength(2);
+    expect(text(f.panel)).not.toContain("Current library entry");
+    f.panel.handleInput(esc); f.panel.handleInput("s"); f.panel.handleInput(enter);
+    expect(text(f.panel).split(a.body)).toHaveLength(3); // All's original library + selected snapshot sections.
+    f.panel.handleInput(esc); f.panel.handleInput("s"); f.panel.handleInput(enter);
+    expect(text(f.panel).split(a.body)).toHaveLength(2); // Mode change invalidates the document cache.
+  });
+
+  it("keeps selected-view edit and delete confirmation bound to the actual current source", async () => {
+    const current = { ...a, version: 2, name: "Current source", body: "Current instruction" };
+    const selected = selectPreference(a);
+    const f = setup([selected], "", "dark", [current]); await loaded(f.panel); f.panel.handleInput("s");
+    f.panel.handleInput("e"); f.panel.handleInput("\x05"); // Move the native input cursor past the name.
+    expect(text(f.panel)).toContain("Name: Current source");
+    expect(text(f.panel)).toContain(current.body);
+    save(f.panel); await loaded(f.panel);
+    expect(f.repo.save).toHaveBeenCalledWith(current.scope, { name: current.name, body: current.body }, current);
+    f.panel.handleInput("d");
+    const confirmation = text(f.panel);
+    expect(confirmation.indexOf(current.body)).toBeLessThan(confirmation.indexOf("Selected snapshot"));
+    expect(confirmation).toContain("Delete library entry?");
+    f.panel.handleInput("y"); await loaded(f.panel);
+    expect(f.repo.remove).toHaveBeenCalledWith({ ...current, version: 3 });
+    f.panel.handleInput(bringBack);
+    expect(f.close).toHaveBeenCalledWith([selected]);
+  });
+
   it("audits snapshots in composition order regardless of all-view search or library rank", async () => {
     const deleted = { ...selectPreference(a), id: "deleted", name: "Gone", body: "Archived requirement", sourceBody: "Archived requirement",
       adoption: "auto" as const, metadata: { kind: "rewrite" as const, description: "Old adoption rule", activation: "auto" as const, match: "always" as const } };

@@ -176,20 +176,33 @@ export class PreferencePanel {
     const unavailable = !!this.library.errors[entry.scope];
     const status = local ? [local.body !== local.sourceBody ? "Edited for this revision" : "Saved snapshot",
       unavailable ? "Library unavailable" : !source ? "Source deleted" : changed ? "Library changed; snapshot kept" : ""].filter(Boolean).join(" · ") : "Library entry";
-    const document: PreferenceDocument = [
-      { text: entry.name, color: "text", heading: true },
-      { text: `${entry.scope} · ${entry.id}`, color: "muted" },
-      { text: unavailable ? "Library unavailable" : source ? "Library entry" : "Deleted source", color: unavailable || !source ? "warning" : "muted" },
-      ...(entry.metadata ? [
-        { text: `${entry.metadata.kind === "rewrite" ? "Prompt rewriting" : "Task requirements"} · ${entry.metadata.activation}${entry.metadata.activation === "auto" ? ` · ${entry.metadata.match}` : ""}`, color: "muted" as const },
-        { text: entry.metadata.description, color: "muted" as const },
+    const details = (value: RevisionPreference, state: PreferenceDocument): PreferenceDocument => [
+      { text: value.name, color: "text", heading: true },
+      { text: `${value.scope} · ${value.id}`, color: "muted" },
+      ...state,
+      ...(value.metadata ? [
+        { text: `${value.metadata.kind === "rewrite" ? "Prompt rewriting" : "Task requirements"} · ${value.metadata.activation}${value.metadata.activation === "auto" ? ` · ${value.metadata.match}` : ""}`, color: "muted" as const },
+        { text: value.metadata.description, color: "muted" as const },
       ] : []),
-      { text: "", color: "text" }, { text: entry.body, color: "text" },
+      { text: "", color: "text" }, { text: value.body, color: "text" },
     ];
-    if (local) document.push({ text: "", color: "text" }, { text: "Selected snapshot", color: "text", heading: true },
-      { text: status, color: unavailable || !source || changed ? "warning" : "muted" },
-      ...(local.metadata ? [{ text: `${local.metadata.kind} · ${local.adoption === "auto" ? `Automatically selected · ${local.metadata.match}` : "Manually selected"} · ${local.metadata.description}`, color: "muted" as const }] : []),
-      { text: local.body, color: "text" });
+    let document: PreferenceDocument;
+    // Delete confirmation still describes its current-source operation target.
+    if (this.selectedOnly && local && this.page.kind !== "delete") {
+      document = [{ text: "Selected snapshot", color: "text", heading: true }, ...details(local, [
+        { text: status, color: unavailable || !source || changed ? "warning" : "muted" },
+        { text: local.adoption === "auto" ? `Automatically selected${local.metadata?.match ? ` · ${local.metadata.match}` : ""}` : "Manually selected", color: "muted" },
+      ])];
+      if (source && !unavailable && (changed || source.body !== local.body)) document.push(
+        { text: "", color: "text" }, { text: "Current library entry", color: "text", heading: true }, ...details(source, []));
+    } else {
+      document = details(entry, [{ text: unavailable ? "Library unavailable" : source ? "Library entry" : "Deleted source",
+        color: unavailable || !source ? "warning" : "muted" }]);
+      if (local) document.push({ text: "", color: "text" }, { text: "Selected snapshot", color: "text", heading: true },
+        { text: status, color: unavailable || !source || changed ? "warning" : "muted" },
+        ...(local.metadata ? [{ text: `${local.metadata.kind} · ${local.adoption === "auto" ? `Automatically selected · ${local.metadata.match}` : "Manually selected"} · ${local.metadata.description}`, color: "muted" as const }] : []),
+        { text: local.body, color: "text" });
+    }
     this.descriptionCache = { entry, version: this.contentVersion, document };
     return document;
   }
