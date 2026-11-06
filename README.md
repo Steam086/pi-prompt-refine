@@ -20,6 +20,8 @@ Pi Prompt Refine 是 Pi Coding Agent 的提示词改写扩展。它结合当前�
 | 复用编辑要求 | Unsent 原稿按 `p`（或 Alt+P）选择 Preferences，Space 勾选、Alt+Enter 带回后仍需 Enter 才首次 refine；Revise 中 Alt+P 或 Tab → Preferences，带回后 Ctrl+S 修订。原始任务不变，要求独立传递 |
 | 切换模型 | 按 `m` 选模型，Enter 重新优化原稿 |
 
+Preferences 中，列表／操作栏按 `s` 检查 Selected only，按实际组合顺序显示所有已选快照，再按 `s` 恢复 All 的搜索和浏览位置。新条目保存后回到 Library 并定位，不自动选中；必要时明确提示重置过滤。搜索支持名称／描述／正文的多词 AND 匹配，详见 [Preferences 选择与保存](docs/preference-selection.md)。
+
 结果对比、直接发送及其他操作见[使用说明](docs/usage.md)。
 
 ### 多模型比较如何工作
@@ -143,6 +145,7 @@ pi --extension git:github.com/Steam086/pi-prompt-refine
 | --- | --- |
 | [使用说明](docs/usage.md) | 完整操作、并行比较、轮次归档、接受与发送、命令参考 |
 | [配置参考](docs/configuration.md) | 模型、thinking、改写策略、快捷键、上下文开关与预算 |
+| [Preferences 选择与保存](docs/preference-selection.md) | Selected only、组合顺序、搜索排名与新建后定位 |
 | [上下文与 Prompt 协议](docs/context.md) | 历史选择、规则与目录采集、输入输出协议、隐私边界 |
 | [快捷键排查](docs/shortcut-troubleshooting.md) | 命令备用入口与终端按键排查 |
 | [项目架构](AGENTS.md) · [设计原则与演进方向](DESIGN.md) | 模块职责、设计原因与尚未实现的方向 |

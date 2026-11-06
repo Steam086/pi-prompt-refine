@@ -219,7 +219,213 @@ describe("three-action preference library", () => {
   });
 });
 
+const listRows = (panel: PreferencePanel, width = 70) => text(panel, width).split("\n").filter((line) => /\[[x ]\]/.test(line));
+const highlightedRow = (panel: PreferencePanel, width = 70) => listRows(panel, width).find((line) => line.includes("›"));
+
+describe("selected-only preference audit", () => {
+  it("audits snapshots in composition order regardless of all-view search or library rank", async () => {
+    const deleted = { ...selectPreference(a), id: "deleted", name: "Gone", body: "Archived requirement", sourceBody: "Archived requirement",
+      adoption: "auto" as const, metadata: { kind: "rewrite" as const, description: "Old adoption rule", activation: "auto" as const, match: "always" as const } };
+    const selected = [selectPreference(b), selectPreference(a), deleted];
+    const f = setup(selected, "Extra", "dark", [{ ...a, name: "Renamed", body: "Changed source", version: 2 }, b]);
+    await loaded(f.panel);
+    search(f.panel, "Literal");
+    expect(listRows(f.panel)).toHaveLength(1);
+    f.panel.handleInput("s");
+    expect(text(f.panel)).toContain("Preferences · Selected only");
+    expect(listRows(f.panel).map((row) => row.trim())).toEqual([
+      expect.stringContaining(b.name), expect.stringContaining(a.name), expect.stringContaining(deleted.name),
+    ]);
+    expect(text(f.panel)).toContain("Search: ");
+    f.panel.handleInput(down); f.panel.handleInput(enter);
+    expect(text(f.panel)).toContain("Library changed; snapshot kept");
+    expect(text(f.panel)).toContain(a.body);
+    f.panel.handleInput(esc); f.panel.handleInput(down); f.panel.handleInput(enter);
+    expect(text(f.panel)).toContain("Source deleted");
+    expect(text(f.panel)).toContain("Automatically selected · always");
+    f.panel.handleInput(esc);
+    search(f.panel, "keep");
+    // Search would rank by name in All; Selected must keep the original sequence.
+    expect(listRows(f.panel)).toHaveLength(2);
+    expect(listRows(f.panel)[0]).toContain(b.name);
+    expect(listRows(f.panel)[1]).toContain(a.name);
+    f.panel.handleInput(" "); // Deselect the first visible snapshot, not a library-ranked result.
+    expect(listRows(f.panel)).toHaveLength(1);
+    f.panel.handleInput("s");
+    expect(text(f.panel)).toContain("Search: Literal");
+    expect(highlightedRow(f.panel)).toContain(b.name);
+    f.panel.handleInput("s"); // Every audit starts unfiltered again.
+    expect(listRows(f.panel)).toHaveLength(2);
+    f.panel.handleInput(ctrlS);
+    expect(f.close).not.toHaveBeenCalled();
+    f.panel.handleInput(bringBack);
+    expect(f.close).toHaveBeenCalledWith([selected[1], deleted]);
+    expect(selected).toEqual([selectPreference(b), selectPreference(a), deleted]);
+    expect(f.repo.load).toHaveBeenCalledTimes(1);
+    expect(f.repo.save).not.toHaveBeenCalled();
+  });
+
+  it("keeps filtered selections in composition order even when an exact name would rank later", async () => {
+    const first = { ...a, name: "Extended keep" }, second = { ...b, name: "keep" };
+    const f = setup([selectPreference(first), selectPreference(second)], "", "dark", [second, first]);
+    await loaded(f.panel); f.panel.handleInput("s"); search(f.panel, "keep");
+    expect(listRows(f.panel)[0]).toContain(first.name);
+    expect(listRows(f.panel)[1]).toContain(second.name);
+    f.panel.handleInput(bringBack);
+    expect(composeRevision(f.close.mock.calls[0]![0], "")).toBe(composeRevision([selectPreference(first), selectPreference(second)], ""));
+  });
+
+  it("restores the all-view query, highlight and scrolled viewport; cancels transactionally", async () => {
+    const entries = Array.from({ length: 45 }, (_, i) => ({ ...a, id: `${i}`, name: `Entry ${i}` }));
+    const initial = [selectPreference(entries[2]!)];
+    const f = setup(initial, "", "dark", entries); await loaded(f.panel);
+    f.terminal.rows = 16; search(f.panel, "Entry"); f.panel.handleInput("\x1b[F");
+    const before = listRows(f.panel);
+    expect(before.at(-1)).toContain("Entry 44");
+    f.panel.handleInput(tab); // Actions owns the same view toggle, without a new focus stop.
+    f.panel.handleInput("s"); expect(text(f.panel)).toContain("Focus: Actions");
+    f.panel.handleInput(backTab); f.panel.handleInput(" ");
+    expect(text(f.panel)).toContain("No selections");
+    f.panel.handleInput("s");
+    expect(text(f.panel)).toContain("Search: Entry");
+    expect(listRows(f.panel)).toEqual(before);
+    f.panel.handleInput(esc);
+    expect(f.close).toHaveBeenCalledWith();
+    expect(initial).toEqual([selectPreference(entries[2]!)]);
+  });
+
+  it("keeps s as text in Search and forms and advertises only current-focus actions", async () => {
+    const f = setup([selectPreference(a)]); await loaded(f.panel);
+    expect(f.panel.render(100).join("\n")).toContain(formatKeyHint(["s", "Selected only"], f.theme));
+    f.panel.handleInput("s");
+    expect(f.panel.render(100).join("\n")).toContain(formatKeyHint(["Space", "Deselect"], f.theme));
+    f.panel.handleInput("/"); f.panel.handleInput("s");
+    expect(text(f.panel)).toContain("Search: s");
+    expect(text(f.panel)).toContain("Preferences · Selected only");
+    expect(f.panel.render(100).slice(-2).join("\n")).not.toContain(formatKeyHint(["s", "All"], f.theme));
+    f.panel.handleInput(enter); f.panel.handleInput("n"); f.panel.handleInput("s");
+    expect(text(f.panel)).toContain("Name: s");
+    f.panel.handleInput(tab); f.panel.handleInput("s");
+    expect(f.repo.save).not.toHaveBeenCalled();
+  });
+});
+
+describe("new preference save identity and reveal", () => {
+  it.each(["query", "selected", "both", "none"])("reveals the returned NEW identity at Library focus under %s without selecting it", async (mode) => {
+    const f = setup([selectPreference(b)]); await loaded(f.panel);
+    if (mode === "query" || mode === "both") search(f.panel, "No match");
+    if (mode === "selected" || mode === "both") f.panel.handleInput("s");
+    if (mode === "both") search(f.panel, "Missing snapshot");
+    f.panel.handleInput(tab); f.panel.handleInput("n"); f.panel.handleInput(a.name); // Duplicate name is not an identity.
+    save(f.panel); await loaded(f.panel);
+    expect(text(f.panel)).toContain("Focus: Library");
+    expect(text(f.panel)).not.toContain("Preferences · Selected only");
+    expect(text(f.panel)).not.toContain("Search: No match");
+    expect(text(f.panel)).toContain("Saved; not selected.");
+    expect(text(f.panel).includes("Filters reset to All.")).toBe(mode !== "none");
+    expect(highlightedRow(f.panel)).toContain(`› [ ] ${a.name}`);
+    f.panel.handleInput(enter);
+    expect(text(f.panel)).toContain("project · new");
+    expect(text(f.panel)).toContain("Extra");
+    f.panel.handleInput(esc); f.panel.handleInput(bringBack);
+    expect(f.close).toHaveBeenCalledWith([selectPreference(b)]);
+  });
+
+  it("keeps a NEW form, filters and snapshots on failure, then reveals a successful retry", async () => {
+    const original = [selectPreference(a)]; const f = setup(original); await loaded(f.panel);
+    search(f.panel, "Literal"); f.panel.handleInput("s"); search(f.panel, "Concise");
+    f.repo.save.mockRejectedValueOnce(new Error("Disk full"));
+    f.panel.handleInput("n"); f.panel.handleInput("Retry me"); save(f.panel); await loaded(f.panel);
+    expect(text(f.panel)).toContain("Save new preference");
+    expect(text(f.panel)).toContain("Name: Retry me");
+    expect(text(f.panel)).toContain("Disk full");
+    f.panel.handleInput(esc); f.panel.handleInput("n"); // Keep the failed form.
+    expect(text(f.panel)).toContain("Name: Retry me");
+    f.panel.handleInput(enter); await loaded(f.panel); // Save remains focused.
+    expect(text(f.panel)).toContain("Filters reset to All.");
+    expect(highlightedRow(f.panel)).toContain("Retry me");
+    f.panel.handleInput(bringBack);
+    expect(f.close).toHaveBeenCalledWith(original);
+  });
+
+  it.each(["throw", "scope"])("reveals the confirmed write but reports %s refresh failure instead of claiming a fresh library", async (failure) => {
+    const f = setup([selectPreference(a)]); await loaded(f.panel);
+    search(f.panel, "Hidden");
+    if (failure === "throw") f.repo.load.mockRejectedValueOnce(new Error("Offline"));
+    else f.repo.load.mockResolvedValueOnce({ entries: [a], errors: { project: "Offline" } });
+    f.panel.handleInput("n"); f.panel.handleInput("Saved offline"); save(f.panel); await loaded(f.panel);
+    expect(text(f.panel)).toContain("Refresh failed after save; not selected.");
+    expect(text(f.panel)).toContain("Filters reset to All.");
+    expect(highlightedRow(f.panel)).toContain("Saved offline");
+    f.panel.handleInput(enter);
+    expect(text(f.panel)).toContain("Library unavailable");
+    expect(text(f.panel)).toContain("project · new");
+    f.panel.handleInput(esc); f.panel.handleInput(bringBack);
+    expect(f.close).toHaveBeenCalledWith([selectPreference(a)]);
+  });
+
+  it("reports a concurrently removed saved identity rather than highlighting another same-name entry as it", async () => {
+    const f = setup(); await loaded(f.panel);
+    f.repo.load.mockResolvedValueOnce({ entries: [a, b], errors: {} });
+    f.panel.handleInput("n"); f.panel.handleInput(a.name); save(f.panel); await loaded(f.panel);
+    expect(text(f.panel)).toContain("Saved entry no longer in library; could not reveal it.");
+    expect(text(f.panel)).toContain("0 selected");
+  });
+
+  it("keeps edit query, selected-only mode and focus semantics while preserving the selected snapshot", async () => {
+    const selected = [selectPreference(b), selectPreference(a)]; const f = setup(selected); await loaded(f.panel);
+    f.panel.handleInput("s"); search(f.panel, "Concise"); f.panel.handleInput(tab);
+    f.panel.handleInput("e"); f.panel.handleInput(" renamed"); save(f.panel); await loaded(f.panel);
+    expect(text(f.panel)).toContain("Focus: Actions");
+    expect(text(f.panel)).toContain("Preferences · Selected only");
+    expect(text(f.panel)).toContain("Search: Concise");
+    expect(listRows(f.panel)).toHaveLength(1);
+    f.panel.handleInput(bringBack);
+    expect(f.close).toHaveBeenCalledWith(selected);
+  });
+});
+
 describe("preference rendering and responsiveness", () => {
+  it.each(["dark", "light"])("keeps concise names, muted scope and semantic snapshot warnings styled through audit/resize (%s)", async (themeName) => {
+    const long = { ...a, name: "长名称 😀\u001b[2J ".repeat(10), id: "wide", metadata: {
+      kind: "rewrite" as const, activation: "auto" as const, match: "always" as const, description: "Detailed provenance 中文" } };
+    const selected = [{ ...selectPreference(long), adoption: "auto" as const }, selectPreference(b)];
+    const f = setup(selected, "", themeName, [{ ...long, metadata: { ...long.metadata, description: "Changed metadata only" } }, b]);
+    await loaded(f.panel);
+    vi.spyOn(f.theme, "bold").mockImplementation((value) => `\x1b[1m${value}\x1b[22m`);
+    f.panel.invalidate(); f.panel.handleInput("s"); f.panel.handleInput(down);
+    let lines = f.panel.render(70);
+    const focused = lines.find((line) => stripVTControlCharacters(line).includes("› [x]"))!;
+    expect(focused).toContain(f.theme.fg("text", f.theme.bold(b.name)));
+    expect(focused).toContain(f.theme.fg("muted", " · P"));
+    expect(focused).not.toContain(f.theme.bold(" · P"));
+    expect(focused).toContain(f.theme.bg("selectedBg", "").split("\x1b[49m")[0]);
+    const warning = lines.find((line) => stripVTControlCharacters(line).includes("!"))!;
+    expect(warning).toContain(f.theme.fg("warning", "! "));
+    expect(warning).not.toContain("\x1b[1m"); // An unfocused name is never bold.
+    expect(warning).not.toContain(" · rewrite"); // Classification belongs in details, not every row.
+    expect(warning).not.toContain("\u001b[2J");
+    f.panel.handleInput("\x1b[H"); f.panel.handleInput(enter);
+    expect(text(f.panel)).toContain("Library changed; snapshot kept");
+    expect(text(f.panel)).toContain("Automatically selected · always");
+    f.panel.handleInput(esc);
+    for (const [width, rows] of [[100, 40], [40, 16], [20, 8], [12, 5], [80, 24], [70, 40]]) {
+      f.terminal.rows = rows!;
+      lines = f.panel.render(width!);
+      expect(lines).toHaveLength(panelLayout(width!, rows!).height);
+      expect(lines.every((line) => visibleWidth(line) <= width!)).toBe(true);
+      expect(lines.join("\n")).not.toContain("\u001b[2J");
+      if (width! >= 40 && rows! >= 16) expect(lines.join("\n")).toContain(formatKeyHint(["s", "All"], f.theme));
+      f.panel.handleInput("\x1b[6~"); f.panel.handleInput("\x1b[5~");
+    }
+    f.panel.handleInput("\x1b[H");
+    expect(listRows(f.panel)[0]).toContain("长名称 😀");
+    f.panel.handleInput(" ");
+    expect(highlightedRow(f.panel)).toContain(b.name);
+    f.panel.handleInput(bringBack);
+    expect(f.close).toHaveBeenCalledWith([selectPreference(b)]);
+  });
+
   it.each(["dark", "light"])("styles visible actions and footers consistently on all pages (%s)", async (themeName) => {
     const f = setup([], "Extra", themeName); await loaded(f.panel);
     vi.spyOn(f.theme, "bold").mockImplementation((value) => `\x1b[1m${value}\x1b[22m`);
@@ -301,7 +507,7 @@ describe("preference rendering and responsiveness", () => {
     const failure = setup([], "Extra", name); await loaded(failure.panel);
     failure.library.errors.project = "Permission denied";
     failure.panel.handleInput("n"); failure.panel.handleInput("Saved"); save(failure.panel); await loaded(failure.panel);
-    expect(failure.panel.render(100).join("\n")).toContain(failure.theme.fg("error", "⚠ Load failed · Permission denied"));
+    expect(failure.panel.render(100).join("\n")).toContain(failure.theme.fg("error", "⚠ Refresh failed after save; not selected. Permission denied"));
   });
 
   it.each(["dark", "light"])("marks over-limit requirements without submitting or losing selection (%s)", async (name) => {

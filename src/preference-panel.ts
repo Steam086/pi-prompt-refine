@@ -37,11 +37,15 @@ const ACTIONS = [
 export class PreferencePanel {
   private page: Page = { kind: "list" };
   private library: PreferenceLibrary = { entries: [], errors: {} };
-  private readonly search = new Input({ prompt: "Search: " });
+  private allSearch = new Input({ prompt: "Search: " });
+  private selectedSearch = new Input({ prompt: "Search: " });
+  private get search(): Input { return this.selectedOnly ? this.selectedSearch : this.allSearch; }
   private readonly working: SelectedPreference[];
   private focus = 1; // Search, library, actions: three regions, never one stop per action.
   private actionIndex = 0;
   private index = 0;
+  private selectedOnly = false;
+  private allView: { index: number; key?: string } = { index: 0 };
   private contentVersion = 0;
   private entriesCache?: { query: string; version: number; entries: RevisionPreference[] };
   private descriptionCache?: { entry: RevisionPreference; version: number; document: PreferenceDocument };
@@ -68,7 +72,9 @@ export class PreferencePanel {
 
   set focused(value: boolean) { this.hasFocus = value; this.updateFocus(); }
   private updateFocus(): void {
-    this.search.focused = this.hasFocus && this.page.kind === "list" && this.focus === 0;
+    const searching = this.hasFocus && this.page.kind === "list" && this.focus === 0;
+    this.allSearch.focused = searching && !this.selectedOnly;
+    this.selectedSearch.focused = searching && this.selectedOnly;
     const form = this.page.kind === "form" || this.page.kind === "discard" ? this.page.form : undefined;
     if (form) {
       form.name.focused = this.hasFocus && this.page.kind === "form" && form.focus === 0;
@@ -78,7 +84,8 @@ export class PreferencePanel {
   }
   dispose(): void { this.focused = false; this.disposed = true; }
   invalidate(): void {
-    this.search.invalidate();
+    this.allSearch.invalidate();
+    this.selectedSearch.invalidate();
     this.documents = [];
     if (this.page.kind === "form") this.page.form.body.editor.invalidate();
   }
@@ -88,11 +95,32 @@ export class PreferencePanel {
     if (this.entriesCache?.query === query && this.entriesCache.version === this.contentVersion) return this.entriesCache.entries;
     // Keep deleted sources visible until their snapshots are explicitly deselected.
     const keys = new Set(this.library.entries.map(preferenceKey));
-    const entries = searchPreferences([...this.library.entries, ...this.working.filter((entry) => !keys.has(preferenceKey(entry)))], query);
+    const candidates = this.selectedOnly ? this.working
+      : [...this.library.entries, ...this.working.filter((entry) => !keys.has(preferenceKey(entry)))];
+    const matches = searchPreferences(candidates, query);
+    // Selected snapshots are audited in composeRevision order, never search rank.
+    const matchedKeys = new Set(matches.map(preferenceKey));
+    const entries = this.selectedOnly ? this.working.filter((entry) => matchedKeys.has(preferenceKey(entry))) : matches;
     this.entriesCache = { query, version: this.contentVersion, entries };
     return entries;
   }
   private highlighted(): RevisionPreference | undefined { return this.entries()[this.index]; }
+  private toggleView(): void {
+    if (!this.selectedOnly) {
+      const entry = this.highlighted();
+      this.allView = { index: this.index, key: entry && preferenceKey(entry) };
+      this.selectedOnly = true;
+      // Each audit starts unfiltered, including snapshots hidden by the all-view query.
+      this.selectedSearch = new Input({ prompt: "Search: " });
+      this.index = 0;
+      this.contentVersion++;
+    } else {
+      this.selectedOnly = false;
+      this.contentVersion++;
+      const index = this.entries().findIndex((entry) => preferenceKey(entry) === this.allView.key);
+      this.index = index >= 0 ? index : Math.min(this.allView.index, Math.max(0, this.entries().length - 1));
+    }
+  }
   private local(entry?: RevisionPreference): SelectedPreference | undefined {
     return entry && this.working.find((item) => preferenceKey(item) === preferenceKey(entry));
   }
@@ -214,10 +242,33 @@ export class PreferencePanel {
     if (error) { this.setNotice(error, "warning"); return; }
     this.busy = true; this.redraw();
     try {
-      await this.repository.save(form.scope, value, form.expected);
+      const saved = await this.repository.save(form.scope, value, form.expected);
       if (this.disposed) return;
       this.page = { kind: "list" }; this.setNotice("Saved to library; not added to selection; no request sent.");
-      await this.refresh();
+      if (form.kind === "new") {
+        const reset = this.selectedOnly || !!this.search.getValue().trim();
+        this.selectedOnly = false;
+        this.allSearch = new Input({ prompt: "Search: " });
+        this.allView = { index: 0, key: preferenceKey(saved) };
+        this.focus = 1;
+        // The write result is authoritative even if the subsequent read fails.
+        this.library.entries = this.library.entries.filter((entry) => preferenceKey(entry) !== preferenceKey(saved)).concat(saved);
+        this.contentVersion++;
+        await this.refresh();
+        if (this.disposed) return;
+        const errors = Object.values(this.library.errors);
+        if (this.library.errors[saved.scope] && !this.source(saved)) {
+          this.library.entries.push(saved);
+          this.contentVersion++;
+        }
+        const index = this.entries().findIndex((entry) => preferenceKey(entry) === preferenceKey(saved));
+        this.index = Math.max(0, index);
+        const feedback = `Saved; not selected.${reset ? " Filters reset to All." : ""}`;
+        const missing = index < 0 ? " Saved entry no longer in library; could not reveal it." : "";
+        this.setNotice(errors.length ? `Refresh failed after save; not selected.${reset ? " Filters reset to All." : ""} ${errors.join(" · ")}${missing}`
+          : feedback + missing,
+          errors.length ? "error" : index < 0 ? "warning" : "muted");
+      } else await this.refresh();
     } catch (error) { if (!this.disposed) this.setNotice(this.error(error), "error"); }
     finally { this.busy = false; this.redraw(); }
   }
@@ -298,7 +349,8 @@ export class PreferencePanel {
     else if (this.focus === 0) {
       if (enter || key === "down") this.focus = 1;
       else { this.search.handleInput(data); this.index = 0; }
-    } else if (key === "/") this.focus = 0;
+    } else if (key === "s") this.toggleView();
+    else if (key === "/") this.focus = 0;
     else if (ACTIONS.some((action) => action.key === key)) {
       this.actionIndex = ACTIONS.findIndex((action) => action.key === key);
       this.activate(ACTIONS[this.actionIndex]!.id);
@@ -326,12 +378,15 @@ export class PreferencePanel {
     const wrap = (text: string, columns = w) => wrapTextWithAnsi(clean(text), columns);
     const button = (text: string, active: boolean) => active ? this.theme.bg("selectedBg", this.theme.fg("text", `› ${clean(text)}`)) : this.theme.fg("muted", `  ${clean(text)}`);
     let title = this.purpose === "refine" ? "Preferences · Unsent original" : "Preferences";
+    if (this.page.kind === "list" && this.selectedOnly) title = `Preferences · Selected only${this.purpose === "refine" ? " · Unsent original" : ""}`;
     const tooLong = this.requirementsChars > this.maxChars;
     let subtitle = `Focus: ${["Search", "Library", "Actions"][this.focus]} · ${this.working.length} selected · ${this.requirementsChars}/${this.maxChars} chars`;
     let subtitleColor: DocumentPart["color"] = "muted";
     let body: string[] = [];
-    let hints: KeyHint[][] = [[["Alt+Enter", "Bring back"], ["Enter", this.focus === 0 ? "Browse" : this.focus === 1 ? "Read" : "Choose"],
-      ...(this.focus === 1 ? [["Space", "Select"] as KeyHint] : this.focus === 2 ? [["←→", "Choose action"] as KeyHint] : [])],
+    let hints: KeyHint[][] = [[["Alt+Enter", "Bring back"],
+      ...(this.focus !== 0 ? [["s", this.selectedOnly ? "All" : w < 60 ? "Selected" : "Selected only"] as KeyHint] : []),
+      ["Enter", this.focus === 0 ? "Browse" : this.focus === 1 ? "Read" : "Choose"],
+      ...(this.focus === 1 ? [["Space", this.selectedOnly ? "Deselect" : "Select"] as KeyHint] : this.focus === 2 ? [["←→", "Choose action"] as KeyHint] : [])],
       [["Esc", "Cancel selection"], ["Tab / Shift+Tab", "Focus"], ...(this.focus !== 0 ? [["/", "Search"] as KeyHint] : [])]];
     const page = this.page;
     if (page.kind === "read") {
@@ -375,8 +430,9 @@ export class PreferencePanel {
       const entries = this.entries();
       this.index = Math.min(this.index, Math.max(0, entries.length - 1));
       const errors = Object.values(this.library.errors);
-      const status = errors.length ? errors.join(" · ") : !this.library.entries.length && !this.working.length
-        ? "Library is empty · n Add to start" : !entries.length ? "No matches · / Search to change query" : "";
+      const status = errors.length ? errors.join(" · ") : this.selectedOnly && !this.working.length
+        ? "No selections · s All to browse" : !this.library.entries.length && !this.working.length
+          ? "Library is empty · n Add to start" : !entries.length ? "No matches · / Search to change query" : "";
       const columns = Math.max(1, Math.min(3, Math.floor(w / 12)));
       const cellWidth = Math.max(1, Math.floor((w - (columns - 1) * 2) / columns));
       const toolbar: string[] = [];
@@ -400,11 +456,21 @@ export class PreferencePanel {
         const current = top + i === this.index;
         const active = this.focus === 1 && current;
         const local = this.local(entry);
-        const suffix = !this.source(entry) ? " · deleted" : local && (local.version !== entry.version || local.body !== entry.body) ? " · snapshot kept" : "";
-        const label = `${active ? "›" : current ? "·" : " "} ${local ? "[x]" : "[ ]"} ${entry.name} · ${entry.scope}${entry.metadata ? ` · ${entry.metadata.kind}` : ""}${local?.adoption === "auto" ? " · auto selected" : ""}${suffix}`;
-        const cell = truncateToWidth(clean(label), leftWidth, "…");
-        const styled = this.theme.fg("text", cell);
-        return active ? this.theme.bg("selectedBg", styled + " ".repeat(Math.max(0, leftWidth - visibleWidth(cell)))) : styled;
+        const source = this.source(entry);
+        const unavailable = !!this.library.errors[entry.scope];
+        const changed = local && source && (local.version !== source.version || local.name !== source.name || local.sourceBody !== source.body ||
+          JSON.stringify(local.metadata) !== JSON.stringify(source.metadata));
+        const warning = unavailable ? "unavailable" : !source ? "deleted" : changed ? "snapshot kept" : "";
+        const prefix = this.theme.fg("muted", `${active ? "›" : current ? "·" : " "} ${local ? "[x]" : "[ ]"} `)
+          + (warning ? this.theme.fg("warning", "! ") : "");
+        const name = clean(entry.name).replace(/\n/g, " ");
+        const metadata = ` · ${entry.scope === "project" ? "P" : "G"}${warning ? ` · ${warning}` : ""}`;
+        const room = Math.max(0, leftWidth - visibleWidth(prefix));
+        const showMetadata = visibleWidth(name) + visibleWidth(metadata) <= room;
+        const label = truncateToWidth(name, room, "…");
+        const cell = truncateToWidth(prefix + this.theme.fg("text", active ? this.theme.bold(label) : label)
+          + (showMetadata ? this.theme.fg("muted", metadata) : ""), leftWidth, "…");
+        return active ? this.theme.bg("selectedBg", cell + " ".repeat(Math.max(0, leftWidth - visibleWidth(cell)))) : cell;
       });
       if (!entries.length) list.push(...wrap(status, leftWidth).map((line) => this.theme.fg(errors.length ? "error" : "muted", line)));
       if (!room) {
@@ -413,7 +479,13 @@ export class PreferencePanel {
       } else {
         const rightWidth = split ? w - leftWidth - 3 : w;
         const detail = split && entries[this.index] ? this.document(this.description(entries[this.index]!), rightWidth) : [];
-        const heading = this.theme.fg("text", this.theme.bold(`Library ${entries.length ? this.index + 1 : 0}/${entries.length} · ${this.working.length} selected`));
+        const headingText = this.theme.fg("text", this.theme.bold(`${this.selectedOnly ? "Selected" : "Library"} ${entries.length ? this.index + 1 : 0}/${entries.length}`));
+        const count = this.theme.fg("muted", ` · ${this.working.length} selected`);
+        const viewHint = this.focus !== 0 ? formatKeyHint(["s", this.selectedOnly ? "All" : "Selected"], this.theme) : "";
+        const hintFits = !!viewHint && visibleWidth(headingText) + 3 + visibleWidth(viewHint) <= leftWidth;
+        const countFits = visibleWidth(headingText + count) + (hintFits ? 3 + visibleWidth(viewHint) : 0) <= leftWidth;
+        const heading = truncateToWidth(headingText + (countFits ? count : ""), leftWidth, "")
+          + (hintFits ? this.theme.fg("muted", " · ") + viewHint : "");
         const panes = Array.from({ length: available }, (_, i) => {
           if (!split) return list[i] ?? "";
           const left = list[i] ?? "";
