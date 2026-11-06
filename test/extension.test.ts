@@ -759,6 +759,40 @@ describe("explicit candidate revision", () => {
     expect(history.records[0]).not.toHaveProperty("preferences");
   });
 
+  it("loads typed automatic rewrites, deduplicates scopes, exposes cancellation and injects only frozen bodies", async () => {
+    const h = await makeHarness();
+    const store = new PreferenceStore(h.agentDir, h.context.cwd);
+    const metadata = { kind: "rewrite", description: "Metadata never injected 中文", activation: "auto", match: "parallel" } as const;
+    const body = "Keep existing parallel questions as separate items.";
+    await store.save("project", { name: "Structure", body, metadata });
+    await store.save("global", { name: "Same structure", body, metadata });
+    await store.save("global", { name: "English response", body: "Answer in English.",
+      metadata: { kind: "task", description: "Response language", activation: "manual" } });
+    await h.reload();
+    h.holdPanel(); const view = h.command("", h.context);
+    h.panelInput("n"); h.panelInput("Why? How?"); h.panelInput("\r");
+    expect(h.panelLines().join("\n")).toContain("Preferences: 1 · Structure");
+    expect(h.complete).not.toHaveBeenCalled();
+    h.panelInput("p");
+    await vi.waitFor(() => {
+      expect(h.panelLines().join("\n")).not.toContain("Working…");
+      expect(h.panelLines().join("\n")).toContain("Automatically selected");
+    });
+    h.panelInput(" "); h.panelInput("\x1b[13;3u");
+    expect(h.panelLines().join("\n")).toContain("Preferences: None");
+    h.panelInput("\r"); await flushPromises();
+    const first = JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
+    expect(first).not.toHaveProperty("editing_instruction");
+    h.panelInput("n"); h.panelInput("What? Why?"); h.panelInput("\r");
+    h.panelInput("\r"); await flushPromises();
+    const second = JSON.parse((h.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
+    expect(second).toMatchObject({ draft: "What? Why?", editing_instruction: `Prompt rewriting instructions:\n${body}` });
+    expect(JSON.stringify(second)).not.toContain(metadata.description);
+    expect(JSON.stringify(second)).not.toContain("Answer in English.");
+    expect(h.sent).toEqual([]); expect(h.editorWrites).toEqual([]);
+    h.panelInput("q"); await view;
+  });
+
   it("uses selected initial requirements on the one-off model path without changing defaults", async () => {
     const h = await makeHarness({ configureModel: false });
     const entry = await new PreferenceStore(h.agentDir, h.context.cwd).save("global", { name: "Steps", body: "Ask for ordered steps when sequence matters." });

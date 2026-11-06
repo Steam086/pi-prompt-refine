@@ -5,7 +5,7 @@ import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from ".
 import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { composeRevision, preferenceKey, preferenceValidation, searchPreferences, selectPreference, PREFERENCE_SELECTION_LIMIT,
-  type PreferenceLibrary, type PreferenceRepository, type PreferenceScope, type RevisionPreference, type SelectedPreference } from "./revision-preferences.js";
+  type PreferenceLibrary, type PreferenceMetadata, type PreferenceRepository, type PreferenceScope, type PreferenceValue, type RevisionPreference, type SelectedPreference } from "./revision-preferences.js";
 
 type Form = {
   kind: "new" | "library";
@@ -13,6 +13,10 @@ type Form = {
   scope: PreferenceScope;
   name: Input;
   body: PromptInput;
+  description: Input;
+  rawDescription: string;
+  initialEditorDescription: string;
+  metadata?: PreferenceMetadata;
   rawBody: string;
   initialEditorBody: string;
   initial: string;
@@ -69,6 +73,7 @@ export class PreferencePanel {
     if (form) {
       form.name.focused = this.hasFocus && this.page.kind === "form" && form.focus === 0;
       form.body.editor.focused = this.hasFocus && this.page.kind === "form" && form.focus === 1;
+      form.description.focused = this.hasFocus && this.page.kind === "form" && form.focus === 4;
     }
   }
   dispose(): void { this.focused = false; this.disposed = true; }
@@ -138,7 +143,8 @@ export class PreferencePanel {
     if (this.descriptionCache?.entry === entry && this.descriptionCache.version === this.contentVersion) return this.descriptionCache.document;
     const local = this.local(entry);
     const source = this.source(entry);
-    const changed = local && source && (source.version !== local.version || source.body !== local.sourceBody || source.name !== local.name);
+    const changed = local && source && (source.version !== local.version || source.body !== local.sourceBody || source.name !== local.name ||
+      JSON.stringify(source.metadata) !== JSON.stringify(local.metadata));
     const unavailable = !!this.library.errors[entry.scope];
     const status = local ? [local.body !== local.sourceBody ? "Edited for this revision" : "Saved snapshot",
       unavailable ? "Library unavailable" : !source ? "Source deleted" : changed ? "Library changed; snapshot kept" : ""].filter(Boolean).join(" · ") : "Library entry";
@@ -146,10 +152,16 @@ export class PreferencePanel {
       { text: entry.name, color: "text", heading: true },
       { text: `${entry.scope} · ${entry.id}`, color: "muted" },
       { text: unavailable ? "Library unavailable" : source ? "Library entry" : "Deleted source", color: unavailable || !source ? "warning" : "muted" },
+      ...(entry.metadata ? [
+        { text: `${entry.metadata.kind === "rewrite" ? "Prompt rewriting" : "Task requirements"} · ${entry.metadata.activation}${entry.metadata.activation === "auto" ? ` · ${entry.metadata.match}` : ""}`, color: "muted" as const },
+        { text: entry.metadata.description, color: "muted" as const },
+      ] : []),
       { text: "", color: "text" }, { text: entry.body, color: "text" },
     ];
     if (local) document.push({ text: "", color: "text" }, { text: "Selected snapshot", color: "text", heading: true },
-      { text: status, color: unavailable || !source || changed ? "warning" : "muted" }, { text: local.body, color: "text" });
+      { text: status, color: unavailable || !source || changed ? "warning" : "muted" },
+      ...(local.metadata ? [{ text: `${local.metadata.kind} · ${local.adoption === "auto" ? `Automatically selected · ${local.metadata.match}` : "Manually selected"} · ${local.metadata.description}`, color: "muted" as const }] : []),
+      { text: local.body, color: "text" });
     this.descriptionCache = { entry, version: this.contentVersion, document };
     return document;
   }
@@ -159,7 +171,13 @@ export class PreferencePanel {
     // Native Editor normalizes tabs on setText; preserve untouched saved literals.
     return text === form.initialEditorBody ? form.rawBody : text;
   }
-  private formValue(form: Form): { name: string; body: string } { return { name: form.name.getValue(), body: this.bodyText(form) }; }
+  private formValue(form: Form): PreferenceValue {
+    const name = form.name.getValue();
+    const edited = form.description.getValue();
+    const description = edited === form.initialEditorDescription ? form.rawDescription : edited;
+    return { name, body: this.bodyText(form), ...(form.metadata ? { metadata: { ...form.metadata,
+      description: description.trim() ? description : name } } : {}) };
+  }
   private stamp(form: Form): string { return JSON.stringify([this.formValue(form), form.scope]); }
   private openForm(kind: Form["kind"], entry?: RevisionPreference): void {
     const body = new PromptInput(this.tui, {
@@ -170,7 +188,11 @@ export class PreferencePanel {
     const rawBody = entry?.body ?? this.freeText;
     body.editor.setText(rawBody);
     const name = new Input({ prompt: "Name: " }); name.setValue(entry?.name ?? "");
+    const rawDescription = entry?.metadata?.description ?? "";
+    const description = new Input({ prompt: "Description: " }); description.setValue(sanitizeTerminalText(rawDescription).replace(/\n/g, " "));
     const form: Form = { kind, scope: entry?.scope ?? "project", name, body, rawBody, initialEditorBody: body.editor.getExpandedText(),
+      description, rawDescription, initialEditorDescription: description.getValue(),
+      metadata: entry ? entry.metadata && structuredClone(entry.metadata) : { kind: "task", description: "", activation: "manual" },
       expected: kind === "library" ? structuredClone(entry) : undefined, initial: "", focus: 0 };
     form.initial = this.stamp(form);
     this.page = { kind: "form", form }; this.setNotice("");
@@ -240,12 +262,28 @@ export class PreferencePanel {
       else if (cancel || key === "n") this.page = { kind: "list" };
     } else if (this.page.kind === "form") {
       const form = this.page.form;
-      const count = 4;
+      const count = 7;
       if (cancel) this.page = this.stamp(form) === form.initial ? { kind: "list" } : { kind: "discard", form };
       else if (key === "tab" || key === "shift+tab") form.focus = (form.focus + (key === "tab" ? 1 : count - 1)) % count;
       else if (form.focus === count - 1 && enter) void this.save(form);
       else if (form.focus === 2 && (enter || key === "space") && form.kind !== "library") form.scope = form.scope === "project" ? "global" : "project";
-      else if (form.focus === 1) {
+      else if (form.focus === 3 && (enter || key === "space")) {
+        form.metadata = { description: form.description.getValue(), kind: form.metadata?.kind === "rewrite" ? "task" : "rewrite", activation: "manual" };
+      } else if (form.focus === 5 && (enter || key === "space")) {
+        if (form.metadata?.kind !== "rewrite") this.setNotice("Automatic adoption is available only for prompt rewriting. Task requirements stay manual.", "warning");
+        else {
+          const choices = [undefined, "parallel", "sequence", "always"] as const;
+          const index = form.metadata.activation === "manual" ? 0 : choices.indexOf(form.metadata.match);
+          const match = choices[(index + 1) % choices.length];
+          form.metadata = { kind: "rewrite", description: form.description.getValue(), activation: match ? "auto" : "manual", ...(match ? { match } : {}) };
+        }
+      } else if (form.focus === 4) {
+        if (enter) form.focus = 5;
+        else {
+          form.description.handleInput(data);
+          form.metadata ??= { kind: "task", description: "", activation: "manual" };
+        }
+      } else if (form.focus === 1) {
         if (enter) form.body.editor.insertTextAtCursor("\n");
         else form.body.editor.handleInput(data);
       } else if (form.focus === 0) {
@@ -313,22 +351,25 @@ export class PreferencePanel {
     } else if (page.kind === "form") {
       const form = page.form;
       title = form.kind === "library" ? "Edit library entry" : "Save new preference";
-      subtitle = `Focus: ${["Name", "Instruction", "Scope", "Save"][form.focus]} · Check paths and sensitive text`;
+      subtitle = `Focus: ${["Name", "Instruction", "Scope", "Type", "Description", "Adoption", "Save"][form.focus]} · Check paths and sensitive text`;
       const name = form.name.render(w);
       const scope = button(`Scope: ${form.scope}${form.kind === "library" ? " (fixed)" : " (Enter change)"}`, form.focus === 2);
-      const save = button("Save to preference library", form.focus === 3);
+      const type = button(`Type: ${form.metadata?.kind === "rewrite" ? "Prompt rewriting" : form.metadata?.kind === "task" ? "Task requirements" : "Unclassified (legacy)"}`, form.focus === 3);
+      const description = form.description.render(w);
+      const adoption = button(`Adoption: ${form.metadata?.activation === "auto" ? `Auto · ${form.metadata.match}` : "Manual"}`, form.focus === 5);
+      const save = button("Save to preference library", form.focus === 6);
       // Native Editor cannot wrap a wide glyph into a one-column line. The
       // outer frame clips its minimal safe canvas in extremely narrow terminals.
       const editorWidth = Math.max(4, w);
       // Tiny viewports show the focused field; the same Tab order remains usable.
-      if (h < 5) {
-        body = form.focus === 0 ? name : form.focus === 3 ? [save]
-          : form.focus === 2 ? [scope] : form.body.render(editorWidth, Math.max(1, h));
+      if (h < 9) {
+        body = form.focus === 0 ? name : form.focus === 6 ? [save] : form.focus === 4 ? description
+          : form.focus === 2 ? [scope] : form.focus === 3 ? [type] : form.focus === 5 ? [adoption] : form.body.render(editorWidth, Math.max(1, h));
       } else {
-        body = [...name, ...form.body.render(editorWidth, h - 3), scope, save];
+        body = [...name, ...form.body.render(editorWidth, h - 6), scope, type, ...description, adoption, save];
       }
-      const enterLabel = form.focus === 3 ? "Save to library" : form.focus === 1 ? "Newline" : form.focus === 0 ? "Next field"
-        : form.kind === "library" ? "Scope fixed" : "Change scope";
+      const enterLabel = form.focus === 6 ? "Save to library" : form.focus === 1 ? "Newline" : form.focus === 0 || form.focus === 4 ? "Next field"
+        : form.focus === 3 ? "Change type" : form.focus === 5 ? "Change adoption" : form.kind === "library" ? "Scope fixed" : "Change scope";
       hints = [[["Enter", enterLabel], ["Tab / Shift+Tab", "Fields"]], [["Esc", "Back"], ["", "No request sent"]]];
     } else {
       const entries = this.entries();
@@ -360,7 +401,7 @@ export class PreferencePanel {
         const active = this.focus === 1 && current;
         const local = this.local(entry);
         const suffix = !this.source(entry) ? " · deleted" : local && (local.version !== entry.version || local.body !== entry.body) ? " · snapshot kept" : "";
-        const label = `${active ? "›" : current ? "·" : " "} ${local ? "[x]" : "[ ]"} ${entry.name} · ${entry.scope}${suffix}`;
+        const label = `${active ? "›" : current ? "·" : " "} ${local ? "[x]" : "[ ]"} ${entry.name} · ${entry.scope}${entry.metadata ? ` · ${entry.metadata.kind}` : ""}${local?.adoption === "auto" ? " · auto selected" : ""}${suffix}`;
         const cell = truncateToWidth(clean(label), leftWidth, "…");
         const styled = this.theme.fg("text", cell);
         return active ? this.theme.bg("selectedBg", styled + " ".repeat(Math.max(0, leftWidth - visibleWidth(cell)))) : styled;

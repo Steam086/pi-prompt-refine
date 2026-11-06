@@ -44,7 +44,8 @@ describe("workspace terminal rendering", () => {
     const run = vi.fn();
     const workspace = new RefineWorkspace(panel, tui, theme, getKeybindings(), {
       preferences: { key: "alt+p", maxChars: 16000, repository: {
-        load: async () => ({ errors: {}, entries: [{ id: "one", version: 1, scope: "global", name: "Keep commands 中文", body: "Preserve literals\n".repeat(100) }] }),
+        load: async () => ({ errors: {}, entries: [{ id: "one", version: 1, scope: "global", name: "Keep commands 中文", body: "Preserve literals\n".repeat(100),
+          metadata: { kind: "rewrite", description: "Preserve ANSI \u001b[31m and 中文😀 literals", activation: "manual" } }] }),
         save: async () => { throw new Error("Read-only fixture"); }, remove: async () => {},
       } },
       taskPosition,
@@ -129,7 +130,8 @@ describe("workspace terminal rendering", () => {
       taskPosition.selectedTaskId = undefined; taskPosition.selectedId = 2;
       workspace.openResult(); input("f"); input("\x1bp");
       await Promise.resolve();
-      for (const key of [" ", "\r", "\x1b[6~", "\x1b", "\t", "\x1b[C", "\x1b[D", "\t", "\t", "n", "Saved name", "\t", "\r", "中文", "\x13", "\x1b", "n", "\x1b", "y", "\x1b[13;3u"]) {
+      for (const key of [" ", "\r", "\x1b[6~", "\x1b", "\t", "\x1b[C", "\x1b[D", "\t", "\t", "n", "Saved name", "\t", "\r", "中文",
+        "\t", "\t", "\r", "\t", "中文😀 description", "\t", "\r", "\t", "\x13", "\x1b", "n", "\x1b", "y", "\x1b[13;3u"]) {
         input(key); tui.renderNow();
         expect(workspace.render(columns)).toHaveLength(initialHeight);
       }

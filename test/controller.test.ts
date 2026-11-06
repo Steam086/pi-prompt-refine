@@ -4,7 +4,7 @@ import type { ModelRef } from "../src/config.js";
 import type { BudgetReport } from "../src/budget.js";
 import { buildRefineSystemPrompt, selectHistory } from "../src/context.js";
 import { deferred, FakeScheduler, flushPromises, success } from "./helpers.js";
-import { selectPreference } from "../src/revision-preferences.js";
+import { automaticPreferences, composeRevision, selectPreference, type RevisionPreference } from "../src/revision-preferences.js";
 
 const model: ModelRef = { provider: "provider-a", id: "chat-model" };
 
@@ -80,6 +80,107 @@ describe("request budget diagnostics", () => {
     expect(controller.getState()).toMatchObject({ phase: "error", error: "budget", budget: { status: "blocked" } });
     expect(controller.getCandidate()?.text).toBe("Previous");
     expect(controller.getHistory().at(-1)).toMatchObject({ status: "error", error: "budget" });
+  });
+});
+
+describe("automatic preference lifecycle", () => {
+  const entries: RevisionPreference[] = [{ id: "sequence", version: 1, scope: "global", name: "Sequence", body: "Preserve existing order.",
+    metadata: { kind: "rewrite", description: "Explicit sequence", activation: "auto", match: "sequence" } }];
+  function automaticSetup() {
+    const library = structuredClone(entries);
+    const jobs: Array<{ request: RefineRequest; pending: ReturnType<typeof deferred<RefineCompletion>> }> = [];
+    const controller = new RefineController({ timeoutMs: 1000, maxDraftChars: 2000, maxConcurrent: 1, onState() {},
+      automaticPreferences: (draft) => automaticPreferences(library, draft),
+      complete: (request) => { const pending = deferred<RefineCompletion>(); jobs.push({ request, pending }); return pending.promise; },
+    }, model);
+    return { controller, library, jobs };
+  }
+
+  it("matches edited originals, retains explicit exclusions, and isolates new originals", () => {
+    const { controller, jobs } = automaticSetup();
+    const capture = controller.createDraft(input(""));
+    if (capture.kind !== "captured") throw new Error("not captured");
+    expect(controller.updateDraft(capture.recordId, "", "First inspect, then explain.")).toBe(true);
+    const record = controller.getRecord(capture.recordId)!;
+    expect(record.input.preferences?.[0]).toMatchObject({ adoption: "auto", metadata: entries[0]!.metadata });
+    expect(record.input.editingInstruction).toContain("Prompt rewriting instructions:");
+    expect(jobs).toHaveLength(0);
+    expect(controller.updateDraftPreferences(record, [])).toBeUndefined();
+    expect(controller.updateDraft(record.id, record.input.draft, "First inspect, then compare.")).toBe(true);
+    expect(controller.getRecord(record.id)!.input.preferences).toEqual([]);
+    expect(controller.getRecord(record.id)!.input.editingInstruction).toBeUndefined();
+    const next = controller.createDraft(input("First inspect, then compare."));
+    if (next.kind !== "captured") throw new Error("not captured");
+    expect(controller.getRecord(next.recordId)!.input.preferences).toHaveLength(1);
+  });
+
+  it("removes inapplicable automatic structure without removing manual requirements", () => {
+    const { controller } = automaticSetup();
+    const capture = controller.createDraft(input("First inspect, then explain."));
+    if (capture.kind !== "captured") throw new Error("not captured");
+    const record = controller.getRecord(capture.recordId)!;
+    const manual = selectPreference({ id: "english", version: 1, scope: "project", name: "English", body: "Answer in English.",
+      metadata: { kind: "task", description: "Response language", activation: "manual" } });
+    controller.updateDraftPreferences(record, [...record.input.preferences!, manual]);
+    expect(controller.updateDraft(record.id, record.input.draft, "Explain this.")).toBe(true);
+    expect(controller.getRecord(record.id)!.input.preferences).toEqual([manual]);
+    expect(controller.getRecord(record.id)!.input.editingInstruction).toBe(composeRevision([manual], ""));
+  });
+
+  it("keeps a selected automatic snapshot after its library source is edited or deleted", () => {
+    const { controller, library } = automaticSetup();
+    const capture = controller.createDraft(input("First inspect, then explain."));
+    if (capture.kind !== "captured") throw new Error("not captured");
+    const record = controller.getRecord(capture.recordId)!;
+    library[0]!.body = "Changed";
+    library[0]!.metadata!.match = "parallel";
+    expect(controller.updateDraft(record.id, record.input.draft, "First inspect, then compare.")).toBe(true);
+    expect(controller.getRecord(record.id)!.input.preferences).toEqual(record.input.preferences);
+    library.splice(0);
+    expect(controller.updateDraft(record.id, "First inspect, then compare.", "First inspect, then discuss.")).toBe(true);
+    expect(controller.getRecord(record.id)!.input.preferences).toEqual(record.input.preferences);
+  });
+
+  it("does not duplicate a deleted-source snapshot or resurrect its dismissed global counterpart", () => {
+    const { controller, library } = automaticSetup();
+    library.unshift({ ...structuredClone(library[0]!), id: "project-sequence", scope: "project" });
+    const capture = controller.createDraft(input("First inspect, then explain."));
+    if (capture.kind !== "captured") throw new Error("not captured");
+    library.shift(); // The selected project source disappears; global copy remains.
+    const record = controller.getRecord(capture.recordId)!;
+    expect(controller.updateDraft(record.id, record.input.draft, "First inspect, then compare.")).toBe(true);
+    expect(controller.getRecord(record.id)!.input.preferences).toEqual(record.input.preferences);
+    controller.updateDraftPreferences(controller.getRecord(record.id)!, []);
+    expect(controller.updateDraft(record.id, "First inspect, then compare.", "First inspect, then discuss.")).toBe(true);
+    expect(controller.getRecord(record.id)!.input.preferences).toEqual([]);
+  });
+
+  it("freezes queued bodies and metadata, and never replays automatic requirements into revision feedback", async () => {
+    const { controller, jobs, library } = automaticSetup();
+    controller.trigger(input("Blocking"));
+    const captured = controller.capture(input("First inspect, then explain."));
+    if (captured.kind !== "captured") throw new Error("not captured");
+    const frozen = controller.getRecord(captured.recordId)!.input.preferences;
+    controller.startRecord(captured.recordId);
+    library[0]!.body = "Changed externally";
+    library[0]!.metadata!.description = "Changed description";
+    expect(controller.updateDraft(captured.recordId, "First inspect, then explain.", "Changed")).toBe(false);
+    jobs[0]!.pending.resolve(success("Blocking result")); await flushPromises();
+    expect(jobs[1]!.request.preferences).toEqual(frozen);
+    jobs[1]!.pending.resolve(success("Structured result")); await flushPromises();
+    controller.applyResult(captured.recordId);
+    const source = controller.getCandidate()!;
+    controller.trigger({ ...source, revision: { previousCandidate: source.text, instruction: "Remove the sequence requirement." } },
+      { revisionToken: controller.getCandidateToken()! });
+    expect(jobs[2]!.request.revision?.instruction).toBe("Remove the sequence requirement.");
+    expect(jobs[2]!.request.preferences).toEqual(frozen);
+  });
+
+  it("rejects over-limit automatic requirements before queuing a model request", () => {
+    const { controller, jobs, library } = automaticSetup();
+    library[0]!.body = "x".repeat(2000);
+    expect(controller.trigger(input("First inspect, then explain.")).kind).toBe("too-long");
+    expect(jobs).toHaveLength(0);
   });
 });
 
