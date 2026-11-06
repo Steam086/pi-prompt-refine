@@ -28,6 +28,52 @@ function create(name = "dark", usage = false, records = [record()]) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("prompt tree and inspection", () => {
+  it.each(["dark", "light"])("follows only an explicitly submitted run in %s, including queued starts and resize", (name) => {
+    for (const usage of [false, true]) for (const status of ["generating", "queued"] as const) {
+      const draft = record(2, 2);
+      draft.status = "unsent"; draft.candidate = undefined;
+      draft.input.draft = "Draft 中文😀\x1b[2J";
+      const f = create(name, usage, [draft, record(1)]);
+      Object.assign(f.position, { selectedTaskId: 2, scroll: 8, scrolls: { "task-2": 8 } });
+      f.actions.run.mockImplementation(() => { draft.status = status; });
+      f.panel.handleInput("\r");
+      expect(f.actions.run).toHaveBeenCalledExactlyOnceWith(2);
+      expect(f.position.selectedId).toBe(2);
+      expect(f.position.selectedTaskId).toBeUndefined();
+      expect(f.position.scroll).toBe(0);
+      expect(f.position.scrolls?.["task-2"]).toBe(8);
+      for (const [width, rows] of [[100, 40], [40, 12], [120, 50]]) {
+        f.size.rows = rows!;
+        const lines = f.panel.render(width!);
+        expect(lines.length).toBeLessThanOrEqual(rows!);
+        for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width!);
+        const selected = lines.find((line) => stripVTControlCharacters(line).includes("›"))!;
+        expect(stripVTControlCharacters(selected)).toContain("└ model-2");
+        const selectionStyle = f.theme.bg("selectedBg", "probe").split("probe")[0]!;
+        expect(selectionStyle).toMatch(/\x1b\[/);
+        expect(selected).toContain(selectionStyle);
+        expect(lines.join("\n")).not.toContain("\x1b[2J");
+      }
+      f.panel.handleInput("\x1b[B"); // Browse another original before completion.
+      const position = structuredClone(f.position);
+      draft.status = "generated"; draft.candidate = record(2, 2).candidate;
+      f.panel.render(100);
+      expect(f.position).toEqual(position);
+      expect(f.actions.activate).not.toHaveBeenCalled();
+    }
+  });
+
+  it("keeps the Unsent original selected when explicit startup is rejected", () => {
+    const draft = record(); draft.status = "unsent"; draft.candidate = undefined;
+    const f = create("dark", false, [draft]);
+    Object.assign(f.position, { selectedTaskId: draft.taskId, scroll: 3 });
+    f.panel.handleInput("\r");
+    expect(f.actions.run).toHaveBeenCalledExactlyOnceWith(draft.id);
+    expect(f.position.selectedTaskId).toBe(draft.taskId);
+    expect(f.position.scroll).toBe(3);
+    expect(f.text()).toContain("› ○ Unsent");
+  });
+
   it("opens selected result details before direct Revise and blocks removed shortcuts", () => {
     const { panel, actions, text, position, records } = create("dark", false, [record(1), record(2)]);
     position.selectedId = 2;

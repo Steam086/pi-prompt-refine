@@ -120,8 +120,12 @@ describe("workspace terminal rendering", () => {
       expect(unsent.input.preferences).toHaveLength(1);
       expect(unsent.input.draft).toBe(requestInput.draft);
       expect(run).toHaveBeenCalledTimes(callsBefore);
+      run.mockImplementationOnce(() => { unsent.status = "generating"; });
       input("\r"); tui.renderNow();
       expect(run).toHaveBeenLastCalledWith(unsent.id);
+      expect(taskPosition.selectedTaskId).toBeUndefined();
+      expect(taskPosition.selectedId).toBe(unsent.id);
+      expect(workspace.render(columns)).toHaveLength(initialHeight);
       taskPosition.selectedTaskId = undefined; taskPosition.selectedId = 2;
       workspace.openResult(); input("f"); input("\x1bp");
       await Promise.resolve();
