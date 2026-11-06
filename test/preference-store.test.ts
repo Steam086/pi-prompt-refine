@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { PreferenceStore, PREFERENCE_MAX_BYTES } from "../src/preference-store.js";
-import { composeRevision, searchPreferences, selectPreference } from "../src/revision-preferences.js";
+import { automaticPreferences, composeRevision, searchPreferences, selectPreference, type PreferenceMetadata, type RevisionPreference } from "../src/revision-preferences.js";
 
 const dirs: string[] = [];
 afterEach(async () => { await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
@@ -75,7 +75,7 @@ describe("preference persistence", () => {
   });
   it("never overwrites corrupt, unsupported, oversized or symlinked libraries", async () => {
     const f = await setup();
-    for (const content of ["broken", '{"version":2,"entries":[]}', " ".repeat(PREFERENCE_MAX_BYTES + 1),
+    for (const content of ["broken", '{"version":3,"entries":[]}', " ".repeat(PREFERENCE_MAX_BYTES + 1),
       JSON.stringify({ version: 1, entries: [{ id: "x", version: 0, name: "Bad", body: "Bad" }] })]) {
       await writeFile(f.global, content);
       const library = await f.store.load();
@@ -98,5 +98,82 @@ describe("preference persistence", () => {
     const saved = await f.store.save("global", { name: "A", body: "B" });
     await expect(f.store.save("project", { name: "A", body: "B" }, saved)).rejects.toThrow("Save as");
     expect((await f.store.load()).entries).toEqual([saved]);
+  });
+});
+
+describe("typed preferences", () => {
+  const metadata: PreferenceMetadata = { kind: "rewrite", description: "并列问题条目化", activation: "auto", match: "parallel" };
+  const entry: RevisionPreference = { id: "structured", version: 1, scope: "global", name: "Structure", body: "Keep literal 中文\tcommands.", metadata };
+
+  it("loads the reorganized preset catalog through the production reader", async () => {
+    const f = await setup();
+    await writeFile(f.global, await readFile(new URL("../examples/prompt-refine-preferences.json", import.meta.url), "utf8"));
+    const library = await f.store.load();
+    expect(library.errors).toEqual({});
+    expect(library.entries).toHaveLength(10);
+    expect(library.entries.every((entry) => entry.metadata?.description && ["rewrite", "task"].includes(entry.metadata.kind))).toBe(true);
+    expect(library.entries.filter((entry) => entry.metadata?.kind === "task").every((entry) => entry.metadata?.activation === "manual")).toBe(true);
+    const chosen = automaticPreferences(library.entries, "先解释原因，再讨论方案。为什么？有什么取舍？");
+    expect(chosen.map((entry) => entry.name)).toEqual(["Prompt Step Structure", "Clarify Prompt Intent"]);
+    expect(automaticPreferences(library.entries, "Clear request.").map((entry) => entry.name)).toEqual(["Clarify Prompt Intent"]);
+  });
+
+  it("round-trips v2 metadata, preserves it in old-style edits and isolates pending writes/snapshots", async () => {
+    const f = await setup();
+    const value = { name: entry.name, body: entry.body, metadata: structuredClone(metadata) };
+    const pending = f.store.save("global", value);
+    value.metadata.description = "mutated while awaiting IO";
+    const saved = await pending;
+    expect(saved.metadata).toEqual(metadata);
+    expect(JSON.parse(await readFile(f.global, "utf8")).version).toBe(2);
+    const selected = selectPreference(saved);
+    saved.metadata!.description = "mutated after selection";
+    expect(selected.metadata).toEqual(metadata);
+    const fresh = (await f.store.load()).entries[0]!;
+    const edited = await f.store.save("global", { name: "Renamed", body: fresh.body }, fresh);
+    expect(edited.metadata).toEqual(metadata);
+    const external = JSON.parse(await readFile(f.global, "utf8"));
+    external.entries[0].metadata.activation = "manual";
+    await writeFile(f.global, JSON.stringify(external));
+    await expect(f.store.remove(edited)).rejects.toThrow("changed or was deleted");
+  });
+
+  it("rejects malformed metadata without overwriting the library", async () => {
+    const f = await setup();
+    for (const invalid of ["serialized JSON", null, { ...metadata, kind: "unknown" }, { ...metadata, description: "" },
+      { ...metadata, match: "guess" }, { ...metadata, match: undefined }, { ...metadata, kind: "task" }, { ...metadata, typo: true }]) {
+      const content = JSON.stringify({ version: 2, entries: [{ ...entry, metadata: invalid }] });
+      await writeFile(f.global, content);
+      expect((await f.store.load()).errors.global).toBeTruthy();
+      await expect(f.store.save("global", { name: "New", body: "New" })).rejects.toThrow();
+      expect(await readFile(f.global, "utf8")).toBe(content);
+    }
+  });
+
+  it("keeps names/descriptions/activation out of instructions and preserves legacy literal composition", () => {
+    const task = { ...entry, id: "language", body: "Require an English answer.", metadata: { kind: "task", description: "回答语言", activation: "manual" } as const };
+    const composed = composeRevision([selectPreference(entry), selectPreference(task)], "Remove only repeated wording.");
+    expect(composed).toBe(`Prompt rewriting instructions:\n${entry.body}\n\nMain-agent task requirements:\n${task.body}\n\nRemove only repeated wording.`);
+    expect(composed).not.toContain(metadata.description);
+    expect(searchPreferences([entry], "并列")).toEqual([entry]);
+  });
+
+  it("matches only eligible rewrites, prefers sequence to bullets, ignores fenced code and deduplicates scopes", () => {
+    const sequence = { ...entry, id: "sequence", body: "Sequence", metadata: { ...metadata, match: "sequence" as const } };
+    const legacy = { ...entry, id: "legacy", metadata: undefined };
+    const manual = { ...entry, id: "manual", metadata: { ...metadata, activation: "manual" as const } };
+    const task = { ...entry, id: "task", metadata: { ...metadata, kind: "task" as const } };
+    const project = { ...entry, id: "project", scope: "project" as const };
+    const entries = [entry, sequence, legacy, manual, task, project];
+    expect(automaticPreferences(entries, "Why? How?").map((entry) => entry.id)).toEqual(["project"]);
+    expect(automaticPreferences(entries, "先检查接口，再讨论方案。\n1. 检查\n2. 讨论").map((entry) => entry.id)).toEqual(["sequence"]);
+    expect(automaticPreferences(entries, "First inspect, then explain.").map((entry) => entry.id)).toEqual(["sequence"]);
+    expect(automaticPreferences(entries, "解释：\n```text\nWhy? How?\n```")).toEqual([]);
+    expect(automaticPreferences(entries, "Already clear.")).toEqual([]);
+    expect(automaticPreferences(entries, " ")).toEqual([]);
+    const result = automaticPreferences(entries, "Why? How?")[0]!;
+    expect(result.adoption).toBe("auto");
+    result.metadata!.description = "local";
+    expect(project.metadata!.description).toBe(metadata.description);
   });
 });

@@ -48,11 +48,48 @@ function search(panel: PreferencePanel, query: string) {
   panel.handleInput("/"); panel.handleInput("\x15"); panel.handleInput(query); panel.handleInput(enter);
 }
 function save(panel: { handleInput(data: string): unknown }) {
-  for (let i = 0; i < 3; i++) panel.handleInput(tab);
+  panel.handleInput(backTab);
   panel.handleInput(enter);
 }
 
 describe("three-action preference library", () => {
+  it.each(["dark", "light"])("sanitizes external metadata before editing while preserving untouched JSON (%s)", async (themeName) => {
+    const entry: RevisionPreference = { ...a, metadata: { kind: "rewrite", activation: "manual", description: "Literal \u001b[31m红色\n第二行\t😀" } };
+    const f = setup([], "", themeName, [entry]); await loaded(f.panel);
+    f.panel.handleInput("e");
+    const output = f.panel.render(100).join("\n");
+    expect(output).not.toContain("\u001b[31m");
+    expect(output).toContain("�[31m红色 第二行    😀");
+    save(f.panel); await loaded(f.panel);
+    expect(f.repo.save).toHaveBeenCalledWith("global", { name: entry.name, body: entry.body, metadata: entry.metadata }, entry);
+  });
+
+  it.each(["dark", "light"])("edits classification/description/adoption without submitting and bounds each field (%s)", async (themeName) => {
+    const f = setup([], "Preserve existing structure.", themeName); await loaded(f.panel);
+    f.panel.handleInput("n"); f.panel.handleInput("Structure");
+    f.panel.handleInput(tab); f.panel.handleInput(tab); f.panel.handleInput(tab);
+    f.panel.handleInput(enter); // Task -> Rewrite.
+    expect(text(f.panel)).toContain("Type: Prompt rewriting");
+    f.panel.handleInput(tab); f.panel.handleInput("并列问题 😀");
+    f.panel.handleInput(tab); f.panel.handleInput(enter); // Manual -> parallel.
+    expect(text(f.panel)).toContain("Adoption: Auto · parallel");
+    for (let field = 0; field < 7; field++) {
+      for (const rows of [5, 8, 16, 40]) for (const width of [1, 12, 40, 100]) {
+        f.terminal.rows = rows;
+        const lines = f.panel.render(width);
+        expect(lines).toHaveLength(panelLayout(width, rows).height);
+        expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+      }
+      f.panel.handleInput(tab);
+    }
+    f.terminal.rows = 40;
+    f.panel.handleInput(tab); f.panel.handleInput(enter); await loaded(f.panel);
+    expect(f.repo.save).toHaveBeenCalledWith("project", { name: "Structure", body: "Preserve existing structure.",
+      metadata: { kind: "rewrite", description: "并列问题 😀", activation: "auto", match: "parallel" } }, undefined);
+    expect(f.close).not.toHaveBeenCalled();
+    expect(text(f.panel)).toContain("0 selected");
+  });
+
   it("shows all three actions and cycles just three focus regions", async () => {
     const f = setup(); await loaded(f.panel);
     expect(text(f.panel)).toContain("Focus: Library");
@@ -79,7 +116,8 @@ describe("three-action preference library", () => {
     f.panel.handleInput("Saved"); f.panel.handleInput(ctrlS);
     expect(f.repo.save).not.toHaveBeenCalled();
     save(f.panel); await loaded(f.panel);
-    expect(f.repo.save).toHaveBeenCalledWith("project", { name: "Saved", body: "Reusable full text" }, undefined);
+    expect(f.repo.save).toHaveBeenCalledWith("project", { name: "Saved", body: "Reusable full text",
+      metadata: { kind: "task", description: "Saved", activation: "manual" } }, undefined);
     expect(text(f.panel)).toContain("0 selected");
     f.panel.handleInput(esc); expect(f.close).toHaveBeenCalledWith();
     expect(f.library.entries.find((entry) => entry.id === "new")?.body).toBe("Reusable full text");
@@ -111,7 +149,7 @@ describe("three-action preference library", () => {
   it("edits a library entry without silently changing its selected snapshot", async () => {
     const f = setup([selectPreference(a)]); await loaded(f.panel);
     f.panel.handleInput("e"); f.panel.handleInput(tab); f.panel.handleInput(" Changed");
-    f.panel.handleInput(tab); f.panel.handleInput(tab); f.panel.handleInput(enter); await loaded(f.panel);
+    f.panel.handleInput(backTab); save(f.panel); await loaded(f.panel);
     expect(f.repo.save).toHaveBeenCalledWith("global", { name: a.name, body: `${a.body} Changed` }, a);
     f.panel.handleInput(enter);
     let all = text(f.panel); f.panel.handleInput("\x1b[6~"); all += text(f.panel);
@@ -199,6 +237,9 @@ describe("preference rendering and responsiveness", () => {
     f.panel.handleInput("n"); check(["Enter", "Next field"], ["Tab / Shift+Tab", "Fields"], ["Esc", "Back"]);
     f.panel.handleInput("Name"); f.panel.handleInput(tab); check(["Enter", "Newline"]);
     f.panel.handleInput(tab); check(["Enter", "Change scope"]);
+    f.panel.handleInput(tab); check(["Enter", "Change type"]);
+    f.panel.handleInput(tab); check(["Enter", "Next field"]);
+    f.panel.handleInput(tab); check(["Enter", "Change adoption"]);
     f.panel.handleInput(tab); check(["Enter", "Save to library"]);
     f.panel.handleInput(esc); check(["y", "Discard"], ["n / Esc", "Keep editing"]);
     f.panel.handleInput("y"); f.panel.handleInput("d"); check(["y", "Delete"], ["n / Esc", "Cancel"]);
