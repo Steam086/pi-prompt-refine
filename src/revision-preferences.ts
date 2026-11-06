@@ -90,8 +90,16 @@ export function automaticPreferences(entries: readonly RevisionPreference[], dra
   });
 }
 export function searchPreferences(entries: readonly RevisionPreference[], query: string): RevisionPreference[] {
-  const needle = query.trim().toLocaleLowerCase();
-  const rank = (entry: RevisionPreference) => entry.name.toLocaleLowerCase().includes(needle) ? 0 : 1;
-  return entries.filter((entry) => !needle || rank(entry) === 0 || entry.body.toLocaleLowerCase().includes(needle) || entry.metadata?.description.toLocaleLowerCase().includes(needle))
-    .sort((a, b) => rank(a) - rank(b));
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [...entries];
+  const tokens = needle.split(/\s+/u);
+  return entries.map((entry, index) => {
+    const name = entry.name.toLowerCase();
+    const description = entry.metadata?.description.toLowerCase() ?? "";
+    const body = entry.body.toLowerCase();
+    const matches = tokens.every((token) => [name, description, body].some((field) => field.includes(token)));
+    const rank = name === needle ? 0 : name.includes(needle) || tokens.every((token) => name.includes(token)) ? 1
+      : tokens.every((token) => name.includes(token) || description.includes(token)) ? 2 : 3;
+    return { entry, index, matches, rank };
+  }).filter((item) => item.matches).sort((a, b) => a.rank - b.rank || a.index - b.index).map((item) => item.entry);
 }

@@ -1,0 +1,71 @@
+import { stripVTControlCharacters } from "node:util";
+import { describe, expect, it, vi } from "vitest";
+import { getKeybindings, TuiAltScreen, TuiMainScreen, visibleWidth, type Terminal } from "@earendil-works/pi-tui";
+import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
+import { PreferencePanel } from "../src/preference-panel.js";
+import { panelLayout } from "../src/panel-layout.js";
+import { selectPreference, type RevisionPreference } from "../src/revision-preferences.js";
+
+// Captured renderer I/O is not human visual or IME validation.
+describe.each(["regular", "fullscreen"] as const)("preference selection terminal rendering (%s)", (mode) => {
+  it.each(["dark", "light"])("audits selections and reveals a new save through narrow/short resize (%s)", async (themeName) => {
+    vi.useFakeTimers();
+    let input = (_data: string) => {};
+    const writes: string[] = [];
+    const terminal: Terminal = {
+      rows: 40, columns: 100, kittyProtocolActive: true,
+      start: (onInput) => { input = onInput; }, stop() {}, write: (data) => { writes.push(data); },
+      async drainInput() {}, moveBy() {}, hideCursor() {}, showCursor() {}, clearLine() {}, clearFromCursor() {},
+      clearScreen() {}, setTitle() {}, setProgress() {}, setProgramStatus() {},
+    };
+    const tui = mode === "regular" ? new TuiMainScreen(terminal) : new TuiAltScreen(terminal);
+    const theme = getThemeByName(themeName)!;
+    const first: RevisionPreference = { id: "first", version: 1, scope: "project", name: "Keep 中文😀 \x1b]52;c;payload\x07", body: "Original snapshot" };
+    const second: RevisionPreference = { id: "second", version: 1, scope: "global", name: "Second", body: "Another snapshot" };
+    const entries = [first, second];
+    const close = vi.fn();
+    const panel = new PreferencePanel(tui, theme, getKeybindings(), {
+      load: async () => ({ errors: {}, entries: structuredClone(entries) }),
+      save: async (scope, value) => {
+        const saved = { ...value, scope, id: "returned-identity", version: 1 };
+        entries.unshift(saved); // Reveal must use identity, not an assumed append position.
+        return saved;
+      }, remove: async () => {},
+    }, [selectPreference(second), selectPreference(first)], "Reusable 中文 body", 16000, close);
+    tui.addChild(panel); tui.setFocus(panel);
+    const render = () => {
+      tui.renderNow();
+      const lines = panel.render(terminal.columns);
+      expect(lines).toHaveLength(panelLayout(terminal.columns, terminal.rows).height);
+      expect(lines.every((line) => visibleWidth(line) <= terminal.columns)).toBe(true);
+      expect(lines.join("\n")).not.toContain("\x1b]52;c;payload");
+      return stripVTControlCharacters(lines.join("\n"));
+    };
+    try {
+      tui.start(); await Promise.resolve(); render();
+      input("/"); input("Second"); input("\r"); input("s");
+      expect(render()).toContain("Preferences · Selected only");
+      const full = render();
+      expect(full.indexOf("[x] Second")).toBeLessThan(full.indexOf("[x] Keep"));
+      const initialRedraws = tui.fullRedraws;
+      for (const key of ["\r", "\x1b[6~", "\x1b[5~", "\x1b", "s", "s"]) { input(key); render(); }
+      expect(tui.fullRedraws).toBe(initialRedraws);
+      for (const [columns, rows] of [[40, 16], [20, 8], [100, 40]]) {
+        Object.assign(terminal, { columns, rows });
+        panel.invalidate(); tui.requestRender(); render();
+      }
+      input("n"); input("Saved 中文😀"); input("\x1b[Z"); input("\r");
+      for (let i = 0; i < 4; i++) await Promise.resolve();
+      expect(render()).toContain("Filters reset to All.");
+      expect(render()).toContain("Focus: Library");
+      expect(render()).toContain("› [ ] Saved 中文😀");
+      input("\r"); expect(render()).toContain("project · returned-identity");
+      input("\x1b"); input("\x1b[13;3u");
+      expect(close).toHaveBeenCalledWith([selectPreference(second), selectPreference(first)]);
+      expect(writes.length).toBeGreaterThan(0);
+      expect(writes.join("")).not.toContain("\x1b]52;c;payload");
+    } finally {
+      panel.dispose(); tui.stop(); vi.useRealTimers();
+    }
+  });
+});

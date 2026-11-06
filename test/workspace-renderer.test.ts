@@ -112,7 +112,7 @@ describe("workspace terminal rendering", () => {
       workspace.openTasks(); taskPosition.selectedTaskId = unsent.taskId;
       input("p"); await Promise.resolve();
       const callsBefore = run.mock.calls.length;
-      for (const key of [" ", "\r", "\x1b[6~", "\x1b[5~", "\x1b", "\x13", "\x1b[13;3u"]) {
+      for (const key of [" ", "s", "\r", "\x1b[6~", "\x1b[5~", "\x1b", "s", "\x13", "\x1b[13;3u"]) {
         input(key); tui.renderNow();
         const lines = workspace.render(columns);
         expect(lines).toHaveLength(initialHeight);
