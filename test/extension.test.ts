@@ -725,8 +725,10 @@ describe("explicit candidate revision", () => {
     const entry = await store.save("project", { name: "Bullet Points", body: "Ask the main agent to use bullets only where useful." });
     const original = "  Explain this command; do not run it.\n```sh\nnpm test -- --run\n```\n";
     const configBefore = await readFile(join(h.agentDir, "prompt-refine.json"), "utf8");
-    h.holdPanel(); let view = h.command("", h.context);
-    h.panelInput("n"); h.panelInput(`\x1b[200~${original}\x1b[201~`); h.panelInput("\r");
+    h.setEditorText(original);
+    h.holdPanel(); let view = shortcut(h, "ctrl+\\")(h.context);
+    expect(h.panelLines(100).join("\n")).toContain("› ○ Unsent");
+    expect(h.complete).not.toHaveBeenCalled();
     h.panelInput("p");
     await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Bullet Points"));
     h.panelInput(" "); h.panelInput("\x13");
@@ -747,7 +749,7 @@ describe("explicit candidate revision", () => {
     expect(packet).not.toHaveProperty("revision_instruction");
     expect(packet).not.toHaveProperty("previous_candidate");
     expect(context.systemPrompt).not.toContain(entry.body);
-    expect(h.getEditor()).toBe("Draft A");
+    expect(h.getEditor()).toBe(original);
     expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
     expect(await readFile(join(h.agentDir, "prompt-refine.json"), "utf8")).toBe(configBefore);
     h.panelInput("q"); await view;
@@ -1277,11 +1279,16 @@ describe("project context injection", () => {
       expect(harness.editorWrites).toEqual([]);
     });
 
-  it("injects skills, applicable instructions and a real bounded tree on the first shortcut in an empty session", async () => {
+  it("injects frozen resources only after explicitly starting the first shortcut draft", async () => {
     const harness = await makeHarness({ config: { projectContext: projectConfig(true) } });
     vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([]);
-    vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
-    await shortcut(harness, "ctrl+\\")(harness.context);
+    const systemPrompt = vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
+    harness.holdPanel();
+    const view = shortcut(harness, "ctrl+\\")(harness.context);
+    expect(harness.complete).not.toHaveBeenCalled();
+    expect(harness.panelLines().join("\n")).toContain("Unsent");
+    systemPrompt.mockReturnValue("Resources changed after capture");
+    harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
     const request = (harness.complete.mock.calls[0] as any[])[1];
     const input = request.messages[0].content[0].text;
@@ -1296,6 +1303,7 @@ describe("project context injection", () => {
     expect(harness.getEditor()).toBe("Draft A");
     expect(harness.sent).toEqual([]);
     expect(harness.sessionWrites).toEqual([]);
+    harness.panelInput("q"); await view;
   });
 
   it.each(["user", "assistant"] as const)("omits tree with selected %s history, including on the first optimization", async (role) => {
@@ -1399,7 +1407,7 @@ describe("project context injection", () => {
     const harness = await makeHarness({ config: { projectContext: projectConfig(true) } });
     vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([]);
     vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
-    await shortcut(harness, "ctrl+\\")(harness.context);
+    await harness.command("optimize", harness.context);
     await harness.command("cancel", harness.context);
     await flushPromises();
     expect(harness.complete).not.toHaveBeenCalled();
@@ -1425,6 +1433,36 @@ describe("project context injection", () => {
 });
 
 describe("round workspace integration", () => {
+  it("captures the first shortcut input as Unsent, permits editing, and never submits on reopen", async () => {
+    const h = await makeHarness();
+    h.holdPanel();
+    let view = shortcut(h, "ctrl+\\")(h.context);
+    expect(h.panelLines(100).join("\n")).toContain("› ○ Unsent · Draft A");
+    expect(h.complete).not.toHaveBeenCalled();
+    h.panelInput("q"); await view;
+    view = shortcut(h, "ctrl+\\")(h.context);
+    expect(h.panelLines().join("\n")).toContain("1 prompts");
+    expect(h.complete).not.toHaveBeenCalled();
+    h.panelInput("i"); h.panelInput(" edited 中文😀"); h.panelInput("\r");
+    expect(h.panelLines(100).join("\n")).toContain("› ○ Unsent · Draft A edited");
+    expect(h.panelLines(100).join("\n")).toContain("Draft A edited 中文😀");
+    expect(h.complete).not.toHaveBeenCalled();
+    h.panelInput("\r");
+    expect(h.panelLines(100).join("\n")).toMatch(/›\s+└ fake-chat/);
+    await flushPromises();
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    expect(JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text).draft).toBe("Draft A edited 中文😀");
+    expect(h.panelLines().join("\n")).toContain("Refined prompt");
+    expect(h.getEditor()).toBe("Draft A");
+    expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
+    h.panelInput("d"); h.panelInput("y"); // Empty the workspace again.
+    h.panelInput("q"); await view;
+    view = shortcut(h, "ctrl+\\")(h.context);
+    expect(h.panelLines(100).join("\n")).toContain("› ○ Unsent · Draft A");
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    h.panelInput("q"); await view;
+  });
+
   it("focuses a new shortcut draft over a remembered result from an earlier round", async () => {
     const harness = await makeHarness();
     await trigger(harness);
@@ -1578,8 +1616,7 @@ describe("round workspace integration", () => {
     const second = JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
     expect(second.draft).toBe("Next round draft");
     expect(second.conversation.items[0].text).toBe("Latest available response");
-    harness.panelInput("\x1b[B"); // Original root → completed run.
-    harness.panelInput("\r"); // Inspect without accepting or sending.
+    harness.panelInput("\r"); // The submitted run is already selected; inspect it.
     expect(harness.panelLines().join("\n")).toContain("Refined prompt");
     finish(refinement("Earlier round result"));
     await flushPromises();
@@ -1944,7 +1981,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const harness = await makeHarness({ useDefaultShortcuts: true });
     let resolve!: (value: any) => void;
     harness.complete.mockImplementation(() => new Promise((res) => { resolve = res; }));
-    await shortcut(harness, "ctrl+\\")(harness.context);
+    await harness.command("optimize", harness.context);
     expect(harness.widgetLines().join("\n")).toContain("1 running");
     expect(harness.widgetLines()).toHaveLength(1);
     expect(harness.context.ui.setWidget).toHaveBeenLastCalledWith(expect.any(String), expect.any(Function), { placement: "aboveEditor" });
@@ -1964,10 +2001,12 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const harness = await makeHarness({ useDefaultShortcuts: true });
     let resolve!: (value: any) => void;
     harness.complete.mockImplementation(() => new Promise((res) => { resolve = res; }));
-    await shortcut(harness, "ctrl+\\")(harness.context);
     harness.holdPanel();
-    const view = shortcut(harness, "ctrl+\\")(harness.context);
-    harness.panelInput("\x1b[B"); // Select the running model beneath its original.
+    let view = shortcut(harness, "ctrl+\\")(harness.context);
+    expect(harness.complete).not.toHaveBeenCalled();
+    harness.panelInput("\r"); // Explicit start selects the running model beneath its original.
+    harness.panelInput("q"); await view;
+    view = shortcut(harness, "ctrl+\\")(harness.context);
     expect(harness.panelLines().join("\n")).toContain("Running");
     expect(harness.panelLines().join("\n")).toContain("Original prompt");
     expect(harness.panelLines().join("\n")).toContain("Draft A");
@@ -1976,7 +2015,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await flushPromises();
     expect(harness.panelLines().join("\n")).toContain("Fresh completed result");
     expect(harness.panelLines().join("\n")).toContain("Draft A"); // Task label remains stable.
-    expect(harness.customCalls()).toBe(1);
+    expect(harness.customCalls()).toBe(2);
     harness.panelInput("a");
     await view;
     expect(harness.getEditor()).toBe("Fresh completed result");
@@ -3212,8 +3251,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.panelLines().join("\n")).toContain("Draft A");
     expect(harness.panelLines().join("\n")).toContain("Unsent");
     expect(harness.panelLines(100).join("\n")).toContain("› ○ Unsent · Draft B");
-    harness.panelInput("\r"); // Explicitly start B while A may still be running.
-    harness.panelInput("\x1b[B"); // Follow its model child, retaining this selection.
+    harness.panelInput("\r"); // Explicitly start B and automatically follow its model child.
+    expect(harness.panelLines(100).join("\n")).toMatch(/›\s+└ fake-chat/);
     const request = (harness.complete.mock.calls[1] as any[])[1];
     expect(JSON.parse(request.messages[0].content[0].text).draft).toBe("Draft B");
     if (phase === "generating") {
@@ -3493,10 +3532,9 @@ describe("main request deletion shortcut", () => {
     const harness = await makeHarness({ useDefaultShortcuts: true });
     let resolve!: (value: any) => void;
     harness.complete.mockImplementationOnce(() => new Promise((res) => { resolve = res; }));
-    await shortcut(harness, "ctrl+\\")(harness.context);
     harness.holdPanel();
     const view = shortcut(harness, "ctrl+\\")(harness.context);
-    harness.panelInput("\x1b[B");
+    harness.panelInput("\r");
     expect(harness.panelLines(100).join("\n")).toContain("d Delete");
     harness.panelInput("d");
     expect(harness.panelLines().join("\n")).toContain("Confirmation required");

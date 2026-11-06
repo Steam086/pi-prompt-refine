@@ -176,8 +176,11 @@ export class TaskPanel {
       return true;
     }
     if (this.keys.matches(data, "tui.select.confirm")) {
-      if (row?.original && row.record.status === "unsent" && !this.inspecting) this.actions.run(row.record.id);
-      else if (row) { this.inspecting = true; this.reading = true; }
+      if (row?.original && row.record.status === "unsent" && !this.inspecting) {
+        this.actions.run(row.record.id);
+        // Only explicit submission moves focus; failed starts and background updates do not.
+        this.select(this.entries().find((item) => !item.original && item.record.id === row.record.id));
+      } else if (row) { this.inspecting = true; this.reading = true; }
       return true;
     }
     if (key === "n") {
