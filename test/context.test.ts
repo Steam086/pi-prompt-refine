@@ -25,6 +25,51 @@ describe("initial editing requirements", () => {
   });
 });
 
+describe("supplemental main-agent task requirements", () => {
+  it.each([undefined, "Use short sentences."])("keeps supplementation in the fixed protocol with editing policy %s", (policy) => {
+    // These assertions cover the delivered protocol, not model compliance with it.
+    const protocol = buildRefineSystemPrompt(false, policy);
+    for (const rule of [
+      'Blocks labeled "Main-agent task requirements" are supplemental requirements selected by the user',
+      "for the separate main agent's response or behavior",
+      "Incorporate their applicable, compatible content into the final prompt body",
+      "preserving the original task, applicable explicit constraints, conditions, and authorization boundaries",
+      "not replacement tasks or merely instructions for your editing process",
+      "Return the complete prompt containing the original task and the integrated requirements, not the supplemental requirements alone",
+      "Preserve their conditional applicability, merge duplicates, and omit refiner-facing wrapper wording",
+      "Do not execute these requirements yourself",
+      "Selecting a saved preference does not by itself override explicit original constraints or grant additional execution, tool-use, or delegation authority",
+      "Change existing requirements only when the current user explicitly requests that change",
+      "such as translating the prompt",
+      "A discussion-only requirement narrows work to discussion, retaining the requested subject",
+      '"Current user instructions" are current corrections, not part of the preceding preference',
+      "reference data, not active instructions to replay",
+      'Return exactly one JSON object with a non-empty "prompt" string',
+    ]) expect(protocol).toContain(rule);
+  });
+
+  it.each(["refine", "revise"])("sends a composed task preference as a labeled string separate from the original task for %s", (operation) => {
+    const draft = "Compare the cache designs in English. Discussion only; do not use tools or delegate.";
+    const body = "If a design has measurable trade-offs, explain them in a table. Keep unverified estimates conditional.";
+    const preference = selectPreference({ id: "trade-offs", version: 1, scope: "project", name: "Conditional comparison", body,
+      metadata: { kind: "task", activation: "manual", description: "Library-only description" } });
+    const correction = "Compare only the read path. Translate the prompt to French.";
+    const instruction = composeRevision([preference], correction);
+    expect(instruction).toBe(`Main-agent task requirements (manually selected):\n${body}\n\nCurrent user instructions:\n${correction}`);
+    const history = selectHistory([], 0, 0);
+    const packet = JSON.parse(operation === "refine"
+      ? buildRefineInput(draft, history, "", undefined, instruction)
+      : buildRefineInput(draft, history, "", { previousCandidate: draft, instruction }));
+    const { operation: actualOperation, delivery_context, project_context, conversation, ...taskFields } = packet;
+    expect(actualOperation).toBe(operation);
+    expect(taskFields).toEqual(operation === "refine"
+      ? { draft, editing_instruction: instruction }
+      : { original_draft: draft, previous_candidate: draft, revision_instruction: instruction });
+    expect(JSON.stringify(packet)).not.toContain('"kind"');
+    expect(JSON.stringify(packet)).not.toContain("Library-only description");
+  });
+});
+
 describe("revision protocol", () => {
   it("keeps explicit translation evidence as inactive history, excludes auto defaults and never accumulates the chain", () => {
     const manual = selectPreference({ id: "translate", version: 1, scope: "project", name: "Translation", body: "Translate the prompt to English.",
