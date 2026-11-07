@@ -3,7 +3,7 @@ import { matchesKey, parseKey, Text, truncateToWidth, visibleWidth, type Keybind
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { RefineRecord } from "./history.js";
 import type { HistoryStorageStatus } from "./history-store.js";
-import { panelFrame, panelLayout, workspaceTabs } from "./panel-layout.js";
+import { panelFrame, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
 import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
@@ -54,6 +54,13 @@ export class TaskPanel {
   private notice = "";
   private noticeColor: "muted" | "warning" | "error" = "muted";
   private cache = new Map<string, string[]>();
+  // Keep requested anchors separate from effective offsets. A taller viewport
+  // may reveal earlier lines near the end, but must not erase the compact anchor.
+  private renderedScrolls = new Map<string, number>();
+  private rememberRenderedScroll(key: string, offset: number): void {
+    if (this.renderedScrolls.size >= 200 && !this.renderedScrolls.has(key)) this.renderedScrolls.delete(this.renderedScrolls.keys().next().value!);
+    this.renderedScrolls.set(key, offset);
+  }
   constructor(
     private readonly actions: TaskPanelActions,
     private readonly theme: Theme,
@@ -61,7 +68,23 @@ export class TaskPanel {
     private readonly keys: KeybindingsManager,
     private readonly usage = false,
     private readonly position: TaskPanelPosition = {},
+    private readonly layout: PanelLayoutProvider = (width) => panelLayout(width, this.rows()),
+    private readonly expansionHint?: () => KeyHint | undefined,
   ) {}
+  canExpand(): boolean { return !this.referenceOnly && !this.deletion && !this.document &&
+    (!this.preferenceFocus || this.actions.inlinePreferences?.hints !== "search"); }
+  /** Initial tree/summary demand only. Never select, render or clamp a live pane. */
+  preferredBodyHeight(innerWidth: number): number {
+    const rows = this.entries();
+    const row = rows.find((item) => this.isSelected(item)) ?? rows.find((item) =>
+      !item.original && item.record.id === this.actions.appliedId()) ?? rows[0];
+    if (!row) return 3;
+    const rightWidth = innerWidth >= 72 ? innerWidth - Math.min(36, Math.floor(innerWidth / 3)) - 3 : innerWidth;
+    const inline = this.inline(row);
+    const summary = row.original ? this.originalHeight(row, rightWidth) + (inline ? 1 + inline.preferredHeight(row.record.id) : 0)
+      : this.paneHeader(row, rightWidth).length + 3 + this.wrapped(sanitizeTerminalText(row.record.candidate?.text ?? row.record.input.draft), rightWidth).length;
+    return Math.max(rows.length, summary);
+  }
   invalidate(): void { this.cache.clear(); }
   setNotice(text: string, color: "muted" | "warning" | "error" = "muted"): void { this.notice = text; this.noticeColor = color; }
   openList(): void { this.inspecting = false; this.compareId = undefined; this.reading = false; this.preferenceFocus = false; this.original = false; }
@@ -71,7 +94,7 @@ export class TaskPanel {
       candidate: record.candidate && { ...record.candidate } }));
     const appliedId = this.actions.appliedId();
     const panel = new TaskPanel({ ...this.actions, inlinePreferences: undefined, records: () => records, appliedId: () => appliedId },
-      this.theme, this.rows, this.keys, this.usage, structuredClone(this.position));
+      this.theme, this.rows, this.keys, this.usage, structuredClone(this.position), this.layout);
     panel.referenceOnly = referenceOnly;
     panel.inspecting = this.inspecting; panel.compareId = this.compareId; panel.reading = this.reading;
     panel.original = this.original; panel.top = this.top; panel.navigationDirection = this.navigationDirection;
@@ -118,7 +141,8 @@ export class TaskPanel {
     return row;
   }
   private scroll(row: Row, delta: number): void {
-    this.position.scroll = Math.max(0, (this.position.scroll ?? 0) + delta);
+    this.position.scroll = Math.max(0, (this.renderedScrolls.get(this.rowKey(row)) ?? this.position.scroll ?? 0) + delta);
+    this.renderedScrolls.delete(this.rowKey(row));
     (this.position.scrolls ??= {})[this.rowKey(row)] = this.position.scroll;
   }
   private canOpenPreferences(): boolean {
@@ -290,7 +314,8 @@ export class TaskPanel {
         if (this.inspecting && !this.usage && this.compareId === undefined && !row.original && row.record.candidate && this.original) {
           const key = `${this.rowKey(row)}-reference`;
           const scrolls = this.position.scrolls ??= {};
-          scrolls[key] = Math.max(0, (scrolls[key] ?? 0) + delta);
+          scrolls[key] = Math.max(0, (this.renderedScrolls.get(key) ?? scrolls[key] ?? 0) + delta);
+          this.renderedScrolls.delete(key);
         } else this.scroll(row, delta);
       }
       else {
@@ -345,16 +370,12 @@ export class TaskPanel {
     }
     return lines;
   }
-  private pane(row: Row, width: number, height: number, active = true, previewDetails = false, showInline = true): string[] {
-    const inline = showInline && this.inline(row);
-    if (inline) {
-      const preferenceHeight = this.preferenceFocus && inline.hints === "read" ? height
-        : height < 9 ? (this.preferenceFocus ? height : 1) : Math.min(7, Math.max(5, Math.floor(height / 2)));
-      const originalHeight = height - preferenceHeight - (height > preferenceHeight ? 1 : 0);
-      const original = originalHeight > 0 ? this.pane(row, width, originalHeight, active, false, false) : [];
-      return [...Array.from({ length: Math.max(0, originalHeight) }, (_, index) => original[index] ?? ""),
-        ...(originalHeight > 0 ? [""] : []), ...inline.render(width, preferenceHeight)];
-    }
+  /** Measure content, never render a pane: rendering can clamp its reading position. */
+  private originalHeight(row: Row, width: number): number {
+    const body = row.record.input.draft || "Empty prompt · i Edit original";
+    return this.paneHeader(row, width).length + 1 + this.wrapped(sanitizeTerminalText(body), width).length;
+  }
+  private paneHeader(row: Row, width: number, previewDetails = false): string[] {
     const { record, records } = row;
     const title = row.original ? "Original prompt" : record.input.model.id;
     const status = row.original && record.status !== "unsent"
@@ -396,6 +417,22 @@ export class TaskPanel {
       diagnostics.push(...this.wrapped(this.theme.fg("warning", sanitizeTerminalText(`Context warning: ${warning}`)), width));
     }
     header.splice(identityLines, 0, ...diagnostics);
+    return header;
+  }
+  private pane(row: Row, width: number, height: number, active = true, previewDetails = false, showInline = true): string[] {
+    const inline = showInline && this.inline(row);
+    if (inline) {
+      const readingPreference = this.preferenceFocus && inline.hints === "read";
+      const reserved = readingPreference ? height : height < 9 ? (this.preferenceFocus ? height : 1)
+        : Math.min(7, Math.max(5, Math.floor(height / 2)));
+      const originalHeight = Math.min(this.originalHeight(row, width), Math.max(0, height - reserved - 1));
+      const original = originalHeight > 0 ? this.pane(row, width, originalHeight, active, false, false) : [];
+      // Short originals end naturally. Give the reclaimed rows to the checklist,
+      // rather than padding between the original and Preferences.
+      return [...original, ...(original.length ? [""] : []), ...inline.render(width, height - original.length - (original.length ? 1 : 0))];
+    }
+    const { record } = row;
+    const header = this.paneHeader(row, width, previewDetails);
     if (previewDetails) return this.previewDetails(row, width, height, header);
     const original = row.original || this.original || !record.candidate;
     const body = [
@@ -453,12 +490,12 @@ export class TaskPanel {
       if (record.sentAt !== undefined) body.push(this.muted(`Pi started send: ${new Date(record.sentAt).toLocaleTimeString()}`));
     }
     const fixed = header.slice(0, Math.max(0, height - 2));
-    if (height > fixed.length + 2) fixed.push("");
+    if (height > fixed.length + 2 || (row.original && height === fixed.length + 2)) fixed.push("");
     const available = Math.max(1, height - fixed.length);
     // Overflow diagnostics belong to the scrollable document, never a clipped header.
     const lines = this.wrapped([...header.slice(Math.max(0, height - 2)), ...body].join("\n"), width);
     const offset = Math.min(active ? this.position.scroll ?? 0 : this.position.scrolls?.[this.rowKey(row)] ?? 0, Math.max(0, lines.length - available));
-    if (active) { this.position.scroll = offset; this.viewport = available; }
+    if (active) { this.rememberRenderedScroll(this.rowKey(row), offset); this.viewport = available; }
     return [...fixed, ...lines.slice(offset, offset + available)];
   }
   /** Preview keeps reference material separate from the result and Usage details. */
@@ -490,8 +527,7 @@ export class TaskPanel {
       const key = `${this.rowKey(row)}${isReference ? "-reference" : ""}`;
       const scrolls = this.position.scrolls ??= {};
       const offset = Math.min(isReference ? scrolls[key] ?? 0 : this.position.scroll ?? 0, Math.max(0, lines.length - available));
-      scrolls[key] = offset;
-      if (!isReference) this.position.scroll = offset;
+      this.rememberRenderedScroll(key, offset);
       return lines.slice(offset, offset + available);
     };
     if (!wide) return [...fixed, ...clip(this.original ? reference : result, width, this.original)];
@@ -503,7 +539,7 @@ export class TaskPanel {
     })];
   }
   private renderDocument(width: number): string[] {
-    const layout = panelLayout(width, this.rows());
+    const layout = this.layout(width);
     const page = this.document!;
     const body: string[] = [];
     let title = "Available actions";
@@ -539,6 +575,8 @@ export class TaskPanel {
       }
       body.push(this.muted(`Focus: ${this.inspecting || this.reading ? "Reading · ↑↓ scroll" : "List · ↑↓ select"}`), "");
       const hints: KeyHint[] = [["Esc", "Back"], ["?", "Available actions and full feedback"]];
+      const expansion = this.expansionHint?.();
+      if (expansion) hints.push(expansion);
       const inline = this.inline(row);
       if (!this.inspecting) hints.push(["Enter", row?.original && row.record.status === "unsent" ? "Run from original focus" : "Inspect"], ["Tab", inline ? "List / Read / Preferences" : this.reading ? "Select" : "Read"], ["n", "New"]);
       if (inline) hints.push(["Shift+Tab", "Choose inline preferences from list"], ["Space", "Toggle at Preferences focus; saved immediately"], ["Enter", "Read at Preferences focus; never starts a run"], ["/", "Search at Preferences focus"]);
@@ -570,13 +608,13 @@ export class TaskPanel {
   }
   render(width: number, _empty?: () => string[]): string[] {
     if (width < 1) return [];
-    const layout = panelLayout(width, this.rows());
+    const layout = this.layout(width);
     if (this.document) return this.renderDocument(width);
     if (this.deletion) {
       const body = this.wrapped(this.theme.fg("warning", `Delete ${this.deletion.label}?`) +
         "\n\nRunning requests will be stopped; queued requests will be removed.\nThis removes Refine history. Pi editor and conversation stay unchanged.", layout.innerWidth);
       return panelFrame(layout, [this.heading("Delete request"), this.muted("Confirmation required")],
-        body, [fittingKeyHints([["y", "Delete"], ["Esc / n", "Cancel"]], layout.innerWidth, this.theme)],
+        body, [fittingKeyHints([["Esc / n", "Cancel"], ["y", "Delete"]], layout.innerWidth, this.theme)],
         (text) => this.muted(text));
     }
     const tabs = workspaceTabs(layout, this.usage ? "Usage" : "Preview", this.theme, !this.referenceOnly && !this.preferenceFocus);
@@ -638,6 +676,8 @@ export class TaskPanel {
         : mode === "read" ? [["Esc", "Back to preferences"], ["↑↓", "Scroll"]]
         : [["Esc", "Back"], ["Space", "Toggle"], ["Enter", "Read"], ["↑↓", "Choose"]];
       const secondary: KeyHint[] = mode === "select" ? [["Tab / Shift+Tab", "Focus"], ["/", "Search"], ["p", "Manage / more"]] : [["Tab / Shift+Tab", "Focus"]];
+      const expansion = this.canExpand() && this.expansionHint?.();
+      if (expansion) secondary.push(expansion);
       const footer = layout.footerHeight === 1
         ? [fittingKeyHints([["Esc", ""], ...primary.slice(1), ...secondary], layout.innerWidth, this.theme, " ")]
         : layout.innerWidth < 40
@@ -664,6 +704,8 @@ export class TaskPanel {
     if (this.inspecting && selected && !selected.original && selected.record.candidate) {
       secondary.push(...(selected.records.some((record) => record.id !== selected.record.id && record.candidate) ? [["c", other ? "Next comparison" : "Compare"] as KeyHint] : []), ["e", "Edit result"], ...(!restored ? [["f", "Revise"] as const] : []));
     }
+    const expansion = this.canExpand() && this.expansionHint?.();
+    if (expansion) secondary.splice(this.usage ? 3 : 2, 0, expansion);
     const compact = (hints: KeyHint[]): KeyHint[] => hints.map(([key, label]) => [key === "Enter" ? "↵" : key, label === "Send to Pi" ? "Send" : label]);
     const footer = layout.innerWidth < 56
       ? [fittingKeyHints(compact(primary), layout.innerWidth, this.theme, layout.innerWidth < 30 ? " " : " · "), fittingKeyHints(secondary, layout.innerWidth, this.theme, layout.innerWidth < 30 ? " " : " · ")]

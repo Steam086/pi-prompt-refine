@@ -24,6 +24,21 @@ function create(overrides: Partial<PreviewOptions> = {}, rows = 40) {
 }
 
 describe("result reading panel", () => {
+  it.each(["dark", "light"])("keeps editor-change feedback visible in compact scrolled references (%s)", (name) => {
+    const theme = getThemeByName(name)!;
+    const panel = new PreviewPanel({ ...options, draftChanged: true, candidateText: "Result\n".repeat(60), draft: "Original\n".repeat(60) },
+      theme, () => 40, vi.fn());
+    panel.setLayoutProvider((width) => panelLayout(width, 40, 18));
+    panel.render(100); panel.toggleOriginal();
+    for (const width of [100, 40, 20]) {
+      const frame = panel.render(width);
+      expect(frame).toHaveLength(18);
+      expect(frame[2]).toContain(theme.fg("warning", "Editor changed"));
+      panel.page(1);
+      expect(panel.render(width)[2]).toContain(theme.fg("warning", "Editor changed"));
+    }
+  });
+
   it("keeps completed candidate metadata separate from a single action footer", () => {
     const panel = create({
       navigation: { index: 1, count: 2, label: "#5 refine" }, thinkingLevel: "xhigh",

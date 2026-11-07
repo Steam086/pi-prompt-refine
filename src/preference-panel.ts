@@ -1,6 +1,6 @@
 import { Input, parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { panelFrame, panelLayout } from "./panel-layout.js";
+import { panelFrame, panelLayout, type PanelLayoutProvider } from "./panel-layout.js";
 import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
 import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
@@ -67,6 +67,7 @@ export class PreferencePanel {
     private readonly freeText: string, private readonly maxChars: number,
     private readonly close: (selected?: SelectedPreference[]) => string | void,
     private readonly purpose: "revise" | "refine" | "manage" = "revise",
+    private readonly layout: PanelLayoutProvider = (width) => panelLayout(width, this.tui.terminal.rows),
   ) {
     this.working = structuredClone([...selected]);
     this.requirementsChars = composeRevision(this.working, freeText).length;
@@ -398,7 +399,7 @@ export class PreferencePanel {
 
   render(width: number): string[] {
     if (width < 1) return [];
-    const layout = panelLayout(width, this.tui.terminal.rows);
+    const layout = this.layout(width);
     const { innerWidth: w, bodyHeight: h } = layout;
     const clean = (text: string) => sanitizeTerminalText(text);
     const wrap = (text: string, columns = w) => wrapTextWithAnsi(clean(text), columns);

@@ -119,10 +119,11 @@ describe("shared refine workspace", () => {
     for (const rows of [5, 8, 12, 16, 24, 40]) {
       for (const width of [1, 8, 12, 20, 40, 100]) {
         const { workspace } = create(rows, name, true);
+        const openingHeight = workspace.render(width).length;
         for (const page of ["Usage", "Settings", "Settings", "Preview"]) {
           workspace.handleInput("\x1b[C");
           const lines = workspace.render(width);
-          expect(lines).toHaveLength(panelLayout(width, rows).height);
+          expect(lines).toHaveLength(openingHeight);
           for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
           if (width >= 20 && rows >= 16) {
             const strip = lines.map(stripVTControlCharacters).find((line) => line.includes("←") && line.includes(page));

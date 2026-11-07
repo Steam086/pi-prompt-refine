@@ -1,7 +1,7 @@
 import { Markdown, ScrollView, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
-import { panelFrame, panelLayout, workspaceTabs } from "./panel-layout.js";
+import { panelFrame, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
 import { formatRunUsage, formatTokenUsage } from "./usage.js";
 import { resultHeading, sanitizeTerminalText, type SummaryOptions } from "./presentation.js";
 
@@ -61,6 +61,15 @@ export class PreviewPanel implements Component {
   private previousDocument = new Text("", 0, 0);
   private scroll: ScrollView;
   private cachedBody?: { width: number; lines: string[] };
+  private layout: PanelLayoutProvider = (width) => panelLayout(width, this.rows());
+  private expansionHint?: () => KeyHint | undefined;
+  private heightAnchor?: number;
+  private lastBodyHeight?: number;
+  setLayoutProvider(layout: PanelLayoutProvider, expansionHint?: () => KeyHint | undefined): void {
+    this.layout = layout; this.expansionHint = expansionHint;
+  }
+  canExpand(): boolean { return !this.referenceOnly && !this.helpVisible; }
+  preferredBodyHeight(width: number): number { return this.renderBody(width).length; }
 
   constructor(
     private options: PreviewOptions,
@@ -105,11 +114,11 @@ export class PreviewPanel implements Component {
     this.options = options;
     if (textChanged) this.rebuildDocument();
     else if (bodyChanged) this.cachedBody = undefined;
-    if (changed) this.scroll.scrollToStart();
+    if (changed) { this.scroll.scrollToStart(); this.heightAnchor = 0; }
   }
 
   rememberPosition(): void {
-    if (this.options.viewKey) this.positions.set(this.options.viewKey, this.originalVisible || this.helpVisible ? 0 : this.scroll.scrollTop);
+    if (this.options.viewKey) this.positions.set(this.options.viewKey, this.originalVisible || this.helpVisible ? 0 : this.heightAnchor ?? this.scroll.scrollTop);
     if (this.positions.size > 100) this.positions.delete(this.positions.keys().next().value!);
   }
 
@@ -118,12 +127,13 @@ export class PreviewPanel implements Component {
   /** A revision's source view must not follow later background completions. */
   snapshot(referenceOnly = false): PreviewPanel {
     const panel = new PreviewPanel(structuredClone(this.options), this.theme, this.rows, () => {});
+    panel.layout = this.layout;
     panel.referenceOnly = referenceOnly;
     panel.originalVisible = this.originalVisible;
     panel.helpVisible = !referenceOnly && this.helpVisible;
     panel.sourceVisible = this.sourceVisible;
     panel.rebuildDocument();
-    panel.restorePosition = this.restorePosition ?? this.scroll.scrollTop;
+    panel.restorePosition = this.restorePosition ?? this.heightAnchor ?? this.scroll.scrollTop;
     return panel;
   }
 
@@ -134,23 +144,23 @@ export class PreviewPanel implements Component {
     this.cachedBody = undefined;
     // Expansion is an explicit comparison request: reveal the draft, not an off-screen section.
     this.revealOriginal = this.originalVisible;
-    if (!this.originalVisible) this.scroll.scrollToStart();
+    if (!this.originalVisible) { this.scroll.scrollToStart(); this.heightAnchor = 0; }
   }
 
   toggleHelp(): void {
     this.helpVisible = !this.helpVisible;
     this.cachedBody = undefined;
-    this.scroll.scrollToStart();
+    this.scroll.scrollToStart(); this.heightAnchor = 0;
   }
 
   toggleSource(): void {
     this.sourceVisible = !this.sourceVisible;
     this.rebuildDocument();
-    this.scroll.scrollToStart();
+    this.scroll.scrollToStart(); this.heightAnchor = 0;
   }
 
-  scrollBy(lines: number): void { this.scroll.scrollBy(lines); }
-  page(direction: number): void { this.scroll.scrollBy(direction * Math.max(1, this.scroll.viewportHeight - 1)); }
+  scrollBy(lines: number): void { this.scroll.scrollBy(lines); this.heightAnchor = this.scroll.scrollTop; }
+  page(direction: number): void { this.scrollBy(direction * Math.max(1, this.scroll.viewportHeight - 1)); }
 
   invalidate(): void {
     // Recreate Markdown's style prefixes on theme changes; never retain old ANSI in state.
@@ -317,7 +327,7 @@ export class PreviewPanel implements Component {
   render(width: number): string[] {
     if (width < 1) return [];
     const { theme, options } = this;
-    const layout = panelLayout(width, this.rows());
+    const layout = this.layout(width);
     const { innerWidth } = layout;
     const navigation = workspaceTabs(layout, "Preview", theme, !this.referenceOnly);
     if (options.navigation && layout.bodyHeight - navigation.length >= 4) {
@@ -352,6 +362,8 @@ export class PreviewPanel implements Component {
             ? [["a", "Accept"], ["e", "Edit"], ...(!options.contextUnavailable ? [["f", "Revise"] as KeyHint] : []), ["s", "Send"]]
             : [["r", options.state.phase === "error" ? "Retry" : "Refine"], ["m", "Model"], ["i", "Input"]];
     const secondary: KeyHint[] = [["q", "Back"], ["?", this.helpVisible ? "Hide help" : "Help"]];
+    const expansion = this.canExpand() && this.expansionHint?.();
+    if (expansion) secondary.push(expansion);
     // Back/Help survive narrow widths; other hints are omitted rather than wrapped.
     // Empty/error primary actions already expose Input/Model. Tabs own page hints.
     if (!primary.some(([key]) => key === "i")) secondary.push(["i", "Input"]);
@@ -368,15 +380,20 @@ export class PreviewPanel implements Component {
     // ScrollView owns offsets/clamping. Explicit viewport composition also works in regular
     // mode, where ScrollView.render() alone returns the entire document without clipping.
     const body = this.scroll.render(innerWidth);
+    const anchor = this.lastBodyHeight !== bodyHeight ? this.heightAnchor ?? this.scroll.scrollTop : undefined;
     this.scroll.updateLayout(body.length, bodyHeight, this.requestRender);
+    this.lastBodyHeight = bodyHeight;
     if (this.restorePosition !== undefined) {
+      this.heightAnchor = this.restorePosition;
       this.scroll.scrollTo(this.restorePosition);
       this.restorePosition = undefined;
-    }
+    } else if (anchor !== undefined) this.scroll.scrollTo(anchor);
     if (this.revealOriginal) {
       this.scroll.scrollTo(this.originalLine);
       this.revealOriginal = false;
+      this.heightAnchor = this.scroll.scrollTop;
     }
+    this.heightAnchor ??= this.scroll.scrollTop;
     const start = this.scroll.scrollTop;
     let visible = body.slice(start, start + bodyHeight);
     if (this.isEmptyState() && body.length <= bodyHeight) {
@@ -397,6 +414,11 @@ export class PreviewPanel implements Component {
     }
     if (layout.headerHeight === 1 && options.state.phase === "generating") {
       header[0] = heading;
+    }
+    if (!this.referenceOnly && (options.draftChanged || options.accepted?.editorChanged)) {
+      const warning = theme.fg("warning", "Editor changed");
+      header[1] = warning + theme.fg("muted", " · ") + header[1];
+      if (layout.headerHeight === 1) header[0] = warning;
     }
     if (options.state.pendingSend) {
       // Delivery is not completion. Keep this visible even at the end of a long result.
