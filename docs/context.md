@@ -83,7 +83,9 @@ ID 优先使用宿主消息 ID，缺失时使用分支位置 `branch-N`。项目
 
 默认编辑策略要求最小有效修改、允许原样返回，保留字面内容、授权范围与不确定性；助手提议不是已批准需求，指代只在依据充分且唯一时消解。模板位于 `context.ts`，不加载 `.pi/prompts/*.md`，也不展开草稿里的 `/模板名`。
 
-Preferences 库 JSON 在插件侧解析和校验；本次采用的正文按类型和实际手动／自动来源标注后进入 `editing_instruction` 或 `revision_instruction`，相同类型／正文只注入一次。有元数据的条目以 `Prompt rewriting instructions`（改变 prompt 表达）和 `Main-agent task requirements`（写入主 Agent 的任务约束）区分；旧条目为 `Saved editing requirements`。组合自由输入独立标为 `Current user instructions`。名称、描述、ID、版本、匹配配置和完整库不进入模型请求。只有显式配置的改造类支持本地条件自动采用，任务要求类仅手动；条件不是模型语义判断，详见 [自动采用规则](usage.md#json-元数据与自动采用)。协议允许明确翻译 prompt，区分回答语言与 prompt 语言，要求当前明确任务／修订纠正优先于冲突默认项，禁止模板扩大执行和委派授权。自动项不在 Revise 中机械重放，避免恢复已被明确删除的要求。
+Preferences 库 JSON 在插件侧解析和校验；本次采用的正文按类型和实际手动／自动来源标注后进入 `editing_instruction` 或 `revision_instruction`，相同类型／正文只注入一次。`composeRevision` 将有元数据条目的 `kind` 转为 `Prompt rewriting instructions`（改变 prompt 表达）和 `Main-agent task requirements`（补充主 Agent 的回答／行为要求）文本标签，不发送 JSON `kind` 字段；旧条目为 `Saved editing requirements`。组合自由输入独立标为 `Current user instructions`。名称、描述、ID、版本、匹配配置和完整库不进入模型请求。只有显式配置的改造类支持本地条件自动采用，任务要求类仅手动；条件不是模型语义判断，详见 [自动采用规则](usage.md#json-元数据与自动采用)。协议允许明确翻译 prompt，区分回答语言与 prompt 语言，要求当前明确任务／修订纠正优先于冲突默认项，禁止模板扩大执行和委派授权。自动项不在 Revise 中机械重放，避免恢复已被明确删除的要求。
+
+`Main-agent task requirements` 是用户选择的补充要求，不是替代任务，也不只是给 refiner 的过程指令。输入时原稿与要求保持独立；固定协议要求把适用且兼容的内容融入最终 prompt 正文，返回含原任务和整合要求的完整 prompt，而非只返回补充要求。保留原任务、适用的明确约束、条件和授权边界，合并重复内容，去掉面向 refiner 的包装措辞；refiner 自身不执行要求。仅选择偏好不覆盖原稿明确约束，也不增加执行、工具或委派权限；只有当前用户明确要求的修改才能改变已有要求，仍允许明确翻译或缩小任务范围。这是协议约定，单元测试检查协议文本与请求构造，不证明模型必然遵守。
 
 Revise 的可选 `historical_editing_context` 保存初次手动采用的编辑要求与紧邻上次修订要求，仅解释 `previous_candidate` 中仍存在的改动（例如翻译）。它不是待重新执行的指令，当前修订纠正优先，候选已删除的要求不得恢复；不携带初次自动默认项，不查询当前库，也不累积完整修订链。没有选项快照的旧输入仅能保留原组合文字作历史依据。该字段参与完整预算，紧张时在具体背景之前整项省略并告警；不随最小 sidecar 新增持久化字段。
 
