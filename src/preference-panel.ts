@@ -4,7 +4,7 @@ import { panelFrame, panelLayout } from "./panel-layout.js";
 import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
 import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
-import { composeRevision, preferenceKey, preferenceValidation, searchPreferences, selectPreference, PREFERENCE_SELECTION_LIMIT,
+import { composeRevision, preferenceContentKey, preferenceKey, preferenceValidation, searchPreferences, selectPreference, PREFERENCE_SELECTION_LIMIT,
   type PreferenceLibrary, type PreferenceMetadata, type PreferenceRepository, type PreferenceScope, type PreferenceValue, type RevisionPreference, type SelectedPreference } from "./revision-preferences.js";
 
 type Form = {
@@ -158,6 +158,9 @@ export class PreferencePanel {
     if (!entry) return;
     const index = this.working.findIndex((item) => preferenceKey(item) === preferenceKey(entry));
     if (index >= 0) this.working.splice(index, 1);
+    else if (this.working.some((item) => preferenceContentKey(item) === preferenceContentKey(entry))) {
+      this.setNotice("Same requirements already selected. Use Selected only (s) to inspect or remove them.", "warning");
+    }
     else if (this.working.length >= PREFERENCE_SELECTION_LIMIT) this.setNotice(`Select at most ${PREFERENCE_SELECTION_LIMIT} preferences for one ${this.purpose === "refine" ? "refinement" : "revision"}.`, "warning");
     else this.working.push(selectPreference(entry));
     this.contentVersion++;

@@ -14,6 +14,7 @@ export interface BudgetReport {
   outputLimit: number;
   removedMessages: number;
   removedProjectParts: string[];
+  removedInstructionContext?: boolean;
   message?: string;
 }
 export interface BudgetModel {
@@ -29,6 +30,7 @@ interface Packet {
   previous_candidate?: string;
   revision_instruction?: string;
   editing_instruction?: string;
+  historical_editing_context?: { initial_instruction?: string; previous_revision_instruction?: string };
   project_context: string | null;
   conversation: {
     status: string;
@@ -106,6 +108,7 @@ export function budgetRequest(systemPrompt: string, preparedInput: string, model
       history.excerpted_message_count = history.items.filter((item) => item.status === "excerpted").length;
     }
     packet.budget_omissions = [
+      ...(report.removedInstructionContext ? ["historical editing context omitted by request token budget"] : []),
       ...report.removedProjectParts.map((part) => `${part} omitted by request token budget`),
       ...(report.removedMessages ? [`${report.removedMessages} additional history messages omitted by request token budget`] : []),
     ];
@@ -124,6 +127,12 @@ export function budgetRequest(systemPrompt: string, preparedInput: string, model
   if (!fits()) {
     report.outputTokens = Math.min(outputLimit, Math.max(minimumOutput, preferredAnswer + thinkingTokens,
       contextWindow - report.inputTokens - safetyTokens));
+  }
+  // Old editing references must not displace concrete current constraints or history.
+  if (!fits() && packet.historical_editing_context) {
+    delete packet.historical_editing_context;
+    report.removedInstructionContext = true;
+    refresh();
   }
   if (!fits()) removeProjectPart("\n\nPROJECT TREE (names only, partial):\n", "project tree");
   if (!fits()) removeProjectPart("\n\nMAIN AGENT SKILLS (metadata only; not optimizer tools):\n", "skill metadata");
@@ -161,9 +170,9 @@ export function budgetRequest(systemPrompt: string, preparedInput: string, model
       return blocked(`input (${report.inputTokens}) + minimum output (${minimumOutput}) + safety (${safetyTokens}) exceeds context window (${contextWindow}).`);
     }
   }
-  if (report.removedMessages || report.removedProjectParts.length) {
+  if (report.removedMessages || report.removedProjectParts.length || report.removedInstructionContext) {
     report.status = "trimmed";
-    report.message = `Budget trimmed background: ${report.removedMessages} history messages; ${report.removedProjectParts.join(", ") || "no project sections"}. Draft unchanged.`;
+    report.message = `Budget trimmed background: ${report.removedMessages} history messages; ${report.removedProjectParts.join(", ") || "no project sections"}${report.removedInstructionContext ? "; historical editing context omitted" : ""}. Draft unchanged.`;
   }
   if (unboundedDeepSeekThinking) {
     report.message = [report.message,

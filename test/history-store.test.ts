@@ -42,7 +42,7 @@ describe("minimal history persistence", () => {
   it("retains revision instruction and parent identity, but not previousCandidate/context", () => {
     const source = record(2);
     source.kind = "revise"; source.parentId = 1;
-    source.input.revision = { instruction: "Shorter", previousCandidate: "private-previous" };
+    source.input.revision = { instruction: "Shorter", previousCandidate: "private-previous", previousInstruction: "private-prior-instruction" };
     const { content } = encodeHistory([source], "s");
     expect(content).not.toContain("private-");
     expect(decodeHistory(content, "s")[0]).toMatchObject({ parentId: 1, kind: "revise", input: { revision: { instruction: "Shorter" } } });

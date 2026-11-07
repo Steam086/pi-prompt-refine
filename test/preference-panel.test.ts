@@ -196,6 +196,27 @@ describe("three-action preference library", () => {
     expect(cancelled.close).toHaveBeenCalledWith(); expect(selected).toEqual([selectPreference(a)]);
   });
 
+  it.each(["dark", "light"])("rejects identical cross-scope selections without hiding management entries (%s)", async (themeName) => {
+    const copy = { ...a, id: "copy", scope: "project" as const, name: "Copy 中文😀" };
+    const f = setup([selectPreference(a)], "", themeName, [a, copy]); await loaded(f.panel);
+    f.panel.handleInput(down); f.panel.handleInput(" ");
+    expect(text(f.panel)).toContain("1 selected");
+    expect(text(f.panel)).toContain("Same requirements already selected");
+    expect(f.panel.render(100).join("\n")).toContain(f.theme.fg("warning", "⚠ Same requirements already selected. Use Selected only (s) to inspect or remove them."));
+    for (const [width, rows] of [[40, 16], [20, 8], [100, 40]]) {
+      f.terminal.rows = rows!;
+      const lines = f.panel.render(width!);
+      expect(lines.every((line) => visibleWidth(line) <= width!)).toBe(true);
+      expect(stripVTControlCharacters(lines.join("\n"))).toContain("Same requirem");
+    }
+    // Both sources remain manageable; refusing a duplicate never rewrites or deletes either.
+    f.panel.handleInput("e"); expect(text(f.panel)).toContain("Edit library entry");
+    f.panel.handleInput(esc); f.panel.handleInput("s"); f.panel.handleInput(" ");
+    f.panel.handleInput("s"); f.panel.handleInput(" "); f.panel.handleInput(bringBack);
+    expect(f.close).toHaveBeenCalledWith([selectPreference(copy)]);
+    expect(f.repo.save).not.toHaveBeenCalled(); expect(f.repo.remove).not.toHaveBeenCalled();
+  });
+
   it("shows empty and no-match states, prevents editing missing entries, and ignores function keys", async () => {
     const f = setup([], "Extra", "dark", []); await loaded(f.panel);
     expect(text(f.panel)).toContain("Library is empty");
@@ -714,7 +735,7 @@ describe("Unsent preference selection", () => {
     f.library.entries[0]!.body = "Changed library text";
     w.handleInput(enter);
     expect(f.run).toHaveBeenCalledExactlyOnceWith(f.originals[0]!.id);
-    expect(f.complete.mock.calls[0]![0]).toMatchObject({ editingInstruction: a.body, draft: f.originals[0]!.input.draft });
+    expect(f.complete.mock.calls[0]![0]).toMatchObject({ editingInstruction: composeRevision([selectPreference(a)], ""), draft: f.originals[0]!.input.draft });
     await Promise.resolve(); w.dispose();
   });
 
@@ -754,11 +775,11 @@ describe("Unsent preference selection", () => {
   });
 
   it("retains over-limit working selections and shows semantic warnings through resize", async () => {
-    const f = unsentWorkspaceSetup(null, false, "light", 40); const w = f.workspace;
+    const f = unsentWorkspaceSetup(null, false, "light", 90); const w = f.workspace;
     w.handleInput("p"); await loaded(w);
     w.handleInput(" "); w.handleInput(down); w.handleInput(" "); w.handleInput(bringBack);
-    expect(text(w)).toContain("Editing requirements exceed 40");
-    expect(w.render(100).join("\n")).toContain(f.theme.fg("warning", "⚠ Editing requirements exceed 40 characters; reduce the selection."));
+    expect(text(w)).toContain("Editing requirements exceed 90");
+    expect(w.render(100).join("\n")).toContain(f.theme.fg("warning", "⚠ Editing requirements exceed 90 characters; reduce the selection."));
     for (const [width, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [80, 30]]) {
       f.terminal.rows = rows!;
       const lines = w.render(width!);
@@ -821,7 +842,7 @@ describe("workspace preference integration", () => {
     f.terminal.rows = 40;
     expect(w.render(100).join("\n")).toContain(f.theme.fg("text", f.theme.bold("Full revision requirements")));
     w.handleInput(esc); w.handleInput("!"); w.handleInput(ctrlS);
-    expect(f.submit.mock.calls.at(-1)![0]).toContain(`${a.body}\n\n补充 中文😀`);
+    expect(f.submit.mock.calls.at(-1)![0]).toContain(`${a.body}\n\nCurrent user instructions:\n补充 中文😀`);
     expect(f.submit.mock.calls.at(-1)![0]).toContain("!");
     w.handleInput(esc); w.handleInput("f");
     expect(text(w)).toContain("Preferences: 1");
@@ -849,11 +870,11 @@ describe("workspace preference integration", () => {
     w.handleInput(" "); w.handleInput(ctrlS); w.handleInput(enter); w.handleInput(ctrlS); w.handleInput(esc);
     expect(f.submit).not.toHaveBeenCalled();
     w.handleInput(bringBack); w.handleInput("X");
-    w.handleInput(ctrlS); expect(f.submit).toHaveBeenLastCalledWith(`${a.body}\n\nAXB`);
+    w.handleInput(ctrlS); expect(f.submit).toHaveBeenLastCalledWith(composeRevision([selectPreference(a)], "AXB"));
     w.handleInput(esc); f.identity("two"); w.handleInput("f"); w.handleInput("Other"); w.handleInput(ctrlS);
     expect(f.submit).toHaveBeenLastCalledWith("Other");
     w.handleInput(esc); f.identity("one"); w.handleInput("f"); w.handleInput(ctrlS);
-    expect(f.submit).toHaveBeenLastCalledWith(`${a.body}\n\nAXB`);
+    expect(f.submit).toHaveBeenLastCalledWith(composeRevision([selectPreference(a)], "AXB"));
   });
   it("cancels local selection changes and saves expanded paste instead of placeholders", async () => {
     const f = workspaceSetup(); const w = f.workspace;

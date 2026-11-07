@@ -22,7 +22,7 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
     const theme = getThemeByName(themeName)!;
     const first: RevisionPreference = { id: "first", version: 1, scope: "project", name: "Keep 中文😀 \x1b]52;c;payload\x07", body: "Original snapshot" };
     const second: RevisionPreference = { id: "second", version: 1, scope: "global", name: "Second", body: "Another snapshot" };
-    const entries = [first, second];
+    const entries = [first, second, { ...first, id: "duplicate", scope: "global" as const, name: "Copy 中文😀" }];
     const close = vi.fn();
     const panel = new PreferencePanel(tui, theme, getKeybindings(), {
       load: async () => ({ errors: {}, entries: structuredClone(entries) }),
@@ -43,7 +43,15 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
     };
     try {
       tui.start(); await Promise.resolve(); render();
-      input("/"); input("Second"); input("\r"); input("s");
+      input("/"); input("Copy"); input("\r"); input(" ");
+      expect(render()).toContain("Same requirements already selected");
+      expect(render()).toContain("2 selected");
+      for (const [columns, rows] of [[40, 16], [20, 8], [100, 40]]) {
+        Object.assign(terminal, { columns, rows }); panel.invalidate();
+        expect(render()).toContain("Same requirem");
+        expect(panel.render(columns!).join("\n")).toContain(theme.fg("warning", "⚠").split("⚠")[0] + "⚠");
+      }
+      input("/"); input("\x15"); input("Second"); input("\r"); input("s");
       expect(render()).toContain("Preferences · Selected only");
       const full = render();
       expect(full.indexOf("[x] Second")).toBeLessThan(full.indexOf("[x] Keep"));

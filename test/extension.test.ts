@@ -745,7 +745,7 @@ describe("explicit candidate revision", () => {
     expect(h.complete).toHaveBeenCalledTimes(1);
     const context = (h.complete.mock.calls[0] as any[])[1];
     const packet = JSON.parse(context.messages[0].content[0].text);
-    expect(packet).toMatchObject({ operation: "refine", draft: original, editing_instruction: entry.body });
+    expect(packet).toMatchObject({ operation: "refine", draft: original, editing_instruction: `Saved editing requirements (manually selected):\n${entry.body}` });
     expect(packet).not.toHaveProperty("revision_instruction");
     expect(packet).not.toHaveProperty("previous_candidate");
     expect(context.systemPrompt).not.toContain(entry.body);
@@ -755,7 +755,7 @@ describe("explicit candidate revision", () => {
     h.panelInput("q"); await view;
     await h.handlers.get("session_shutdown")![0]!({ type: "session_shutdown" }, h.context);
     const history = JSON.parse(await readFile(`${h.context.sessionManager.getSessionFile()}.prompt-refine.json`, "utf8"));
-    expect(history.records[0]).toMatchObject({ draft: original, editingInstruction: entry.body });
+    expect(history.records[0]).toMatchObject({ draft: original, editingInstruction: `Saved editing requirements (manually selected):\n${entry.body}` });
     expect(history.records[0]).not.toHaveProperty("preferences");
   });
 
@@ -786,10 +786,50 @@ describe("explicit candidate revision", () => {
     h.panelInput("n"); h.panelInput("What? Why?"); h.panelInput("\r");
     h.panelInput("\r"); await flushPromises();
     const second = JSON.parse((h.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
-    expect(second).toMatchObject({ draft: "What? Why?", editing_instruction: `Prompt rewriting instructions:\n${body}` });
+    expect(second).toMatchObject({ draft: "What? Why?", editing_instruction: `Prompt rewriting instructions (automatic default):\n${body}` });
     expect(JSON.stringify(second)).not.toContain(metadata.description);
     expect(JSON.stringify(second)).not.toContain("Answer in English.");
     expect(h.sent).toEqual([]); expect(h.editorWrites).toEqual([]);
+    h.panelInput("q"); await view;
+  });
+
+  it("carries frozen manual edit evidence across revisions without replaying defaults or growing an edit conversation", async () => {
+    const h = await makeHarness();
+    const store = new PreferenceStore(h.agentDir, h.context.cwd);
+    const translation = await store.save("project", { name: "Translation", body: "Translate the prompt to English.",
+      metadata: { kind: "rewrite", activation: "manual", description: "Private description" } });
+    await store.save("global", { name: "Automatic", body: "AUTOMATIC BODY", metadata: {
+      kind: "rewrite", activation: "auto", match: "always", description: "Auto metadata" } });
+    await h.reload();
+    h.holdPanel(); const view = h.command("", h.context);
+    h.panelInput("n"); h.panelInput("解释缓存。"); h.panelInput("\r"); h.panelInput("p");
+    await vi.waitFor(() => expect(h.panelLines().join("\n")).not.toContain("Working…"));
+    h.panelInput("/"); h.panelInput("Translation"); h.panelInput("\r");
+    h.panelInput(" "); h.panelInput("\x1b[13;3u");
+    h.complete.mockResolvedValueOnce(refinement("Explain caching."));
+    h.panelInput("\r"); await flushPromises();
+    await store.save("project", { name: "Changed", body: "NEW LIBRARY BODY" }, translation);
+    const packet = (index: number) => JSON.parse((h.complete.mock.calls[index] as any[])[1].messages[0].content[0].text);
+    expect(packet(0).editing_instruction).toContain("AUTOMATIC BODY");
+    expect(packet(0).editing_instruction).toContain(translation.body);
+    for (const [instruction, result] of [["再短一点。", "Explain caching briefly."], ["改回中文。", "简述缓存。"], ["保留字面量。", "简述缓存。"]]) {
+      h.panelInput("f"); h.panelInput(instruction!);
+      h.complete.mockResolvedValueOnce(refinement(result!));
+      h.panelInput("\x13"); await flushPromises();
+    }
+    expect(h.complete).toHaveBeenCalledTimes(4);
+    for (const index of [1, 2, 3]) {
+      const sent = packet(index);
+      expect(sent.historical_editing_context.initial_instruction).toBe(`Prompt rewriting instructions (manually selected):\n${translation.body}`);
+      expect(sent).not.toHaveProperty("editing_instruction");
+      for (const absent of ["AUTOMATIC BODY", "NEW LIBRARY BODY", "Private description"]) expect(JSON.stringify(sent)).not.toContain(absent);
+    }
+    expect(packet(1).historical_editing_context).not.toHaveProperty("previous_revision_instruction");
+    expect(packet(2).historical_editing_context.previous_revision_instruction).toBe("再短一点。");
+    expect(packet(3).historical_editing_context.previous_revision_instruction).toBe("改回中文。");
+    expect(JSON.stringify(packet(3))).not.toContain("再短一点。");
+    expect(packet(3).previous_candidate).toBe("简述缓存。");
+    expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
     h.panelInput("q"); await view;
   });
 
@@ -805,7 +845,7 @@ describe("explicit candidate revision", () => {
     await vi.waitFor(() => expect(h.panelLines().join("\n")).not.toContain("Run original with another model"));
     expect(h.complete).toHaveBeenCalledTimes(1);
     const packet = JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
-    expect(packet).toMatchObject({ draft: "Explain setup, do not implement.", editing_instruction: entry.body });
+    expect(packet).toMatchObject({ draft: "Explain setup, do not implement.", editing_instruction: `Saved editing requirements (manually selected):\n${entry.body}` });
     expect(JSON.parse(await readFile(join(h.agentDir, "prompt-refine.json"), "utf8"))).not.toHaveProperty("model");
     expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
     h.panelInput("q"); await view;
@@ -823,7 +863,7 @@ describe("explicit candidate revision", () => {
     h.panelInput("\r"); await flushPromises();
     expect(h.complete).toHaveBeenCalledTimes(2);
     const packets = h.complete.mock.calls.map((call: any[]) => JSON.parse(call[1].messages[0].content[0].text));
-    expect(packets[0]).toHaveProperty("editing_instruction", "Ask for useful topic headings.");
+    expect(packets[0]).toHaveProperty("editing_instruction", "Saved editing requirements (manually selected):\nAsk for useful topic headings.");
     expect(packets[1]).not.toHaveProperty("editing_instruction");
     expect(packets[1].draft).toBe("Original copied");
     h.panelInput("q"); await view;
@@ -846,7 +886,7 @@ describe("explicit candidate revision", () => {
     await flushPromises();
     const packet = JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
     expect(packet).toMatchObject({ operation: "revise", original_draft: "Draft A", previous_candidate: "Refined prompt",
-      revision_instruction: "Keep all commands unchanged.\n\nShorten examples." });
+      revision_instruction: "Saved editing requirements (manually selected):\nKeep all commands unchanged.\n\nCurrent user instructions:\nShorten examples." });
     expect(harness.editorWrites).toEqual([]); expect(harness.sent).toEqual([]);
     harness.panelInput("q"); await view;
   });
@@ -938,7 +978,8 @@ describe("explicit candidate revision", () => {
     harness.panelInput("\x13");
     await flushPromises();
     const next = JSON.parse((harness.complete.mock.calls[2] as any[])[1].messages[0].content[0].text);
-    expect(next).toMatchObject({ operation: "revise", original_draft: "Draft A", previous_candidate: "Second result", revision_instruction: "Use bullet points" });
+    expect(next).toMatchObject({ operation: "revise", original_draft: "Draft A", previous_candidate: "Second result", revision_instruction: "Use bullet points",
+      historical_editing_context: { previous_revision_instruction: "再短一点，命令原样保留。" } });
     expect(JSON.stringify(next)).not.toContain("Refined prompt");
     harness.panelInput("i");
     expect(harness.panelLines().join("\n")).toContain("Separate new draft");
