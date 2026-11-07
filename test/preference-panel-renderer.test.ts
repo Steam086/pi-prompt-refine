@@ -24,7 +24,7 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
     const second: RevisionPreference = { id: "second", version: 1, scope: "global", name: "Second", body: "Another snapshot" };
     const entries = [first, second, { ...first, id: "duplicate", scope: "global" as const, name: "Copy 中文😀" }];
     const close = vi.fn();
-    const panel = new PreferencePanel(tui, theme, getKeybindings(), {
+    let panel = new PreferencePanel(tui, theme, getKeybindings(), {
       load: async () => ({ errors: {}, entries: structuredClone(entries) }),
       save: async (scope, value) => {
         const saved = { ...value, scope, id: "returned-identity", version: 1 };
@@ -70,6 +70,37 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
       input("\r"); expect(render()).toContain("project · returned-identity");
       input("\x1b"); input("\x1b[13;3u");
       expect(close).toHaveBeenCalledWith([selectPreference(second), selectPreference(first)]);
+      // The same real renderer hosts management-only access with frozen snapshots.
+      panel.dispose(); tui.removeChild(panel);
+      const manageClose = vi.fn();
+      let current = [{ ...first, version: 2, body: "Current library 中文😀" }];
+      panel = new PreferencePanel(tui, theme, getKeybindings(), {
+        load: async () => ({ errors: {}, entries: structuredClone(current) }),
+        save: async (scope, value, expected) => {
+          const saved = { ...value, scope, id: expected!.id, version: expected!.version + 1 };
+          current = [saved]; return saved;
+        },
+        remove: async () => { current = []; },
+      }, [selectPreference(first)], "", 16000, manageClose, "manage");
+      tui.addChild(panel); tui.setFocus(panel); await Promise.resolve();
+      expect(render()).toContain("1 frozen snapshots");
+      expect(render()).not.toContain("Bring back"); expect(render()).not.toContain("Space Select");
+      input(" "); input("\x1b[13;3u"); expect(manageClose).not.toHaveBeenCalled();
+      input("s"); input("\r");
+      expect(render()).toContain("Selected snapshot"); expect(render()).toContain("Current library entry");
+      expect(panel.render(100).join("\n")).toContain(theme.fg("text", first.body));
+      for (const [columns, rows] of [[40, 16], [20, 8], [100, 40]]) {
+        Object.assign(terminal, { columns, rows }); panel.invalidate();
+        input("\x1b[6~"); render(); input("\x1b[5~"); render();
+      }
+      input("\x1b"); input("e"); input("Edited "); input("\x1b[Z"); input("\r");
+      for (let i = 0; i < 4; i++) await Promise.resolve();
+      expect(render()).toContain("Saved to library");
+      input("d"); expect(render()).toContain("Delete library entry?");
+      input("n"); expect(current).toHaveLength(1);
+      input("d"); input("y"); for (let i = 0; i < 4; i++) await Promise.resolve();
+      input("\r"); expect(render()).toContain("Source deleted"); expect(render()).toContain(first.body);
+      input("\x1b"); input("\x1b"); expect(manageClose.mock.calls).toEqual([[]]);
       expect(writes.length).toBeGreaterThan(0);
       expect(writes.join("")).not.toContain("\x1b]52;c;payload");
     } finally {

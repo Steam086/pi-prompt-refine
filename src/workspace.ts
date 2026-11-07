@@ -32,7 +32,8 @@ export interface SettingsResult { message: string; persisted: boolean }
 
 interface WorkspaceActions {
   preferences?: { repository: PreferenceRepository; key: KeyId | null; maxChars: number };
-  draftPreferences?(id: number): { selected: SelectedPreference[]; save(selected: SelectedPreference[]): string | undefined } | undefined;
+  /** No save capability means library management with read-only adopted snapshots. */
+  draftPreferences?(id?: number, original?: boolean): { selected: SelectedPreference[]; save?(selected: SelectedPreference[]): string | undefined } | undefined;
   original?(id?: number): { text: string; save(text: string): string | undefined; cancel(): void } | undefined;
   /** Session-owned text, independent of request snapshots and revision feedback. */
   inputDraft?: { text: string; save(text: string): void };
@@ -110,11 +111,11 @@ export class RefineWorkspace implements Component, Focusable {
     if (this.preferencesKey && Object.values(keys.getResolvedBindings()).some((binding) =>
       (Array.isArray(binding) ? binding : [binding]).some((key) => key && canonicalShortcut(key) === canonicalShortcut(this.preferencesKey!)))) {
       this.preferencesKey = null;
-      this.preferencesKeyNotice = "Preferences key conflicts with Pi bindings; use p on Unsent or Tab then Enter in Revise. ";
+      this.preferencesKeyNotice = "Preferences key conflicts with Pi bindings; use p in Tasks or Tab then Enter in Revise. ";
     }
     if (actions.tasks) {
       const taskActions: TaskPanelActions = { ...actions.tasks,
-        preferences: actions.draftPreferences && actions.preferences ? (id) => this.openDraftPreferences(id) : undefined,
+        preferences: actions.preferences ? (id, original) => this.openDraftPreferences(id, original) : undefined,
         preferencesKey: this.preferencesKey,
         revise: (id) => this.openRevision(id),
         editOriginal: (id) => this.openOriginal(id), activate: (id) => {
@@ -217,18 +218,19 @@ export class RefineWorkspace implements Component, Focusable {
     this.tui.requestRender();
   }
 
-  private openDraftPreferences(id: number): void {
+  private openDraftPreferences(id?: number, original?: boolean): void {
     const options = this.actions.preferences;
-    const target = this.actions.draftPreferences?.(id);
+    const target = this.actions.draftPreferences ? this.actions.draftPreferences(id, original) : { selected: [] };
     const parent = this.mode === "usage" ? this.historyPanel : this.taskPanel;
-    if (!options || !target || this.preferencePanel) {
-      parent?.setNotice("Select an Unsent original with available background to choose Preferences.", "warning");
+    if (!options || this.preferencePanel) return;
+    if (!target) {
+      parent?.setNotice("Preferences target changed; reopen Preferences.", "warning");
       return;
     }
     this.preferencePanel = new PreferencePanel(this.tui, this.theme, this.keys, options.repository,
       target.selected, "", options.maxChars, (selected) => {
         if (selected) {
-          const error = target.save(selected);
+          const error = target.save?.(selected);
           // Keep the child's working snapshots available on stale/over-limit failure.
           if (error) return error;
         }
@@ -238,7 +240,7 @@ export class RefineWorkspace implements Component, Focusable {
         if (selected) parent?.setNotice("", "muted");
         this.focused = this.hasFocus;
         if (!this.disposed) this.tui.requestRender();
-      }, "refine");
+      }, target.save ? "refine" : "manage");
     this.focused = this.hasFocus;
     this.tui.requestRender();
   }
@@ -296,7 +298,7 @@ export class RefineWorkspace implements Component, Focusable {
       run: (id) => actions?.run(id), stop: (id) => actions?.stop(id), launchModel: () => actions?.launchModel?.() ?? "No model",
       editOriginal: (id) => this.openOriginal(id),
       revise: (id) => this.openRevision(id),
-      preferences: this.actions.draftPreferences && this.actions.preferences ? (id) => this.openDraftPreferences(id) : undefined,
+      preferences: this.actions.preferences ? (id, original) => this.openDraftPreferences(id, original) : undefined,
       preferencesKey: this.preferencesKey,
     }, this.theme, () => this.tui.terminal.rows, this.keys, true, this.actions.usagePosition);
     this.switchMode("usage");

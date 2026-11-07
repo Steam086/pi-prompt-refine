@@ -32,13 +32,13 @@ function repository(entries: RevisionPreference[] = [a, b]) {
   };
   return { repo, library };
 }
-function setup(selected: SelectedPreference[] = [], free = "Extra", themeName = "dark", entries = [a, b]) {
+function setup(selected: SelectedPreference[] = [], free = "Extra", themeName = "dark", entries = [a, b], purpose: "revise" | "refine" | "manage" = "revise") {
   const terminal = { rows: 40, columns: 100 };
   const tui = { terminal, requestRender: vi.fn() } as unknown as TUI;
   const theme = getThemeByName(themeName)!;
   const keys = new KeybindingsManager(TUI_KEYBINDINGS);
   const { repo, library } = repository(entries); const close = vi.fn();
-  const panel = new PreferencePanel(tui, theme, keys, repo, selected, free, 16000, close);
+  const panel = new PreferencePanel(tui, theme, keys, repo, selected, free, 16000, close, purpose);
   panel.focused = true;
   return { panel, repo, library, close, terminal, tui, theme, keys };
 }
@@ -51,6 +51,60 @@ function save(panel: { handleInput(data: string): unknown }) {
   panel.handleInput(backTab);
   panel.handleInput(enter);
 }
+
+describe("Preferences management without selection", () => {
+  it.each(["dark", "light"])("keeps adopted snapshots read-only while managing current library entries (%s)", async (themeName) => {
+    const snapshot = selectPreference(a);
+    const f = setup([snapshot], "", themeName, [{ ...a, version: 2, body: "Current library body 中文😀" }], "manage");
+    await loaded(f.panel);
+    expect(text(f.panel)).toContain("1 frozen snapshots");
+    expect(text(f.panel)).not.toContain("Bring back");
+    expect(text(f.panel)).not.toContain("Space Select");
+    f.panel.handleInput("s");
+    f.panel.handleInput(" "); f.panel.handleInput(bringBack); f.panel.handleInput(ctrlS);
+    expect(f.close).not.toHaveBeenCalled();
+    expect(text(f.panel)).toContain("Library management only");
+    f.panel.handleInput(enter);
+    expect(text(f.panel)).toContain("Selected snapshot");
+    expect(text(f.panel)).toContain(a.body);
+    expect(text(f.panel)).toContain("Current library entry");
+    expect(text(f.panel)).toContain("Current library body");
+    expect(f.panel.render(100).join("\n")).toContain(f.theme.fg("text", a.body));
+    for (const [width, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [100, 40]]) {
+      f.terminal.rows = rows!;
+      for (const key of ["\x1b[6~", "\x1b[5~"]) {
+        f.panel.handleInput(key);
+        const lines = f.panel.render(width!);
+        expect(lines).toHaveLength(panelLayout(width!, rows!).height);
+        expect(lines.every((line) => visibleWidth(line) <= width!)).toBe(true);
+      }
+    }
+    f.panel.handleInput(esc); f.panel.handleInput("e");
+    expect(text(f.panel)).toContain("Current library body");
+    f.panel.handleInput("\x05"); f.panel.handleInput("\x15"); f.panel.handleInput("Changed name"); save(f.panel); await loaded(f.panel);
+    expect(f.repo.save.mock.calls[0]![2]).toMatchObject({ version: 2, body: "Current library body 中文😀" });
+    f.panel.handleInput("d"); f.panel.handleInput("y"); await loaded(f.panel);
+    expect(f.repo.remove).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ version: 3, name: "Changed name" }));
+    f.panel.handleInput(enter);
+    expect(text(f.panel)).toContain("Source deleted"); expect(text(f.panel)).toContain(a.body);
+    expect(snapshot).toEqual(selectPreference(a));
+    f.panel.handleInput(esc); f.panel.handleInput(esc); expect(f.close.mock.calls).toEqual([[]]);
+  });
+
+  it("can Add with no adopted snapshots and never returns selections", async () => {
+    const f = setup([], "", "dark", [], "manage"); await loaded(f.panel);
+    expect(text(f.panel)).toContain("Library is empty");
+    f.panel.handleInput("n"); f.panel.handleInput("First 中文😀"); f.panel.handleInput(tab); f.panel.handleInput("Keep literal commands.");
+    for (let i = 0; i < 5; i++) f.panel.handleInput(tab);
+    f.panel.handleInput(enter); await loaded(f.panel);
+    expect(f.repo.save).toHaveBeenCalledOnce();
+    f.panel.handleInput(" ");
+    expect(text(f.panel)).toContain("0 frozen snapshots");
+    f.panel.handleInput(" "); f.panel.handleInput(bringBack); f.panel.handleInput(ctrlS);
+    expect(f.close).not.toHaveBeenCalled();
+    f.panel.handleInput(esc); expect(f.close.mock.calls).toEqual([[]]);
+  });
+});
 
 describe("three-action preference library", () => {
   it.each(["dark", "light"])("sanitizes external metadata before editing while preserving untouched JSON (%s)", async (themeName) => {
@@ -702,10 +756,12 @@ function unsentWorkspaceSetup(key: KeyId | null = "alt+p", conflict = false, the
     contextLabel: "Original", elapsedSeconds: 0, openHint: "ctrl+\\", canRestore: false }, f.theme, () => f.terminal.rows, () => {});
   const workspace = new RefineWorkspace(preview, f.tui, f.theme, f.keys, {
     preferences: { repository: f.repo, key, maxChars },
-    draftPreferences: (id) => {
-      const source = controller.getRecord(id);
-      if (!source || source.status !== "unsent") return undefined;
-      return { selected: source.input.preferences ?? [], save: (selected) => controller.updateDraftPreferences(source, selected) };
+    draftPreferences: (id, original) => {
+      const source = id === undefined ? undefined : controller.getRecord(id);
+      if (id !== undefined && !source) return undefined;
+      const selected = source?.input.preferences ?? [];
+      if (!source || !original || source.status !== "unsent" || source.input.contextUnavailable) return { selected };
+      return { selected, save: (selected) => controller.updateDraftPreferences(source, selected) };
     },
     taskPosition: position,
     tasks: { records: () => controller.getHistory(), appliedId: () => undefined, activate: () => false, run, stop() {} },
@@ -790,6 +846,29 @@ describe("Unsent preference selection", () => {
     w.handleInput(" "); w.handleInput(bringBack);
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toHaveLength(1);
     expect(f.complete).not.toHaveBeenCalled(); w.dispose();
+  });
+
+  it("preserves selection for archived Unsent originals with intact background", async () => {
+    const f = unsentWorkspaceSetup(); const w = f.workspace;
+    f.controller.onMessageStarted("Another Pi task");
+    w.handleInput("p"); await loaded(w);
+    expect(text(w)).toContain("Preferences · Unsent original");
+    w.handleInput(" "); w.handleInput(bringBack);
+    expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(a)]);
+    expect(f.complete).not.toHaveBeenCalled(); w.dispose();
+  });
+
+  it("rejects bring-back if an editable original starts while the child is open", async () => {
+    const f = unsentWorkspaceSetup(); const w = f.workspace;
+    f.complete.mockImplementationOnce(() => new Promise(() => {}));
+    w.handleInput("p"); await loaded(w); w.handleInput(" ");
+    f.controller.startRecord(f.originals[0]!.id);
+    w.handleInput(bringBack);
+    expect(text(w)).toContain("already started");
+    expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toBeUndefined();
+    w.handleInput(esc); w.handleInput("p"); await loaded(w);
+    expect(text(w)).not.toContain("Bring back");
+    w.dispose(); f.controller.setSession("other");
   });
 
   it("keeps working snapshots in the child if the original changes before bring-back", async () => {
