@@ -86,8 +86,10 @@ describe("workspace terminal rendering", () => {
         tui.requestRender();
         tui.renderNow();
         expect(workspace.render(columns)).toHaveLength(initialHeight);
+        // Automatic navigation stays at the opening height. Explicit reading
+        // expansion is covered separately in workspace-height-renderer.test.ts.
         for (const key of [
-          "\t", "\x1b[6~", "\t", "\x1b[B", "\r", "\x1b[6~", "f", "中文😀", "\r", "keep", "\x05", "\x05", "\x13", "\x1b", "o", "\x1b", // Task browser and applied result
+          "\t", "\x1b[6~", "\t", "\x1b[B", "\r", "\x1b[6~", "f", "中文😀", "\r", "keep", "\x13", "\x1b", "o", "\x1b", // Task browser and applied result
           "\x1b[C", "\x1b[B", "\t", "\x1b[6~", "\r", "\x1b", // Unified Usage and Apply
           "\x1b[C", ...Array<string>(6).fill("\x1b[B"), ...Array<string>(6).fill("\x1b[A"), "\t", ...Array<string>(3).fill("\x1b[B"), "\t", "\x1b", "i", "\x1b",
         ]) {

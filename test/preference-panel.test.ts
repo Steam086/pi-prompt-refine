@@ -1004,7 +1004,9 @@ describe("Unsent preference selection", () => {
     for (const [width, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [100, 40]]) {
       f.terminal.rows = rows!;
       const lines = w.render(width!);
-      expect(lines).toHaveLength(panelLayout(width!, rows!).height);
+      expect(lines.length).toBeGreaterThanOrEqual(Math.min(18, panelLayout(width!, rows!).height));
+      expect(lines.length).toBeLessThanOrEqual(panelLayout(width!, rows!).height);
+      expect(w.render(width!)).toHaveLength(lines.length);
       expect(lines.every((line) => visibleWidth(line) <= width!)).toBe(true);
       expect(lines.join("\n")).toContain(f.theme.fg("warning", "⚠").split("⚠")[0] + "⚠");
     }
@@ -1092,7 +1094,9 @@ describe("Unsent preference selection", () => {
     for (const [width, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [80, 30]]) {
       f.terminal.rows = rows!;
       const lines = w.render(width!);
-      expect(lines).toHaveLength(panelLayout(width!, rows!).height);
+      expect(lines.length).toBeGreaterThanOrEqual(Math.min(18, panelLayout(width!, rows!).height));
+      expect(lines.length).toBeLessThanOrEqual(panelLayout(width!, rows!).height);
+      expect(w.render(width!)).toHaveLength(lines.length);
       for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width!);
     }
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toBeUndefined();
@@ -1166,7 +1170,9 @@ describe("workspace preference integration", () => {
     for (const [width, rows] of [[100, 40], [36, 16], [12, 8], [80, 30]]) {
       f.terminal.rows = rows!;
       const lines = w.render(width!);
-      expect(lines).toHaveLength(panelLayout(width!, rows!).height);
+      expect(lines.length).toBeGreaterThanOrEqual(Math.min(18, panelLayout(width!, rows!).height));
+      expect(lines.length).toBeLessThanOrEqual(panelLayout(width!, rows!).height);
+      expect(w.render(width!)).toHaveLength(lines.length);
       for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width!);
       expect(lines.join("\n")).not.toContain("\x1b[2J");
       w.handleInput("\x1b[6~"); w.handleInput("\x1b[5~");

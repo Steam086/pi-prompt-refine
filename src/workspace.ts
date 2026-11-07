@@ -2,7 +2,7 @@ import { stripVTControlCharacters } from "node:util";
 import { matchesKey, parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type Focusable, type KeybindingsManager, type KeyId, type TUI } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { PreviewPanel } from "./preview.js";
-import { panelFrame, panelLayout, panelTabs, workspaceTabs, WORKSPACE_PAGES, type WorkspacePage } from "./panel-layout.js";
+import { panelFrame, panelTabs, workspaceTabs, WorkspaceHeight, WORKSPACE_PAGES, type WorkspacePage } from "./panel-layout.js";
 import { alignedKeyHints, fittingKeyHints, type KeyHint } from "./key-hints.js";
 import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
@@ -99,6 +99,14 @@ export class RefineWorkspace implements Component, Focusable {
   private revisionSource?: { render(width: number): string[] };
   private preferencesKey?: KeyId | null;
   private preferencesKeyNotice = "";
+  private readonly height = new WorkspaceHeight();
+  private expandKey?: KeyId;
+  private lastWidth?: number;
+  private readonly expansionHint = (): KeyHint | undefined => this.expandKey && this.height.canToggle(this.tui.terminal.rows)
+    ? [this.expandKey === "ctrl+e" ? "Ctrl+E" : this.expandKey, this.height.isExpanded ? "Collapse" : "Expand"] : undefined;
+  private readonly layout = (width: number) => this.height.layout(width, this.tui.terminal.rows,
+    (columns) => (this.mode === "result" ? this.panel : this.mode === "usage" ? this.historyPanel : this.taskPanel)
+      ?.preferredBodyHeight(columns) ?? this.panel.preferredBodyHeight(columns));
 
   private get activeInput(): PromptInput { return this.inputKind === "original" ? this.originalInput : this.inputKind === "revision" ? this.revisionInput : this.input; }
 
@@ -109,6 +117,15 @@ export class RefineWorkspace implements Component, Focusable {
     private readonly keys: KeybindingsManager,
     private readonly actions: WorkspaceActions,
   ) {
+    this.panel.setLayoutProvider(this.layout, this.expansionHint);
+    // Editor-only bindings do not conflict in a read-only view. Never intercept
+    // this key in inputs/search, or steal a remapped application/select action.
+    const readingBindings = Object.entries(keys.getResolvedBindings()).filter(([id]) =>
+      !id.startsWith("tui.editor.") && !id.startsWith("tui.input."));
+    this.expandKey = (["ctrl+e", "=", "+"] as const).find((candidate) =>
+      canonicalShortcut(candidate) !== canonicalShortcut(actions.preferences?.key ?? "") &&
+      !readingBindings.some(([, binding]) => (Array.isArray(binding) ? binding : [binding]).some((key) =>
+        key && canonicalShortcut(key) === canonicalShortcut(candidate))));
     this.preferencesKey = actions.preferences?.key;
     if (this.preferencesKey && Object.values(keys.getResolvedBindings()).some((binding) =>
       (Array.isArray(binding) ? binding : [binding]).some((key) => key && canonicalShortcut(key) === canonicalShortcut(this.preferencesKey!)))) {
@@ -130,7 +147,7 @@ export class RefineWorkspace implements Component, Focusable {
         if (applied) this.showApplied(id);
         return applied;
       } };
-      this.taskPanel = new TaskPanel(taskActions, theme, () => tui.terminal.rows, keys, false, actions.taskPosition);
+      this.taskPanel = new TaskPanel(taskActions, theme, () => tui.terminal.rows, keys, false, actions.taskPosition, this.layout, this.expansionHint);
     }
     this.input = this.makeInput();
     this.input.editor.setText(actions.inputDraft?.text ?? "");
@@ -221,7 +238,7 @@ export class RefineWorkspace implements Component, Focusable {
         this.revisionFocus = "input";
         this.focused = this.hasFocus;
         if (!this.disposed) this.tui.requestRender();
-      });
+      }, "revise", this.layout);
     this.focused = this.hasFocus;
     this.tui.requestRender();
   }
@@ -249,7 +266,7 @@ export class RefineWorkspace implements Component, Focusable {
         if (selected) parent?.setNotice("", "muted");
         this.focused = this.hasFocus;
         if (!this.disposed) this.tui.requestRender();
-      }, target.save ? "refine" : "manage");
+      }, target.save ? "refine" : "manage", this.layout);
     this.focused = this.hasFocus;
     this.tui.requestRender();
   }
@@ -310,7 +327,7 @@ export class RefineWorkspace implements Component, Focusable {
       revise: (id) => this.openRevision(id),
       preferences: this.actions.preferences ? (id, original) => this.openDraftPreferences(id, original) : undefined,
       preferencesKey: this.preferencesKey,
-    }, this.theme, () => this.tui.terminal.rows, this.keys, true, this.actions.usagePosition);
+    }, this.theme, () => this.tui.terminal.rows, this.keys, true, this.actions.usagePosition, this.layout, this.expansionHint);
     this.switchMode("usage");
   }
 
@@ -410,7 +427,7 @@ export class RefineWorkspace implements Component, Focusable {
         this.openPreferences(); return true;
       }
       if (this.inputKind === "revision" && key === "ctrl+e") {
-        if (this.canInlineRevision(this.tui.terminal.columns)) this.revisionExpanded = !this.revisionExpanded;
+        if (this.canInlineRevision(this.lastWidth ?? this.tui.terminal.columns)) this.revisionExpanded = !this.revisionExpanded;
         this.tui.requestRender();
         return true;
       }
@@ -444,6 +461,14 @@ export class RefineWorkspace implements Component, Focusable {
       return true;
     }
     const activeTasks = this.mode === "main" ? this.taskPanel : this.mode === "usage" ? this.historyPanel : undefined;
+    const readingCanExpand = activeTasks ? activeTasks.canExpand()
+      : (this.mode === "main" || this.mode === "result") && this.panel.canExpand();
+    if (readingCanExpand && this.expandKey && matchesKey(data, this.expandKey)) {
+      this.layout(this.lastWidth ?? this.tui.terminal.columns);
+      this.height.toggle(this.tui.terminal.rows);
+      this.tui.requestRender();
+      return true;
+    }
     if (activeTasks?.ownsInput()) {
       activeTasks.handleInput(data);
       this.tui.requestRender();
@@ -548,7 +573,7 @@ export class RefineWorkspace implements Component, Focusable {
   }
 
   private renderRequirements(width: number): string[] {
-    const layout = panelLayout(width, this.tui.terminal.rows);
+    const layout = this.layout(width);
     const text = composeRevision(this.revisionSelected, this.revisionInput.editor.getExpandedText());
     if (this.requirementsCache?.text !== text || this.requirementsCache.width !== layout.innerWidth) {
       this.requirementsCache = { text, width: layout.innerWidth,
@@ -563,12 +588,12 @@ export class RefineWorkspace implements Component, Focusable {
   }
 
   private canInlineRevision(width: number): boolean {
-    const layout = panelLayout(width, this.tui.terminal.rows);
+    const layout = this.layout(width);
     return layout.bodyHeight >= 12 && layout.innerWidth >= 36;
   }
 
   private renderRevision(width: number): string[] {
-    const layout = panelLayout(width, this.tui.terminal.rows);
+    const layout = this.layout(width);
     const { theme } = this;
     const canInline = this.canInlineRevision(width);
     const inline = !this.revisionExpanded && canInline;
@@ -613,12 +638,13 @@ export class RefineWorkspace implements Component, Focusable {
 
   render(width: number): string[] {
     if (width < 1) return [];
+    this.lastWidth = width;
     if (this.preferencePanel) return this.preferencePanel.render(width);
     if (this.mode === "input" && this.inputKind === "revision") return this.reviewingRequirements ? this.renderRequirements(width) : this.renderRevision(width);
     if (this.mode === "result") return this.panel.render(width);
     if (this.mode === "main") return this.taskPanel?.render(width, () => this.panel.render(width)) ?? this.panel.render(width);
     if (this.mode === "usage") return this.historyPanel?.render(width) ?? [];
-    const layout = panelLayout(width, this.tui.terminal.rows);
+    const layout = this.layout(width);
     const { innerWidth, bodyHeight } = layout;
     const { theme } = this;
     let frameKey = "";

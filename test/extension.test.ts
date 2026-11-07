@@ -2435,7 +2435,14 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("o");
     expect(harness.panelLines().join("\n")).toContain("Draft A");
     harness.panelInput("?");
-    expect(harness.panelLines().join("\n")).toContain("Cycle task models + favorites");
+    const helpHeight = harness.panelLines().length;
+    let help = harness.panelLines().join("\n");
+    for (let page = 0; page < 3; page++) {
+      harness.panelInput("\x1b[6~");
+      expect(harness.panelLines()).toHaveLength(helpHeight);
+      help += harness.panelLines().join("\n");
+    }
+    expect(help).toContain("Cycle task models + favorites");
     harness.panelInput("?");
     harness.panelInput("v");
     expect(harness.panelLines().join("\n")).toContain("source");

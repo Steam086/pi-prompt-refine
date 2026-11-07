@@ -2,9 +2,9 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { READING_WIDTH } from "./presentation.js";
 
-/** One geometry for reading, settings and input; only terminal resize changes it. */
-export function panelLayout(width: number, rows: number) {
-  const height = Math.max(1, Math.min(rows - 4, 24, Math.max(12, Math.round(rows * 0.65))));
+/** Shared frame geometry. Explicit heights remain bounded by the terminal. */
+export function panelLayout(width: number, rows: number, requestedHeight = Math.min(24, Math.max(12, Math.round(rows * 0.65)))) {
+  const height = Math.max(1, Math.min(rows - 4, Math.round(requestedHeight)));
   const panelWidth = Math.max(1, Math.min(width, READING_WIDTH));
   const inset = panelWidth >= 16 ? 2 : 0;
   const innerWidth = Math.max(1, panelWidth - inset * 2);
@@ -18,6 +18,27 @@ export function panelLayout(width: number, rows: number) {
 }
 
 export type PanelLayout = ReturnType<typeof panelLayout>;
+export type PanelLayoutProvider = (width: number) => PanelLayout;
+
+/** One opening owns one compact height. Content/focus updates never resize it. */
+export class WorkspaceHeight {
+  private compact?: { width: number; rows: number; height: number };
+  private expanded = false;
+  private expandedHeight(rows: number): number { return Math.max(1, Math.min(rows - 4, Math.round(rows * 0.85))); }
+  canToggle(rows: number): boolean { return !!this.compact && this.expandedHeight(rows) > this.compact.height; }
+  get isExpanded(): boolean { return this.expanded; }
+  toggle(rows: number): void { if (this.canToggle(rows)) this.expanded = !this.expanded; }
+
+  layout(width: number, rows: number, measure: (innerWidth: number) => number): PanelLayout {
+    if (!this.compact || this.compact.width !== width || this.compact.rows !== rows) {
+      const limit = panelLayout(width, rows);
+      const tabs = limit.bodyHeight >= 8 ? 3 : limit.bodyHeight >= 4 ? 1 : 0;
+      const chrome = limit.height - limit.bodyHeight + tabs;
+      this.compact = { width, rows, height: Math.min(limit.height, Math.max(18, measure(limit.innerWidth) + chrome)) };
+    }
+    return panelLayout(width, rows, this.expanded ? this.expandedHeight(rows) : this.compact.height);
+  }
+}
 
 export const WORKSPACE_PAGES = ["Preview", "Usage", "Settings"] as const;
 export type WorkspacePage = typeof WORKSPACE_PAGES[number];

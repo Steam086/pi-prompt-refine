@@ -9,7 +9,7 @@ export interface InlinePreferenceTarget {
   selected: SelectedPreference[];
   save?(selected: SelectedPreference[]): string | undefined;
 }
-interface Document { text: string; scroll: number; width?: number; lines?: string[] }
+interface Document { text: string; scroll: number; renderedScroll?: number; width?: number; lines?: string[] }
 interface Position { search: Input; searching: boolean; key?: string; index: number; top: number; direction?: number; reading?: boolean; document?: Document }
 
 /** Direct, per-Unsent selection. Library editing remains a transactional child page. */
@@ -40,6 +40,15 @@ export class InlinePreferences {
     private readonly theme: Theme, private readonly keys: KeybindingsManager, private readonly redraw: () => void) {}
 
   available(id: number): boolean { return !this.disposed && !!this.target(id)?.save; }
+  /** Unfiltered preview demand; no I/O, target/focus changes or selection movement. */
+  preferredHeight(id: number): number {
+    if (!this.loaded || this.loading) return 7;
+    const selected = this.target(id)?.selected ?? [];
+    const entries = [...this.library.entries, ...selected.filter((entry) =>
+      !this.library.entries.some((source) => preferenceKey(source) === preferenceKey(entry)))];
+    const groups = new Set(entries.map((entry) => entry.metadata?.kind ?? "unclassified"));
+    return Math.min(7, 1 + (Object.keys(this.library.errors).length ? 1 : 0) + Math.max(1, entries.length + groups.size));
+  }
   set focused(value: boolean) { this.hostFocused = value; this.updateFocus(); }
   private updateFocus(): void {
     for (const [id, position] of this.positions) position.search.focused = this.hostFocused && this.active && id === this.id && position.searching && !this.document;
@@ -125,10 +134,11 @@ export class InlinePreferences {
     const cancel = this.keys.matches(data, "tui.select.cancel") || key === "ctrl+\\";
     if (this.document) {
       if (cancel || key === "q") this.document = undefined;
-      else if (key === "up" || key === "pageup") this.document.scroll = Math.max(0, this.document.scroll - (key === "up" ? 1 : this.viewport));
-      else if (key === "down" || key === "pagedown") this.document.scroll += key === "down" ? 1 : this.viewport;
+      else if (key === "up" || key === "pageup") this.document.scroll = Math.max(0, (this.document.renderedScroll ?? this.document.scroll) - (key === "up" ? 1 : this.viewport));
+      else if (key === "down" || key === "pagedown") this.document.scroll = (this.document.renderedScroll ?? this.document.scroll) + (key === "down" ? 1 : this.viewport);
       else if (key === "home") this.document.scroll = 0;
       else if (key === "end") this.document.scroll = Number.MAX_SAFE_INTEGER;
+      if (this.document) this.document.renderedScroll = undefined;
     } else if (position.searching) {
       if (cancel || this.keys.matches(data, "tui.input.submit") || key === "down") position.searching = false;
       else { position.search.handleInput(data); position.index = 0; position.key = undefined; position.top = 0; position.direction = 1; }
@@ -185,8 +195,9 @@ export class InlinePreferences {
       const doc = this.document;
       if (!doc.lines || doc.width !== width) { doc.lines = wrapTextWithAnsi(this.theme.fg("text", clean(doc.text)), width); doc.width = width; }
       this.viewport = Math.max(1, height - result.length);
-      doc.scroll = Math.min(doc.scroll, Math.max(0, doc.lines.length - this.viewport));
-      return [...result, ...doc.lines.slice(doc.scroll, doc.scroll + this.viewport)].slice(0, height);
+      const offset = Math.min(doc.scroll, Math.max(0, doc.lines.length - this.viewport));
+      doc.renderedScroll = offset;
+      return [...result, ...doc.lines.slice(offset, offset + this.viewport)].slice(0, height);
     }
     if ((position.searching || position.search.getValue()) && result.length < height) result.push(...position.search.render(width).slice(0, 1));
     const entry = this.highlighted(target.selected, position);
