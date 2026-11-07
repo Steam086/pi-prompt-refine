@@ -18,7 +18,6 @@ import { sanitizeTerminalText } from "./presentation.js";
 import { formatKeyHint, type KeyHint } from "./key-hints.js";
 import { RefineWorkspace, type ContextSettings } from "./workspace.js";
 import { PreferenceStore } from "./preference-store.js";
-import { automaticPreferences, type PreferenceRepository, type RevisionPreference } from "./revision-preferences.js";
 import { PreviewPanel, type PreviewOptions } from "./preview.js";
 import { RefineController, type Candidate, type CandidateToken, type ControllerState, type RefineRequest, type RefineRequestInput, type TriggerResult } from "./controller.js";
 import type { TaskPanelPosition } from "./task-panel.js";
@@ -114,19 +113,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   let refreshPreview: (() => void) | undefined;
   let closePreview: (() => void) | undefined;
   let interacting = false;
-  let preferenceLibrary: { cwd: string; entries: RevisionPreference[] } | undefined;
-  function preferenceRepository(ctx: ExtensionContext): PreferenceRepository {
-    const store = new PreferenceStore(getAgentDir(), ctx.cwd);
-    return {
-      load: async () => {
-        const epoch = historyEpoch;
-        const library = await store.load();
-        if (epoch === historyEpoch && currentUiContext?.cwd === ctx.cwd) preferenceLibrary = { cwd: ctx.cwd, entries: library.entries };
-        return library;
-      },
-      save: (...args) => store.save(...args),
-      remove: (entry) => store.remove(entry),
-    };
+  function preferenceRepository(ctx: ExtensionContext): PreferenceStore {
+    return new PreferenceStore(getAgentDir(), ctx.cwd);
   }
   const backgroundStatus = new BackgroundStatus();
   let historyStore: HistoryStore | undefined;
@@ -167,8 +155,6 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   const openHint = config.shortcuts.view ?? config.shortcuts.optimize ?? "/refine view";
 
   const controller = new RefineController({
-    automaticPreferences: (draft) => preferenceLibrary && preferenceLibrary.cwd === currentUiContext?.cwd
-      ? automaticPreferences(preferenceLibrary.entries, draft) : [],
     timeoutMs: config.timeoutMs,
     maxDraftChars: config.maxDraftChars,
     maxOutputChars: Math.max(config.maxDraftChars, config.maxOutputTokens * 32),
@@ -1402,7 +1388,6 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
     canNameSession(ctx);
     controller.setSession(ctx.sessionManager.getSessionId());
-    preferenceLibrary = undefined;
     const [preferences] = await Promise.all([preferenceRepository(ctx).load(), previousStore?.flush()]);
     if (epoch !== historyEpoch) return;
     for (const warning of Object.values(preferences.errors)) notify(ctx, `Preferences: ${warning}`, "warning");

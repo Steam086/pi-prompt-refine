@@ -730,7 +730,7 @@ describe("explicit candidate revision", () => {
       expect(h.panelLines().join("\n")).not.toContain("Working…");
     });
     h.panelInput("n"); h.panelInput("First 中文😀"); h.panelInput("\t"); h.panelInput("Keep literal commands.");
-    for (let i = 0; i < 5; i++) h.panelInput("\t");
+    for (let i = 0; i < 4; i++) h.panelInput("\t");
     h.panelInput("\r");
     await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Saved; not selected"));
     h.panelInput(" "); h.panelInput("\x1b[13;3u"); h.panelInput("\x13");
@@ -750,14 +750,19 @@ describe("explicit candidate revision", () => {
   it("manages running/queued originals and children equally in list and Inspect without changing frozen requirements", async () => {
     const h = await makeHarness(); const store = new PreferenceStore(h.agentDir, h.context.cwd);
     const entry = await store.save("project", { name: "Frozen 中文😀", body: "Original frozen body.",
-      metadata: { kind: "rewrite", description: "Automatic", activation: "auto", match: "always" } });
+      metadata: { kind: "rewrite", description: "Manually selected", activation: "manual" } });
     await h.reload();
     const finishes: ((value: any) => void)[] = [];
     h.complete.mockImplementation(() => new Promise((resolve) => { finishes.push(resolve); }));
-    for (let i = 0; i < 5; i++) { h.setEditorText(`Draft ${i}`); await trigger(h); }
-    expect(h.complete).toHaveBeenCalledTimes(4);
     h.setEditorText(""); h.holdPanel(); const view = h.command("", h.context);
     const output = () => h.panelLines(100).join("\n");
+    for (let i = 0; i < 5; i++) {
+      h.panelInput("n"); h.panelInput(`Draft ${i}`); h.panelInput("\r");
+      expect(output()).toContain("Preferences: None");
+      h.panelInput("p"); await vi.waitFor(() => expect(output()).not.toContain("Working…"));
+      h.panelInput(" "); h.panelInput("\x1b[13;3u"); h.panelInput("\r"); await flushPromises();
+    }
+    expect(h.complete).toHaveBeenCalledTimes(4);
     // Latest group is queued; the next group is running. Both have original/run rows.
     for (const row of [0, 1, 2, 3]) {
       h.panelInput("\x1b[H");
@@ -791,7 +796,7 @@ describe("explicit candidate revision", () => {
     expect(output()).toContain("Preferences: None");
     for (const call of h.complete.mock.calls) {
       const packet = JSON.parse((call as any[])[1].messages[0].content[0].text);
-      expect(packet.editing_instruction).toBe(`Prompt rewriting instructions (automatic default):\n${entry.body}`);
+      expect(packet.editing_instruction).toBe(`Prompt rewriting instructions (manually selected):\n${entry.body}`);
     }
     for (const finish of finishes.slice(1)) finish(refinement("Done")); await flushPromises();
     expect(h.complete).toHaveBeenCalledTimes(5); expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
@@ -867,10 +872,10 @@ describe("explicit candidate revision", () => {
     expect(history.records[0]).not.toHaveProperty("preferences");
   });
 
-  it("loads typed automatic rewrites, deduplicates scopes, exposes cancellation and injects only frozen bodies", async () => {
+  it("uses typed rewrites only after explicit selection and never inherits them on a new original", async () => {
     const h = await makeHarness();
     const store = new PreferenceStore(h.agentDir, h.context.cwd);
-    const metadata = { kind: "rewrite", description: "Metadata never injected 中文", activation: "auto", match: "parallel" } as const;
+    const metadata = { kind: "rewrite", description: "Metadata never injected 中文", activation: "manual" } as const;
     const body = "Keep existing parallel questions as separate items.";
     await store.save("project", { name: "Structure", body, metadata });
     await store.save("global", { name: "Same structure", body, metadata });
@@ -879,35 +884,65 @@ describe("explicit candidate revision", () => {
     await h.reload();
     h.holdPanel(); const view = h.command("", h.context);
     h.panelInput("n"); h.panelInput("Why? How?"); h.panelInput("\r");
-    expect(h.panelLines().join("\n")).toContain("Preferences: 1 · Structure");
+    expect(h.panelLines().join("\n")).toContain("Preferences: None");
     expect(h.complete).not.toHaveBeenCalled();
     h.panelInput("p");
-    await vi.waitFor(() => {
-      expect(h.panelLines().join("\n")).not.toContain("Working…");
-      expect(h.panelLines().join("\n")).toContain("Automatically selected");
-    });
+    await vi.waitFor(() => expect(h.panelLines().join("\n")).not.toContain("Working…"));
+    expect(h.panelLines().join("\n")).not.toContain("Automatically selected");
+    h.panelInput("/"); h.panelInput("Structure"); h.panelInput("\r");
     h.panelInput(" "); h.panelInput("\x1b[13;3u");
-    expect(h.panelLines().join("\n")).toContain("Preferences: None");
+    expect(h.panelLines().join("\n")).toContain("Preferences: 1 · Structure");
+    expect(h.complete).not.toHaveBeenCalled();
     h.panelInput("\r"); await flushPromises();
     const first = JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
-    expect(first).not.toHaveProperty("editing_instruction");
-    h.panelInput("n"); h.panelInput("What? Why?"); h.panelInput("\r");
+    expect(first).toMatchObject({ draft: "Why? How?", editing_instruction: `Prompt rewriting instructions (manually selected):\n${body}` });
+    expect(JSON.stringify(first)).not.toContain(metadata.description);
+    expect(JSON.stringify(first)).not.toContain("Answer in English.");
+    h.panelInput("n"); h.panelInput("先检查，再解释。 What? Why?"); h.panelInput("\r");
+    expect(h.panelLines().join("\n")).toContain("Preferences: None");
     h.panelInput("\r"); await flushPromises();
     const second = JSON.parse((h.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
-    expect(second).toMatchObject({ draft: "What? Why?", editing_instruction: `Prompt rewriting instructions (automatic default):\n${body}` });
-    expect(JSON.stringify(second)).not.toContain(metadata.description);
-    expect(JSON.stringify(second)).not.toContain("Answer in English.");
+    expect(second).not.toHaveProperty("editing_instruction");
     expect(h.sent).toEqual([]); expect(h.editorWrites).toEqual([]);
     h.panelInput("q"); await view;
   });
 
-  it("carries frozen manual edit evidence across revisions without replaying defaults or growing an edit conversation", async () => {
+  it.each(["always", "parallel", "sequence"])("never auto-selects legacy %s preferences in shortcut or command requests, but keeps manual selection available", async (match) => {
+    const h = await makeHarness();
+    const path = join(h.agentDir, "prompt-refine-preferences.json");
+    const body = "LEGACY BODY: only send after explicit selection.";
+    const content = JSON.stringify({ version: 2, entries: [{ id: "legacy", version: 1, name: "Legacy structure", body,
+      metadata: { kind: "rewrite", description: "Old configuration", activation: "auto", match } }] });
+    await writeFile(path, content); await h.reload();
+    h.setEditorText("先检查，再解释。 Why? How?"); await trigger(h);
+    await h.command("optimize First inspect, then explain. 为什么？怎么办？", h.context); await flushPromises();
+    for (const call of h.complete.mock.calls) {
+      const packet = JSON.parse((call as any[])[1].messages[0].content[0].text);
+      expect(packet).not.toHaveProperty("editing_instruction");
+      expect(JSON.stringify(packet)).not.toContain(body);
+    }
+    expect(h.complete).toHaveBeenCalledTimes(2);
+    h.holdPanel(); const view = h.command("", h.context);
+    h.panelInput("n"); h.panelInput("Manual original"); h.panelInput("\r"); h.panelInput("p");
+    await vi.waitFor(() => expect(h.panelLines().join("\n")).not.toContain("Working…"));
+    expect(h.panelLines().join("\n")).toContain("0 selected");
+    h.panelInput(" "); h.panelInput("\x1b[13;3u");
+    expect(h.complete).toHaveBeenCalledTimes(2);
+    h.panelInput("\r"); await flushPromises();
+    const packet = JSON.parse((h.complete.mock.calls[2] as any[])[1].messages[0].content[0].text);
+    expect(packet.editing_instruction).toBe(`Prompt rewriting instructions (manually selected):\n${body}`);
+    expect(await readFile(path, "utf8")).toBe(content);
+    expect(h.sent).toEqual([]); expect(h.editorWrites).toEqual([]);
+    h.panelInput("q"); await view;
+  });
+
+  it("carries only selected frozen manual edit evidence across revisions without growing an edit conversation", async () => {
     const h = await makeHarness();
     const store = new PreferenceStore(h.agentDir, h.context.cwd);
     const translation = await store.save("project", { name: "Translation", body: "Translate the prompt to English.",
       metadata: { kind: "rewrite", activation: "manual", description: "Private description" } });
-    await store.save("global", { name: "Automatic", body: "AUTOMATIC BODY", metadata: {
-      kind: "rewrite", activation: "auto", match: "always", description: "Auto metadata" } });
+    await store.save("global", { name: "Unselected", body: "UNSELECTED BODY", metadata: {
+      kind: "rewrite", activation: "manual", description: "Unselected metadata" } });
     await h.reload();
     h.holdPanel(); const view = h.command("", h.context);
     h.panelInput("n"); h.panelInput("解释缓存。"); h.panelInput("\r"); h.panelInput("p");
@@ -918,7 +953,7 @@ describe("explicit candidate revision", () => {
     h.panelInput("\r"); await flushPromises();
     await store.save("project", { name: "Changed", body: "NEW LIBRARY BODY" }, translation);
     const packet = (index: number) => JSON.parse((h.complete.mock.calls[index] as any[])[1].messages[0].content[0].text);
-    expect(packet(0).editing_instruction).toContain("AUTOMATIC BODY");
+    expect(packet(0).editing_instruction).not.toContain("UNSELECTED BODY");
     expect(packet(0).editing_instruction).toContain(translation.body);
     for (const [instruction, result] of [["再短一点。", "Explain caching briefly."], ["改回中文。", "简述缓存。"], ["保留字面量。", "简述缓存。"]]) {
       h.panelInput("f"); h.panelInput(instruction!);
@@ -930,7 +965,7 @@ describe("explicit candidate revision", () => {
       const sent = packet(index);
       expect(sent.historical_editing_context.initial_instruction).toBe(`Prompt rewriting instructions (manually selected):\n${translation.body}`);
       expect(sent).not.toHaveProperty("editing_instruction");
-      for (const absent of ["AUTOMATIC BODY", "NEW LIBRARY BODY", "Private description"]) expect(JSON.stringify(sent)).not.toContain(absent);
+      for (const absent of ["UNSELECTED BODY", "NEW LIBRARY BODY", "Private description"]) expect(JSON.stringify(sent)).not.toContain(absent);
     }
     expect(packet(1).historical_editing_context).not.toHaveProperty("previous_revision_instruction");
     expect(packet(2).historical_editing_context.previous_revision_instruction).toBe("再短一点。");

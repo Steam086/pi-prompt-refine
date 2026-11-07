@@ -85,12 +85,11 @@ export class RefineHistory {
     delete record.originalInput.projectDiagnostics;
   }
 
-  setDraftPreferences(id: number, selected: readonly SelectedPreference[], instruction: string, exclusions?: string[]): void {
+  setDraftPreferences(id: number, selected: readonly SelectedPreference[], instruction: string): void {
     const record = this.records.find((item) => item.id === id);
     if (record?.status !== "unsent") return;
     record.input.preferences = structuredClone([...selected]);
     record.input.editingInstruction = instruction || undefined;
-    if (exclusions) record.input.automaticPreferenceExclusions = [...exclusions];
     delete record.input.preparedInput;
     delete record.input.projectDiagnostics;
     delete record.input.budget;

@@ -21,10 +21,13 @@ function decode(content: string, scope: PreferenceScope): RevisionPreference[] {
     if (!object(entry) || typeof entry.id !== "string" || !/^[a-zA-Z0-9-]{1,80}$/.test(entry.id) || ids.has(entry.id) ||
       !Number.isSafeInteger(entry.version) || (entry.version as number) < 1 || typeof entry.name !== "string" || typeof entry.body !== "string" ||
       preferenceValidation({ name: entry.name, body: entry.body }) ||
-      entry.metadata !== undefined && metadataValidation(entry.metadata)) throw new Error("Invalid preference entry; original file kept.");
+      entry.metadata !== undefined && metadataValidation(entry.metadata, true)) throw new Error("Invalid preference entry; original file kept.");
     ids.add(entry.id);
+    const metadata = entry.metadata as PreferenceMetadata | undefined;
+    // Read old auto/match fields for compatibility, but never expose or execute them.
+    // Loading does not rewrite the file; the next explicit mutation writes manual metadata.
     return { id: entry.id, version: entry.version as number, scope, name: entry.name, body: entry.body,
-      ...(entry.metadata !== undefined ? { metadata: structuredClone(entry.metadata as PreferenceMetadata) } : {}) };
+      ...(metadata ? { metadata: { description: metadata.description, kind: metadata.kind, activation: "manual" as const } } : {}) };
   });
 }
 
@@ -98,7 +101,8 @@ export class PreferenceStore implements PreferenceRepository {
     const index = entries.findIndex((entry) => entry.id === expected.id);
     const entry = entries[index];
     if (!entry || entry.version !== expected.version || entry.name !== expected.name || entry.body !== expected.body ||
-      JSON.stringify(entry.metadata) !== JSON.stringify(expected.metadata)) {
+      entry.metadata?.kind !== expected.metadata?.kind || entry.metadata?.description !== expected.metadata?.description ||
+      entry.metadata?.activation !== expected.metadata?.activation) {
       throw new Error("Library entry changed or was deleted. Cancel this form, refresh, and edit again; your text is still here.");
     }
     return index;

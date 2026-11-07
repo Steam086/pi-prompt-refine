@@ -5,7 +5,7 @@ import type { HistorySnapshot, RevisionInput } from "./context.js";
 import type { TokenUsage } from "./usage.js";
 import type { ProjectSnapshot } from "./project-context.js";
 import { RefineHistory, type RefineRecord } from "./history.js";
-import { automaticPreferences as matchAutomaticPreferences, composeRevision, preferenceContentKey, preferenceKey, preferenceValidation, uniquePreferences, PREFERENCE_SELECTION_LIMIT, type SelectedPreference } from "./revision-preferences.js";
+import { composeRevision, preferenceKey, preferenceValidation, uniquePreferences, PREFERENCE_SELECTION_LIMIT, type SelectedPreference } from "./revision-preferences.js";
 
 interface RequestProjectContext { cwd: string; snapshot: ProjectSnapshot; revisionSnapshot?: ProjectSnapshot; config?: ProjectContextConfig }
 export type RefinePhase = "idle" | "generating" | "ready" | "error";
@@ -17,8 +17,6 @@ export interface RefineRequestInput {
   editingInstruction?: string;
   /** Frozen selected bodies and identities; never resolved against the library at launch. */
   preferences?: SelectedPreference[];
-  /** Explicitly dismissed automatic entries for this original, never session defaults. */
-  automaticPreferenceExclusions?: string[];
   model: ModelRef;
   thinkingLevel?: ModelThinkingLevel;
   generateTitle?: boolean;
@@ -79,7 +77,6 @@ export interface ControllerState {
 }
 export interface Scheduler { setTimeout(callback: () => void, delayMs: number): unknown; clearTimeout(handle: unknown): void }
 export interface RefineControllerOptions {
-  automaticPreferences?(draft: string): SelectedPreference[];
   complete(request: RefineRequest, signal: AbortSignal): Promise<RefineCompletion>;
   timeoutMs: number;
   maxDraftChars: number;
@@ -327,14 +324,8 @@ export class RefineController {
     return structuredClone({ ...input, roundId: this.round.id, history: snapshot.history, project: snapshot.project,
       systemPrompt: snapshot.systemPrompt, generateTitle: snapshot.generateTitle, branchLeafId: snapshot.branchLeafId });
   }
-  private withAutomaticPreferences(input: RefineRequestInput): RefineRequestInput {
-    if (input.revision || input.contextUnavailable || input.preferences !== undefined || input.editingInstruction !== undefined) return input;
-    const selected = this.options.automaticPreferences?.(input.draft) ?? [];
-    return selected.length ? { ...input, preferences: selected, editingInstruction: composeRevision(selected, "") } : input;
-  }
   /** Capture is a zero-call operation and never changes the applied preview. */
   capture(input: RefineRequestInput): TriggerResult {
-    input = this.withAutomaticPreferences(input);
     const invalid = this.validate(input);
     if (invalid) return invalid;
     this.ensureSession(input.sessionId);
@@ -348,7 +339,6 @@ export class RefineController {
   }
   /** Explicit creation is independent of shortcut deduplication, model selection and submission. */
   createDraft(input: RefineRequestInput): TriggerResult {
-    input = this.withAutomaticPreferences(input);
     if ((input.preferences?.length ?? 0) > PREFERENCE_SELECTION_LIMIT || input.draft.length > this.options.maxDraftChars || (input.editingInstruction?.length ?? 0) > this.options.maxDraftChars) return { kind: "too-long" };
     this.ensureSession(input.sessionId);
     if (!this.journal.canStart()) return { kind: "busy" };
@@ -360,26 +350,8 @@ export class RefineController {
     const record = this.getRecord(id);
     if (!record || record.status !== "unsent" || record.archivedAt !== undefined || record.input.draft !== expected ||
       text.length > this.options.maxDraftChars) return false;
-    const excluded = new Set(record.input.automaticPreferenceExclusions ?? []);
-    const previous = record.input.preferences ?? [];
-    const previousAutomatic = previous.filter((entry) => entry.adoption === "auto");
-    const previousKeys = new Set(previousAutomatic.map(preferenceKey));
-    const automatic = [...matchAutomaticPreferences(previousAutomatic, text),
-      ...(this.options.automaticPreferences?.(text) ?? []).filter((entry) => !previousKeys.has(preferenceKey(entry)))]
-      .filter((entry) => !excluded.has(preferenceKey(entry)) && !excluded.has(preferenceContentKey(entry)));
-    const manual = previous.filter((entry) => entry.adoption !== "auto");
-    const manualKeys = new Set(manual.map(preferenceKey));
-    const seen = new Set(manual.map(preferenceContentKey));
-    const selected = [...automatic.filter((entry) => {
-      const key = preferenceContentKey(entry);
-      if (manualKeys.has(preferenceKey(entry)) || seen.has(key)) return false;
-      seen.add(key); return true;
-    }).map((entry) =>
-      previous.find((old) => old.adoption === "auto" && preferenceKey(old) === preferenceKey(entry)) ?? entry), ...manual];
-    const instruction = composeRevision(selected, "");
-    if (selected.length > PREFERENCE_SELECTION_LIMIT || instruction.length > this.options.maxDraftChars) return false;
+    // Editing an original preserves its explicit selection and frozen instruction verbatim.
     this.journal.editDraft(id, text);
-    if (this.options.automaticPreferences || previous.length) this.journal.setDraftPreferences(id, selected, instruction);
     this.emitState();
     return true;
   }
@@ -390,7 +362,6 @@ export class RefineController {
       record.input.sessionId !== expected.input.sessionId || record.taskId !== expected.taskId ||
       record.archivedAt !== expected.archivedAt || record.input.draft !== expected.input.draft ||
       record.input.editingInstruction !== expected.input.editingInstruction ||
-      JSON.stringify(record.input.automaticPreferenceExclusions) !== JSON.stringify(expected.input.automaticPreferenceExclusions) ||
       JSON.stringify(record.input.preferences) !== JSON.stringify(expected.input.preferences)) {
       return "Original/session changed or already started. Cancel and reopen Preferences.";
     }
@@ -399,15 +370,7 @@ export class RefineController {
     selected = uniquePreferences(selected);
     const instruction = composeRevision(selected, "");
     if (instruction.length > this.options.maxDraftChars) return `Editing requirements exceed ${this.options.maxDraftChars} characters; reduce the selection.`;
-    const selectedKeys = new Set(selected.map(preferenceKey));
-    const excluded = new Set(record.input.automaticPreferenceExclusions ?? []);
-    // Dismissal is about this original, not how the last selection was adopted.
-    // A manually reselected auto-capable entry must not return after another dismissal.
-    for (const entry of record.input.preferences ?? []) if (!selectedKeys.has(preferenceKey(entry))) {
-      excluded.add(preferenceKey(entry)); excluded.add(preferenceContentKey(entry));
-    }
-    for (const entry of selected) { excluded.delete(preferenceKey(entry)); excluded.delete(preferenceContentKey(entry)); }
-    this.journal.setDraftPreferences(record.id, selected, instruction, [...excluded]);
+    this.journal.setDraftPreferences(record.id, selected, instruction);
     this.emitState();
     return undefined;
   }
@@ -440,7 +403,6 @@ export class RefineController {
     return this.launch(recordId, false);
   }
   trigger(input: RefineRequestInput, options: { force?: boolean; revisionToken?: CandidateToken; sameTask?: boolean } = {}): TriggerResult {
-    if (!options.sameTask) input = this.withAutomaticPreferences(input);
     if (this.pendingSend) return { kind: input.revision ? "stale-source" : "busy" };
     const invalid = this.validate(input);
     if (invalid) return invalid;
