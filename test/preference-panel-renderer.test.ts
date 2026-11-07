@@ -58,9 +58,21 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
       const initialRedraws = tui.fullRedraws;
       for (const key of ["\r", "\x1b[6~", "\x1b[5~", "\x1b", "s", "s"]) { input(key); render(); }
       expect(tui.fullRedraws).toBe(initialRedraws);
-      for (const [columns, rows] of [[40, 16], [20, 8], [100, 40]]) {
+      for (const [columns, rows] of [[100, 40], [31, 16], [32, 16], [20, 10], [100, 40]]) {
         Object.assign(terminal, { columns, rows });
         panel.invalidate(); tui.requestRender(); render();
+        const layout = panelLayout(columns!, rows!);
+        const listWidth = columns === 100 ? 41 : layout.innerWidth;
+        const labels = listWidth >= 28 ? [" Global", "Project"] : ["G", "P"];
+        const lines = panel.render(columns!);
+        for (const label of labels) {
+          const source = theme.fg("muted", label);
+          const row = lines.find((line) => line.includes(source))!;
+          expect(row).toBeDefined();
+          expect(visibleWidth(row.slice(0, row.indexOf(source))) + visibleWidth(label)).toBe(layout.inset + listWidth);
+        }
+        const focused = lines.find((line) => stripVTControlCharacters(line).includes("› [x]"))!;
+        expect(focused).toContain(theme.bg("selectedBg", "").split("\x1b[49m")[0]);
       }
       input("n"); input("Saved 中文😀"); input("\x1b[Z"); input("\r");
       for (let i = 0; i < 4; i++) await Promise.resolve();

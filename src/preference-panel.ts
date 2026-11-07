@@ -100,7 +100,9 @@ export class PreferencePanel {
     const matches = searchPreferences(candidates, query);
     // Selected snapshots are audited in composeRevision order, never search rank.
     const matchedKeys = new Set(matches.map(preferenceKey));
-    const entries = this.selectedOnly ? this.working.filter((entry) => matchedKeys.has(preferenceKey(entry))) : matches;
+    const rank = (entry: RevisionPreference) => entry.metadata?.kind === "task" ? 0 : entry.metadata?.kind === "rewrite" ? 1 : 2;
+    const entries = this.selectedOnly ? this.working.filter((entry) => matchedKeys.has(preferenceKey(entry)))
+      : matches.sort((a, b) => rank(a) - rank(b));
     this.entriesCache = { query, version: this.contentVersion, entries };
     return entries;
   }
@@ -375,8 +377,10 @@ export class PreferencePanel {
       this.activate(ACTIONS[this.actionIndex]!.id);
     } else if (this.focus === 1) {
       const max = Math.max(0, this.entries().length - 1);
-      if (key === "up" || key === "pageup") this.index = Math.max(0, this.index - (key === "up" ? 1 : this.viewport));
-      else if (key === "down" || key === "pagedown") this.index = Math.min(max, this.index + (key === "down" ? 1 : this.viewport));
+      if (key === "up") this.index = this.index <= 0 ? max : this.index - 1;
+      else if (key === "down") this.index = this.index >= max ? 0 : this.index + 1;
+      else if (key === "pageup") this.index = Math.max(0, this.index - this.viewport);
+      else if (key === "pagedown") this.index = Math.min(max, this.index + this.viewport);
       else if (key === "home") this.index = 0;
       else if (key === "end") this.index = max;
       else if (key === "space") this.toggle();
@@ -471,9 +475,44 @@ export class PreferencePanel {
       this.viewport = available;
       const split = room && w >= 76;
       const leftWidth = split ? Math.floor(w * 0.43) : w;
-      const top = Math.max(0, this.index - available + 1);
-      const list = entries.slice(top, top + available).map((entry, i) => {
-        const current = top + i === this.index;
+      // 28 columns leave 12 for names even with the 8-column warning prefix,
+      // one gap and the 7-column source. Decide once for the actual list pane.
+      const fullSource = leftWidth >= 28;
+      const sourceWidth = fullSource ? 7 : 1;
+      const sourceGap = leftWidth >= sourceWidth + 2 ? 1 : 0;
+      const contentWidth = leftWidth - sourceWidth - sourceGap;
+      const groupTitle = (entry: RevisionPreference) => entry.metadata?.kind === "task" ? "Task requirements"
+        : entry.metadata?.kind === "rewrite" ? "Prompt rewriting" : "Unclassified";
+      // Keep selection indices entry-based: headings and spaces are never action targets.
+      // Repeat the first visible group's heading when scrolling within a group.
+      type ListRow = number | string;
+      const grouped = !this.selectedOnly;
+      const spaced = available >= 10;
+      const rowsFrom = (start: number): ListRow[] => {
+        const rows: ListRow[] = [];
+        for (let i = start; i < entries.length; i++) {
+          if (grouped && (i === start || groupTitle(entries[i]!) !== groupTitle(entries[i - 1]!))) {
+            const extra = i === start ? 0 : spaced ? 1 : 0;
+            if (rows.length + extra + 2 > available) break;
+            if (extra) rows.push("");
+            rows.push(groupTitle(entries[i]!));
+          }
+          if (rows.length >= available) break;
+          rows.push(i);
+        }
+        return rows;
+      };
+      let top = Math.max(0, this.index - available + 1);
+      let rows = rowsFrom(top);
+      while (top < this.index && !rows.includes(this.index)) rows = rowsFrom(++top);
+      // A single physical row cannot hold both a heading and an entry.
+      // Keep the group explicit; keyboard selection still operates on entries.
+      if (grouped && available === 1 && entries[this.index]) rows = [groupTitle(entries[this.index]!)];
+      this.viewport = Math.max(1, rows.filter((row) => typeof row === "number").length);
+      const list = rows.map((row) => {
+        if (typeof row === "string") return this.theme.fg("text", this.theme.bold(truncateToWidth(row, leftWidth, "…")));
+        const entry = entries[row]!;
+        const current = row === this.index;
         const active = this.focus === 1 && current;
         const local = this.local(entry);
         const source = this.source(entry);
@@ -481,16 +520,32 @@ export class PreferencePanel {
         const changed = local && source && (local.version !== source.version || local.name !== source.name || local.sourceBody !== source.body ||
           JSON.stringify(local.metadata) !== JSON.stringify(source.metadata));
         const warning = unavailable ? "unavailable" : !source ? "deleted" : changed ? "snapshot kept" : "";
-        const prefix = this.theme.fg("muted", `${active ? "›" : current ? "·" : " "} ${local ? "[x]" : "[ ]"} `)
-          + (warning ? this.theme.fg("warning", "! ") : "");
+        const cursor = active ? "›" : current ? "·" : " ";
+        const checkbox = local ? "[x]" : "[ ]";
+        let prefix: string;
+        if (contentWidth >= (warning ? 8 : 6) + 1) {
+          prefix = this.theme.fg("muted", `${cursor} ${checkbox} `)
+            + (warning ? this.theme.fg("warning", "! ") : "");
+        } else if (contentWidth >= (warning ? 5 : 4) + 1) {
+          prefix = this.theme.fg("muted", `${cursor}${checkbox}`)
+            + (warning ? this.theme.fg("warning", "!") : "");
+        } else {
+          // Drop checkbox/spacing first, then cursor; keep a warning whenever
+          // a column remains beside the source, even if no name can fit.
+          prefix = contentWidth >= (warning ? 3 : 2) ? this.theme.fg("muted", cursor) : "";
+          if (warning && contentWidth > 0) prefix += this.theme.fg("warning", "!");
+        }
         const name = clean(entry.name).replace(/\n/g, " ");
-        const metadata = ` · ${entry.scope === "project" ? "P" : "G"}${warning ? ` · ${warning}` : ""}`;
-        const room = Math.max(0, leftWidth - visibleWidth(prefix));
-        const showMetadata = visibleWidth(name) + visibleWidth(metadata) <= room;
-        const label = truncateToWidth(name, room, "…");
-        const cell = truncateToWidth(prefix + this.theme.fg("text", active ? this.theme.bold(label) : label)
-          + (showMetadata ? this.theme.fg("muted", metadata) : ""), leftWidth, "…");
-        return active ? this.theme.bg("selectedBg", cell + " ".repeat(Math.max(0, leftWidth - visibleWidth(cell)))) : cell;
+        const status = warning ? ` · ${warning}` : "";
+        const nameWidth = Math.max(0, contentWidth - visibleWidth(prefix));
+        const showStatus = visibleWidth(name + status) <= nameWidth;
+        const label = truncateToWidth(name, nameWidth, "…");
+        const content = prefix + this.theme.fg("text", active ? this.theme.bold(label) : label)
+          + (showStatus ? this.theme.fg("muted", status) : "");
+        const sourceLabel = fullSource ? entry.scope === "project" ? "Project" : "Global" : entry.scope === "project" ? "P" : "G";
+        const cell = content + " ".repeat(Math.max(0, contentWidth - visibleWidth(content)) + sourceGap)
+          + this.theme.fg("muted", sourceLabel.padStart(sourceWidth));
+        return active ? this.theme.bg("selectedBg", cell) : cell;
       });
       if (!entries.length) list.push(...wrap(status, leftWidth).map((line) => this.theme.fg(errors.length ? "error" : "muted", line)));
       if (!room) {

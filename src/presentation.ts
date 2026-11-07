@@ -27,7 +27,7 @@ export function resultHeading(options: SummaryOptions, theme: PresentationTheme,
       : state.phase === "idle" ? "Refine"
         : state.pendingSend ? `◌ Send pending · ${time}` : `✓ Done · ${time}`;
   const color = state.phase === "error" ? "warning" : state.phase === "ready" && !state.pendingSend ? "success" : "accent";
-  const warning = state.budget && state.budget.status !== "ok" ? theme.fg("warning", " ⚠") : "";
+  const warning = state.budget && (state.budget.status !== "ok" || state.budget.message) ? theme.fg("warning", " ⚠") : "";
   const status = theme.fg(color, theme.bold(label)) + warning;
   return includeBrand ? `${status} · ${theme.fg("muted", "Prompt Refine")}` : status;
 }
