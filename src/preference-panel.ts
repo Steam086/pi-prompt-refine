@@ -4,6 +4,7 @@ import { panelFrame, panelLayout } from "./panel-layout.js";
 import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
 import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
+import { selectionWindow } from "./selection-window.js";
 import { composeRevision, preferenceContentKey, preferenceKey, preferenceValidation, searchPreferences, selectPreference, PREFERENCE_SELECTION_LIMIT,
   type PreferenceLibrary, type PreferenceMetadata, type PreferenceRepository, type PreferenceScope, type PreferenceValue, type RevisionPreference, type SelectedPreference } from "./revision-preferences.js";
 
@@ -44,8 +45,10 @@ export class PreferencePanel {
   private focus = 1; // Search, library, actions: three regions, never one stop per action.
   private actionIndex = 0;
   private index = 0;
+  private top = 0;
+  private navigationDirection = 1;
   private selectedOnly = false;
-  private allView: { index: number; key?: string } = { index: 0 };
+  private allView: { index: number; top: number; direction: number; key?: string } = { index: 0, top: 0, direction: 1 };
   private contentVersion = 0;
   private entriesCache?: { query: string; version: number; entries: RevisionPreference[] };
   private descriptionCache?: { entry: RevisionPreference; version: number; document: PreferenceDocument };
@@ -110,17 +113,21 @@ export class PreferencePanel {
   private toggleView(): void {
     if (!this.selectedOnly) {
       const entry = this.highlighted();
-      this.allView = { index: this.index, key: entry && preferenceKey(entry) };
+      this.allView = { index: this.index, top: this.top, direction: this.navigationDirection, key: entry && preferenceKey(entry) };
+      this.navigationDirection = 1;
       this.selectedOnly = true;
       // Each audit starts unfiltered, including snapshots hidden by the all-view query.
       this.selectedSearch = new Input({ prompt: "Search: " });
       this.index = 0;
+      this.top = 0;
       this.contentVersion++;
     } else {
       this.selectedOnly = false;
       this.contentVersion++;
       const index = this.entries().findIndex((entry) => preferenceKey(entry) === this.allView.key);
       this.index = index >= 0 ? index : Math.min(this.allView.index, Math.max(0, this.entries().length - 1));
+      this.top = this.allView.top;
+      this.navigationDirection = this.allView.direction;
     }
   }
   private local(entry?: RevisionPreference): SelectedPreference | undefined {
@@ -268,7 +275,9 @@ export class PreferencePanel {
         const reset = this.selectedOnly || !!this.search.getValue().trim();
         this.selectedOnly = false;
         this.allSearch = new Input({ prompt: "Search: " });
-        this.allView = { index: 0, key: preferenceKey(saved) };
+        this.allView = { index: 0, top: 0, direction: 1, key: preferenceKey(saved) };
+        this.top = 0;
+        this.navigationDirection = 1;
         this.focus = 1;
         // The write result is authoritative even if the subsequent read fails.
         this.library.entries = this.library.entries.filter((entry) => preferenceKey(entry) !== preferenceKey(saved)).concat(saved);
@@ -361,7 +370,7 @@ export class PreferencePanel {
     else if (key === "tab" || key === "shift+tab") this.focus = (this.focus + (key === "tab" ? 1 : 2)) % 3;
     else if (this.focus === 0) {
       if (enter || key === "down") this.focus = 1;
-      else { this.search.handleInput(data); this.index = 0; }
+      else { this.search.handleInput(data); this.index = 0; this.top = 0; this.navigationDirection = 1; }
     } else if (key === "s") this.toggleView();
     else if (key === "/") this.focus = 0;
     else if (ACTIONS.some((action) => action.key === key)) {
@@ -369,6 +378,8 @@ export class PreferencePanel {
       this.activate(ACTIONS[this.actionIndex]!.id);
     } else if (this.focus === 1) {
       const max = Math.max(0, this.entries().length - 1);
+      if (key === "up" || key === "pageup" || key === "home") this.navigationDirection = -1;
+      else if (key === "down" || key === "pagedown" || key === "end") this.navigationDirection = 1;
       if (key === "up") this.index = this.index <= 0 ? max : this.index - 1;
       else if (key === "down") this.index = this.index >= max ? 0 : this.index + 1;
       else if (key === "pageup") this.index = Math.max(0, this.index - this.viewport);
@@ -474,31 +485,10 @@ export class PreferencePanel {
       const contentWidth = leftWidth - sourceWidth - sourceGap;
       const groupTitle = (entry: RevisionPreference) => entry.metadata?.kind === "task" ? "Task requirements"
         : entry.metadata?.kind === "rewrite" ? "Prompt rewriting" : "Unclassified";
-      // Keep selection indices entry-based: headings and spaces are never action targets.
-      // Repeat the first visible group's heading when scrolling within a group.
-      type ListRow = number | string;
-      const grouped = !this.selectedOnly;
-      const spaced = available >= 10;
-      const rowsFrom = (start: number): ListRow[] => {
-        const rows: ListRow[] = [];
-        for (let i = start; i < entries.length; i++) {
-          if (grouped && (i === start || groupTitle(entries[i]!) !== groupTitle(entries[i - 1]!))) {
-            const extra = i === start ? 0 : spaced ? 1 : 0;
-            if (rows.length + extra + 2 > available) break;
-            if (extra) rows.push("");
-            rows.push(groupTitle(entries[i]!));
-          }
-          if (rows.length >= available) break;
-          rows.push(i);
-        }
-        return rows;
-      };
-      let top = Math.max(0, this.index - available + 1);
-      let rows = rowsFrom(top);
-      while (top < this.index && !rows.includes(this.index)) rows = rowsFrom(++top);
-      // A single physical row cannot hold both a heading and an entry.
-      // Keep the group explicit; keyboard selection still operates on entries.
-      if (grouped && available === 1 && entries[this.index]) rows = [groupTitle(entries[this.index]!)];
+      const window = selectionWindow(entries.length, this.index, available, this.top,
+        this.selectedOnly ? undefined : (index) => groupTitle(entries[index]!), available >= 10 ? 1 : 0, this.navigationDirection);
+      this.top = window.start;
+      const rows = window.rows;
       this.viewport = Math.max(1, rows.filter((row) => typeof row === "number").length);
       const list = rows.map((row) => {
         if (typeof row === "string") return this.theme.fg("text", this.theme.bold(truncateToWidth(row, leftWidth, "…")));

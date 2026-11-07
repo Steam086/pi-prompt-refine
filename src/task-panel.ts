@@ -6,6 +6,7 @@ import type { HistoryStorageStatus } from "./history-store.js";
 import { panelFrame, panelLayout, workspaceTabs } from "./panel-layout.js";
 import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
 import { sanitizeTerminalText } from "./presentation.js";
+import { selectionWindow } from "./selection-window.js";
 import type { InlinePreferences } from "./inline-preferences.js";
 import { cacheHitRate, formatReferenceCost, formatRunUsage, totalInputTokens, truncatedOutputHint } from "./usage.js";
 
@@ -49,6 +50,7 @@ export class TaskPanel {
   private original = false;
   private viewport = 1;
   private top = 0;
+  private navigationDirection = 1;
   private notice = "";
   private noticeColor: "muted" | "warning" | "error" = "muted";
   private cache = new Map<string, string[]>();
@@ -72,7 +74,8 @@ export class TaskPanel {
       this.theme, this.rows, this.keys, this.usage, structuredClone(this.position));
     panel.referenceOnly = referenceOnly;
     panel.inspecting = this.inspecting; panel.compareId = this.compareId; panel.reading = this.reading;
-    panel.original = this.original; panel.top = this.top; panel.notice = this.notice; panel.noticeColor = this.noticeColor;
+    panel.original = this.original; panel.top = this.top; panel.navigationDirection = this.navigationDirection;
+    panel.notice = this.notice; panel.noticeColor = this.noticeColor;
     return panel;
   }
   private entries(): Row[] {
@@ -291,6 +294,7 @@ export class TaskPanel {
         } else this.scroll(row, delta);
       }
       else {
+        this.navigationDirection = Math.sign(delta);
         const rows = this.entries();
         const index = rows.findIndex((item) => this.isSelected(item));
         this.select(rows[Math.max(0, Math.min(rows.length - 1, index + delta))]);
@@ -585,8 +589,7 @@ export class TaskPanel {
     const leftWidth = split ? Math.min(36, Math.floor(layout.innerWidth / 3)) : layout.innerWidth;
     const rightWidth = split ? layout.innerWidth - leftWidth - 3 : layout.innerWidth;
     const selectedIndex = Math.max(0, rows.findIndex((row) => this.isSelected(row)));
-    this.top = Math.max(0, Math.min(this.top, selectedIndex, rows.length - height));
-    if (selectedIndex >= this.top + height) this.top = selectedIndex - height + 1;
+    this.top = selectionWindow(rows.length, selectedIndex, height, this.top, undefined, 0, this.navigationDirection).start;
     const list = rows.slice(this.top, this.top + height).map((row) => {
       const { record } = row;
       const old = record.archivedAt !== undefined;

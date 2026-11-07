@@ -79,6 +79,15 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
           expect(active).toContain(theme.bg("selectedBg", "").split("\x1b[49m")[0]);
         }
         input("\x1b[H"); render();
+        if (rows! >= 14 && columns! >= 45) {
+          for (let i = 0; i < entries.length; i++) {
+            const frame = render();
+            expect(frame).toContain(`› [${i < 2 ? "x" : " "}] Item ${String(i).padStart(2, "0")}`);
+            if (i + 1 < entries.length) expect(frame).toContain(`Item ${String(i + 1).padStart(2, "0")}`);
+            input("\x1b[B");
+          }
+          input("\x1b[H"); render();
+        }
       }
       expect(panel.render(100).join("\n")).toContain(theme.fg("text", theme.bold(sanitizeTerminalText(entries[0]!.name))));
       // Search owns ordinary action keys, including p, and arrows never escape into page navigation.

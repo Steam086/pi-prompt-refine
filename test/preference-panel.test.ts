@@ -108,7 +108,7 @@ describe("Library purpose groups", () => {
   it.each(["dark", "light"])("keeps group context and focused entries visible through scroll and resize (%s)", async (themeName) => {
     const entries = Array.from({ length: 24 }, (_, i) => ({ ...(i < 12 ? task : rewrite), id: `entry-${i}`, name: `Item ${String(i).padStart(2, "0")} 中文😀` }));
     const f = setup([], "", themeName, entries); await loaded(f.panel);
-    for (const [width, height] of [[100, 16], [45, 14], [100, 40], [45, 14]]) {
+    for (const [width, height] of [[100, 16], [45, 14], [100, 20], [100, 40], [45, 14]]) {
       f.terminal.rows = height!;
       f.panel.handleInput("\x1b[H");
       for (let i = 0; i < entries.length; i++) {
@@ -117,9 +117,20 @@ describe("Library purpose groups", () => {
         const left = lines.map((line) => stripVTControlCharacters(line).split("│")[0]!).join("\n");
         expect(left).toContain(i < 12 ? "Task requirements" : "Prompt rewriting");
         expect(left).toContain(entries[i]!.name);
+        if (i < entries.length - 1 && (i !== 11 || height! >= 20)) expect(left).toContain(entries[i + 1]!.name);
+        expect(lines.join("\n")).toContain(f.theme.fg("text", f.theme.bold(entries[i]!.name)));
+        expect(f.panel.render(width!)).toEqual(lines);
         if (i < entries.length - 1) f.panel.handleInput(down);
       }
+      for (let i = entries.length - 2; i >= 0; i--) {
+        f.panel.handleInput("\x1b[A");
+        const left = text(f.panel, width!).split("\n").map((line) => line.split("│")[0]).join("\n");
+        expect(left).toContain(entries[i]!.name);
+        if (i > 0 && (i !== 12 || height! >= 20)) expect(left).toContain(entries[i - 1]!.name);
+      }
     }
+    expect(f.close).not.toHaveBeenCalled();
+    expect(f.repo.save).not.toHaveBeenCalled();
   });
 });
 
