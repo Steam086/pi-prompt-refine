@@ -166,7 +166,7 @@ describe("Preferences management without selection", () => {
     const f = setup([], "", "dark", [], "manage"); await loaded(f.panel);
     expect(text(f.panel)).toContain("Library is empty");
     f.panel.handleInput("n"); f.panel.handleInput("First 中文😀"); f.panel.handleInput(tab); f.panel.handleInput("Keep literal commands.");
-    for (let i = 0; i < 5; i++) f.panel.handleInput(tab);
+    for (let i = 0; i < 4; i++) f.panel.handleInput(tab);
     f.panel.handleInput(enter); await loaded(f.panel);
     expect(f.repo.save).toHaveBeenCalledOnce();
     f.panel.handleInput(" ");
@@ -189,16 +189,17 @@ describe("three-action preference library", () => {
     expect(f.repo.save).toHaveBeenCalledWith("global", { name: entry.name, body: entry.body, metadata: entry.metadata }, entry);
   });
 
-  it.each(["dark", "light"])("edits classification/description/adoption without submitting and bounds each field (%s)", async (themeName) => {
+  it.each(["dark", "light"])("edits classification/description with manual-only selection and bounds each field (%s)", async (themeName) => {
     const f = setup([], "Preserve existing structure.", themeName); await loaded(f.panel);
     f.panel.handleInput("n"); f.panel.handleInput("Structure");
     f.panel.handleInput(tab); f.panel.handleInput(tab); f.panel.handleInput(tab);
     f.panel.handleInput(enter); // Task -> Rewrite.
     expect(text(f.panel)).toContain("Type: Prompt rewriting");
     f.panel.handleInput(tab); f.panel.handleInput("并列问题 😀");
-    f.panel.handleInput(tab); f.panel.handleInput(enter); // Manual -> parallel.
-    expect(text(f.panel)).toContain("Adoption: Auto · parallel");
-    for (let field = 0; field < 7; field++) {
+    f.panel.handleInput(tab); // Description -> Save, with no adoption control.
+    expect(text(f.panel)).toContain("Focus: Save");
+    expect(text(f.panel)).not.toContain("Adoption:");
+    for (let field = 0; field < 6; field++) {
       for (const rows of [5, 8, 16, 40]) for (const width of [1, 12, 40, 100]) {
         f.terminal.rows = rows;
         const lines = f.panel.render(width);
@@ -208,9 +209,9 @@ describe("three-action preference library", () => {
       f.panel.handleInput(tab);
     }
     f.terminal.rows = 40;
-    f.panel.handleInput(tab); f.panel.handleInput(enter); await loaded(f.panel);
+    f.panel.handleInput(enter); await loaded(f.panel);
     expect(f.repo.save).toHaveBeenCalledWith("project", { name: "Structure", body: "Preserve existing structure.",
-      metadata: { kind: "rewrite", description: "并列问题 😀", activation: "auto", match: "parallel" } }, undefined);
+      metadata: { kind: "rewrite", description: "并列问题 😀", activation: "manual" } }, undefined);
     expect(f.close).not.toHaveBeenCalled();
     expect(text(f.panel)).toContain("0 selected");
   });
@@ -371,8 +372,8 @@ const highlightedRow = (panel: PreferencePanel, width = 70) => listRows(panel, w
 describe("selected-only preference audit", () => {
   it.each(["dark", "light"])("labels retained snapshot and actual updated source separately, snapshot first (%s)", async (themeName) => {
     const original: RevisionPreference = { ...a, name: "Retained name", body: "RETAINED_BODY", metadata: {
-      kind: "rewrite", activation: "auto", match: "always", description: "Retained description" } };
-    const selected = { ...selectPreference(original), adoption: "auto" as const };
+      kind: "rewrite", activation: "manual", description: "Retained description" } };
+    const selected = selectPreference(original);
     const current: RevisionPreference = { ...a, version: 2, name: "Current name", body: "CURRENT_BODY", metadata: {
       kind: "task", activation: "manual", description: "Current description" } };
     const f = setup([selected], "", themeName, [current]); await loaded(f.panel);
@@ -388,7 +389,7 @@ describe("selected-only preference audit", () => {
     const output = text(f.panel);
     const [snapshot, source] = output.split("Current library entry");
     for (const value of ["Selected snapshot", original.name, original.body, original.metadata!.description,
-      "Prompt rewriting · auto · always", "Automatically selected · always"]) expect(snapshot).toContain(value);
+      "Prompt rewriting · manual", "Manually selected"]) expect(snapshot).toContain(value);
     for (const value of [current.name, current.body, current.metadata!.description, "Task requirements · manual"]) {
       expect(source).toContain(value);
       expect(snapshot).not.toContain(value);
@@ -472,7 +473,7 @@ describe("selected-only preference audit", () => {
 
   it("audits snapshots in composition order regardless of all-view search or library rank", async () => {
     const deleted = { ...selectPreference(a), id: "deleted", name: "Gone", body: "Archived requirement", sourceBody: "Archived requirement",
-      adoption: "auto" as const, metadata: { kind: "rewrite" as const, description: "Old adoption rule", activation: "auto" as const, match: "always" as const } };
+      metadata: { kind: "rewrite" as const, description: "Retained requirements", activation: "manual" as const } };
     const selected = [selectPreference(b), selectPreference(a), deleted];
     const f = setup(selected, "Extra", "dark", [{ ...a, name: "Renamed", body: "Changed source", version: 2 }, b]);
     await loaded(f.panel);
@@ -489,7 +490,7 @@ describe("selected-only preference audit", () => {
     expect(text(f.panel)).toContain(a.body);
     f.panel.handleInput(esc); f.panel.handleInput(down); f.panel.handleInput(enter);
     expect(text(f.panel)).toContain("Source deleted");
-    expect(text(f.panel)).toContain("Automatically selected · always");
+    expect(text(f.panel)).toContain("Manually selected");
     f.panel.handleInput(esc);
     search(f.panel, "keep");
     // Search would rank by name in All; Selected must keep the original sequence.
@@ -720,8 +721,8 @@ describe("preference rendering and responsiveness", () => {
 
   it.each(["dark", "light"])("keeps concise names, muted scope and semantic snapshot warnings styled through audit/resize (%s)", async (themeName) => {
     const long = { ...a, name: "长名称 😀\u001b[2J ".repeat(10), id: "wide", metadata: {
-      kind: "rewrite" as const, activation: "auto" as const, match: "always" as const, description: "Detailed provenance 中文" } };
-    const selected = [{ ...selectPreference(long), adoption: "auto" as const }, selectPreference(b)];
+      kind: "rewrite" as const, activation: "manual" as const, description: "Detailed provenance 中文" } };
+    const selected = [selectPreference(long), selectPreference(b)];
     const f = setup(selected, "", themeName, [{ ...long, metadata: { ...long.metadata, description: "Changed metadata only" } }, b]);
     await loaded(f.panel);
     vi.spyOn(f.theme, "bold").mockImplementation((value) => `\x1b[1m${value}\x1b[22m`);
@@ -739,7 +740,7 @@ describe("preference rendering and responsiveness", () => {
     expect(warning).not.toContain("\u001b[2J");
     f.panel.handleInput("\x1b[H"); f.panel.handleInput(enter);
     expect(text(f.panel)).toContain("Library changed; snapshot kept");
-    expect(text(f.panel)).toContain("Automatically selected · always");
+    expect(text(f.panel)).toContain("Manually selected");
     f.panel.handleInput(esc);
     for (const [width, rows] of [[100, 40], [40, 16], [20, 8], [12, 5], [80, 24], [70, 40]]) {
       f.terminal.rows = rows!;
@@ -777,7 +778,6 @@ describe("preference rendering and responsiveness", () => {
     f.panel.handleInput(tab); check(["Enter", "Change scope"]);
     f.panel.handleInput(tab); check(["Enter", "Change type"]);
     f.panel.handleInput(tab); check(["Enter", "Next field"]);
-    f.panel.handleInput(tab); check(["Enter", "Change adoption"]);
     f.panel.handleInput(tab); check(["Enter", "Save to library"]);
     f.panel.handleInput(esc); check(["y", "Discard"], ["n / Esc", "Keep editing"]);
     f.panel.handleInput("y"); f.panel.handleInput("d"); check(["y", "Delete"], ["n / Esc", "Cancel"]);

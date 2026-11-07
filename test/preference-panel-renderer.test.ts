@@ -74,11 +74,26 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
         const focused = lines.find((line) => stripVTControlCharacters(line).includes("› [x]"))!;
         expect(focused).toContain(theme.bg("selectedBg", "").split("\x1b[49m")[0]);
       }
-      input("n"); input("Saved 中文😀"); input("\x1b[Z"); input("\r");
+      input("n"); input("Saved 中文😀");
+      for (const field of ["Name", "Instruction", "Scope", "Type", "Description", "Save"]) {
+        Object.assign(terminal, { columns: 100, rows: 40 }); panel.invalidate();
+        expect(render()).toContain(`Focus: ${field}`);
+        expect(render()).not.toContain("Adoption:");
+        if (field === "Save") expect(panel.render(100).join("\n")).toContain(theme.fg("muted", "Save to library"));
+        for (const [columns, rows] of [[40, 16], [20, 8], [100, 40]]) {
+          Object.assign(terminal, { columns, rows }); panel.invalidate(); render();
+        }
+        if (field !== "Save") input("\t");
+      }
+      expect(close).not.toHaveBeenCalled();
+      input("\r");
       for (let i = 0; i < 4; i++) await Promise.resolve();
       expect(render()).toContain("Filters reset to All.");
       expect(render()).toContain("Focus: Library");
       expect(render()).toContain("› [ ] Saved 中文😀");
+      expect(entries.find((entry) => entry.id === "returned-identity")?.metadata).toEqual({
+        kind: "task", description: "Saved 中文😀", activation: "manual",
+      });
       input("\r"); expect(render()).toContain("project · returned-identity");
       input("\x1b"); input("\x1b[13;3u");
       expect(close).toHaveBeenCalledWith([selectPreference(second), selectPreference(first)]);

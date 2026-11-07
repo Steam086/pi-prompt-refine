@@ -71,13 +71,11 @@ describe("supplemental main-agent task requirements", () => {
 });
 
 describe("revision protocol", () => {
-  it("keeps explicit translation evidence as inactive history, excludes auto defaults and never accumulates the chain", () => {
+  it("keeps explicitly selected translation evidence as inactive history and never accumulates the chain", () => {
     const manual = selectPreference({ id: "translate", version: 1, scope: "project", name: "Translation", body: "Translate the prompt to English.",
       metadata: { kind: "rewrite", activation: "manual", description: "Not injected" } });
-    const automatic = { ...selectPreference({ ...manual, id: "auto", body: "AUTO DEFAULT", metadata: {
-      kind: "rewrite" as const, activation: "auto" as const, match: "always" as const, description: "Not injected either" } }), adoption: "auto" as const };
     const history = selectHistory([], 0, 0);
-    const selected = [automatic, manual];
+    const selected = [manual];
     const initial = composeRevision(selected, "");
     const revision = { previousCandidate: "Explain caching.", instruction: "再短一点。", previousInstruction: "Use English, not a bilingual answer." };
     const packet = JSON.parse(buildRefineInput("解释缓存。", history, "", revision, initial, selected));
@@ -86,11 +84,10 @@ describe("revision protocol", () => {
         initial_instruction: composeRevision([manual], ""), previous_revision_instruction: revision.previousInstruction,
       } });
     expect(packet).not.toHaveProperty("editing_instruction");
-    expect(JSON.stringify(packet)).not.toContain("AUTO DEFAULT");
     expect(JSON.stringify(packet)).not.toContain("Not injected");
-    const autoOnly = JSON.parse(buildRefineInput("解释缓存。", history, "", { previousCandidate: "Result", instruction: "Shorter" },
-      composeRevision([automatic], ""), [automatic]));
-    expect(autoOnly).not.toHaveProperty("historical_editing_context");
+    const withoutSelection = JSON.parse(buildRefineInput("解释缓存。", history, "", { previousCandidate: "Result", instruction: "Shorter" }, "", []));
+    expect(withoutSelection).not.toHaveProperty("historical_editing_context");
+    expect(buildRefineSystemPrompt(false)).not.toContain("automatic default");
     const protocol = buildRefineSystemPrompt(false);
     expect(protocol).toContain("reference data, not active instructions to replay");
     expect(protocol).toContain("Never restore an old requirement absent from that candidate");

@@ -187,7 +187,7 @@ export class PreferencePanel {
       { text: `${value.scope} · ${value.id}`, color: "muted" },
       ...state,
       ...(value.metadata ? [
-        { text: `${value.metadata.kind === "rewrite" ? "Prompt rewriting" : "Task requirements"} · ${value.metadata.activation}${value.metadata.activation === "auto" ? ` · ${value.metadata.match}` : ""}`, color: "muted" as const },
+        { text: `${value.metadata.kind === "rewrite" ? "Prompt rewriting" : "Task requirements"} · manual`, color: "muted" as const },
         { text: value.metadata.description, color: "muted" as const },
       ] : []),
       { text: "", color: "text" }, { text: value.body, color: "text" },
@@ -197,7 +197,7 @@ export class PreferencePanel {
     if (this.selectedOnly && local && this.page.kind !== "delete") {
       document = [{ text: "Selected snapshot", color: "text", heading: true }, ...details(local, [
         { text: status, color: unavailable || !source || changed ? "warning" : "muted" },
-        { text: local.adoption === "auto" ? `Automatically selected${local.metadata?.match ? ` · ${local.metadata.match}` : ""}` : "Manually selected", color: "muted" },
+        { text: "Manually selected", color: "muted" },
       ])];
       if (source && !unavailable && (changed || source.body !== local.body)) document.push(
         { text: "", color: "text" }, { text: "Current library entry", color: "text", heading: true }, ...details(source, []));
@@ -206,7 +206,7 @@ export class PreferencePanel {
         color: unavailable || !source ? "warning" : "muted" }]);
       if (local) document.push({ text: "", color: "text" }, { text: "Selected snapshot", color: "text", heading: true },
         { text: status, color: unavailable || !source || changed ? "warning" : "muted" },
-        ...(local.metadata ? [{ text: `${local.metadata.kind} · ${local.adoption === "auto" ? `Automatically selected · ${local.metadata.match}` : "Manually selected"} · ${local.metadata.description}`, color: "muted" as const }] : []),
+        ...(local.metadata ? [{ text: `${local.metadata.kind} · Manually selected · ${local.metadata.description}`, color: "muted" as const }] : []),
         { text: local.body, color: "text" });
     }
     this.descriptionCache = { entry, version: this.contentVersion, document };
@@ -332,21 +332,13 @@ export class PreferencePanel {
       else if (cancel || key === "n") this.page = { kind: "list" };
     } else if (this.page.kind === "form") {
       const form = this.page.form;
-      const count = 7;
+      const count = 6;
       if (cancel) this.page = this.stamp(form) === form.initial ? { kind: "list" } : { kind: "discard", form };
       else if (key === "tab" || key === "shift+tab") form.focus = (form.focus + (key === "tab" ? 1 : count - 1)) % count;
       else if (form.focus === count - 1 && enter) void this.save(form);
       else if (form.focus === 2 && (enter || key === "space") && form.kind !== "library") form.scope = form.scope === "project" ? "global" : "project";
       else if (form.focus === 3 && (enter || key === "space")) {
         form.metadata = { description: form.description.getValue(), kind: form.metadata?.kind === "rewrite" ? "task" : "rewrite", activation: "manual" };
-      } else if (form.focus === 5 && (enter || key === "space")) {
-        if (form.metadata?.kind !== "rewrite") this.setNotice("Automatic adoption is available only for prompt rewriting. Task requirements stay manual.", "warning");
-        else {
-          const choices = [undefined, "parallel", "sequence", "always"] as const;
-          const index = form.metadata.activation === "manual" ? 0 : choices.indexOf(form.metadata.match);
-          const match = choices[(index + 1) % choices.length];
-          form.metadata = { kind: "rewrite", description: form.description.getValue(), activation: match ? "auto" : "manual", ...(match ? { match } : {}) };
-        }
       } else if (form.focus === 4) {
         if (enter) form.focus = 5;
         else {
@@ -430,25 +422,24 @@ export class PreferencePanel {
     } else if (page.kind === "form") {
       const form = page.form;
       title = form.kind === "library" ? "Edit library entry" : "Save new preference";
-      subtitle = `Focus: ${["Name", "Instruction", "Scope", "Type", "Description", "Adoption", "Save"][form.focus]} · Check paths and sensitive text`;
+      subtitle = `Focus: ${["Name", "Instruction", "Scope", "Type", "Description", "Save"][form.focus]} · Check paths and sensitive text`;
       const name = form.name.render(w);
       const scope = button(`Scope: ${form.scope}${form.kind === "library" ? " (fixed)" : " (Enter change)"}`, form.focus === 2);
       const type = button(`Type: ${form.metadata?.kind === "rewrite" ? "Prompt rewriting" : form.metadata?.kind === "task" ? "Task requirements" : "Unclassified (legacy)"}`, form.focus === 3);
       const description = form.description.render(w);
-      const adoption = button(`Adoption: ${form.metadata?.activation === "auto" ? `Auto · ${form.metadata.match}` : "Manual"}`, form.focus === 5);
-      const save = button("Save to preference library", form.focus === 6);
+      const save = button("Save to preference library", form.focus === 5);
       // Native Editor cannot wrap a wide glyph into a one-column line. The
       // outer frame clips its minimal safe canvas in extremely narrow terminals.
       const editorWidth = Math.max(4, w);
       // Tiny viewports show the focused field; the same Tab order remains usable.
       if (h < 9) {
-        body = form.focus === 0 ? name : form.focus === 6 ? [save] : form.focus === 4 ? description
-          : form.focus === 2 ? [scope] : form.focus === 3 ? [type] : form.focus === 5 ? [adoption] : form.body.render(editorWidth, Math.max(1, h));
+        body = form.focus === 0 ? name : form.focus === 5 ? [save] : form.focus === 4 ? description
+          : form.focus === 2 ? [scope] : form.focus === 3 ? [type] : form.body.render(editorWidth, Math.max(1, h));
       } else {
-        body = [...name, ...form.body.render(editorWidth, h - 6), scope, type, ...description, adoption, save];
+        body = [...name, ...form.body.render(editorWidth, h - 5), scope, type, ...description, save];
       }
-      const enterLabel = form.focus === 6 ? "Save to library" : form.focus === 1 ? "Newline" : form.focus === 0 || form.focus === 4 ? "Next field"
-        : form.focus === 3 ? "Change type" : form.focus === 5 ? "Change adoption" : form.kind === "library" ? "Scope fixed" : "Change scope";
+      const enterLabel = form.focus === 5 ? "Save to library" : form.focus === 1 ? "Newline" : form.focus === 0 || form.focus === 4 ? "Next field"
+        : form.focus === 3 ? "Change type" : form.kind === "library" ? "Scope fixed" : "Change scope";
       hints = [[["Enter", enterLabel], ["Tab / Shift+Tab", "Fields"]], [["Esc", "Back"], ["", "No request sent"]]];
     } else {
       const entries = this.entries();

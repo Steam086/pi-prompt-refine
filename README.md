@@ -20,6 +20,8 @@ Pi Prompt Refine 是 Pi Coding Agent 的提示词改写扩展。它结合当前�
 | 复用编辑要求 | Unsent 原稿按 `p`（或 Alt+P）选择 Preferences，Space 勾选、Alt+Enter 带回后仍需 Enter 才首次 refine；Revise 中 Alt+P 或 Tab → Preferences，带回后 Ctrl+S 修订。原始任务不变，要求独立传递 |
 | 切换模型 | 按 `m` 选模型，Enter 重新优化原稿 |
 
+所有 Preferences 均需用户手动选择；创建或编辑草稿不会根据关键词自动勾选，旧库自动项也按手动项处理。
+
 任务要求类 Preferences 是对原任务的**补充，不是替代任务**：输入时与原稿分开传递；协议要求输出时将适用且兼容的回答／行为要求融入完整 prompt 正文，保留原任务、适用的明确约束、条件和授权边界，而非只返回补充要求。仅选择偏好不覆盖原稿明确约束，也不增加执行、工具或委派权限；当前用户明确要求的修改（如翻译 prompt 或缩小任务范围）仍可生效。
 
 Preferences 中，列表／操作栏按 `s` 检查 Selected only，按实际组合顺序显示所有已选快照，再按 `s` 恢复 All 的搜索和浏览位置。新条目保存后回到 Library 并定位，不自动选中；必要时明确提示重置过滤。搜索支持名称／描述／正文的多词 AND 匹配，详见 [Preferences 选择与保存](docs/preference-selection.md)。
