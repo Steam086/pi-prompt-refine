@@ -1,7 +1,7 @@
 import { stripVTControlCharacters } from "node:util";
 import { performance } from "node:perf_hooks";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CURSOR_MARKER, KeybindingsManager, TUI_KEYBINDINGS, visibleWidth, wrapTextWithAnsi, type KeyId, type TUI } from "@earendil-works/pi-tui";
+import { CURSOR_MARKER, KeybindingsManager, TUI_KEYBINDINGS, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeyId, type TUI } from "@earendil-works/pi-tui";
 import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { PreferencePanel } from "../src/preference-panel.js";
 import { RefineWorkspace } from "../src/workspace.js";
@@ -51,6 +51,77 @@ function save(panel: { handleInput(data: string): unknown }) {
   panel.handleInput(backTab);
   panel.handleInput(enter);
 }
+
+describe("Library purpose groups", () => {
+  const task: RevisionPreference = { ...a, id: "task", name: "Z task 中文😀", metadata: { kind: "task", description: "", activation: "manual" } };
+  const rewrite: RevisionPreference = { ...b, id: "rewrite", name: "A rewrite", metadata: { kind: "rewrite", description: "", activation: "manual" } };
+
+  it.each(["dark", "light"])("groups by purpose without changing selection order or source styling (%s)", async (themeName) => {
+    const f = setup([], "", themeName, [rewrite, task, b]);
+    await loaded(f.panel);
+    const lines = f.panel.render(100);
+    const left = lines.map((line) => stripVTControlCharacters(line).split("│")[0]!).join("\n");
+    expect(left.indexOf("Task requirements")).toBeLessThan(left.indexOf(task.name));
+    expect(left.indexOf(task.name)).toBeLessThan(left.indexOf("Prompt rewriting"));
+    expect(left.indexOf("Prompt rewriting")).toBeLessThan(left.indexOf(rewrite.name));
+    expect(left.indexOf(rewrite.name)).toBeLessThan(left.indexOf("Unclassified"));
+    expect(lines.join("\n")).toContain(f.theme.fg("text", f.theme.bold("Task requirements")));
+    expect(lines.join("\n")).toContain(f.theme.fg("text", f.theme.bold("Prompt rewriting")));
+    expect(lines.join("\n")).toContain(f.theme.fg("muted", "Project"));
+    expect(lines.join("\n")).toContain(f.theme.fg("muted", " Global"));
+    // Navigation skips non-interactive headings and spacers; bring-back is shared.
+    f.panel.handleInput(" "); f.panel.handleInput(down); f.panel.handleInput(" ");
+    f.panel.handleInput(bringBack);
+    expect(f.close.mock.calls[0]![0].map((entry: SelectedPreference) => entry.id)).toEqual(["task", "rewrite"]);
+  });
+
+  it("wraps arrow navigation across groups and filtered/selected lists", async () => {
+    const f = setup([selectPreference(rewrite), selectPreference(task)], "", "dark", [rewrite, task]);
+    await loaded(f.panel);
+    const position = () => text(f.panel).match(/(?:Library|Selected) (\d+)\/(\d+)/)?.slice(1);
+    expect(position()).toEqual(["1", "2"]);
+    f.panel.handleInput("\x1b[A"); expect(position()).toEqual(["2", "2"]);
+    f.panel.handleInput(down); expect(position()).toEqual(["1", "2"]);
+    f.panel.handleInput("s");
+    f.panel.handleInput("\x1b[H"); f.panel.handleInput("\x1b[A"); expect(position()).toEqual(["2", "2"]);
+    f.panel.handleInput(down); expect(position()).toEqual(["1", "2"]);
+    f.panel.handleInput("s");
+    search(f.panel, "Z task");
+    for (const key of ["\x1b[A", down]) { f.panel.handleInput(key); expect(position()).toEqual(["1", "1"]); }
+    search(f.panel, "No matching preference");
+    for (const key of ["\x1b[A", down]) { f.panel.handleInput(key); expect(position()).toEqual(["0", "0"]); }
+  });
+
+  it("hides empty groups during search and retains Selected-only adoption order", async () => {
+    const f = setup([selectPreference(rewrite), selectPreference(task)], "", "dark", [rewrite, task]);
+    await loaded(f.panel);
+    search(f.panel, "Z task");
+    const left = text(f.panel).split("\n").map((line) => line.split("│")[0]).join("\n");
+    expect(left).toContain("Task requirements");
+    expect(left).not.toContain("Prompt rewriting");
+    expect(left).not.toContain("Unclassified");
+    search(f.panel, ""); f.panel.handleInput("s");
+    const selected = text(f.panel).split("\n").map((line) => line.split("│")[0]).join("\n");
+    expect(selected.indexOf(rewrite.name)).toBeLessThan(selected.indexOf(task.name));
+  });
+
+  it.each(["dark", "light"])("keeps group context and focused entries visible through scroll and resize (%s)", async (themeName) => {
+    const entries = Array.from({ length: 24 }, (_, i) => ({ ...(i < 12 ? task : rewrite), id: `entry-${i}`, name: `Item ${String(i).padStart(2, "0")} 中文😀` }));
+    const f = setup([], "", themeName, entries); await loaded(f.panel);
+    for (const [width, height] of [[100, 16], [45, 14], [100, 40], [45, 14]]) {
+      f.terminal.rows = height!;
+      f.panel.handleInput("\x1b[H");
+      for (let i = 0; i < entries.length; i++) {
+        const lines = f.panel.render(width!);
+        expect(lines.every((line) => visibleWidth(line) <= width!)).toBe(true);
+        const left = lines.map((line) => stripVTControlCharacters(line).split("│")[0]!).join("\n");
+        expect(left).toContain(i < 12 ? "Task requirements" : "Prompt rewriting");
+        expect(left).toContain(entries[i]!.name);
+        if (i < entries.length - 1) f.panel.handleInput(down);
+      }
+    }
+  });
+});
 
 describe("Preferences management without selection", () => {
   it.each(["dark", "light"])("keeps adopted snapshots read-only while managing current library entries (%s)", async (themeName) => {
@@ -562,6 +633,91 @@ describe("new preference save identity and reveal", () => {
 });
 
 describe("preference rendering and responsiveness", () => {
+  it.each(["dark", "light"])("reserves right-aligned muted source columns by list width through resize (%s)", async (themeName) => {
+    const entries = [
+      { ...a, name: "Global 中文😀\u001b[31m " + "长名称".repeat(30) },
+      { ...b, name: "Project 短" },
+    ];
+    const f = setup(entries.map(selectPreference), "", themeName, entries); await loaded(f.panel);
+    vi.spyOn(f.theme, "bold").mockImplementation((value) => `\x1b[1m${value}\x1b[22m`);
+    f.panel.handleInput("s"); // Stable snapshot order, with Global focused.
+    // 31/32 straddle the 28-column list threshold. At 80 the preview splits
+    // the pane; a short viewport at 100 instead gives the list all 96 columns.
+    for (const [width, rows, listWidth, full] of [
+      [100, 40, 41, true], [31, 40, 27, false], [32, 40, 28, true],
+      [79, 40, 75, true], [80, 24, 32, true], [40, 16, 36, true],
+      [20, 10, 16, false], [12, 10, 12, false], [3, 10, 3, false],
+      [2, 10, 2, false], [1, 10, 1, false], [100, 10, 96, true], [100, 40, 41, true],
+    ] as const) {
+      f.terminal.rows = rows;
+      const lines = f.panel.render(width);
+      const layout = panelLayout(width, rows);
+      expect(lines).toHaveLength(layout.height);
+      expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+      const labels = full ? [" Global", "Project"] : ["G", "P"];
+      const sourceRows = lines.filter((line) => labels.some((label) => line.includes(f.theme.fg("muted", label))));
+      expect(sourceRows).toHaveLength(2);
+      for (const [index, row] of sourceRows.entries()) {
+        const label = labels[index]!;
+        const plain = stripVTControlCharacters(row);
+        expect(row).toContain(f.theme.fg("muted", label));
+        expect(row).not.toContain(f.theme.bold(label));
+        const sourceStart = row.indexOf(f.theme.fg("muted", label));
+        expect(visibleWidth(row.slice(0, sourceStart)) + visibleWidth(label)).toBe(layout.inset + listWidth);
+        expect(plain).not.toContain(` · ${label.trim()}`);
+      }
+      const focused = sourceRows[0]!;
+      expect(focused).toContain(f.theme.bg("selectedBg", "").split("\x1b[49m")[0]);
+      expect(lines.join("\n")).not.toContain("\u001b[31m");
+      if (listWidth >= 12) {
+        const budget = listWidth - (full ? 7 : 1) - 1 - 6;
+        const name = presentation.sanitizeTerminalText(entries[0]!.name);
+        expect(focused).toContain(f.theme.fg("text", f.theme.bold(truncateToWidth(name, budget, "…"))));
+        expect(stripVTControlCharacters(focused)).toContain("…");
+        expect(stripVTControlCharacters(focused)).toContain("› [x]");
+      }
+    }
+    // Moving focus preserves checkbox selection and keeps the source regular/muted.
+    f.panel.handleInput(down);
+    const selected = f.panel.render(100).find((line) => stripVTControlCharacters(line).includes("› [x]"))!;
+    expect(selected).toContain(f.theme.fg("text", f.theme.bold(entries[1]!.name)));
+    expect(selected).toContain(f.theme.fg("muted", "Project"));
+    f.panel.handleInput(tab);
+    expect(f.panel.render(100).join("\n")).toContain(f.theme.fg("muted", "Project"));
+    f.panel.handleInput(bringBack);
+    expect(f.close).toHaveBeenCalledWith(entries.map(selectPreference));
+  });
+
+  it.each(["dark", "light"])("keeps warnings separate from source labels down to two columns (%s)", async (themeName) => {
+    for (const state of ["unavailable", "deleted", "snapshot kept"] as const) {
+      const entry = { ...a, name: "Warning 中文😀 " + "long ".repeat(20) };
+      const source = state === "deleted" ? [] : [{ ...entry, version: state === "snapshot kept" ? 2 : 1 }];
+      const { repo } = repository(source);
+      repo.load.mockResolvedValueOnce({ entries: source, errors: state === "unavailable" ? { global: "Offline" } : {} });
+      const terminal = { rows: 40, columns: 100 };
+      const theme = getThemeByName(themeName)!;
+      const panel = new PreferencePanel({ terminal, requestRender: vi.fn() } as unknown as TUI, theme,
+        new KeybindingsManager(TUI_KEYBINDINGS), repo, [selectPreference(entry)], "", 16000, vi.fn());
+      await loaded(panel); panel.handleInput("s");
+      for (const [width, rows] of [[100, 40], [32, 16], [20, 8], [12, 8], [6, 8], [3, 8], [2, 8], [1, 8], [100, 40]]) {
+        terminal.rows = rows!;
+        const lines = panel.render(width!);
+        expect(lines.every((line) => visibleWidth(line) <= width!)).toBe(true);
+        const label = width! >= 32 ? " Global" : "G";
+        const row = lines.find((line) => line.includes(theme.fg("muted", label)))!;
+        expect(row).toBeDefined();
+        expect(row).not.toContain(theme.fg("warning", label));
+        if (width! > 1) expect(row).toContain(theme.fg("warning", width! >= 12 ? "! " : "!"));
+        if (width! <= 3) expect(stripVTControlCharacters(row)).toBe(width === 1 ? "G" : width === 2 ? "!G" : "! G");
+      }
+      terminal.rows = 40;
+      panel.handleInput(enter);
+      const details = text(panel);
+      expect(details).toContain(`global · ${entry.id}`); // Full source and UUID stay discoverable.
+      expect(details).toContain(state === "unavailable" ? "Library unavailable" : state === "deleted" ? "Source deleted" : "Library changed; snapshot kept");
+    }
+  });
+
   it.each(["dark", "light"])("keeps concise names, muted scope and semantic snapshot warnings styled through audit/resize (%s)", async (themeName) => {
     const long = { ...a, name: "长名称 😀\u001b[2J ".repeat(10), id: "wide", metadata: {
       kind: "rewrite" as const, activation: "auto" as const, match: "always" as const, description: "Detailed provenance 中文" } };
@@ -573,8 +729,8 @@ describe("preference rendering and responsiveness", () => {
     let lines = f.panel.render(70);
     const focused = lines.find((line) => stripVTControlCharacters(line).includes("› [x]"))!;
     expect(focused).toContain(f.theme.fg("text", f.theme.bold(b.name)));
-    expect(focused).toContain(f.theme.fg("muted", " · P"));
-    expect(focused).not.toContain(f.theme.bold(" · P"));
+    expect(focused).toContain(f.theme.fg("muted", "Project"));
+    expect(focused).not.toContain(f.theme.bold("Project"));
     expect(focused).toContain(f.theme.bg("selectedBg", "").split("\x1b[49m")[0]);
     const warning = lines.find((line) => stripVTControlCharacters(line).includes("!"))!;
     expect(warning).toContain(f.theme.fg("warning", "! "));

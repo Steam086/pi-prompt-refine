@@ -202,6 +202,50 @@ describe("prompt tree and inspection", () => {
     expect(panel.render(100).join("\n")).toContain(heading("Prompt details"));
   });
 
+  it.each([80, 94, 100, 180])("gives list, Enter details and Compare exactly one split owner at width %s", (width) => {
+    const revised = record(1);
+    revised.kind = "revise";
+    revised.input.revision = { instruction: "REVISION_REFERENCE", previousCandidate: "Before" };
+    const { panel, text } = create("dark", false, [revised, record(2)]);
+    const columns = () => {
+      const lines = text(width).split("\n");
+      expect(lines.every((line) => line.split(" │ ").length <= 2)).toBe(true);
+      return lines.filter((line) => line.includes(" │ "));
+    };
+    let panes = columns();
+    expect(panes.some((line) => /[├└]/.test(line.split(" │ ")[0]!))).toBe(true);
+    expect(panes.map((line) => line.split(" │ ")[1]).join("\n")).not.toContain("REVISION_REFERENCE");
+    panel.handleInput("\r");
+    panes = columns();
+    if (width >= 94) {
+      expect(panes[0]).toContain("Revised result");
+      expect(panes[0]).toContain("Original prompt");
+      expect(panes.some((line) => /[├└]/.test(line))).toBe(false);
+      expect(panes.map((line) => line.split(" │ ")[1]).join("\n")).toContain("REVISION_REFERENCE");
+    } else {
+      expect(panes).toHaveLength(0);
+      panel.handleInput("o");
+      expect(text(width)).toContain("REVISION_REFERENCE");
+    }
+    panel.handleInput("c");
+    panes = columns();
+    expect(text(width)).toContain("Compare results");
+    expect(panes.map((line) => line.split(" │ ")[0]).join("\n")).toContain("model-1");
+    expect(panes.map((line) => line.split(" │ ")[1]).join("\n")).toContain("model-2");
+    panel.handleInput("\x1b");
+    expect(text(width)).toContain("Prompt refine · Tasks");
+    expect(columns().some((line) => /[├└]/.test(line))).toBe(true);
+  });
+
+  it("does not render an unused full-width pane before rendering Compare", () => {
+    const { panel } = create("dark", false, [record(), record(2)]);
+    panel.handleInput("\r"); panel.handleInput("c");
+    const render = vi.spyOn(Text.prototype, "render");
+    panel.render(100);
+    expect(render).toHaveBeenCalled();
+    expect(render.mock.calls.map(([width]) => width)).not.toContain(panelLayout(100, 40).innerWidth);
+  });
+
   it("scrolls result and reference independently across resize and snapshots without changing action targets", () => {
     const revised = record(2);
     revised.kind = "revise";

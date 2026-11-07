@@ -557,15 +557,19 @@ export class TaskPanel {
       const warningAt = !row.original && badge.startsWith("⚠") ? clean.lastIndexOf("⚠") : -1;
       const text = warningAt < 0 ? this.theme.fg(color, clean)
         : this.theme.fg(color, clean.slice(0, warningAt)) + this.theme.fg("warning", "⚠") + this.theme.fg(color, clean.slice(warningAt + 1));
-    let right = selected ? this.pane(selected, rightWidth, height, true, previewDetails) : [this.muted("No prompts yet. Press n to create one.")];
       return active ? this.theme.bg("selectedBg", text + " ".repeat(Math.max(0, leftWidth - visibleWidth(text)))) : text;
     });
     const previewDetails = this.inspecting && !this.usage && this.compareId === undefined && !!selected && !selected.original && !!selected.record.candidate;
     let body: string[];
     const other = this.inspecting && this.compareId !== undefined ? rows.find((row) => !row.original && row.record.id === this.compareId) : undefined;
-    if (other && layout.innerWidth >= 72) {
+    // Exactly one layout owns the horizontal split: list + summary, Enter
+    // details (result + reference), or Compare. Never nest detail columns inside
+    // an existing pane, or render an unused pane that clamps its scroll offset.
+    if (previewDetails && selected) {
+      body = this.pane(selected, layout.innerWidth, height, true, true);
+    } else if (other && layout.innerWidth >= 72) {
       const half = Math.floor((layout.innerWidth - 3) / 2);
-      right = selected ? this.pane(selected, half, height - 1) : [];
+      const right = selected ? this.pane(selected, half, height - 1) : [];
       const peer = this.pane(other, layout.innerWidth - half - 3, height - 1, false);
       body = [this.muted("Selected result ← · Tab switches the result to accept")];
       body.push(...Array.from({ length: height - 1 }, (_, i) => {
@@ -573,6 +577,7 @@ export class TaskPanel {
         return line + " ".repeat(Math.max(0, half - visibleWidth(line))) + this.muted(" │ ") + (peer[i] ?? "");
       }));
     } else {
+      const right = selected ? this.pane(selected, rightWidth, height) : [this.muted("No prompts yet. Press n to create one.")];
       body = Array.from({ length: height }, (_, i) => {
         if (!split) return this.inspecting || this.reading || !rows.length ? right[i] ?? "" : list[i] ?? "";
         const line = list[i] ?? "";
