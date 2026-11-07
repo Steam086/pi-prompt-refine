@@ -1004,12 +1004,15 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         };
         const workspace = new RefineWorkspace(panel, tui, theme, keybindings, {
           preferences: { repository: preferenceRepository(ctx), key: config.preferencesKey, maxChars: config.maxDraftChars },
-          draftPreferences: (id) => {
-            if (closed || ctx.sessionManager.getSessionId() !== sessionId || controller.getState().pendingSend) return undefined;
-            const source = controller.getRecord(id);
-            if (!source || source.status !== "unsent" || source.input.contextUnavailable) return undefined;
+          draftPreferences: (id, original) => {
+            if (closed || ctx.sessionManager.getSessionId() !== sessionId || controller.getSessionId() !== sessionId) return undefined;
+            const source = id === undefined ? undefined : original ? controller.getOriginalRecord(id) : controller.getRecord(id);
+            if (id !== undefined && !source) return undefined;
+            const selected = source?.input.preferences ?? [];
+            // A request (including its original row) only exposes adopted snapshots.
+            if (!source || !original || source.status !== "unsent" || source.input.contextUnavailable || controller.getState().pendingSend) return { selected };
             return {
-              selected: source.input.preferences ?? [],
+              selected,
               save: (selected) => {
                 if (closed || ctx.sessionManager.getSessionId() !== sessionId || controller.getSessionId() !== sessionId) return "Session changed; no selection applied.";
                 return controller.updateDraftPreferences(source, selected);

@@ -19,7 +19,7 @@ export interface TaskPanelActions {
   chooseModel?(id: number): void;
   accept?(id: number): void;
   revise?(id: number): void;
-  preferences?(id: number): void;
+  preferences?(id?: number, original?: boolean): void;
   preferencesKey?: KeyId | null;
   launchModel?(): string;
   historyStorage?(): HistoryStorageStatus;
@@ -114,6 +114,9 @@ export class TaskPanel {
   private scroll(row: Row, delta: number): void {
     this.position.scroll = Math.max(0, (this.position.scroll ?? 0) + delta);
     (this.position.scrolls ??= {})[this.rowKey(row)] = this.position.scroll;
+  }
+  private canOpenPreferences(): boolean {
+    return !!this.actions.preferences;
   }
   private canChoosePreferences(row?: Row): boolean {
     return !!(row?.original && row.record.status === "unsent" && !row.record.input.contextUnavailable && this.actions.preferences);
@@ -226,8 +229,8 @@ export class TaskPanel {
       return true;
     }
     if (key === "p" || (this.actions.preferencesKey && matchesKey(data, this.actions.preferencesKey))) {
-      if (this.canChoosePreferences(row)) this.actions.preferences!(row!.record.id);
-      else this.notice = "Select an Unsent original for Preferences, or press f on a result to revise";
+      if (this.canOpenPreferences()) this.actions.preferences!(row?.record.id, row?.original);
+      else this.notice = "Preferences unavailable";
       return true;
     }
     if (key === "g") {
@@ -492,9 +495,9 @@ export class TaskPanel {
       body.push(this.muted(`Focus: ${this.inspecting || this.reading ? "Reading · ↑↓ scroll" : "List · ↑↓ select"}`), "");
       const hints: KeyHint[] = [["Esc", "Back"], ["?", "Available actions and full feedback"]];
       if (!this.inspecting) hints.push(["Enter", row?.original && row.record.status === "unsent" ? "Run" : "Inspect"], ["Tab", this.reading ? "Select" : "Read"], ["n", "New"]);
+      if (this.canOpenPreferences()) hints.push(["p", "Preferences"]);
       if (row) {
         hints.push(["i", row.record.input.contextUnavailable ? "Copy to current" : "Edit original"]);
-        if (this.canChoosePreferences(row)) hints.push(["p", "Preferences before first refine"]);
         if (!row.record.input.contextUnavailable) hints.push(["m", "Run model"]);
         if (!row.original && pending(row.record)) hints.push(["x", "Stop"]);
         if (!row.original && row.record.candidate) {
@@ -554,10 +557,10 @@ export class TaskPanel {
       const warningAt = !row.original && badge.startsWith("⚠") ? clean.lastIndexOf("⚠") : -1;
       const text = warningAt < 0 ? this.theme.fg(color, clean)
         : this.theme.fg(color, clean.slice(0, warningAt)) + this.theme.fg("warning", "⚠") + this.theme.fg(color, clean.slice(warningAt + 1));
+    let right = selected ? this.pane(selected, rightWidth, height, true, previewDetails) : [this.muted("No prompts yet. Press n to create one.")];
       return active ? this.theme.bg("selectedBg", text + " ".repeat(Math.max(0, leftWidth - visibleWidth(text)))) : text;
     });
     const previewDetails = this.inspecting && !this.usage && this.compareId === undefined && !!selected && !selected.original && !!selected.record.candidate;
-    let right = selected ? this.pane(selected, rightWidth, height, true, previewDetails) : [this.muted("No prompts yet. Press n to create one.")];
     let body: string[];
     const other = this.inspecting && this.compareId !== undefined ? rows.find((row) => !row.original && row.record.id === this.compareId) : undefined;
     if (other && layout.innerWidth >= 72) {
@@ -580,7 +583,7 @@ export class TaskPanel {
     const restored = selected?.record.input.contextUnavailable;
     const primary: KeyHint[] = this.inspecting ? [["i", restored ? "Copy to current" : "Edit original"], ...(!restored ? [["m", "Run model"] as const] : [])]
       : [["Enter", action], ["i", restored ? "Copy to current" : "Edit original"], ["n", "New"], ...(!restored ? [["m", selected ? "Run model" : "Model"] as const] : [])];
-    if (this.canChoosePreferences(selected)) primary.splice(this.inspecting ? 0 : 1, 0, ["p", "Preferences"]);
+    if (this.canOpenPreferences()) primary.splice(this.inspecting ? 0 : 1, 0, ["p", "Preferences"]);
     if (selected && !selected.original && pending(selected.record)) primary.unshift(["x", "Stop"]);
     if (selected && !selected.original && selected.record.candidate) {
       primary.unshift(...(this.inspecting ? [["s", "Send to Pi"] as const] : []));

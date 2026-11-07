@@ -63,7 +63,7 @@ export class PreferencePanel {
     private readonly repository: PreferenceRepository, selected: readonly SelectedPreference[],
     private readonly freeText: string, private readonly maxChars: number,
     private readonly close: (selected?: SelectedPreference[]) => string | void,
-    private readonly purpose: "revise" | "refine" = "revise",
+    private readonly purpose: "revise" | "refine" | "manage" = "revise",
   ) {
     this.working = structuredClone([...selected]);
     this.requirementsChars = composeRevision(this.working, freeText).length;
@@ -154,6 +154,7 @@ export class PreferencePanel {
   }
   private error(error: unknown): string { return error instanceof Error ? error.message : "Could not access preference library."; }
   private toggle(): void {
+    if (this.purpose === "manage") return;
     const entry = this.highlighted();
     if (!entry) return;
     const index = this.working.findIndex((item) => preferenceKey(item) === preferenceKey(entry));
@@ -304,7 +305,7 @@ export class PreferencePanel {
     const key = parseKey(data);
     if (key && /(^|\+)f\d+$/.test(key)) return;
     if (key === "ctrl+s") {
-      this.setNotice(this.purpose === "refine" ? "Bring back with Alt+Enter, then press Enter on the Unsent original to refine." : "Return to Revise to request revision with Ctrl+S.");
+      this.setNotice(this.purpose === "manage" ? "Library management only; no selection or request sent." : this.purpose === "refine" ? "Bring back with Alt+Enter, then press Enter on the Unsent original to refine." : "Return to Revise to request revision with Ctrl+S.");
       this.redraw(); return;
     }
     const cancel = this.keys.matches(data, "tui.select.cancel") || key === "ctrl+\\";
@@ -358,8 +359,10 @@ export class PreferencePanel {
       }
     } else if (cancel) this.close();
     else if (key === "alt+enter") {
-      const error = this.close(structuredClone(this.working));
-      if (error) this.setNotice(error, "warning");
+      if (this.purpose !== "manage") {
+        const error = this.close(structuredClone(this.working));
+        if (error) this.setNotice(error, "warning");
+      }
     }
     else if (key === "tab" || key === "shift+tab") this.focus = (this.focus + (key === "tab" ? 1 : 2)) % 3;
     else if (this.focus === 0) {
@@ -377,7 +380,7 @@ export class PreferencePanel {
       else if (key === "home") this.index = 0;
       else if (key === "end") this.index = max;
       else if (key === "space") this.toggle();
-      else if (enter) { const entry = this.highlighted(); if (entry) this.read(this.purpose === "refine" ? "Full editing instruction" : "Full revision instruction", this.description(entry)); }
+      else if (enter) { const entry = this.highlighted(); if (entry) this.read(this.purpose === "manage" ? "Preference details" : this.purpose === "refine" ? "Full editing instruction" : "Full revision instruction", this.description(entry)); }
     } else {
       if (key === "left" || key === "up") this.actionIndex = (this.actionIndex + ACTIONS.length - 1) % ACTIONS.length;
       else if (key === "right" || key === "down") this.actionIndex = (this.actionIndex + 1) % ACTIONS.length;
@@ -396,14 +399,15 @@ export class PreferencePanel {
     let title = this.purpose === "refine" ? "Preferences · Unsent original" : "Preferences";
     if (this.page.kind === "list" && this.selectedOnly) title = `Preferences · Selected only${this.purpose === "refine" ? " · Unsent original" : ""}`;
     const tooLong = this.requirementsChars > this.maxChars;
-    let subtitle = `Focus: ${["Search", "Library", "Actions"][this.focus]} · ${this.working.length} selected · ${this.requirementsChars}/${this.maxChars} chars`;
+    const managing = this.purpose === "manage";
+    let subtitle = `Focus: ${["Search", "Library", "Actions"][this.focus]} · ${managing ? `${this.working.length} frozen snapshots` : `${this.working.length} selected · ${this.requirementsChars}/${this.maxChars} chars`}`;
     let subtitleColor: DocumentPart["color"] = "muted";
     let body: string[] = [];
-    let hints: KeyHint[][] = [[["Alt+Enter", "Bring back"],
+    let hints: KeyHint[][] = [[...(!managing ? [["Alt+Enter", "Bring back"] as KeyHint] : []),
       ...(this.focus !== 0 ? [["s", this.selectedOnly ? "All" : w < 60 ? "Selected" : "Selected only"] as KeyHint] : []),
       ["Enter", this.focus === 0 ? "Browse" : this.focus === 1 ? "Read" : "Choose"],
-      ...(this.focus === 1 ? [["Space", this.selectedOnly ? "Deselect" : "Select"] as KeyHint] : this.focus === 2 ? [["←→", "Choose action"] as KeyHint] : [])],
-      [["Esc", "Cancel selection"], ["Tab / Shift+Tab", "Focus"], ...(this.focus !== 0 ? [["/", "Search"] as KeyHint] : [])]];
+      ...(this.focus === 1 && !managing ? [["Space", this.selectedOnly ? "Deselect" : "Select"] as KeyHint] : this.focus === 2 ? [["←→", "Choose action"] as KeyHint] : [])],
+      [["Esc", managing ? "Back" : "Cancel selection"], ["Tab / Shift+Tab", "Focus"], ...(this.focus !== 0 ? [["/", "Search"] as KeyHint] : [])]];
     const page = this.page;
     if (page.kind === "read") {
       title = page.title; subtitle = "Read-only · No request sent";
@@ -512,7 +516,7 @@ export class PreferencePanel {
         body = [...chrome, section, ...panes];
       }
       if (errors.length) { subtitle = `Load failed · ${errors.join(" · ")}`; subtitleColor = "error"; }
-      else if (tooLong) { subtitle = `Too long · ${this.requirementsChars}/${this.maxChars} chars`; subtitleColor = "warning"; }
+      else if (tooLong && !managing) { subtitle = `Too long · ${this.requirementsChars}/${this.maxChars} chars`; subtitleColor = "warning"; }
     }
     if (this.busy) { subtitle = "Working…"; subtitleColor = "muted"; }
     else if (this.notice && (this.noticeColor !== "muted" || subtitleColor === "muted")) {

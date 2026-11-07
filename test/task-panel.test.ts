@@ -130,7 +130,7 @@ describe("prompt tree and inspection", () => {
     expect(right).toContain(revised.input.draft);
     expect(right).toContain("Revision instruction");
     expect(right).toContain("Keep commands 中文😀");
-    for (const hidden of ["Usage · tokens", "Cache read", "Reference cost · USD", "Preferences"]) expect(output).not.toContain(hidden);
+    for (const hidden of ["Usage · tokens", "Cache read", "Reference cost · USD"]) expect(output).not.toContain(hidden);
     const narrow = text(80);
     expect(narrow).not.toContain(" │ ");
     expect(narrow).toContain("Result 2");
@@ -319,22 +319,32 @@ describe("prompt tree and inspection", () => {
     expect(actions.activate).not.toHaveBeenCalled();
   });
 
-  it("opens Preferences only for the selected Unsent original via p or its optional shortcut", () => {
-    const unsent = { ...record(), status: "unsent" as const, candidate: undefined };
-    const f = create("dark", false, [unsent, record(2, 2)]);
-    f.position.selectedTaskId = 1;
-    f.panel.handleInput("p"); f.panel.handleInput("\x1bp");
-    expect(f.actions.preferences.mock.calls).toEqual([[1], [1]]);
-    expect(f.actions.run).not.toHaveBeenCalled();
-    f.panel.handleInput("?"); expect(f.text()).toContain("p Preferences before first refine");
-    f.panel.handleInput("p"); expect(f.actions.preferences).toHaveBeenCalledTimes(2);
-    f.panel.handleInput("\x1b");
-    f.position.selectedTaskId = undefined; f.position.selectedId = 2;
-    f.panel.handleInput("p"); expect(f.actions.preferences).toHaveBeenCalledTimes(2);
-    expect(f.text()).toContain("Select an Unsent original");
-    f.position.selectedTaskId = 1; unsent.input.contextUnavailable = true;
-    f.panel.handleInput("p"); expect(f.actions.preferences).toHaveBeenCalledTimes(2);
-    expect(f.actions.activate).not.toHaveBeenCalled();
+  it("opens Preferences for empty, original and child rows, equally before and after Inspect", () => {
+    for (const status of ["unsent", "queued", "generating", "generated"] as const) {
+      for (const contextUnavailable of [false, true]) {
+        const source = { ...record(), status, input: { ...record().input, contextUnavailable } };
+        const f = create("dark", false, [source]);
+        f.position.selectedTaskId = 1;
+        f.panel.handleInput("p"); f.panel.handleInput("\x1bp");
+        expect(f.actions.preferences.mock.calls).toEqual([[1, true], [1, true]]);
+        f.panel.handleInput("?"); expect(f.text()).toContain("p Preferences");
+        f.panel.handleInput("p"); expect(f.actions.preferences).toHaveBeenCalledTimes(2);
+        f.panel.handleInput("\x1b");
+        if (status !== "unsent") {
+          for (const original of [true, false]) {
+            f.position.selectedTaskId = original ? 1 : undefined; f.position.selectedId = 1;
+            f.panel.handleInput("p"); f.panel.handleInput("\r"); f.panel.handleInput("p");
+            expect(f.actions.preferences.mock.calls.slice(-2)).toEqual([[1, original], [1, original]]);
+            expect(f.text()).toContain("p Preferences");
+            f.panel.handleInput("\x1b");
+          }
+        }
+        expect(f.actions.run).not.toHaveBeenCalled(); expect(f.actions.activate).not.toHaveBeenCalled();
+      }
+    }
+    const f = create("light", false, []);
+    expect(f.text()).toContain("p Preferences");
+    f.panel.handleInput("p"); expect(f.actions.preferences).toHaveBeenCalledWith(undefined, undefined);
   });
 
   it.each(["dark", "light"])("shows selected Unsent snapshots with neutral semantic styling and bounded %s layouts", (name) => {

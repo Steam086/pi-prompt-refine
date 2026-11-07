@@ -719,6 +719,114 @@ describe("explicit candidate revision", () => {
     harness.panelInput("q"); await view;
   });
 
+  it("opens an empty editor/workspace to browse and Add/Edit/Delete Preferences without a request", async () => {
+    const h = await makeHarness({ config: { preferencesKey: null } });
+    const store = new PreferenceStore(h.agentDir, h.context.cwd);
+    h.setEditorText(""); h.holdPanel(); const view = shortcut(h, "ctrl+\\")(h.context);
+    expect(h.panelLines(100).join("\n")).toContain("p Preferences");
+    h.panelInput("p");
+    await vi.waitFor(() => {
+      expect(h.panelLines().join("\n")).toContain("Library is empty");
+      expect(h.panelLines().join("\n")).not.toContain("Working…");
+    });
+    h.panelInput("n"); h.panelInput("First 中文😀"); h.panelInput("\t"); h.panelInput("Keep literal commands.");
+    for (let i = 0; i < 5; i++) h.panelInput("\t");
+    h.panelInput("\r");
+    await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Saved; not selected"));
+    h.panelInput(" "); h.panelInput("\x1b[13;3u"); h.panelInput("\x13");
+    expect(h.panelLines().join("\n")).toContain("Library management only");
+    h.panelInput("e"); h.panelInput("Renamed "); h.panelInput("\x1b[Z"); h.panelInput("\r");
+    await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Saved to library"));
+    expect((await store.load()).entries).toEqual([expect.objectContaining({ name: "Renamed First 中文😀", body: "Keep literal commands." })]);
+    h.panelInput("d"); h.panelInput("n"); expect((await store.load()).entries).toHaveLength(1);
+    h.panelInput("d"); h.panelInput("y");
+    await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Deleted from library"));
+    expect((await store.load()).entries).toEqual([]);
+    h.panelInput("\x1b"); h.panelInput("q"); await view;
+    expect(h.getEditor()).toBe(""); expect(h.complete).not.toHaveBeenCalled();
+    expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
+  });
+
+  it("manages running/queued originals and children equally in list and Inspect without changing frozen requirements", async () => {
+    const h = await makeHarness(); const store = new PreferenceStore(h.agentDir, h.context.cwd);
+    const entry = await store.save("project", { name: "Frozen 中文😀", body: "Original frozen body.",
+      metadata: { kind: "rewrite", description: "Automatic", activation: "auto", match: "always" } });
+    await h.reload();
+    const finishes: ((value: any) => void)[] = [];
+    h.complete.mockImplementation(() => new Promise((resolve) => { finishes.push(resolve); }));
+    for (let i = 0; i < 5; i++) { h.setEditorText(`Draft ${i}`); await trigger(h); }
+    expect(h.complete).toHaveBeenCalledTimes(4);
+    h.setEditorText(""); h.holdPanel(); const view = h.command("", h.context);
+    const output = () => h.panelLines(100).join("\n");
+    // Latest group is queued; the next group is running. Both have original/run rows.
+    for (const row of [0, 1, 2, 3]) {
+      h.panelInput("\x1b[H");
+      for (let i = 0; i < row; i++) h.panelInput("\x1b[B");
+      for (const inspect of [false, true]) {
+        if (inspect) h.panelInput("\r");
+        h.panelInput("p"); await vi.waitFor(() => expect(output()).toContain("1 frozen snapshots"));
+        expect(output()).not.toContain("Bring back"); expect(output()).not.toContain("Space Select");
+        h.panelInput(" "); h.panelInput("\x1b[13;3u"); h.panelInput("\x13");
+        expect(output()).toContain("Library management only");
+        h.panelInput("\x1b"); if (inspect) h.panelInput("\x1b");
+      }
+    }
+    // Library writes in the child's management page never rewrite adopted snapshots.
+    h.panelInput("p"); await vi.waitFor(() => expect(output()).toContain("1 frozen snapshots"));
+    h.panelInput("e"); h.panelInput("Changed "); h.panelInput("\x1b[Z"); h.panelInput("\r");
+    await vi.waitFor(() => expect(output()).toContain("Saved to library"));
+    h.panelInput("s"); h.panelInput("\r");
+    expect(output()).toContain("Selected snapshot"); expect(output()).toContain("Current library entry");
+    expect(output()).toContain("Frozen 中文😀"); expect(output()).toContain("Changed Frozen 中文😀");
+    h.panelInput("\x1b"); h.panelInput("d"); h.panelInput("y");
+    await vi.waitFor(() => expect(output()).toContain("Deleted from library"));
+    expect((await store.load()).entries).toEqual([]);
+    finishes[0]!(refinement("Done")); await flushPromises();
+    expect(h.complete).toHaveBeenCalledTimes(5);
+    expect(output()).toContain("Preferences"); expect(output()).not.toContain("Bring back");
+    h.panelInput("\r"); expect(output()).toContain("Source deleted"); expect(output()).toContain(entry.body);
+    h.panelInput("\x1b"); h.panelInput("\x1b");
+    // The refresh affects only future drafts, not the five frozen requests.
+    h.panelInput("n"); h.panelInput("New after delete"); h.panelInput("\r");
+    expect(output()).toContain("Preferences: None");
+    for (const call of h.complete.mock.calls) {
+      const packet = JSON.parse((call as any[])[1].messages[0].content[0].text);
+      expect(packet.editing_instruction).toBe(`Prompt rewriting instructions (automatic default):\n${entry.body}`);
+    }
+    for (const finish of finishes.slice(1)) finish(refinement("Done")); await flushPromises();
+    expect(h.complete).toHaveBeenCalledTimes(5); expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
+    h.panelInput("q"); await view;
+  });
+
+  it("browses legacy/restored records without fabricating adopted snapshots or enabling selection", async () => {
+    const h = await makeHarness({ persistHistory: true });
+    const store = new PreferenceStore(h.agentDir, h.context.cwd);
+    await store.save("project", { name: "Library only", body: "Current library body." });
+    await trigger(h); await h.reload();
+    h.holdPanel(); const view = h.command("usage", h.context);
+    h.panelInput("p");
+    await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("0 frozen snapshots"));
+    expect(h.panelLines().join("\n")).toContain("Library only");
+    h.panelInput(" "); h.panelInput("\x1b[13;3u"); h.panelInput("s");
+    expect(h.panelLines().join("\n")).toContain("No selections");
+    expect(h.panelLines().join("\n")).not.toContain("Bring back");
+    h.panelInput("\x1b"); h.panelInput("q"); h.panelInput("q"); await view;
+    expect(h.complete).toHaveBeenCalledTimes(1); expect(h.sent).toEqual([]); expect(h.editorWrites).toEqual([]);
+  });
+
+  it("still permits management while send is pending, and closes Preferences on session invalidation", async () => {
+    const h = await makeHarness(); await trigger(h); h.holdPanel();
+    let view = h.command("view", h.context); h.panelInput("s"); await view;
+    view = h.command("", h.context); h.panelInput("p");
+    await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("0 frozen snapshots"));
+    expect(h.panelLines().join("\n")).not.toContain("Bring back");
+    h.panelInput("n"); h.panelInput("Unsaved form");
+    h.handlers.get("session_before_switch")?.[0]?.({}, h.context); await view;
+    h.panelInput("\x1b[Z"); h.panelInput("\r"); h.panelInput("\x1b[13;3u");
+    expect((await new PreferenceStore(h.agentDir, h.context.cwd).load()).entries).toEqual([]);
+    expect(h.complete).toHaveBeenCalledTimes(1); expect(h.sent).toHaveLength(1);
+  });
+
   it("selects Preferences before first refine without a modifier, preserves literal task and snapshots across reopening", async () => {
     const h = await makeHarness({ config: { preferencesKey: null }, persistHistory: true });
     const store = new PreferenceStore(h.agentDir, h.context.cwd);
