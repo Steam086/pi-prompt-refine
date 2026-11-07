@@ -17,7 +17,7 @@ Pi Prompt Refine 是 Pi Coding Agent 的提示词改写扩展。它结合当前�
 | 接受 | 按 `a` 写入主编辑器，不发送 |
 | 微调 | 详情中按 `e` 手工编辑 |
 | 修订 | 列表选中结果或详情按 `f`，默认输入补充要求；Enter 换行，Ctrl+S 请求，Ctrl+E 展开 |
-| 复用编辑要求 | Unsent 原稿按 `p`（或 Alt+P）选择 Preferences，Space 勾选、Alt+Enter 带回后仍需 Enter 才首次 refine；Revise 中 Alt+P 或 Tab → Preferences，带回后 Ctrl+S 修订。原始任务不变，要求独立传递 |
+| 复用编辑要求 | Preview 的 Unsent 原稿按 Shift+Tab 聚焦内联 Preferences，Space 直接勾选，Esc 回原稿后 Enter 才首次 refine；`p`（或 Alt+P）仍打开完整面板，需 Alt+Enter 带回。Revise 中选择并带回后 Ctrl+S 修订。原始任务不变，要求独立传递 |
 | 切换模型 | 按 `m` 选模型，Enter 重新优化原稿 |
 
 所有 Preferences 均需用户手动选择；创建或编辑草稿不会根据关键词自动勾选，旧库自动项也按手动项处理。
@@ -106,7 +106,7 @@ pi --extension git:github.com/Steam086/pi-prompt-refine
 看看 @src/ 的错误处理，找出可能吞掉异常的地方，先给建议，不要改代码。
 ```
 
-按 **`Ctrl+\`（Control + 反斜杠，不是 Command）**，将草稿作为 **Unsent** 保留并打开 Refine。首次和后续输入行为一致：可以先按 `i` 编辑原稿、按 `p` 添加 Preferences，再按 **Enter** 明确启动优化；启动后自动选中对应的模型运行。
+按 **`Ctrl+\`（Control + 反斜杠，不是 Command）**，将草稿作为 **Unsent** 保留并打开 Refine。首次和后续输入行为一致：可以先按 `i` 编辑原稿、按 Shift+Tab 在 Preview 内勾选 Preferences（`p` 管理库），Esc 回原稿后按 **Enter** 明确启动优化；启动后自动选中对应的模型运行。
 
 主 Pi 窗口的编辑器上方显示一行 Refine 后台状态：`running` 运行数、`queued` 排队数、`new` 尚未查看的结果数及 `failed` 失败数。运行中只显示当前运行最久的一条的耗时，排队不计入运行时间；无运行且仅有一份新结果时显示其最终耗时，多份新结果不显示耗时。
 

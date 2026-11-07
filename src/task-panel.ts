@@ -6,6 +6,7 @@ import type { HistoryStorageStatus } from "./history-store.js";
 import { panelFrame, panelLayout, workspaceTabs } from "./panel-layout.js";
 import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
 import { sanitizeTerminalText } from "./presentation.js";
+import type { InlinePreferences } from "./inline-preferences.js";
 import { cacheHitRate, formatReferenceCost, formatRunUsage, totalInputTokens, truncatedOutputHint } from "./usage.js";
 
 export interface TaskPanelActions {
@@ -21,6 +22,7 @@ export interface TaskPanelActions {
   revise?(id: number): void;
   preferences?(id?: number, original?: boolean): void;
   preferencesKey?: KeyId | null;
+  inlinePreferences?: InlinePreferences;
   launchModel?(): string;
   historyStorage?(): HistoryStorageStatus;
 }
@@ -37,7 +39,8 @@ const pending = (record: RefineRecord) => record.status === "queued" || record.s
 export class TaskPanel {
   private deletion?: { ids: number[]; label: string };
   isConfirmingDelete(): boolean { return !!this.deletion; }
-  ownsInput(): boolean { return !!this.deletion || !!this.document; }
+  ownsInput(): boolean { return !!this.deletion || !!this.document || this.preferenceFocus; }
+  private preferenceFocus = false;
   private document?: { kind: "help" | "storage"; scroll: number };
   private reading = false;
   private referenceOnly = false;
@@ -59,13 +62,13 @@ export class TaskPanel {
   ) {}
   invalidate(): void { this.cache.clear(); }
   setNotice(text: string, color: "muted" | "warning" | "error" = "muted"): void { this.notice = text; this.noticeColor = color; }
-  openList(): void { this.inspecting = false; this.compareId = undefined; this.reading = false; this.original = false; }
+  openList(): void { this.inspecting = false; this.compareId = undefined; this.reading = false; this.preferenceFocus = false; this.original = false; }
   /** Preserve the source and reading position while a revision owns focus. */
   snapshot(referenceOnly = false): TaskPanel {
     const records = this.actions.records().map((record) => ({ ...record, input: { ...record.input },
       candidate: record.candidate && { ...record.candidate } }));
     const appliedId = this.actions.appliedId();
-    const panel = new TaskPanel({ ...this.actions, records: () => records, appliedId: () => appliedId },
+    const panel = new TaskPanel({ ...this.actions, inlinePreferences: undefined, records: () => records, appliedId: () => appliedId },
       this.theme, this.rows, this.keys, this.usage, structuredClone(this.position));
     panel.referenceOnly = referenceOnly;
     panel.inspecting = this.inspecting; panel.compareId = this.compareId; panel.reading = this.reading;
@@ -121,6 +124,10 @@ export class TaskPanel {
   private canChoosePreferences(row?: Row): boolean {
     return !!(row?.original && row.record.status === "unsent" && !row.record.input.contextUnavailable && this.actions.preferences);
   }
+  private inline(row?: Row): InlinePreferences | undefined {
+    return !this.usage && !this.referenceOnly && !this.inspecting && this.canChoosePreferences(row) &&
+      this.actions.inlinePreferences?.available(row!.record.id) ? this.actions.inlinePreferences : undefined;
+  }
   private preferenceSummary(record: RefineRecord): string {
     const selected = record.input.preferences ?? [];
     return `Preferences: ${selected.length ? `${selected.length} · ${selected.map((entry) => entry.name).join(", ")}` : "None"}`;
@@ -145,6 +152,31 @@ export class TaskPanel {
         this.setNotice(removed ? "Deleted" : "Request changed or send pending; deletion cancelled", removed ? "muted" : "warning");
       } else if (key === "n" || key === "q" || key === "ctrl+\\" || this.keys.matches(data, "tui.select.cancel")) {
         this.deletion = undefined;
+      }
+      return true;
+    }
+    const inlineRow = this.selected();
+    const inline = this.inline(inlineRow);
+    this.actions.inlinePreferences?.setTarget(inline ? inlineRow!.record.id : undefined, this.preferenceFocus);
+    if (this.preferenceFocus && !inline) {
+      this.preferenceFocus = false; this.reading = false;
+      this.setNotice("Original changed or already started; no selection applied.", "warning");
+      return true;
+    }
+    if (inline && (key === "tab" || key === "shift+tab")) {
+      const focus = this.preferenceFocus ? 2 : this.reading ? 1 : 0;
+      const next = (focus + (key === "tab" ? 1 : 2)) % 3;
+      this.preferenceFocus = next === 2; this.reading = next === 1;
+      inline.setTarget(inlineRow!.record.id, this.preferenceFocus);
+      return true;
+    }
+    if (inline && this.preferenceFocus) {
+      if (this.actions.preferencesKey && matchesKey(data, this.actions.preferencesKey) && inline.hints === "select") {
+        this.actions.preferences?.(inlineRow!.record.id, true);
+      } else {
+        const action = inline.handleInput(data);
+        if (action === "back") { this.preferenceFocus = false; this.reading = false; inline.setTarget(inlineRow!.record.id, false); }
+        else if (action === "manage") this.actions.preferences?.(inlineRow!.record.id, true);
       }
       return true;
     }
@@ -309,7 +341,16 @@ export class TaskPanel {
     }
     return lines;
   }
-  private pane(row: Row, width: number, height: number, active = true, previewDetails = false): string[] {
+  private pane(row: Row, width: number, height: number, active = true, previewDetails = false, showInline = true): string[] {
+    const inline = showInline && this.inline(row);
+    if (inline) {
+      const preferenceHeight = this.preferenceFocus && inline.hints === "read" ? height
+        : height < 9 ? (this.preferenceFocus ? height : 1) : Math.min(7, Math.max(5, Math.floor(height / 2)));
+      const originalHeight = height - preferenceHeight - (height > preferenceHeight ? 1 : 0);
+      const original = originalHeight > 0 ? this.pane(row, width, originalHeight, active, false, false) : [];
+      return [...Array.from({ length: Math.max(0, originalHeight) }, (_, index) => original[index] ?? ""),
+        ...(originalHeight > 0 ? [""] : []), ...inline.render(width, preferenceHeight)];
+    }
     const { record, records } = row;
     const title = row.original ? "Original prompt" : record.input.model.id;
     const status = row.original && record.status !== "unsent"
@@ -320,7 +361,7 @@ export class TaskPanel {
       ? [titleText + (previewDetails ? this.muted(" · ") : " ".repeat(width - visibleWidth(titleText) - visibleWidth(status))) + status]
       : [truncateToWidth(titleText, width, "…"), status];
     const identityLines = header.length;
-    if ((row.original && record.status === "unsent" && this.actions.preferences) || record.input.preferences?.length) {
+    if (!this.inline(row) && ((row.original && record.status === "unsent" && this.actions.preferences) || record.input.preferences?.length)) {
       header.push(...this.wrapped(this.muted(this.preferenceSummary(record)), width));
     }
     if (!row.original) {
@@ -494,8 +535,10 @@ export class TaskPanel {
       }
       body.push(this.muted(`Focus: ${this.inspecting || this.reading ? "Reading · ↑↓ scroll" : "List · ↑↓ select"}`), "");
       const hints: KeyHint[] = [["Esc", "Back"], ["?", "Available actions and full feedback"]];
-      if (!this.inspecting) hints.push(["Enter", row?.original && row.record.status === "unsent" ? "Run" : "Inspect"], ["Tab", this.reading ? "Select" : "Read"], ["n", "New"]);
-      if (this.canOpenPreferences()) hints.push(["p", "Preferences"]);
+      const inline = this.inline(row);
+      if (!this.inspecting) hints.push(["Enter", row?.original && row.record.status === "unsent" ? "Run from original focus" : "Inspect"], ["Tab", inline ? "List / Read / Preferences" : this.reading ? "Select" : "Read"], ["n", "New"]);
+      if (inline) hints.push(["Shift+Tab", "Choose inline preferences from list"], ["Space", "Toggle at Preferences focus; saved immediately"], ["Enter", "Read at Preferences focus; never starts a run"], ["/", "Search at Preferences focus"]);
+      if (this.canOpenPreferences()) hints.push(["p", inline ? "Manage / more; Alt+Enter brings back child changes" : "Preferences"]);
       if (row) {
         hints.push(["i", row.record.input.contextUnavailable ? "Copy to current" : "Edit original"]);
         if (!row.record.input.contextUnavailable) hints.push(["m", "Run model"]);
@@ -532,10 +575,12 @@ export class TaskPanel {
         body, [fittingKeyHints([["y", "Delete"], ["Esc / n", "Cancel"]], layout.innerWidth, this.theme)],
         (text) => this.muted(text));
     }
-    const tabs = workspaceTabs(layout, this.usage ? "Usage" : "Preview", this.theme, !this.referenceOnly);
+    const tabs = workspaceTabs(layout, this.usage ? "Usage" : "Preview", this.theme, !this.referenceOnly && !this.preferenceFocus);
     const height = Math.max(1, layout.bodyHeight - tabs.length);
     const rows = this.entries();
     const selected = this.selected(rows);
+    const inline = this.inline(selected);
+    this.actions.inlinePreferences?.setTarget(inline ? selected!.record.id : undefined, this.preferenceFocus);
     const split = !this.inspecting && layout.innerWidth >= 72;
     const leftWidth = split ? Math.min(36, Math.floor(layout.innerWidth / 3)) : layout.innerWidth;
     const rightWidth = split ? layout.innerWidth - leftWidth - 3 : layout.innerWidth;
@@ -579,16 +624,31 @@ export class TaskPanel {
     } else {
       const right = selected ? this.pane(selected, rightWidth, height) : [this.muted("No prompts yet. Press n to create one.")];
       body = Array.from({ length: height }, (_, i) => {
-        if (!split) return this.inspecting || this.reading || !rows.length ? right[i] ?? "" : list[i] ?? "";
+        if (!split) return this.inspecting || this.reading || this.preferenceFocus || !rows.length ? right[i] ?? "" : list[i] ?? "";
         const line = list[i] ?? "";
         return line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line))) + this.muted(" │ ") + (right[i] ?? "");
       });
+    }
+    if (inline && this.preferenceFocus) {
+      const mode = inline.hints;
+      const primary: KeyHint[] = mode === "search" ? [["Esc", "Finish search"], ["Enter", "Choose"]]
+        : mode === "read" ? [["Esc", "Back to preferences"], ["↑↓", "Scroll"]]
+        : [["Esc", "Back"], ["Space", "Toggle"], ["Enter", "Read"], ["↑↓", "Choose"]];
+      const secondary: KeyHint[] = mode === "select" ? [["Tab / Shift+Tab", "Focus"], ["/", "Search"], ["p", "Manage / more"]] : [["Tab / Shift+Tab", "Focus"]];
+      const footer = layout.footerHeight === 1
+        ? [fittingKeyHints([["Esc", ""], ...primary.slice(1), ...secondary], layout.innerWidth, this.theme, " ")]
+        : layout.innerWidth < 40
+          ? [fittingKeyHints(primary.slice(1), layout.innerWidth, this.theme), fittingKeyHints([primary[0]!, ...secondary], layout.innerWidth, this.theme)]
+          : alignedKeyHints([primary, secondary], layout.innerWidth, this.theme);
+      return panelFrame(layout, [this.heading("Prompt refine · Tasks"), this.muted(`Focus: Preferences${mode === "select" ? " · Changes saved to this Unsent; not run" : mode === "search" ? " · Search" : " · Read-only"}`)],
+        [...tabs, ...body], footer, (text) => this.muted(text));
     }
     const action = !this.inspecting && selected?.original && selected.record.status === "unsent" ? "Run" : "Inspect";
     const restored = selected?.record.input.contextUnavailable;
     const primary: KeyHint[] = this.inspecting ? [["i", restored ? "Copy to current" : "Edit original"], ...(!restored ? [["m", "Run model"] as const] : [])]
       : [["Enter", action], ["i", restored ? "Copy to current" : "Edit original"], ["n", "New"], ...(!restored ? [["m", selected ? "Run model" : "Model"] as const] : [])];
-    if (this.canOpenPreferences()) primary.splice(this.inspecting ? 0 : 1, 0, ["p", "Preferences"]);
+    if (inline) primary.splice(1, 0, [this.reading ? "Tab" : "Shift+Tab", layout.innerWidth < 56 ? "Preferences" : "Choose preferences"]);
+    if (this.canOpenPreferences()) primary.splice(this.inspecting ? 0 : inline ? 2 : 1, 0, ["p", inline ? "Manage / more" : "Preferences"]);
     if (selected && !selected.original && pending(selected.record)) primary.unshift(["x", "Stop"]);
     if (selected && !selected.original && selected.record.candidate) {
       primary.unshift(...(this.inspecting ? [["s", "Send to Pi"] as const] : []));
@@ -596,7 +656,7 @@ export class TaskPanel {
     }
     if (selected && this.actions.deleteRecords) primary.push(["d", "Delete"]);
     // Reserve both focus labels so Tab never shifts columns or changes which hints fit.
-    const focusAction = (this.reading ? "Select" : "Read").padEnd("Select".length);
+    const focusAction = inline ? (this.reading ? "Preferences" : "Read") : (this.reading ? "Select" : "Read").padEnd("Select".length);
     const secondary: KeyHint[] = [["Esc", "Back"], ["?", layout.innerWidth < 56 ? "Help" : "Actions"], ...(this.usage && this.actions.historyStorage ? [["b", "Storage"] as const] : []), ...(!this.inspecting && selected && !selected.original && selected.record.candidate && !restored && this.actions.revise ? [["f", "Revise"] as KeyHint] : []), ...(previewDetails ? [["o", this.original ? "Result" : "Reference"] as KeyHint] : []), ...(other || !this.inspecting ? [["Tab", other ? "Switch result" : focusAction] as KeyHint] : [])];
     if (this.inspecting && selected && !selected.original && selected.record.candidate) {
       secondary.push(...(selected.records.some((record) => record.id !== selected.record.id && record.candidate) ? [["c", other ? "Next comparison" : "Compare"] as KeyHint] : []), ["e", "Edit result"], ...(!restored ? [["f", "Revise"] as const] : []));
@@ -618,7 +678,7 @@ export class TaskPanel {
       : this.muted(`${rows.filter((row) => row.original).length} prompts · ${rows.filter((row) => !row.original).length} runs · `)
         + formatKeyHint(["↑↓", this.reading ? "scroll" : "select"], this.theme) + this.muted(` · Run: ${this.actions.launchModel?.() ?? "selected model"}`);
     const header = [this.heading(title), subtitle];
-    if (!this.notice && !this.referenceOnly && this.canChoosePreferences(selected)) {
+    if (!inline && !this.notice && !this.referenceOnly && this.canChoosePreferences(selected)) {
       const summary = this.muted(this.preferenceSummary(selected!.record));
       header[1] = summary + this.muted(" · ") + subtitle;
       if (layout.headerHeight === 1) header[0] = summary;
