@@ -111,6 +111,17 @@ describe("typed preferences", () => {
     const library = await f.store.load();
     expect(library.errors).toEqual({});
     expect(library.entries).toHaveLength(10);
+    const automatic = library.entries.filter((entry) => entry.metadata?.activation === "auto");
+    expect(automatic.map((entry) => [entry.id, entry.version, entry.metadata?.match])).toEqual([
+      ["prompt-bullet-structure", 2, "parallel"], ["prompt-step-structure", 2, "sequence"],
+    ]);
+    for (const entry of automatic) {
+      expect(entry.body).toContain("本地匹配仅表示可能适用");
+      expect(entry.body).toContain("保持原样");
+      expect(entry.body).toContain("授权范围");
+    }
+    expect(automaticPreferences(library.entries, "保留原稿结构。为什么？如何处理？")).toEqual([]);
+    expect(automaticPreferences(library.entries, "首先检查。然后解释。").map((entry) => entry.id)).toEqual(["prompt-step-structure"]);
     expect(library.entries.every((entry) => entry.metadata?.description && ["rewrite", "task"].includes(entry.metadata.kind))).toBe(true);
     expect(library.entries.filter((entry) => entry.metadata?.kind === "task").every((entry) => entry.metadata?.activation === "manual")).toBe(true);
     const chosen = automaticPreferences(library.entries, "先解释原因，再讨论方案。为什么？有什么取舍？");

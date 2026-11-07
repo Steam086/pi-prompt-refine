@@ -106,13 +106,16 @@ function matchingText(draft: string): string {
   }
   const text = lines.join("\n");
   const visible: string[] = [];
-  const quotes: Record<string, string> = { "“": "”", "「": "」", "『": "』", '"': '"' };
+  const quotes: Record<string, string> = { "“": "”", "「": "」", "『": "』", "‘": "’", "'": "'", '"': '"' };
   let quote: string | undefined;
   let ticks = 0;
   // Unclosed spans conservatively hide the rest. Scan once, including malformed input.
   for (let index = 0; index < text.length; index++) {
     const character = text[index]!;
-    if (quote) { if (character === quote) quote = undefined; continue; }
+    // Apostrophes inside words (don't / user's / don’t) are not quotation marks.
+    const apostrophe = (character === "'" || character === "’") &&
+      /[\p{L}\p{N}]/u.test(text[index - 1] ?? "") && /[\p{L}\p{N}]/u.test(text[index + 1] ?? "");
+    if (quote) { if (character === quote && !apostrophe) quote = undefined; continue; }
     if (character === "`") {
       let end = index + 1;
       while (text[end] === "`") end++;
@@ -121,30 +124,52 @@ function matchingText(draft: string): string {
       else if (ticks === length) ticks = 0;
       index = end - 1;
     } else if (!ticks) {
-      if (quotes[character]) { quote = quotes[character]; visible.push(" "); }
+      if (quotes[character] && !apostrophe) { quote = quotes[character]; visible.push(" "); }
       else visible.push(character);
     }
   }
   return visible.join("").replace(/https?:\/\/\S+/g, " ");
 }
-/** Conservative cues only: numbered lists alone do not establish either parallelism or sequence. */
+/** Local eligibility only, not a semantic verdict. Keep ambiguous prose out of step adoption. */
 function structureCues(draft: string): { parallel: boolean; sequence: boolean } {
   const plain = matchingText(draft);
-  const positive = plain.split(/[。！？.!?;；\n]/).filter((part) =>
-    !/(?:不要|别|无需|不必|禁止|不能|不应|不允许|并非|不是|\b(?:not|never|avoid|without)\b|\bdon['’]t\b)/i.test(part));
-  const follows = (part: string, start: RegExp, end: RegExp): boolean => {
-    const match = start.exec(part);
-    return !!match && end.test(part.slice(match.index + match[0].length + 1));
-  };
-  const sequence = positive.some((part) => /(?:按顺序|依次|按次序|\bin (?:order|sequence)\b)/i.test(part) ||
-    follows(part, /先/, /再|然后/) || follows(part, /首先/, /其次|接着/) || follows(part, /\bfirst\b/i, /\bthen\b/i));
-  // Repeated punctuation is one question; require actual text between question groups.
-  // Splitting keeps long unpunctuated drafts linear rather than backtracking over every suffix.
-  const questions = plain.split(/[?？]+/).slice(0, -1).filter((part) =>
+  // These constraints concern the draft's structure, not the main agent's answer format.
+  const preserveStructure = /(?:保留|保持)(?:原有|原稿|原文|现有)?(?:的)?(?:结构|格式|自然段)|(?:不要|禁止|无需|不必|别)(?:将|把)?(?:原稿|原文|prompt)?(?:改成|改为|整理成|转换为|使用|添加)?(?:列表|条目|编号|步骤)|(?:不要|禁止|别)(?:改变|调整|修改)(?:原稿|原文|现有)?(?:的)?(?:结构|格式)|\b(?:preserve|keep) (?:the )?(?:(?:original|existing|draft) )?(?:structure|format|paragraphs)\b|\b(?:do not|don't|don’t|never) (?:restructure|reformat)\b/i.test(plain);
+  if (preserveStructure) return { parallel: false, sequence: false };
+
+  const negative = /(?:不要|别|无需|不必|禁止|不能|不应|不允许|并非|不是|\b(?:not|never|avoid|without)\b|\bdon['’]t\b)/i;
+  // Clause-local negation: “无需联网，先检查再解释” must retain the positive request.
+  const clauses = plain.split(/[，,。！？.!?;；\n]/).map((part) => part.trim());
+  const request = /^(?:(?:请你|请|麻烦|我们需要|需要)\s*|(?:please|we should|you should)\s+)?/i;
+  const starts = /^(?:首先|先(?!前|生|进|验|天)|first\b)\s*(\S.*)$/i;
+  const continuation = /^(?:再|然后|其次|接着|then\b|next\b)\s*\S/i;
+  const normalized = clauses.map((part) => part.replace(/^[-*+•]\s+/, "").replace(request, ""));
+  let sequence = false;
+  for (let index = 0; index < normalized.length; index++) {
+    const part = normalized[index]!;
+    if (negative.test(part)) continue;
+    if (/^(?:按顺序|依次|按次序)\s*\S|^in (?:order|sequence)\b(?!\s+to\b)/i.test(part)) sequence = true;
+    const start = starts.exec(part);
+    if (!start) continue;
+    // Require content between the markers, not a substring such as “优先”.
+    if (/(?:再|然后|其次|接着|\bthen\b)\s*\S/i.test(start[1]!.slice(1))) sequence = true;
+    const next = normalized[index + 1];
+    if (next && !negative.test(next) && continuation.test(next)) sequence = true;
+  }
+  // Explicit step labels carry order; plain numbered lists do not.
+  const stepLabels = normalized.filter((part) => !negative.test(part)).map((part) =>
+    /^(?:第([一二三四五六七八九十\d]+)步|步骤([一二三四五六七八九十\d]+)|step\s+(\d+)\b)\s*[:：、.)]?\s*\S/i.exec(part))
+    .filter((match) => match !== null).map((match) => match[1] ?? match[2] ?? match[3]);
+  if (new Set(stepLabels).size >= 2) sequence = true;
+
+  // Exclude numbered lines locally, rather than suppressing unrelated questions in the draft.
+  const unnumbered = plain.split(/\r?\n/).filter((line) => !/^\s*\d+[.)、][ \t]*\S/.test(line)).join("\n");
+  const questions = unnumbered.split(/[?？]+/).slice(0, -1).filter((part) =>
     /[\p{L}\p{N}]/u.test(part.split(/[。!！;；\n]/).at(-1) ?? "")).length;
-  const numbered = /^\s*\d+[.)、][ \t]*\S/m.test(plain);
-  const bullets = plain.match(/^[ \t]*[-*+][ \t]+\S/gm)?.length ?? 0;
-  return { sequence, parallel: !numbered && (questions >= 2 || bullets >= 2) };
+  const bullets = unnumbered.match(/^[ \t]*[-*+•][ \t]+\S/gm)?.length ?? 0;
+  // Unresolved ordering cues should not be reclassified as parallel merely due to punctuation.
+  const possibleOrder = /(?:第一步|第二步|步骤[一二12]|然后|接着|随后|\b(?:then|next|after|before)\b)/i.test(plain);
+  return { sequence, parallel: !possibleOrder && (questions >= 2 || bullets >= 2) };
 }
 /** Only rewrite preferences can be adopted implicitly. Project entries precede global duplicates. */
 export function automaticPreferences(entries: readonly RevisionPreference[], draft: string): SelectedPreference[] {

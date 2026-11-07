@@ -39,9 +39,48 @@ describe("conservative automatic selection", () => {
     ["请按顺序：检查、修复、验证。", ["sequence"]],
     ["依次解释三个阶段。", ["sequence"]],
     ["First inspect, then explain. Why? How?", ["sequence"]],
+    ["首先检查。然后解释。", ["sequence"]],
+    ["先检查\n然后解释", ["sequence"]],
+    ["Please first inspect. Then explain.", ["sequence"]],
+    ["请你先查再改", ["sequence"]],
+    ["不要修改文件，先检查再解释。", ["sequence"]],
+    ["无需联网，依次解释三个阶段。", ["sequence"]],
+    ["Don't edit files, first inspect then explain.", ["sequence"]],
+    ["Don’t edit files, first inspect then explain.", ["sequence"]],
+    ["不要先检查，再解释。", []],
+    ["优先考虑兼容性，然后讨论性能。", []],
+    ["系统先读取配置再启动服务，请解释失败原因。", []],
+    ["解释 ‘先检查再修改’ 的含义", []],
+    ["解释 'first inspect then change' 的含义", []],
+    ["解释 'don't first inspect then change' 的含义", []],
+    ["解释 '未闭合 first inspect then change", []],
+    ["User's request: Why? How?", ["parallel"]],
+    ["In order to understand this issue, explain the cause.", []],
+    ["In order: inspect, explain.", ["sequence"]],
+    ["- 第一步检查\n- 第二步修复", ["sequence"]],
+    ["步骤一：检查\n步骤二：修复", ["sequence"]],
+    ["Step 1: inspect\nStep 2: explain", ["sequence"]],
+    ["步骤一：检查\n步骤一：解释", []],
+    ["为什么先失败？然后怎么办？", []],
+    ["1. 原因\n2. 影响\n还有什么？为什么？", ["parallel"]],
+    ["• 原因\n• 影响", ["parallel"]],
+    ["请分析原因、影响和解决方案。", []],
+    ["保留原稿结构。原因是什么？怎么解决？", []],
+    ["不要把原稿改成列表。原因是什么？怎么解决？", []],
+    ["不要改变原稿结构。先检查再解释。", []],
+    ["Keep the original structure. First inspect then explain.", []],
+    ["Don't reformat. Why? How?", []],
+    ["不要分条回答。原因是什么？怎么解决？", ["parallel"]],
+    ["解释‘保留原稿结构’。原因是什么？怎么解决？", ["parallel"]],
     ["先" + "检查".repeat(100) + "，再解释。", ["sequence"]],
   ])("uses supported unquoted cues: %s", (draft, expected) => {
     expect(automaticPreferences(entries, draft as string).map((entry) => entry.id)).toEqual(expected);
+  });
+  it("keeps structure guards separate from explicit always defaults and manual requirements", () => {
+    const always: RevisionPreference = { ...entries[0]!, id: "always", body: "Keep literals.",
+      metadata: { kind: "rewrite", activation: "auto", match: "always", description: "Literal safety" } };
+    expect(automaticPreferences([...entries, always], "保留原稿结构。为什么？怎么办？").map((entry) => entry.id)).toEqual(["always"]);
+    expect(composeRevision([selectPreference(entries[0]!)], "保留原稿结构")).toContain("manually selected");
   });
   it("handles long plain text and repeated start words without quadratic suffix scans", () => {
     for (const draft of ["a".repeat(100_000), "再" + "先".repeat(99_999), "“".repeat(100_000), "literal " + "`".repeat(99_990)]) {
