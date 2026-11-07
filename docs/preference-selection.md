@@ -1,8 +1,24 @@
 # Preferences：检查选择与保存新条目
 
-Preferences 是独立子页，不会请求模型、写 Pi 编辑器或发送消息。Unsent 原稿按 `p` 打开；Revise 中按 Alt+P，或 Tab 到 Preferences 后 Enter。只有 Alt+Enter **带回**后，返回 Unsent 按 Enter／返回 Revise 按 Ctrl+S，要求才进入请求。根层 Esc 放弃本次暂存选择，不撤销已保存的库修改。
+Preferences 有 Preview 内联选择与完整子页两种入口；浏览、选择和管理均不会请求模型、写 Pi 编辑器或发送消息。
 
-## All 与 Selected only
+## Preview 内联选择（Unsent）
+
+选中有完整背景的 `○ Unsent` 原稿父节点，右侧原稿下方直接展示有界偏好列表。默认焦点仍在原稿列表；**Shift+Tab** 直接聚焦偏好，Tab / Shift+Tab 循环切换原稿列表、原稿阅读、偏好选择。↑↓ / Page Up / Page Down 浏览，**Space 立即更新当前 Unsent 的选择**，不用 Alt+Enter 带回。Esc 回原稿列表，不撤销已经勾选的项；回原稿后 Enter 才开始优化。
+
+- 偏好聚焦时，Enter 只阅读全文；Esc 从全文回列表，再 Esc 回原稿。Ctrl+S、Alt+Enter 和原稿动作不会从这里触发请求。顶层左右切页在偏好焦点内暂停，先 Esc 返回。
+- `/` 进入搜索；Enter / ↓ / Esc 结束文字输入，保留筛选，再 Esc 回原稿。搜索期间普通动作键是文字。查询、光标与阅读位置按原稿保留；筛选不改变已选项与组合顺序。
+- 列表按用途分组，显示勾选状态；聚焦项附短描述，来源空间足够时显示 P / G。选中后不重排列表。来源变化／删除的快照带 `!`，Enter 可检查已选正文与当前库正文；不静默替换快照。库加载失败显示 warning，不伪装成空库，已有快照仍可查看与移除。
+- 窄屏通过焦点切换显示列表／阅读／偏好；短窗口未聚焦时折叠为数量，聚焦时优先给偏好列表高度，全文阅读使用摘要区全部高度。不新增横向分栏。
+- 每次 Space 校验当前原稿、session、运行状态与长度限制。失败不改变已有有效选择；已启动目标不再接受修改。选择只属于该原稿，关闭再打开仍保留于当前 session 内存，不作为库默认值或写入 Unsent sidecar。
+
+`p` 或可用的 Alt+P 仍打开完整 Preferences 面板；子页独立暂存修改，**Alt+Enter 带回才更新原稿，根层 Esc 放弃子页修改**，不撤销此前的内联选择。库管理仍只有 Add / Edit / Delete。首次显示内联区时加载库，从完整面板返回后刷新；聚焦与滚动不重复读库。
+
+Usage 的 Unsent 不增加内联区，仍通过完整面板选择。其他原稿／运行只浏览和管理库；结果追加要求通过 Revise → Preferences。
+
+## 完整面板：All 与 Selected only
+
+Unsent 按 `p` 打开完整子页；Revise 中按 Alt+P，或 Tab 到 Preferences 后 Enter。子页内只有 Alt+Enter **带回**后，返回 Unsent 按 Enter／返回 Revise 按 Ctrl+S，要求才进入请求。根层 Esc 放弃暂存选择，不撤销已保存的库修改。
 
 Tab / Shift+Tab 仍然只切换 **Search、Library、Actions** 三个区域；管理操作仍只有 **Add / Edit / Delete**。
 

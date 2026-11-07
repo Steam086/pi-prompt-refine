@@ -758,7 +758,7 @@ describe("explicit candidate revision", () => {
     const output = () => h.panelLines(100).join("\n");
     for (let i = 0; i < 5; i++) {
       h.panelInput("n"); h.panelInput(`Draft ${i}`); h.panelInput("\r");
-      expect(output()).toContain("Preferences: None");
+      expect(output()).toContain("Preferences · 0 selected");
       h.panelInput("p"); await vi.waitFor(() => expect(output()).not.toContain("Working…"));
       h.panelInput(" "); h.panelInput("\x1b[13;3u"); h.panelInput("\r"); await flushPromises();
     }
@@ -793,7 +793,7 @@ describe("explicit candidate revision", () => {
     h.panelInput("\x1b"); h.panelInput("\x1b");
     // The refresh affects only future drafts, not the five frozen requests.
     h.panelInput("n"); h.panelInput("New after delete"); h.panelInput("\r");
-    expect(output()).toContain("Preferences: None");
+    expect(output()).toContain("Preferences · 0 selected");
     for (const call of h.complete.mock.calls) {
       const packet = JSON.parse((call as any[])[1].messages[0].content[0].text);
       expect(packet.editing_instruction).toBe(`Prompt rewriting instructions (manually selected):\n${entry.body}`);
@@ -832,6 +832,35 @@ describe("explicit candidate revision", () => {
     expect(h.complete).toHaveBeenCalledTimes(1); expect(h.sent).toHaveLength(1);
   });
 
+  it("selects inline on Unsent, reads without submission, and freezes the chosen body across reopening", async () => {
+    const h = await makeHarness({ config: { preferencesKey: null } });
+    const store = new PreferenceStore(h.agentDir, h.context.cwd);
+    const entry = await store.save("project", { name: "Inline 中文😀", body: "Only the main agent should use brief sections." });
+    const original = "  Explain this literal task; do not run commands.\n";
+    h.setEditorText(original); h.holdPanel(); let view = shortcut(h, "ctrl+\\")(h.context);
+    const output = () => h.panelLines(100).join("\n");
+    h.panelInput("\x1b[Z");
+    await vi.waitFor(() => expect(output()).toContain("[ ] Inline 中文😀"));
+    h.panelInput(" ");
+    expect(output()).toContain("[x] Inline 中文😀");
+    expect(output()).not.toContain("Bring back");
+    h.panelInput("\r"); expect(output()).toContain(entry.body);
+    for (const key of ["\x13", "\r", "p", "i", "f"]) h.panelInput(key);
+    expect(h.complete).not.toHaveBeenCalled();
+    expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
+    h.panelInput("\x1b"); h.panelInput("\x1b"); h.panelInput("q"); await view;
+    await store.save("project", { name: "Changed", body: "Do not replace the captured body." }, entry);
+    view = h.command("", h.context);
+    expect(output()).toContain("Preferences · 1 selected");
+    h.panelInput("\r"); await flushPromises();
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    const packet = JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
+    expect(packet).toMatchObject({ draft: original, editing_instruction: `Saved editing requirements (manually selected):\n${entry.body}` });
+    expect(h.getEditor()).toBe(original);
+    expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
+    h.panelInput("q"); await view;
+  });
+
   it("selects Preferences before first refine without a modifier, preserves literal task and snapshots across reopening", async () => {
     const h = await makeHarness({ config: { preferencesKey: null }, persistHistory: true });
     const store = new PreferenceStore(h.agentDir, h.context.cwd);
@@ -847,13 +876,15 @@ describe("explicit candidate revision", () => {
     h.panelInput(" "); h.panelInput("\x13");
     expect(h.complete).not.toHaveBeenCalled();
     h.panelInput("\r"); h.panelInput("\x1b"); h.panelInput("\x1b[13;3u");
-    expect(h.panelLines().join("\n")).toContain("Preferences: 1 · Bullet Points");
+    expect(h.panelLines().join("\n")).toContain("Preferences · 1 selected");
+    expect(h.panelLines().join("\n")).toContain("[x] Bullet Points");
     expect(h.complete).not.toHaveBeenCalled();
     expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
     h.panelInput("q"); await view;
     await store.save("project", { name: "Renamed", body: "Changed library body" }, entry);
     view = h.command("", h.context);
-    expect(h.panelLines().join("\n")).toContain("Preferences: 1 · Bullet Points");
+    expect(h.panelLines().join("\n")).toContain("Preferences · 1 selected");
+    expect(h.panelLines().join("\n")).toContain("[x] Bullet Points");
     h.panelInput("\r"); await flushPromises();
     expect(h.complete).toHaveBeenCalledTimes(1);
     const context = (h.complete.mock.calls[0] as any[])[1];
@@ -884,14 +915,15 @@ describe("explicit candidate revision", () => {
     await h.reload();
     h.holdPanel(); const view = h.command("", h.context);
     h.panelInput("n"); h.panelInput("Why? How?"); h.panelInput("\r");
-    expect(h.panelLines().join("\n")).toContain("Preferences: None");
+    expect(h.panelLines().join("\n")).toContain("Preferences · 0 selected");
     expect(h.complete).not.toHaveBeenCalled();
     h.panelInput("p");
     await vi.waitFor(() => expect(h.panelLines().join("\n")).not.toContain("Working…"));
     expect(h.panelLines().join("\n")).not.toContain("Automatically selected");
     h.panelInput("/"); h.panelInput("Structure"); h.panelInput("\r");
     h.panelInput(" "); h.panelInput("\x1b[13;3u");
-    expect(h.panelLines().join("\n")).toContain("Preferences: 1 · Structure");
+    expect(h.panelLines().join("\n")).toContain("Preferences · 1 selected");
+    expect(h.panelLines().join("\n")).toContain("[x] Structure");
     expect(h.complete).not.toHaveBeenCalled();
     h.panelInput("\r"); await flushPromises();
     const first = JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
@@ -899,7 +931,7 @@ describe("explicit candidate revision", () => {
     expect(JSON.stringify(first)).not.toContain(metadata.description);
     expect(JSON.stringify(first)).not.toContain("Answer in English.");
     h.panelInput("n"); h.panelInput("先检查，再解释。 What? Why?"); h.panelInput("\r");
-    expect(h.panelLines().join("\n")).toContain("Preferences: None");
+    expect(h.panelLines().join("\n")).toContain("Preferences · 0 selected");
     h.panelInput("\r"); await flushPromises();
     const second = JSON.parse((h.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
     expect(second).not.toHaveProperty("editing_instruction");
@@ -1002,7 +1034,7 @@ describe("explicit candidate revision", () => {
     await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Sections"));
     h.panelInput(" "); h.panelInput("\x1b[13;3u"); h.panelInput("\r"); await flushPromises();
     h.panelInput("i"); h.panelInput(" copied"); h.panelInput("\r");
-    expect(h.panelLines().join("\n")).toContain("Preferences: None");
+    expect(h.panelLines().join("\n")).toContain("Preferences · 0 selected");
     h.panelInput("\r"); await flushPromises();
     expect(h.complete).toHaveBeenCalledTimes(2);
     const packets = h.complete.mock.calls.map((call: any[]) => JSON.parse(call[1].messages[0].content[0].text));

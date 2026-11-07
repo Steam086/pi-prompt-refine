@@ -929,9 +929,94 @@ function unsentWorkspaceSetup(key: KeyId | null = "alt+p", conflict = false, the
 }
 
 describe("Unsent preference selection", () => {
+  it.each(["dark", "light"])("selects inline without a child or bring-back, and only runs from the original (%s)", async (theme) => {
+    const f = unsentWorkspaceSetup(null, false, theme); const w = f.workspace;
+    text(w); await vi.waitFor(() => expect(text(w)).toContain(`[ ] ${a.name}`));
+    w.handleInput(backTab);
+    expect(text(w)).toContain("Focus: Preferences");
+    expect(text(w)).not.toContain("Bring back");
+    w.handleInput(" "); w.handleInput(down); w.handleInput("\x1b[32u");
+    expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(a), selectPreference(b)]);
+    expect(text(w)).toContain("2 selected");
+    const styled = w.render(100).join("\n");
+    expect(styled).toContain(f.theme.fg("text", f.theme.bold(b.name)));
+    expect(styled).toContain(formatKeyHint(["Space", "Toggle"], f.theme));
+    expect(styled).toContain(f.theme.fg("muted", " · P"));
+    w.handleInput(enter); expect(text(w)).toContain(b.body);
+    for (const key of [" ", "i", "f", "n", ctrlS, bringBack, enter]) w.handleInput(key);
+    expect(f.run).not.toHaveBeenCalled(); expect(f.complete).not.toHaveBeenCalled();
+    expect(f.repo.save).not.toHaveBeenCalled();
+    w.handleInput(esc); w.handleInput(esc); // Close reading, then focus the original.
+    expect(text(w)).not.toContain("Focus: Preferences");
+    expect(f.controller.getRecord(f.originals[0]!.id)!.input.draft).toBe(f.originals[0]!.input.draft);
+    w.handleInput(enter);
+    expect(f.run).toHaveBeenCalledExactlyOnceWith(f.originals[0]!.id);
+    expect(f.complete.mock.calls[0]![0]).toMatchObject({ editingInstruction: composeRevision([selectPreference(a), selectPreference(b)], "") });
+    await Promise.resolve(); w.dispose();
+  });
+
+  it("isolates inline searches and choices by original, caches browsing, and preserves the full panel transaction", async () => {
+    const f = unsentWorkspaceSetup(); const w = f.workspace;
+    text(w); await vi.waitFor(() => expect(text(w)).toContain(a.name));
+    const loads = f.repo.load.mock.calls.length;
+    w.handleInput(backTab); w.handleInput("/"); w.handleInput("Literal");
+    // Search owns all text and arrows; it cannot open another view or invoke task actions.
+    for (const key of [left, right, ctrlS]) w.handleInput(key);
+    expect(text(w)).toContain("Focus: Preferences · Search");
+    expect(f.run).not.toHaveBeenCalled();
+    w.handleInput(enter); w.handleInput(" ");
+    expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(b)]);
+    w.handleInput(esc); w.handleInput(tab); w.handleInput(tab);
+    expect(text(w)).toContain("Search: Literal");
+    expect(f.repo.load).toHaveBeenCalledTimes(loads);
+    w.handleInput(esc);
+    f.position.selectedTaskId = f.originals[1]!.taskId;
+    text(w); w.handleInput(backTab);
+    expect(text(w)).not.toContain("Search: Literal");
+    w.handleInput(" ");
+    expect(f.controller.getRecord(f.originals[1]!.id)!.input.preferences).toEqual([selectPreference(a)]);
+    w.handleInput("p"); await loaded(w); w.handleInput(" "); w.handleInput(esc);
+    expect(f.controller.getRecord(f.originals[1]!.id)!.input.preferences).toEqual([selectPreference(a)]);
+    expect(text(w)).toContain("Focus: Preferences");
+    w.handleInput("p"); await loaded(w); w.handleInput(" "); w.handleInput(bringBack);
+    expect(f.controller.getRecord(f.originals[1]!.id)!.input.preferences).toEqual([]);
+    expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(b)]);
+    expect(f.complete).not.toHaveBeenCalled(); w.dispose();
+  });
+
+  it("rejects an over-limit inline addition without discarding the valid selection", async () => {
+    const f = unsentWorkspaceSetup(null, false, "light", 90); const w = f.workspace;
+    text(w); await vi.waitFor(() => expect(text(w)).toContain(a.name));
+    w.handleInput(backTab); w.handleInput(" "); w.handleInput(down); w.handleInput(" ");
+    expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(a)]);
+    expect(text(w)).toContain("Editing requirements exceed 90");
+    for (const [width, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [100, 40]]) {
+      f.terminal.rows = rows!;
+      const lines = w.render(width!);
+      expect(lines).toHaveLength(panelLayout(width!, rows!).height);
+      expect(lines.every((line) => visibleWidth(line) <= width!)).toBe(true);
+      expect(lines.join("\n")).toContain(f.theme.fg("warning", "⚠").split("⚠")[0] + "⚠");
+    }
+    expect(f.complete).not.toHaveBeenCalled(); w.dispose();
+  });
+
+  it("consumes the focused Enter if its Unsent starts elsewhere, rather than inspecting or running another item", async () => {
+    const f = unsentWorkspaceSetup(); const w = f.workspace;
+    text(w); await vi.waitFor(() => expect(text(w)).toContain(a.name));
+    w.handleInput(backTab);
+    f.complete.mockImplementationOnce(() => new Promise(() => {}));
+    f.controller.startRecord(f.originals[0]!.id);
+    text(w); w.handleInput(enter);
+    expect(text(w)).toContain("Original changed or already started");
+    expect(text(w)).not.toContain("Prompt details");
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toBeUndefined();
+    w.dispose(); f.controller.setSession("other");
+  });
+
   it.each(["dark", "light"])("uses p independently of optional keys, freezes snapshots, and requests only on parent Enter (%s)", async (theme) => {
     const f = unsentWorkspaceSetup(null, false, theme); const w = f.workspace;
-    expect(text(w)).toContain("Preferences: None");
+    expect(text(w)).toContain("Preferences · 0 selected");
     w.handleInput("p"); await loaded(w);
     expect(text(w)).toContain("Preferences · Unsent original");
     w.handleInput(" "); w.handleInput(ctrlS);
@@ -942,7 +1027,8 @@ describe("Unsent preference selection", () => {
     w.handleInput(esc); w.handleInput(bringBack);
     expect(f.complete).not.toHaveBeenCalled();
     expect(f.repo.save).not.toHaveBeenCalled();
-    expect(text(w)).toContain(`Preferences: 1 · ${a.name}`);
+    expect(text(w)).toContain("Preferences · 1 selected");
+    expect(text(w)).toContain(`[x] ${a.name}`);
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.draft).toBe(f.originals[0]!.input.draft);
     f.library.entries[0]!.body = "Changed library text";
     w.handleInput(enter);
@@ -970,7 +1056,7 @@ describe("Unsent preference selection", () => {
     const f = unsentWorkspaceSetup(); const w = f.workspace;
     w.handleInput(altP); await loaded(w); w.handleInput(" "); w.handleInput(bringBack);
     f.position.selectedTaskId = f.originals[1]!.taskId;
-    expect(text(w)).toContain("Preferences: None");
+    expect(text(w)).toContain("Preferences · 0 selected");
     expect(text(w).split("\n")[2]).not.toContain(a.name);
     w.handleInput("p"); await loaded(w); expect(text(w)).toContain("0 selected");
     w.handleInput(esc);

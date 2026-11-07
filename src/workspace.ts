@@ -10,6 +10,7 @@ import { TaskPanel, type TaskPanelActions, type TaskPanelPosition } from "./task
 import type { RefineRecord } from "./history.js";
 import type { HistoryStorageStatus } from "./history-store.js";
 import { PreferencePanel } from "./preference-panel.js";
+import { InlinePreferences } from "./inline-preferences.js";
 import { composeRevision, type PreferenceRepository, type RevisionDraft, type SelectedPreference } from "./revision-preferences.js";
 import { canonicalShortcut } from "./config.js";
 
@@ -89,6 +90,7 @@ export class RefineWorkspace implements Component, Focusable {
   private readonly revisionDrafts = new Map<string, RevisionDraft>();
   private revisionSelected: SelectedPreference[] = [];
   private preferencePanel?: PreferencePanel;
+  private inlinePreferences?: InlinePreferences;
   private revisionExpanded = false;
   private revisionFocus: "input" | "preferences" | "requirements" = "input";
   private reviewingRequirements = false;
@@ -113,8 +115,13 @@ export class RefineWorkspace implements Component, Focusable {
       this.preferencesKey = null;
       this.preferencesKeyNotice = "Preferences key conflicts with Pi bindings; use p in Tasks or Tab then Enter in Revise. ";
     }
+    if (actions.tasks && actions.preferences && actions.draftPreferences) {
+      this.inlinePreferences = new InlinePreferences(actions.preferences.repository,
+        (id) => actions.draftPreferences!(id, true), theme, keys, () => { if (!this.disposed) this.tui.requestRender(); });
+    }
     if (actions.tasks) {
       const taskActions: TaskPanelActions = { ...actions.tasks,
+        inlinePreferences: this.inlinePreferences,
         preferences: actions.preferences ? (id, original) => this.openDraftPreferences(id, original) : undefined,
         preferencesKey: this.preferencesKey,
         revise: (id) => this.openRevision(id),
@@ -166,6 +173,7 @@ export class RefineWorkspace implements Component, Focusable {
     this.revisionInput.editor.focused = value && !this.preferencePanel && !this.reviewingRequirements && this.revisionFocus === "input" && this.mode === "input" && this.inputKind === "revision";
     this.originalInput.editor.focused = value && this.mode === "input" && this.inputKind === "original";
     if (this.preferencePanel) this.preferencePanel.focused = value;
+    if (this.inlinePreferences) this.inlinePreferences.focused = value && !this.preferencePanel && this.mode === "main";
   }
 
   private openRevision(id?: number): void {
@@ -235,6 +243,7 @@ export class RefineWorkspace implements Component, Focusable {
           if (error) return error;
         }
         this.preferencePanel?.dispose(); this.preferencePanel = undefined;
+        void this.inlinePreferences?.refresh();
         // The live per-original summary is the feedback; a sticky notice could
         // incorrectly advertise this selection after navigating to another task.
         if (selected) parent?.setNotice("", "muted");
@@ -257,7 +266,7 @@ export class RefineWorkspace implements Component, Focusable {
     this.switchMode("input");
   }
 
-  dispose(): void { this.disposed = true; this.preferencePanel?.dispose(); this.originalTarget?.cancel(); this.originalTarget = undefined; this.focused = false; }
+  dispose(): void { this.disposed = true; this.inlinePreferences?.dispose(); this.preferencePanel?.dispose(); this.originalTarget?.cancel(); this.originalTarget = undefined; this.focused = false; }
   invalidate(): void {
     this.panel.invalidate();
     this.historyPanel?.invalidate();
@@ -266,6 +275,7 @@ export class RefineWorkspace implements Component, Focusable {
     this.revisionInput.editor.invalidate();
     this.originalInput.editor.invalidate();
     this.preferencePanel?.invalidate();
+    this.inlinePreferences?.invalidate();
     this.settingsFrames.clear();
     this.refreshSettings();
   }
