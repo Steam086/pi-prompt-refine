@@ -28,6 +28,34 @@ function fixture(entries = [first, second], selected: SelectedPreference[] = [],
 }
 
 describe("inline Unsent preferences", () => {
+  it.each(["dark", "light"])("previews adjacent choices while navigating groups and resizing (%s)", async (themeName) => {
+    const entries = Array.from({ length: 18 }, (_, i) => ({ ...(i < 9 ? first : second), id: `item-${i}`, name: `Item ${String(i).padStart(2, "0")} 中文😀` }));
+    const f = fixture(entries, [], themeName); await Promise.resolve();
+    for (const [width, height] of [[60, 10], [24, 5], [60, 10]]) {
+      f.picker.handleInput("\x1b[H");
+      for (let i = 0; i < entries.length; i++) {
+        const frame = f.render(width!, height!);
+        const plain = stripVTControlCharacters(frame.join("\n"));
+        expect(plain).toContain(`› [ ] ${entries[i]!.name}`);
+        if (i + 1 < entries.length) expect(plain).toContain(entries[i + 1]!.name);
+        expect(frame.join("\n")).toContain(f.theme.fg("text", f.theme.bold(entries[i]!.name)));
+        expect(frame.length).toBeLessThanOrEqual(height!);
+        expect(frame.every((line) => visibleWidth(line) <= width!)).toBe(true);
+        expect(f.render(width!, height!)).toEqual(frame);
+        f.picker.handleInput("\x1b[B");
+      }
+      for (let i = entries.length - 2; i >= 0; i--) {
+        f.picker.handleInput("\x1b[A");
+        const plain = f.text(width!, height!);
+        expect(plain).toContain(`› [ ] ${entries[i]!.name}`);
+        if (i > 0) expect(plain).toContain(entries[i - 1]!.name);
+      }
+    }
+    expect(f.save).not.toHaveBeenCalled();
+    expect(f.load).toHaveBeenCalledTimes(1);
+    f.picker.dispose();
+  });
+
   it.each(["dark", "light"])("keeps snapshot identities and composition order, rejects duplicates, and never silently replaces sources (%s)", async (themeName) => {
     const copy = { ...first, id: "copy", scope: "global" as const, name: "Duplicate" };
     const f = fixture([first, copy, second], [selectPreference(first)], themeName);

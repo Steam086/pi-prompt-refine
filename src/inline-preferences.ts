@@ -1,6 +1,7 @@
 import { Input, parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { sanitizeTerminalText } from "./presentation.js";
+import { selectionWindow } from "./selection-window.js";
 import { preferenceContentKey, preferenceKey, searchPreferences, selectPreference, PREFERENCE_SELECTION_LIMIT,
   type PreferenceLibrary, type PreferenceRepository, type RevisionPreference, type SelectedPreference } from "./revision-preferences.js";
 
@@ -9,7 +10,7 @@ export interface InlinePreferenceTarget {
   save?(selected: SelectedPreference[]): string | undefined;
 }
 interface Document { text: string; scroll: number; width?: number; lines?: string[] }
-interface Position { search: Input; searching: boolean; key?: string; index: number; top: number; reading?: boolean; document?: Document }
+interface Position { search: Input; searching: boolean; key?: string; index: number; top: number; direction?: number; reading?: boolean; document?: Document }
 
 /** Direct, per-Unsent selection. Library editing remains a transactional child page. */
 export class InlinePreferences {
@@ -130,7 +131,7 @@ export class InlinePreferences {
       else if (key === "end") this.document.scroll = Number.MAX_SAFE_INTEGER;
     } else if (position.searching) {
       if (cancel || this.keys.matches(data, "tui.input.submit") || key === "down") position.searching = false;
-      else { position.search.handleInput(data); position.index = 0; position.key = undefined; position.top = 0; }
+      else { position.search.handleInput(data); position.index = 0; position.key = undefined; position.top = 0; position.direction = 1; }
     } else if (cancel || key === "q") return "back";
     else if (key === "p") return "manage";
     else if (key === "/") position.searching = true;
@@ -139,6 +140,7 @@ export class InlinePreferences {
       const entries = this.entries(target.selected, position);
       const delta = key === "up" ? -1 : key === "down" ? 1 : key === "pageup" ? -this.viewport : key === "pagedown" ? this.viewport : 0;
       if (delta || key === "home" || key === "end") {
+        position.direction = key === "home" ? -1 : key === "end" ? 1 : Math.sign(delta);
         position.index = key === "home" ? 0 : key === "end" ? Math.max(0, entries.length - 1) : Math.max(0, Math.min(entries.length - 1, position.index + delta));
         position.key = entries[position.index] && preferenceKey(entries[position.index]!);
       } else if (entry && key === "space") {
@@ -196,24 +198,16 @@ export class InlinePreferences {
     const group = (item: RevisionPreference) => item.metadata?.kind === "task" ? "Task requirements" : item.metadata?.kind === "rewrite" ? "Prompt rewriting" : "Unclassified";
     const available = height - result.length;
     const description = entry.metadata?.description;
-    const showDescription = this.active && !!description && available >= 4;
+    // Leave room for two choices even across a group boundary before adding metadata.
+    const showDescription = this.active && !!description && available >= 5;
     const count = Math.max(0, available - (showDescription ? 1 : 0));
-    const rows: { group: string; entry?: RevisionPreference }[] = [];
-    for (const item of entries) {
-      if (rows.at(-1)?.group !== group(item)) rows.push({ group: group(item) });
-      rows.push({ group: group(item), entry: item });
-    }
-    const selectedRow = rows.findIndex((row) => row.entry && preferenceKey(row.entry) === position.key);
-    position.top = Math.max(0, Math.min(position.top, selectedRow, Math.max(0, rows.length - count)));
-    const context = () => count >= 2 && rows[position.top]?.entry ? 1 : 0;
-    while (count > 0 && selectedRow >= position.top + count - context()) position.top++;
-    this.viewport = Math.max(1, count - 1);
+    const window = selectionWindow(entries.length, position.index, count, position.top, (index) => group(entries[index]!), 0, position.direction);
+    position.top = window.start;
+    this.viewport = Math.max(1, window.end - window.start);
     const groupHeading = (label: string) => this.theme.fg("text", this.theme.bold(clean(label)));
-    const contextRows = context();
-    if (contextRows) result.push(groupHeading(rows[position.top]!.group));
-    for (const row of rows.slice(position.top, position.top + Math.max(0, count - contextRows))) {
-      const item = row.entry;
-      if (!item) { result.push(groupHeading(row.group)); continue; }
+    for (const row of window.rows) {
+      if (typeof row === "string") { result.push(groupHeading(row)); continue; }
+      const item = entries[row]!;
       const local = target.selected.find((selected) => preferenceKey(selected) === preferenceKey(item));
       const active = this.active && preferenceKey(item) === position.key;
       const warning = local && this.snapshotWarning(local);

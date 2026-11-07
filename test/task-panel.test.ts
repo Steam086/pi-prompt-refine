@@ -28,6 +28,33 @@ function create(name = "dark", usage = false, records = [record()]) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("prompt tree and inspection", () => {
+  it.each(["dark", "light"])("keeps neighbouring runs visible without moving the action target on resize (%s)", (name) => {
+    const f = create(name, false, Array.from({ length: 24 }, (_, i) => record(24 - i)));
+    for (const [width, rows] of [[100, 40], [45, 14], [100, 20]]) {
+      f.size.rows = rows!; f.position.selectedTaskId = undefined; f.position.selectedId = 24;
+      for (let id = 24; id >= 1; id--) {
+        const frame = f.panel.render(width!);
+        const left = frame.map((line) => stripVTControlCharacters(line).split("│")[0]).join("\n");
+        expect(left).toMatch(new RegExp(`model-${id}(?!\\d)`));
+        if (id > 1) expect(left).toMatch(new RegExp(`model-${id - 1}(?!\\d)`));
+        const active = frame.find((line) => stripVTControlCharacters(line).includes("›"))!;
+        expect(active).toContain(f.theme.bg("selectedBg", "probe").split("probe")[0]);
+        expect(frame.every((line) => visibleWidth(line) <= width!)).toBe(true);
+        expect(f.panel.render(width!)).toEqual(frame);
+        expect(f.position.selectedId).toBe(id);
+        f.panel.handleInput("\x1b[B");
+      }
+      for (let id = 2; id <= 24; id++) {
+        f.panel.handleInput("\x1b[A");
+        const left = f.text(width!).split("\n").map((line) => line.split("│")[0]).join("\n");
+        expect(f.position.selectedId).toBe(id);
+        if (id < 24) expect(left).toMatch(new RegExp(`model-${id + 1}(?!\\d)`));
+      }
+    }
+    expect(f.actions.activate).not.toHaveBeenCalled();
+    expect(f.actions.run).not.toHaveBeenCalled();
+  });
+
   it.each(["dark", "light"])("follows only an explicitly submitted run in %s, including queued starts and resize", (name) => {
     for (const usage of [false, true]) for (const status of ["generating", "queued"] as const) {
       const draft = record(2, 2);
