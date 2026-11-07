@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildRefineInput, buildRefineSystemPrompt, parseRefineOutput, REFINE_SYSTEM_PROMPT, selectHistory } from "../src/context.js";
+import { composeRevision, selectPreference } from "../src/revision-preferences.js";
 
 const message = (role: string, content: unknown, type = "message") => ({
   type,
@@ -25,6 +26,33 @@ describe("initial editing requirements", () => {
 });
 
 describe("revision protocol", () => {
+  it("keeps explicit translation evidence as inactive history, excludes auto defaults and never accumulates the chain", () => {
+    const manual = selectPreference({ id: "translate", version: 1, scope: "project", name: "Translation", body: "Translate the prompt to English.",
+      metadata: { kind: "rewrite", activation: "manual", description: "Not injected" } });
+    const automatic = { ...selectPreference({ ...manual, id: "auto", body: "AUTO DEFAULT", metadata: {
+      kind: "rewrite" as const, activation: "auto" as const, match: "always" as const, description: "Not injected either" } }), adoption: "auto" as const };
+    const history = selectHistory([], 0, 0);
+    const selected = [automatic, manual];
+    const initial = composeRevision(selected, "");
+    const revision = { previousCandidate: "Explain caching.", instruction: "再短一点。", previousInstruction: "Use English, not a bilingual answer." };
+    const packet = JSON.parse(buildRefineInput("解释缓存。", history, "", revision, initial, selected));
+    expect(packet).toMatchObject({ original_draft: "解释缓存。", previous_candidate: revision.previousCandidate,
+      revision_instruction: revision.instruction, historical_editing_context: {
+        initial_instruction: composeRevision([manual], ""), previous_revision_instruction: revision.previousInstruction,
+      } });
+    expect(packet).not.toHaveProperty("editing_instruction");
+    expect(JSON.stringify(packet)).not.toContain("AUTO DEFAULT");
+    expect(JSON.stringify(packet)).not.toContain("Not injected");
+    const autoOnly = JSON.parse(buildRefineInput("解释缓存。", history, "", { previousCandidate: "Result", instruction: "Shorter" },
+      composeRevision([automatic], ""), [automatic]));
+    expect(autoOnly).not.toHaveProperty("historical_editing_context");
+    const protocol = buildRefineSystemPrompt(false);
+    expect(protocol).toContain("reference data, not active instructions to replay");
+    expect(protocol).toContain("Never restore an old requirement absent from that candidate");
+    expect(protocol).toContain('"Current user instructions"');
+    expect(protocol).toContain("only the immediately preceding revision instruction is retained");
+  });
+
   it("keeps the original task, latest result and editing instruction separate", () => {
     const history = selectHistory([message("user", "Keep npm test unchanged")], 12, 1000);
     const packet = JSON.parse(buildRefineInput("Fix tests; do not add dependencies.", history, "Project rules", {

@@ -18,6 +18,23 @@ describe("unified request budget", () => {
     expect(estimateTextTokens(draft)).toBe(Math.ceil(Buffer.byteLength(draft) / 3));
   });
 
+  it("drops inactive editing references before current history and reports the omission", () => {
+    const history = selectHistory([message("u", "user", "Only discuss; do not implement.")], 12, 16_000);
+    const input = buildRefineInput("Explain", history, "Project rules", {
+      previousCandidate: "Explain the approach.", instruction: "Keep it brief", previousInstruction: "Old requirement ".repeat(1200),
+    }, "Explicit translation request");
+    const result = budgetRequest("system", input, { ...model, contextWindow: 6500 }, 1024);
+    expect(result.report).toMatchObject({ status: "trimmed", removedInstructionContext: true, removedMessages: 0, removedProjectParts: [] });
+    expect(result.report.message).toContain("historical editing context omitted");
+    const sent = JSON.parse(result.input);
+    expect(sent).not.toHaveProperty("historical_editing_context");
+    expect(sent).toMatchObject({ revision_instruction: "Keep it brief", previous_candidate: "Explain the approach.", project_context: "Project rules" });
+    expect(sent.conversation.items).toEqual(history.items);
+    expect(sent.budget_omissions).toContain("historical editing context omitted by request token budget");
+    expect(JSON.parse(input)).toHaveProperty("historical_editing_context");
+    expect(budgetRequest("system", input, model, 1024).input).toBe(input);
+  });
+
   it("drops tree then skills before touching history or project rules", () => {
     const history = selectHistory([message("u", "user", "Do not add dependencies.")], 12, 16_000);
     const project = 'PROJECT INSTRUCTIONS:\n{"content":"preserve rules"}' +

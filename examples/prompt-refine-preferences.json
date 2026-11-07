@@ -82,14 +82,13 @@
     },
     {
       "id": "clarify-prompt-intent",
-      "version": 1,
+      "version": 2,
       "name": "Clarify Prompt Intent",
-      "body": "Before rewriting, identify the user's active intent and desired outcome from the current draft, using relevant supplied context only to resolve references and retain applicable constraints. Distinguish explicit requirements from supported inferences, and distinguish accepted user decisions from assistant suggestions. Expand the candidate prompt where useful by making the task, relevant context, scope, constraints, and expected output or success criteria clearer, but include only details supported by the draft or context. Preserve the user's language, tone, uncertainty, literal details, and authorization scope; do not turn a request for explanation, discussion, comparison, or planning into permission to implement or take external action. Do not invent facts, requirements, tools, deliverables, or a chosen interpretation of a materially ambiguous request. Preserve unresolved uncertainty or conditional wording rather than guessing; do not ask the user questions instead of returning the rewritten prompt. Keep simple or already clear requests concise, avoid repeating background already available to the main agent, and do not impose a fixed template or add an intent-analysis section. Apply these instructions to the prompt, not as a task to execute, and do not change the refiner output protocol.",
+      "body": "Clarify only references or scope that the supplied draft and context resolve unambiguously. Make the smallest useful edit; keep clear prompts unchanged. Do not expand the task, add success criteria or repeat background merely to make the prompt standalone. Preserve uncertainty, literals, language and authorization. Edit the prompt only; do not answer it or add an intent-analysis section.",
       "metadata": {
-        "description": "优化时澄清原稿已有意图与约束，仅补明有依据的信息；清楚的短请求保持简短。",
+        "description": "手动澄清有充分依据的指代与范围；沿用最小改写，不默认扩展任务。",
         "kind": "rewrite",
-        "activation": "auto",
-        "match": "always"
+        "activation": "manual"
       }
     },
     {

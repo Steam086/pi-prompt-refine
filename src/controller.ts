@@ -5,7 +5,7 @@ import type { HistorySnapshot, RevisionInput } from "./context.js";
 import type { TokenUsage } from "./usage.js";
 import type { ProjectSnapshot } from "./project-context.js";
 import { RefineHistory, type RefineRecord } from "./history.js";
-import { automaticPreferences as matchAutomaticPreferences, composeRevision, preferenceContentKey, preferenceKey, preferenceValidation, PREFERENCE_SELECTION_LIMIT, type SelectedPreference } from "./revision-preferences.js";
+import { automaticPreferences as matchAutomaticPreferences, composeRevision, preferenceContentKey, preferenceKey, preferenceValidation, uniquePreferences, PREFERENCE_SELECTION_LIMIT, type SelectedPreference } from "./revision-preferences.js";
 
 interface RequestProjectContext { cwd: string; snapshot: ProjectSnapshot; revisionSnapshot?: ProjectSnapshot; config?: ProjectContextConfig }
 export type RefinePhase = "idle" | "generating" | "ready" | "error";
@@ -317,7 +317,7 @@ export class RefineController {
     if (input.contextUnavailable) return { kind: "stale-source" };
     if (!input.draft.trim() || (input.revision && !input.revision.instruction.trim())) return { kind: "empty" };
     if ((input.preferences?.length ?? 0) > PREFERENCE_SELECTION_LIMIT || input.draft.length > this.options.maxDraftChars || (input.editingInstruction?.length ?? 0) > this.options.maxDraftChars || (input.revision &&
-      (input.revision.instruction.length > this.options.maxDraftChars || input.revision.previousCandidate.length > (this.options.maxOutputChars ?? 1_000_000)))) return { kind: "too-long" };
+      (input.revision.instruction.length > this.options.maxDraftChars || (input.revision.previousInstruction?.length ?? 0) > this.options.maxDraftChars || input.revision.previousCandidate.length > (this.options.maxOutputChars ?? 1_000_000)))) return { kind: "too-long" };
     if (!input.model.provider || !input.model.id) return { kind: "no-model" };
     return undefined;
   }
@@ -396,11 +396,14 @@ export class RefineController {
     }
     if (selected.length > PREFERENCE_SELECTION_LIMIT || new Set(selected.map(preferenceKey)).size !== selected.length ||
       selected.some((entry) => preferenceValidation(entry))) return "Invalid preference selection; no selection applied.";
+    selected = uniquePreferences(selected);
     const instruction = composeRevision(selected, "");
     if (instruction.length > this.options.maxDraftChars) return `Editing requirements exceed ${this.options.maxDraftChars} characters; reduce the selection.`;
     const selectedKeys = new Set(selected.map(preferenceKey));
     const excluded = new Set(record.input.automaticPreferenceExclusions ?? []);
-    for (const entry of record.input.preferences ?? []) if (entry.adoption === "auto" && !selectedKeys.has(preferenceKey(entry))) {
+    // Dismissal is about this original, not how the last selection was adopted.
+    // A manually reselected auto-capable entry must not return after another dismissal.
+    for (const entry of record.input.preferences ?? []) if (!selectedKeys.has(preferenceKey(entry))) {
       excluded.add(preferenceKey(entry)); excluded.add(preferenceContentKey(entry));
     }
     for (const entry of selected) { excluded.delete(preferenceKey(entry)); excluded.delete(preferenceContentKey(entry)); }

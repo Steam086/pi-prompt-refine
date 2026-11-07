@@ -50,11 +50,29 @@ export function preferenceContentKey(entry: Pick<RevisionPreference, "body" | "m
 export function selectPreference(entry: RevisionPreference): SelectedPreference {
   return { ...structuredClone(entry), sourceBody: entry.body };
 }
-/** Preserve bodies literally; typed boundaries distinguish editor and main-agent requirements. */
+/** Deduplicate literal content, not names. Explicit selection wins over an automatic default. */
+export function uniquePreferences(selected: readonly SelectedPreference[]): SelectedPreference[] {
+  const result: SelectedPreference[] = [];
+  const positions = new Map<string, number>();
+  for (const entry of selected) {
+    const key = preferenceContentKey(entry);
+    const index = positions.get(key);
+    if (index === undefined) { positions.set(key, result.length); result.push(entry); }
+    else if (result[index]!.adoption === "auto" && entry.adoption !== "auto") result[index] = entry;
+  }
+  return result;
+}
+/** Preserve bodies literally, with explicit purpose and provenance boundaries. */
 export function composeRevision(selected: readonly SelectedPreference[], freeText: string): string {
-  return [...selected.map((entry) => entry.metadata
-    ? `${entry.metadata.kind === "rewrite" ? "Prompt rewriting instructions" : "Main-agent task requirements"}:\n${entry.body}`
-    : entry.body), freeText].filter((text) => text.trim()).join("\n\n");
+  const entries = uniquePreferences(selected);
+  const blocks = entries.map((entry) => {
+    const purpose = !entry.metadata ? "Saved editing requirements"
+      : entry.metadata.kind === "rewrite" ? "Prompt rewriting instructions" : "Main-agent task requirements";
+    const source = entry.adoption === "auto" ? "automatic default" : "manually selected";
+    return `${purpose} (${source}):\n${entry.body}`;
+  });
+  if (freeText.trim()) blocks.push(entries.length ? `Current user instructions:\n${freeText}` : freeText);
+  return blocks.join("\n\n");
 }
 export function metadataValidation(value: unknown): string | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return "Metadata must be a JSON object.";
@@ -72,12 +90,66 @@ export function preferenceValidation(value: PreferenceValue): string | undefined
   if (!value.body.trim() || value.body.length > PREFERENCE_BODY_LIMIT) return `Instruction must contain 1–${PREFERENCE_BODY_LIMIT} characters.`;
   return value.metadata === undefined ? undefined : metadataValidation(value.metadata);
 }
+/** Ignore quoted examples and code, without treating them as adoption instructions. */
+function matchingText(draft: string): string {
+  let fence: { character: string; length: number } | undefined;
+  const lines: string[] = [];
+  for (const line of draft.split(/\r?\n/)) {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (marker && marker[1]![0] === fence.character && marker[1]!.length >= fence.length && !marker[2]!.trim()) fence = undefined;
+      lines.push("");
+    } else if (marker) {
+      fence = { character: marker[1]![0]!, length: marker[1]!.length };
+      lines.push("");
+    } else lines.push(/^(?: {0,3}>| {4}|\t)/.test(line) ? "" : line);
+  }
+  const text = lines.join("\n");
+  const visible: string[] = [];
+  const quotes: Record<string, string> = { "“": "”", "「": "」", "『": "』", '"': '"' };
+  let quote: string | undefined;
+  let ticks = 0;
+  // Unclosed spans conservatively hide the rest. Scan once, including malformed input.
+  for (let index = 0; index < text.length; index++) {
+    const character = text[index]!;
+    if (quote) { if (character === quote) quote = undefined; continue; }
+    if (character === "`") {
+      let end = index + 1;
+      while (text[end] === "`") end++;
+      const length = end - index;
+      if (!ticks) { ticks = length; visible.push(" "); }
+      else if (ticks === length) ticks = 0;
+      index = end - 1;
+    } else if (!ticks) {
+      if (quotes[character]) { quote = quotes[character]; visible.push(" "); }
+      else visible.push(character);
+    }
+  }
+  return visible.join("").replace(/https?:\/\/\S+/g, " ");
+}
+/** Conservative cues only: numbered lists alone do not establish either parallelism or sequence. */
+function structureCues(draft: string): { parallel: boolean; sequence: boolean } {
+  const plain = matchingText(draft);
+  const positive = plain.split(/[。！？.!?;；\n]/).filter((part) =>
+    !/(?:不要|别|无需|不必|禁止|不能|不应|不允许|并非|不是|\b(?:not|never|avoid|without)\b|\bdon['’]t\b)/i.test(part));
+  const follows = (part: string, start: RegExp, end: RegExp): boolean => {
+    const match = start.exec(part);
+    return !!match && end.test(part.slice(match.index + match[0].length + 1));
+  };
+  const sequence = positive.some((part) => /(?:按顺序|依次|按次序|\bin (?:order|sequence)\b)/i.test(part) ||
+    follows(part, /先/, /再|然后/) || follows(part, /首先/, /其次|接着/) || follows(part, /\bfirst\b/i, /\bthen\b/i));
+  // Repeated punctuation is one question; require actual text between question groups.
+  // Splitting keeps long unpunctuated drafts linear rather than backtracking over every suffix.
+  const questions = plain.split(/[?？]+/).slice(0, -1).filter((part) =>
+    /[\p{L}\p{N}]/u.test(part.split(/[。!！;；\n]/).at(-1) ?? "")).length;
+  const numbered = /^\s*\d+[.)、][ \t]*\S/m.test(plain);
+  const bullets = plain.match(/^[ \t]*[-*+][ \t]+\S/gm)?.length ?? 0;
+  return { sequence, parallel: !numbered && (questions >= 2 || bullets >= 2) };
+}
 /** Only rewrite preferences can be adopted implicitly. Project entries precede global duplicates. */
 export function automaticPreferences(entries: readonly RevisionPreference[], draft: string): SelectedPreference[] {
   if (!draft.trim()) return [];
-  const plain = draft.replace(/```[^\n]*\n[\s\S]*?(?:```|$)/g, "");
-  const parallel = (plain.match(/[?？]/g)?.length ?? 0) >= 2 || (plain.match(/^\s*(?:[-*+] |\d+[.)、]\s*)\S/gm)?.length ?? 0) >= 2;
-  const sequence = /(?:先[\s\S]{1,160}(?:再|然后)|首先[\s\S]{1,160}(?:其次|接着)|\bfirst\b[\s\S]{1,160}\bthen\b)/i.test(plain);
+  const { parallel, sequence } = structureCues(draft);
   const seen = new Set<string>();
   return [...entries].sort((a, b) => Number(b.scope === "project") - Number(a.scope === "project")).flatMap((entry) => {
     const meta = entry.metadata;

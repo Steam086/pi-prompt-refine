@@ -223,7 +223,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         }
       }
 
-      const preparedInput = request.preparedInput ?? buildRefineInput(request.draft, request.history, projectText, request.revision, request.editingInstruction);
+      const preparedInput = request.preparedInput ?? buildRefineInput(request.draft, request.history, projectText, request.revision, request.editingInstruction, request.preferences);
       if (signal.aborted) throw new Error("Request cancelled");
       controller.capturePreparedInput(request.requestId, request.generation, preparedInput, diagnostics);
       const budget = budgetRequest(systemPrompt, preparedInput, model, config.maxOutputTokens, request.thinkingLevel);
@@ -912,7 +912,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     completionContext = ctx;
     const result = controller.trigger({
       draft: source.draft,
-      revision: { previousCandidate: source.text, instruction },
+      revision: { previousCandidate: source.text, instruction, previousInstruction: source.revision?.instruction },
       editingInstruction: source.editingInstruction,
       preferences: source.preferences,
       model: source.model,

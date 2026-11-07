@@ -20,8 +20,8 @@ describe("revision preference snapshots", () => {
     const entry = { id: "a", version: 1, scope: "project" as const, name: "Not sent", body: "  Keep\t中文\n" };
     const selected = selectPreference(entry);
     entry.body = "changed later";
-    expect(composeRevision([selected], "\nFree text\n")).toBe("  Keep\t中文\n\n\n\nFree text\n");
-    expect(composeRevision([selected], " \n")).toBe("  Keep\t中文\n");
+    expect(composeRevision([selected], "\nFree text\n")).toBe("Saved editing requirements (manually selected):\n  Keep\t中文\n\n\nCurrent user instructions:\n\nFree text\n");
+    expect(composeRevision([selected], " \n")).toBe("Saved editing requirements (manually selected):\n  Keep\t中文\n");
     expect(composeRevision([], "Free")).toBe("Free");
     expect(composeRevision([], " \n")).toBe("");
     selected.body = "Temporary";
@@ -114,8 +114,12 @@ describe("typed preferences", () => {
     expect(library.entries.every((entry) => entry.metadata?.description && ["rewrite", "task"].includes(entry.metadata.kind))).toBe(true);
     expect(library.entries.filter((entry) => entry.metadata?.kind === "task").every((entry) => entry.metadata?.activation === "manual")).toBe(true);
     const chosen = automaticPreferences(library.entries, "先解释原因，再讨论方案。为什么？有什么取舍？");
-    expect(chosen.map((entry) => entry.name)).toEqual(["Prompt Step Structure", "Clarify Prompt Intent"]);
-    expect(automaticPreferences(library.entries, "Clear request.").map((entry) => entry.name)).toEqual(["Clarify Prompt Intent"]);
+    expect(chosen.map((entry) => entry.name)).toEqual(["Prompt Step Structure"]);
+    expect(automaticPreferences(library.entries, "Clear request.")).toEqual([]);
+    const clarify = library.entries.find((entry) => entry.id === "clarify-prompt-intent")!;
+    expect(clarify.metadata?.activation).toBe("manual");
+    expect(clarify.body.length).toBeLessThan(500);
+    expect(clarify.body).toContain("smallest useful edit");
   });
 
   it("round-trips v2 metadata, preserves it in old-style edits and isolates pending writes/snapshots", async () => {
@@ -150,10 +154,10 @@ describe("typed preferences", () => {
     }
   });
 
-  it("keeps names/descriptions/activation out of instructions and preserves legacy literal composition", () => {
+  it("labels purpose and actual adoption without sending names/descriptions or matching configuration", () => {
     const task = { ...entry, id: "language", body: "Require an English answer.", metadata: { kind: "task", description: "回答语言", activation: "manual" } as const };
     const composed = composeRevision([selectPreference(entry), selectPreference(task)], "Remove only repeated wording.");
-    expect(composed).toBe(`Prompt rewriting instructions:\n${entry.body}\n\nMain-agent task requirements:\n${task.body}\n\nRemove only repeated wording.`);
+    expect(composed).toBe(`Prompt rewriting instructions (manually selected):\n${entry.body}\n\nMain-agent task requirements (manually selected):\n${task.body}\n\nCurrent user instructions:\nRemove only repeated wording.`);
     expect(composed).not.toContain(metadata.description);
     expect(searchPreferences([entry], "并列")).toEqual([entry]);
   });

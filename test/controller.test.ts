@@ -103,12 +103,33 @@ describe("automatic preference lifecycle", () => {
     expect(controller.updateDraft(capture.recordId, "", "First inspect, then explain.")).toBe(true);
     const record = controller.getRecord(capture.recordId)!;
     expect(record.input.preferences?.[0]).toMatchObject({ adoption: "auto", metadata: entries[0]!.metadata });
-    expect(record.input.editingInstruction).toContain("Prompt rewriting instructions:");
+    expect(record.input.editingInstruction).toContain("Prompt rewriting instructions (automatic default):");
     expect(jobs).toHaveLength(0);
     expect(controller.updateDraftPreferences(record, [])).toBeUndefined();
     expect(controller.updateDraft(record.id, record.input.draft, "First inspect, then compare.")).toBe(true);
     expect(controller.getRecord(record.id)!.input.preferences).toEqual([]);
     expect(controller.getRecord(record.id)!.input.editingInstruction).toBeUndefined();
+    const next = controller.createDraft(input("First inspect, then compare."));
+    if (next.kind !== "captured") throw new Error("not captured");
+    expect(controller.getRecord(next.recordId)!.input.preferences).toHaveLength(1);
+  });
+
+  it("keeps repeated explicit dismissals after manual reselection, even if an identical scope copy remains", () => {
+    const { controller, library } = automaticSetup();
+    library.unshift({ ...structuredClone(library[0]!), id: "project-sequence", scope: "project" });
+    const captured = controller.createDraft(input("First inspect, then explain."));
+    if (captured.kind !== "captured") throw new Error("not captured");
+    const id = captured.recordId;
+    const save = (selected: ReturnType<typeof selectPreference>[]) => {
+      expect(controller.updateDraftPreferences(controller.getRecord(id)!, selected)).toBeUndefined();
+    };
+    save([]);
+    save([selectPreference(library[0]!)]);
+    expect(controller.getRecord(id)!.input.preferences![0]!.adoption).toBeUndefined();
+    save([]);
+    library.shift(); // The identical global entry must not bypass the content exclusion.
+    expect(controller.updateDraft(id, "First inspect, then explain.", "First inspect, then compare.")).toBe(true);
+    expect(controller.getRecord(id)!.input.preferences).toEqual([]);
     const next = controller.createDraft(input("First inspect, then compare."));
     if (next.kind !== "captured") throw new Error("not captured");
     expect(controller.getRecord(next.recordId)!.input.preferences).toHaveLength(1);
@@ -201,7 +222,7 @@ describe("Unsent preference requirements", () => {
     selected.body = "Library changed"; selected.name = "Renamed";
     const saved = controller.getRecord(first.id)!;
     expect(saved.input).toMatchObject({ draft: first.input.draft, systemPrompt: first.input.systemPrompt,
-      history: first.input.history, roundId: first.input.roundId, editingInstruction: preference().body, preferences: [preference()] });
+      history: first.input.history, roundId: first.input.roundId, editingInstruction: composeRevision([preference()], ""), preferences: [preference()] });
     expect(saved.originalInput).toEqual(saved.input);
     expect(controller.getRecord(second.id)!.input.preferences).toBeUndefined();
     expect(complete).not.toHaveBeenCalled();
@@ -214,7 +235,7 @@ describe("Unsent preference requirements", () => {
     const { controller } = setup();
     const source = create(controller);
     const long = preference("a".repeat(60));
-    expect(controller.updateDraftPreferences(source, [long, { ...long, id: "other" }])).toContain("exceed 100");
+    expect(controller.updateDraftPreferences(source, [long, { ...long, id: "other", body: "b".repeat(60) }])).toContain("exceed 100");
     expect(controller.getRecord(source.id)!.input.preferences).toBeUndefined();
     expect(controller.updateDraftPreferences(source, [preference()])).toBeUndefined();
     expect(controller.updateDraftPreferences(source, [])).toContain("changed");
@@ -230,6 +251,18 @@ describe("Unsent preference requirements", () => {
     expect(controller.updateDraftPreferences(archived, [preference()])).toBeUndefined();
     controller.setSession("other-session");
     expect(controller.updateDraftPreferences(archived, [])).toContain("changed");
+  });
+
+  it("normalizes duplicate manual bodies without hiding different requirements or changing snapshots", () => {
+    const { controller } = setup();
+    const source = create(controller);
+    const selected = preference();
+    const copy = { ...selected, scope: "global" as const, id: "global-copy" };
+    expect(controller.updateDraftPreferences(source, [selected, copy])).toBeUndefined();
+    const saved = controller.getRecord(source.id)!;
+    expect(saved.input.preferences).toEqual([selected]);
+    expect(saved.input.editingInstruction).toBe(composeRevision([selected], ""));
+    expect(copy.scope).toBe("global");
   });
 
   it("includes independent editing requirements in deduplication", () => {
@@ -262,11 +295,11 @@ describe("Unsent preference requirements", () => {
     expect(controller.updateDraftPreferences(saved, [])).toContain("already started");
     selected.body = "Mutated library";
     jobs[0]!.pending.resolve(success("Busy result")); await flushPromises();
-    expect(jobs[1]!.request).toMatchObject({ draft: queued.input.draft, editingInstruction: preference().body, preferences: [preference()] });
+    expect(jobs[1]!.request).toMatchObject({ draft: queued.input.draft, editingInstruction: composeRevision([preference()], ""), preferences: [preference()] });
     jobs[1]!.pending.resolve(success("Refined")); await flushPromises();
     controller.runOriginal(queued.id, { provider: "another", id: "model" });
-    expect(jobs[2]!.request).toMatchObject({ draft: queued.input.draft, editingInstruction: preference().body, preferences: [preference()] });
-    expect(controller.getRecord(queued.id)!.input.editingInstruction).toBe(preference().body);
+    expect(jobs[2]!.request).toMatchObject({ draft: queued.input.draft, editingInstruction: composeRevision([preference()], ""), preferences: [preference()] });
+    expect(controller.getRecord(queued.id)!.input.editingInstruction).toBe(composeRevision([preference()], ""));
     jobs[2]!.pending.resolve(success("Other result")); await flushPromises();
   });
 
