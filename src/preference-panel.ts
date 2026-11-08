@@ -13,6 +13,8 @@ type Form = {
   expected?: RevisionPreference;
   scope: PreferenceScope;
   name: Input;
+  rawName: string;
+  initialEditorName: string;
   body: PromptInput;
   description: Input;
   rawDescription: string;
@@ -227,7 +229,9 @@ export class PreferencePanel {
     return text === form.initialEditorBody ? form.rawBody : text;
   }
   private formValue(form: Form): PreferenceValue {
-    const name = form.name.getValue();
+    const editedName = form.name.getValue();
+    // Display sanitization must not silently rewrite an untouched saved name.
+    const name = editedName === form.initialEditorName ? form.rawName : editedName;
     const edited = form.description.getValue();
     const description = edited === form.initialEditorDescription ? form.rawDescription : edited;
     return { name, body: this.bodyText(form), ...(form.metadata ? { metadata: { ...form.metadata,
@@ -242,10 +246,12 @@ export class PreferencePanel {
     });
     const rawBody = entry?.body ?? this.freeText;
     body.editor.setText(rawBody);
-    const name = new Input({ prompt: "Name: " }); name.setValue(entry?.name ?? "");
+    const rawName = entry?.name ?? "";
+    const name = new Input({ prompt: "Name: " }); name.setValue(sanitizeTerminalText(rawName).replace(/\n/g, " "));
     const rawDescription = entry?.metadata?.description ?? "";
     const description = new Input({ prompt: "Description: " }); description.setValue(sanitizeTerminalText(rawDescription).replace(/\n/g, " "));
-    const form: Form = { kind, scope: entry?.scope ?? "project", name, body, rawBody, initialEditorBody: body.editor.getExpandedText(),
+    const form: Form = { kind, scope: entry?.scope ?? "project", name, rawName, initialEditorName: name.getValue(),
+      body, rawBody, initialEditorBody: body.editor.getExpandedText(),
       description, rawDescription, initialEditorDescription: description.getValue(),
       metadata: entry ? entry.metadata && structuredClone(entry.metadata) : { kind: "task", description: "", activation: "manual" },
       expected: kind === "library" ? structuredClone(entry) : undefined, initial: "", focus: 0 };
