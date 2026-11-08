@@ -1932,6 +1932,31 @@ describe("round workspace integration", () => {
     harness.panelInput("q"); await view;
   });
 
+  it("keeps an open result stable on archival but opens only current work in a fresh Preview", async () => {
+    const harness = await makeHarness();
+    await trigger(harness);
+    harness.holdPanel();
+    const view = harness.command("", harness.context);
+    expect(harness.panelLines().join("\n")).toContain("Refined prompt");
+    harness.panelInput("\r");
+    harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Sent prompt" } }, harness.context);
+    expect(harness.panelLines().join("\n")).toContain("Earlier · kept open");
+    expect(harness.panelLines().join("\n")).toContain("Refined prompt");
+    harness.panelInput("\x1b");
+    expect(harness.panelLines().join("\n")).not.toContain("Refined prompt");
+    harness.panelInput("q"); await view;
+    harness.holdPanel();
+    const reopened = harness.command("", harness.context);
+    expect(harness.panelLines().join("\n")).not.toContain("Refined prompt");
+    harness.panelInput("\x1b[C");
+    expect(harness.panelLines().join("\n")).toContain("Earlier ·");
+    expect(harness.panelLines().join("\n")).toContain("Refined prompt");
+    harness.panelInput("q"); harness.panelInput("q"); await reopened;
+    expect(harness.complete).toHaveBeenCalledTimes(1);
+    expect(harness.editorWrites).toEqual([]);
+    expect(harness.sent).toEqual([]);
+  });
+
   it("archives on committed Pi send, preserves background work, and captures the next context lazily", async () => {
     const harness = await makeHarness();
     let finish!: (value: any) => void;

@@ -349,9 +349,9 @@ describe("prompt tree and inspection", () => {
     expect(text()).toContain("Queued");
   });
 
-  it("orders tasks and runs newest first, keeps archived work last and preserves selection", () => {
+  it("orders all Usage tasks and runs newest first, keeps archived work last and preserves selection", () => {
     const older = { ...record(9, 3), archivedAt: 1 };
-    const { panel, position, records, text } = create("dark", false, [record(1), record(2, 2), record(3), older]);
+    const { panel, position, records, text } = create("dark", true, [record(1), record(2, 2), record(3), older]);
     const output = text();
     const left = output.split("\n").filter((line) => line.includes(" │ ")).map((line) => line.split(" │ ")[0]).join("\n");
     expect(left.indexOf("model-3")).toBeLessThan(left.indexOf("model-1"));
@@ -364,7 +364,6 @@ describe("prompt tree and inspection", () => {
     expect(text()).not.toContain("Uses earlier conversation context");
     expect(text()).toContain("Earlier ·");
     panel.handleInput("\r");
-    panel.handleInput("o");
     let details = "";
     for (let i = 0; i < 6; i++) { details += text(80); panel.handleInput("\x1b[6~"); }
     expect(details).toContain("Earlier context");
@@ -372,6 +371,84 @@ describe("prompt tree and inspection", () => {
     const fg = vi.spyOn(getThemeByName("dark")!, "fg");
     expect(text()).toContain("正文 中文😀");
     expect(fg).not.toHaveBeenCalledWith("dim", records[0]!.candidate!.text);
+  });
+
+  it.each(["dark", "light"])("keeps archived and restored trees out of Preview, including stale remembered selections (%s)", (name) => {
+    const old = { ...record(9, 3), archivedAt: 1 };
+    const restored = { ...record(10, 4), archivedAt: 2, input: { ...record(10, 4).input, contextUnavailable: true } };
+    const f = create(name, false, [old, restored, record(2, 2)]);
+    expect(f.text()).toContain("model-2");
+    expect(f.text()).not.toContain("model-9");
+    expect(f.text()).not.toContain("model-10");
+    expect(f.position.selectedTaskId).toBe(2);
+    f.panel.handleInput("\x1b[B"); f.panel.handleInput("a");
+    expect(f.actions.accept).toHaveBeenCalledExactlyOnceWith(2);
+    const usage = create(name, true, f.records);
+    expect(usage.text()).toContain("Earlier ·");
+    expect(usage.text()).toContain("model-9");
+    expect(usage.text()).toContain("model-10");
+  });
+
+  it.each(["dark", "light"])("retains only an open archived view until explicit Back, without following late completions (%s)", (name) => {
+    for (const inspecting of [false, true]) {
+      const f = create(name, false, [record(1), record(2, 2)]);
+      f.text(); // Establish a live viewing target, not merely a stale saved position.
+      if (inspecting) f.panel.handleInput("\r");
+      const archived = f.records[0]!;
+      archived.archivedAt = 1;
+      f.records[1]!.archivedAt = 1;
+      f.records.push(record(3, 3));
+      const saved = structuredClone(f.position);
+      for (const [width, rows] of [[100, 40], [40, 24], [20, 12], [100, 40]]) {
+        f.size.rows = rows!;
+        const frame = f.panel.render(width!);
+        expect(frame.every((line) => visibleWidth(line) <= width!)).toBe(true);
+        expect(f.position.selectedId).toBe(saved.selectedId);
+        expect(f.position.selectedTaskId).toBe(saved.selectedTaskId);
+        expect(f.position.scroll).toBe(saved.scroll);
+        if (width! >= 40) {
+          expect(stripVTControlCharacters(frame.join("\n"))).toContain("Earlier");
+          expect(stripVTControlCharacters(frame.join("\n"))).toContain("Result 1");
+        }
+      }
+      f.records[1]!.candidate!.text = "Late old result";
+      expect(f.text()).not.toContain("Late old result");
+      expect(f.text()).not.toContain("model-2");
+      f.panel.handleInput("a");
+      expect(f.actions.accept).toHaveBeenCalledExactlyOnceWith(1);
+      f.panel.handleInput("\x1b");
+      expect(f.text()).toContain("model-3");
+      expect(f.text()).not.toContain("Earlier · kept open");
+      expect(f.position.selectedId).toBe(3);
+      expect(f.actions.run).not.toHaveBeenCalled();
+    }
+  });
+
+  it("exposes archived background work in Usage without restoring it to Preview", () => {
+    const running: RefineRecord = { ...record(1), archivedAt: 1, status: "generating", candidate: undefined };
+    const f = create("dark", false, [running, record(2, 2)]);
+    expect(f.text()).toContain("Earlier: 1 running / queued");
+    expect(f.text()).not.toContain("model-1");
+    const usage = create("dark", true, f.records);
+    usage.panel.handleInput("x");
+    expect(usage.actions.stop).toHaveBeenCalledExactlyOnceWith(1);
+    running.status = "generated";
+    running.candidate = record(1).candidate;
+    expect(f.text()).not.toContain("Earlier: 1");
+    expect(f.text()).toContain("model-2");
+    expect(f.position.selectedId).toBe(2);
+  });
+
+  it("does not submit or edit an Unsent whose open view has just been archived", () => {
+    const source: RefineRecord = { ...record(), status: "unsent", candidate: undefined };
+    const f = create("dark", false, [source]);
+    f.text(); source.archivedAt = 1;
+    f.panel.handleInput("\r");
+    expect(f.text()).toContain("Earlier");
+    expect(f.text()).not.toContain("Enter Run");
+    expect(f.actions.run).not.toHaveBeenCalled();
+    f.panel.handleInput("\x1b");
+    expect(f.text()).not.toContain("Original prompt");
   });
 
   it("uses selectable original roots; Enter runs unsent and otherwise inspects without Apply", () => {
