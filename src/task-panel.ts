@@ -669,7 +669,7 @@ export class TaskPanel {
       const originalHeight = Math.max(0, height - feedbackHeight - description.length - (description.length ? 2 : 1));
       const original = originalHeight ? this.pane(row, rightWidth, originalHeight, true, false, false) : [];
       const selected = row.record.input.preferences ?? [];
-      const feedback = [this.heading("Selected") + this.muted(` · ${selected.length}`)];
+      const feedback = [this.muted(`Selected · ${selected.length}`)];
       const room = Math.min(feedbackHeight, height - original.length - (original.length ? 1 : 0)
         - description.length - (description.length ? 1 : 0)) - feedback.length;
       if (!selected.length && room > 0) feedback.push(this.muted("None yet"));

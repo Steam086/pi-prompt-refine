@@ -25,6 +25,8 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
     };
     const tui = mode === "regular" ? new TuiMainScreen(terminal) : new TuiAltScreen(terminal);
     const theme = getThemeByName(themeName)!;
+    // Exercise weight boundaries even when Chalk disables bold outside a TTY.
+    vi.spyOn(theme, "bold").mockImplementation((value) => `\x1b[1m${value}\x1b[22m`);
     const keys = getKeybindings();
     const entries: RevisionPreference[] = Array.from({ length: 18 }, (_, index) => ({
       id: `item-${index}`, scope: index % 2 ? "global" : "project", version: 1,
@@ -78,6 +80,13 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       expect(reference()).toContain("ORIGINAL 中文😀");
       expect(reference()).toContain("Selected · 1");
       expect(reference()).toContain("Item 00");
+      const styledReference = panel.render(100).map((line) => line.split(theme.fg("muted", " │ "))[1] ?? "").join("\n");
+      expect(styledReference).toContain(theme.fg("text", theme.bold("Original prompt")));
+      expect(styledReference).toContain(theme.fg("muted", "Selected · 1"));
+      expect(styledReference).not.toContain(theme.bold("Selected"));
+      const selectedLine = styledReference.split("\n").find((line) => stripVTControlCharacters(line).startsWith("· Item 00"));
+      expect(selectedLine).toContain(theme.fg("muted", "· ") + theme.fg("text", sanitizeTerminalText(entries[0]!.name).replace(/\s+/gu, " ")));
+      expect(selectedLine).not.toContain("\x1b[1m");
       expect(reference()).toContain("Description 0 中文😀");
       expect(reference()).toContain("Summary ending 0.");
       expect(columns().map((line) => line.split(" │ ")[0]).join("\n")).not.toContain("Description");
@@ -152,7 +161,7 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       expect(controller.getRecord(original.id)!.input.preferences?.map((entry) => entry.id)).toEqual(["item-0", "item-1", "item-17"]);
       expect(writes.join("")).not.toContain("\x1b]52;c;payload");
     } finally {
-      picker.dispose(); controller.setSession("other"); tui.stop(); vi.useRealTimers();
+      picker.dispose(); controller.setSession("other"); tui.stop(); vi.restoreAllMocks(); vi.useRealTimers();
     }
   });
 });
