@@ -1,6 +1,6 @@
-import { Container, parseKey, SelectList, Text, truncateToWidth, type KeyId, type SelectItem } from "@earendil-works/pi-tui";
+import { parseKey, SelectList, truncateToWidth, type KeyId, type SelectItem } from "@earendil-works/pi-tui";
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model, type ModelThinkingLevel, type UserMessage } from "@earendil-works/pi-ai";
-import { DynamicBorder, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   configPath,
   modelKey,
@@ -13,9 +13,8 @@ import {
 import { buildRefineInput, buildRefineSystemPrompt, parseRefineOutput, selectHistory, REFINE_SYSTEM_PROMPT, type HistorySnapshot } from "./context.js";
 import { budgetRequest } from "./budget.js";
 import { BackgroundStatus, renderBackgroundStatus } from "./background-status.js";
-import { renderModelChoices } from "./model-picker.js";
+import { renderModelPicker } from "./model-picker.js";
 import { sanitizeTerminalText } from "./presentation.js";
-import { formatKeyHint, type KeyHint } from "./key-hints.js";
 import { RefineWorkspace, type ContextSettings } from "./workspace.js";
 import { PreferenceStore } from "./preference-store.js";
 import { PreviewPanel, type PreviewOptions } from "./preview.js";
@@ -409,13 +408,12 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const selection = await ctx.ui.custom<{ modelKey: string; thinkingLevel?: ModelThinkingLevel } | undefined>((tui, theme, keybindings, done) => {
       let query = "";
       let list: SelectList;
-      let thinkingStatus: Text;
+      let items: SelectItem[] = [];
       // Edits belong to individual models and stay local until confirmation.
       const thinkingEdits = new Map<string, ModelThinkingLevel>();
       const thinkingOverride = (model: ModelRef): ModelThinkingLevel | undefined =>
         thinkingEdits.get(modelKey(model)) ?? config.modelThinkingLevels[modelKey(model)] ??
         baseline?.input.thinkingLevel ?? config.thinkingLevel;
-      const container = new Container();
       const cycleThinkingKeys = keybindings.getKeys("app.thinking.cycle")
         .map((key) => key.split("+").map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join("+"))
         .join("/");
@@ -431,25 +429,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           ? "Last used for this model" : thinkingSource(override, ctx.thinkingLevel);
         return `Thinking level: ${level} · ${source}`;
       };
-      const selectedDetails = (model: Model<Api> | undefined): string => {
-        if (!model) return theme.fg("muted", statusFor(model));
-        return [
-          theme.fg("muted", "Selected model"),
-          theme.fg("text", theme.bold(sanitizeTerminalText(model.name))),
-          theme.fg("muted", sanitizeTerminalText(displayModel(modelRef(model)))),
-          theme.fg("muted", sanitizeTerminalText(statusFor(model))),
-        ].join("\n");
-      };
-      const updateThinkingStatus = (model?: Model<Api>) => {
-        thinkingStatus?.setText(selectedDetails(model ?? highlightedModel()));
-      };
       const rebuild = () => {
-        container.clear();
-        container.addChild(new DynamicBorder((text) => theme.fg("borderMuted", text)));
-        container.addChild(new Text(theme.fg("text", theme.bold(source ? "Run original with another model" : "Choose optimizer model")), 1, 0));
-        container.addChild(new Text(theme.fg("muted", source ? "Same original and conversation context · Default model unchanged" : "Optimizer only · Main session unchanged"), 1, 0));
-        container.addChild(new Text(`${theme.fg("muted", "Search:")} ${query ? theme.fg("text", sanitizeTerminalText(query)) : theme.fg("muted", "provider/model, name, or thinking")}`, 1, 1));
-        const items = modelPickerItems(available, query, controller.getModel()).map((item) => ({
+        items = modelPickerItems(available, query, controller.getModel()).map((item) => ({
           ...item, description: `${taskModels.includes(item.value) ? "This task · " : ""}${item.description ?? ""}`,
         }));
         list = new SelectList(items, Math.min(10, Math.max(1, items.length)), {
@@ -467,14 +448,15 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           if (model) done({ modelKey: item.value, thinkingLevel: thinkingOverride(model) });
         };
         list.onCancel = () => done(undefined);
-        list.onSelectionChange = (item) => {
-          updateThinkingStatus(highlightedModel(item.value));
-          tui.requestRender();
-        };
-        container.addChild({
-          render: (width) => {
-            const retained = source ? controller.getHistory().filter((record) => record.taskId === source.taskId && record.status !== "unsent") : [];
-            return renderModelChoices(items.map((item) => {
+        list.onSelectionChange = () => tui.requestRender();
+      };
+      rebuild();
+
+      return {
+        render: (width) => {
+          const retained = source ? controller.getHistory().filter((record) => record.taskId === source.taskId && record.status !== "unsent") : [];
+          return renderModelPicker({
+            items: items.map((item) => {
               if (!source) return item;
               const runs = retained.filter((record) => displayModel(record.input.model) === item.value);
               const running = runs.find((record) => record.status === "generating" || record.status === "queued");
@@ -482,24 +464,14 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
               const status = latest ? ({ generating: "Running", queued: "Queued", generated: "Done", error: "Failed", cancelled: "Cancelled", interrupted: "Interrupted", unsent: "Unsent" })[latest.status] : "";
               const favorite = config.favorites.some((model) => displayModel(model) === item.value);
               return { ...item, description: [item.description, status, recent.includes(item.value) ? "Recent" : favorite ? "Favorite" : ""].filter(Boolean).join(" · ") };
-            }), list.getSelectedItem()?.value, width, tui.terminal.rows, theme);
-          },
-          invalidate: () => list.invalidate(),
-        });
-        container.addChild(new DynamicBorder((text) => theme.fg("borderMuted", text)));
-        thinkingStatus = new Text(selectedDetails(highlightedModel()), 1, 0);
-        container.addChild(thinkingStatus);
-        const hints: KeyHint[] = [["↑↓", "Select"],
-          ...(cycleThinkingKeys ? [[cycleThinkingKeys, "Thinking"] as KeyHint] : []),
-          ["Enter", source ? "Run" : "Confirm"], ["Esc", "Cancel"]];
-        container.addChild(new Text(hints.map((hint) => formatKeyHint(hint, theme)).join(" · "), 1, 0));
-        container.addChild(new DynamicBorder((text) => theme.fg("borderMuted", text)));
-      };
-      rebuild();
-
-      return {
-        render: (width) => width < 1 ? [] : container.render(width),
-        invalidate: () => container.invalidate(),
+            }),
+            selectedKey: list.getSelectedItem()?.value,
+            title: source ? "Run original with another model" : "Choose optimizer model",
+            subtitle: source ? "Same original and conversation context · Default model unchanged" : "Optimizer only · Main session unchanged",
+            query, thinkingStatus: statusFor(highlightedModel()), thinkingKeys: cycleThinkingKeys, run: !!source,
+          }, width, tui.terminal.rows, theme);
+        },
+        invalidate: () => list.invalidate(),
         handleInput(data) {
           if (keybindings.matches(data, "tui.select.cancel")) {
             done(undefined);
@@ -513,7 +485,6 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             const current = effectiveThinkingLevel(model, thinkingOverride(model), ctx.thinkingLevel);
             const currentIndex = levels.indexOf(current);
             thinkingEdits.set(modelKey(model), levels[(currentIndex + 1 + levels.length) % levels.length]!);
-            updateThinkingStatus(model);
             tui.requestRender();
             return;
           }

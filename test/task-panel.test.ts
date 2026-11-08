@@ -7,6 +7,7 @@ import type { RefineRecord } from "../src/history.js";
 import { panelLayout } from "../src/panel-layout.js";
 import { TaskPanel, type TaskPanelPosition } from "../src/task-panel.js";
 import { sanitizeTerminalText } from "../src/presentation.js";
+import { formatKeyHint } from "../src/key-hints.js";
 
 function record(id = 1, taskId = 1): RefineRecord {
   const input = { draft: "本项目的原始要求", model: { provider: "openai-codex", id: `model-${id}` }, thinkingLevel: "xhigh" as const,
@@ -28,6 +29,74 @@ function create(name = "dark", usage = false, records = [record()]) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("prompt tree and inspection", () => {
+  it.each(["dark", "light"])("keeps model identities neutral and archived statuses semantic (%s)", (name) => {
+    const records = [record(1), record(2), record(3), record(4)];
+    records[1]!.status = "error"; records[1]!.error = "timeout";
+    records[2]!.status = "generating";
+    records[3]!.status = "cancelled";
+    for (const record of records) record.archivedAt = 1;
+    const { panel, theme } = create(name, true, records);
+    const fg = vi.spyOn(theme, "fg");
+    const lines = panel.render(100);
+    for (const record of records) {
+      const row = lines.find((line) => /[├└]/.test(stripVTControlCharacters(line)) && stripVTControlCharacters(line).includes(record.input.model.id))!;
+      expect(row).toBeDefined();
+      expect(fg.mock.calls.some(([color, value]) => color === "text" && value.includes(record.input.model.id) && /[├└]/.test(value))).toBe(true);
+      expect(fg.mock.calls.some(([color, value]) => color !== "text" && value.includes(record.input.model.id) && /[├└]/.test(value))).toBe(false);
+    }
+    for (const [color, badge] of [["success", "✓ Done"], ["error", "! Timed out"], ["accent", "◌ Running"], ["warning", "× Cancelled"]] as const) {
+      expect(lines.join("\n")).toContain(theme.fg(color, badge));
+    }
+    expect(lines.join("\n")).toContain(theme.fg("muted", "Earlier · "));
+  });
+
+  it.each(["dark", "light"])("reserves detail navigation beside long Unicode model identities (%s)", (name) => {
+    const source = record(); source.input.model.id = "模型😀\x1b[31m".repeat(20);
+    const { panel, theme, position } = create(name, false, [source]);
+    panel.handleInput("\r");
+    for (const width of [20, 28, 40, 80, 100, 160, 40]) {
+      const lines = panel.render(width);
+      const subtitle = lines[2]!;
+      expect(stripVTControlCharacters(subtitle)).toContain("#1");
+      expect(stripVTControlCharacters(subtitle)).toContain("…");
+      expect(subtitle).toContain(formatKeyHint(["o", width === 20 ? "Ref" : "Reference"], theme));
+      expect(lines.every((line) => visibleWidth(line) <= Math.min(width, 100))).toBe(true);
+      expect(lines.join("\n")).not.toContain("\x1b[31m");
+      expect(position.selectedId).toBe(1);
+    }
+  });
+
+  it.each(["dark", "light"])("identifies both compared runs across narrow layouts and target switches (%s)", (name) => {
+    const records = [record(1), record(2)];
+    records[1]!.input.model.id = records[0]!.input.model.id; // Same model, distinct runs.
+    const { panel, theme, position, actions, size } = create(name, false, records);
+    panel.handleInput("\r"); panel.handleInput("c");
+    for (const selected of [1, 2, 1]) {
+      for (const width of [100, 60, 40, 28, 20, 100]) {
+        const lines = panel.render(width);
+        const output = stripVTControlCharacters(lines.join("\n"));
+        expect(output).toContain("Compare results");
+        expect(output).toContain(width < 40 ? "A#1" : "A · Run #1");
+        expect(output).toContain(width < 40 ? "B#2" : "B · Run #2");
+        expect(lines).toHaveLength(panelLayout(width, size.rows).height);
+        expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+        expect(position.selectedId).toBe(selected);
+        if (width < 76) {
+          expect(output).toContain(`Result ${selected}`);
+          expect(output).not.toContain(`Result ${3 - selected}`);
+          const peer = selected === 1 ? "B" : "A";
+          expect(lines.join("\n")).toContain(formatKeyHint(["Tab", width < 40 ? `${peer}#${3 - selected}` : `${peer} · Run #${3 - selected}`], theme));
+        } else {
+          expect(output).toContain("Result 1"); expect(output).toContain("Result 2");
+        }
+      }
+      panel.handleInput("a"); expect(actions.accept).toHaveBeenLastCalledWith(selected);
+      panel.handleInput("\t");
+    }
+    expect(actions.activate).not.toHaveBeenCalled();
+    expect(actions.run).not.toHaveBeenCalled();
+  });
+
   it.each(["dark", "light"])("keeps neighbouring runs visible without moving the action target on resize (%s)", (name) => {
     const f = create(name, false, Array.from({ length: 24 }, (_, i) => record(24 - i)));
     for (const [width, rows] of [[100, 40], [45, 14], [100, 20]]) {

@@ -681,7 +681,11 @@ export class RefineWorkspace implements Component, Focusable {
         ? [[["↵", action], ["⇧↵", "NL"]], [["Esc", "Back"]]]
         : [[["Enter", action], ["Shift+Enter", "Newline"]], [["Esc", "Back"]]], innerWidth, theme);
       if (layout.footerHeight === 1) footer = [fittingKeyHints([["Esc", "Back"], ["↵", action]], innerWidth, theme)];
-      if (this.inputError && layout.headerHeight < 2 && layout.footerHeight > 1) footer[1] = theme.fg("warning", sanitizeTerminalText(this.inputError));
+      if (this.inputError && layout.headerHeight < 2) {
+        const feedback = theme.fg("warning", sanitizeTerminalText(this.inputError));
+        if (layout.headerHeight === 1) header[0] = feedback;
+        else body = [feedback, ...body];
+      }
     } else {
       const dirty = this.selected.instructions !== this.original.instructions || this.selected.tree !== this.original.tree || this.selected.skills !== this.original.skills;
       const notice = [this.saving ? "Saving..." : this.settingsNotice, dirty ? "Unsaved context changes" : ""].filter(Boolean).join(" · ");
