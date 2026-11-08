@@ -1012,6 +1012,26 @@ describe("Unsent preference selection", () => {
     await Promise.resolve(); w.dispose();
   });
 
+  it.each([{ name: "Esc", key: esc }, { name: "Tab", key: tab }, { name: "Shift+Tab", key: backTab }])("returns to tasks with $name without toggling, submitting or discarding selections", async ({ key }) => {
+    const f = unsentWorkspaceSetup(); const w = f.workspace;
+    text(w); await vi.waitFor(() => expect(text(w)).toContain(a.name));
+    const before = structuredClone(f.position);
+    w.handleInput(tab); w.handleInput(" "); w.handleInput(down);
+    w.handleInput(key);
+    expect(text(w)).not.toContain("Focus: Preferences");
+    expect(f.position).toEqual(before);
+    expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(a)]);
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.complete).not.toHaveBeenCalled();
+    w.handleInput(tab);
+    expect(text(w)).toContain(`› [ ] ${b.name}`);
+    expect(text(w)).toContain(`Selected · 1`);
+    w.handleInput(" "); w.handleInput(enter);
+    expect(f.run).toHaveBeenCalledExactlyOnceWith(f.originals[0]!.id);
+    expect(f.complete.mock.calls[0]![0]).toMatchObject({ editingInstruction: composeRevision([selectPreference(a), selectPreference(b)], "") });
+    await Promise.resolve(); w.dispose();
+  });
+
   it("isolates inline searches and choices by original, caches browsing, and preserves the full panel transaction", async () => {
     const f = unsentWorkspaceSetup(); const w = f.workspace;
     text(w); await vi.waitFor(() => expect(text(w)).toContain(a.name));

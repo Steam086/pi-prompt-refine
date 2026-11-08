@@ -3,7 +3,7 @@ import { matchesKey, parseKey, Text, truncateToWidth, visibleWidth, type Keybind
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { RefineRecord } from "./history.js";
 import type { HistoryStorageStatus } from "./history-store.js";
-import { panelFrame, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
+import { panelFrame, panelLayout, workspaceTabs, type PanelLayout, type PanelLayoutProvider } from "./panel-layout.js";
 import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
@@ -232,9 +232,9 @@ export class TaskPanel {
       this.setNotice("Original changed or already started; no selection applied.", "warning");
       return true;
     }
-    if (inline && (key === "tab" || key === "shift+tab") && (!this.preferenceFocus || inline.hints === "select")) {
-      this.preferenceFocus = !this.preferenceFocus; this.reading = false;
-      inline.setTarget(inlineRow!.record.id, this.preferenceFocus);
+    if (inline && !this.preferenceFocus && (key === "tab" || key === "shift+tab")) {
+      this.preferenceFocus = true; this.reading = false;
+      inline.setTarget(inlineRow!.record.id, true);
       return true;
     }
     if (inline && this.preferenceFocus) {
@@ -465,9 +465,8 @@ export class TaskPanel {
   private pane(row: Row, width: number, height: number, active = true, previewDetails = false, showInline = true): string[] {
     const inline = showInline && this.inline(row);
     if (inline) {
-      const readingPreference = this.preferenceFocus && inline.hints === "read";
-      const reserved = readingPreference ? height : height < 9 ? (this.preferenceFocus ? height : 1)
-        : Math.min(7, Math.max(5, Math.floor(height / 2)));
+      // Inactive checklist only; the focused selector owns its full-height layout.
+      const reserved = height < 9 ? 1 : Math.min(7, Math.max(5, Math.floor(height / 2)));
       const originalHeight = Math.min(this.originalHeight(row, width), Math.max(0, height - reserved - 1));
       const original = originalHeight > 0 ? this.pane(row, width, originalHeight, active, false, false) : [];
       // Short originals end naturally. Give the reclaimed rows to the checklist,
@@ -622,7 +621,7 @@ export class TaskPanel {
       if (expansion) hints.push(expansion);
       const inline = this.inline(row);
       if (!this.inspecting) hints.push(["Enter", row?.original && row.record.status === "unsent" && (this.usage || row.record.archivedAt === undefined) ? "Optimize from original focus" : "Inspect"], ...(!this.retainedEarlier ? [["Tab", inline ? "List / Preferences" : this.reading ? "Select" : "Read"] as KeyHint] : []), ["n", "New"]);
-      if (inline) hints.push(["Tab / Shift+Tab", "Choose inline preferences directly"], ["Space", "Toggle at Preferences focus; saved immediately"], ["Enter", "Optimize this Unsent at Preferences focus; search/read never submit"], ["o", "Read original or full preference at its focus"], ["/", "Search at Preferences focus"]);
+      if (inline) hints.push(["Tab / Shift+Tab", "Enter preferences; return to tasks without changing selections"], ["Space", "Toggle at Preferences focus; saved immediately"], ["Enter", "Optimize this Unsent at Preferences focus; search/read never submit"], ["o", "Read original or full preference at its focus"], ["/", "Search at Preferences focus"]);
       if (this.canOpenPreferences()) hints.push(["p", inline ? "Manage / more; Alt+Enter brings back child changes" : "Preferences"]);
       if (row) {
         hints.push(["i", row.record.input.contextUnavailable ? "Copy to current" : "Edit original"]);
@@ -651,6 +650,66 @@ export class TaskPanel {
     return panelFrame(layout, [this.heading(title), this.muted(`${page.scroll + 1}–${Math.min(lines.length, page.scroll + this.viewport)} / ${lines.length} lines`)],
       lines.slice(page.scroll, page.scroll + this.viewport), footer, (text) => this.muted(text));
   }
+  /** Selection temporarily replaces the task tree; references never gain an action focus. */
+  private renderPreferences(row: Row, inline: InlinePreferences, layout: PanelLayout, tabs: string[]): string[] {
+    const width = layout.innerWidth;
+    const height = Math.max(1, layout.bodyHeight - tabs.length);
+    const mode = inline.hints;
+    const warning = inline.warning;
+    const showInlineWarning = layout.headerHeight === 0;
+    let body: string[];
+    if (width >= 72 && mode !== "read") {
+      const leftWidth = Math.min(36, Math.floor(width / 3));
+      const rightWidth = width - leftWidth - 3;
+      const choices = inline.render(leftWidth, height, showInlineWarning);
+      const feedbackHeight = Math.min(height, Math.max(3, Math.floor(height * 0.4)));
+      const originalHeight = Math.max(0, height - feedbackHeight - 1);
+      const original = originalHeight ? this.pane(row, rightWidth, originalHeight, true, false, false) : [];
+      const selected = row.record.input.preferences ?? [];
+      const feedback = [this.heading("Selected") + this.muted(` · ${selected.length}`)];
+      const room = height - original.length - (original.length ? 1 : 0) - feedback.length;
+      if (!selected.length && room > 0) feedback.push(this.muted("None yet"));
+      else if (room > 0) {
+        // Keep newly appended selections visible without changing composition order.
+        const count = Math.min(selected.length, Math.max(0, room - (selected.length > room ? 1 : 0)));
+        if (count < selected.length) feedback.push(this.muted(`… ${selected.length - count} more`));
+        for (const item of count ? selected.slice(-count) : []) {
+          feedback.push(truncateToWidth(this.muted("· ") + this.theme.fg("text", sanitizeTerminalText(item.name).replace(/\s+/gu, " ")), rightWidth, "…"));
+        }
+      }
+      const reference = [...original, ...(original.length ? [""] : []), ...feedback];
+      body = Array.from({ length: height }, (_, i) => {
+        const line = choices[i] ?? "";
+        return line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line))) + this.muted(" │ ") + (reference[i] ?? "");
+      });
+    } else {
+      // Reading uses the full width. Narrow selection prioritizes choices over references.
+      const summary = mode !== "read" && height >= 8
+        ? [truncateToWidth(this.muted("Original: ") + this.theme.fg("text", sanitizeTerminalText(row.record.input.draft).replace(/\s+/gu, " ")), width, "…")] : [];
+      body = [...summary, ...inline.render(width, height - summary.length, showInlineWarning)];
+    }
+    const back: KeyHint = ["Esc", width < 8 ? "" : mode === "select" ? width < 40 ? "Back" : "Back to tasks"
+      : mode === "search" ? width < 40 ? "Back" : "End search" : width < 40 ? "Back" : "Back to preferences"];
+    const submit: KeyHint = [width < 16 ? "↵" : "Enter", width < 10 ? "Start" : "Optimize"];
+    const primary: KeyHint[] = mode === "select" ? [back, submit]
+      : mode === "search" ? [back, ["Enter", "Results"]] : [back, ["↑↓", "Scroll"]];
+    const secondary: KeyHint[] = mode === "select"
+      ? [["Space", "Toggle"], ["Tab", "Back"], ["o", "Read"], ["↑↓", "Choose"], ["/", "Search"], ["p", "Manage"]] : [];
+    const expansion = this.canExpand() && this.expansionHint?.();
+    if (expansion) secondary.push(expansion);
+    const pairFits = visibleWidth(formatKeyHint(primary[0]!, this.theme) + " · " + formatKeyHint(primary[1]!, this.theme)) <= width;
+    const header = [this.heading("Choose preferences"), this.muted(`Focus: Preferences${mode === "search" ? " · Search" : mode === "read" ? " · Read-only" : ""}`)];
+    const footer = layout.footerHeight > 1 && !pairFits
+      ? [fittingKeyHints([back], width, this.theme), fittingKeyHints([...primary.slice(1), ...secondary], width, this.theme)]
+      : [fittingKeyHints(primary, width, this.theme), fittingKeyHints(secondary, width, this.theme)];
+    if (layout.footerHeight === 1) footer[0] = fittingKeyHints([...primary, ...secondary], width, this.theme);
+    if (layout.footerHeight === 1 && mode === "select" && !pairFits && layout.headerHeight > 0) {
+      // Keep both action meanings, rather than dropping Optimize in short/narrow frames.
+      header[layout.headerHeight - 1] = formatKeyHint(submit, this.theme);
+    }
+    if (warning && layout.headerHeight > 0) header[layout.headerHeight - 1] = this.theme.fg("warning", sanitizeTerminalText(`⚠ ${warning}`));
+    return panelFrame(layout, header, [...tabs, ...body], footer, (text) => this.muted(text));
+  }
   render(width: number, _empty?: () => string[]): string[] {
     if (width < 1) return [];
     const layout = this.layout(width);
@@ -668,6 +727,7 @@ export class TaskPanel {
     const selected = this.selected(rows);
     const inline = this.inline(selected);
     this.actions.inlinePreferences?.setTarget(inline ? selected!.record.id : undefined, this.preferenceFocus);
+    if (inline && this.preferenceFocus && selected) return this.renderPreferences(selected, inline, layout, tabs);
     const split = !this.inspecting && !this.retainedEarlier && layout.innerWidth >= 72;
     const leftWidth = split ? Math.min(36, Math.floor(layout.innerWidth / 3)) : layout.innerWidth;
     const rightWidth = split ? layout.innerWidth - leftWidth - 3 : layout.innerWidth;
@@ -720,22 +780,6 @@ export class TaskPanel {
         const line = list[i] ?? "";
         return line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line))) + this.muted(" │ ") + (right[i] ?? "");
       });
-    }
-    if (inline && this.preferenceFocus) {
-      const mode = inline.hints;
-      const primary: KeyHint[] = mode === "search" ? [["Esc", layout.innerWidth < 40 ? "Back" : "Finish search"], ["Enter", "Choose"]]
-        : mode === "read" ? [["Esc", layout.innerWidth < 40 ? "Back" : "Back to preferences"], ["↑↓", "Scroll"]]
-        : [["Esc", "Back"], [layout.innerWidth < 40 ? "↵" : "Enter", "Optimize"], ["Space", "Toggle"]];
-      const secondary: KeyHint[] = mode === "select" ? [["o", "Read"], ["↑↓", "Choose"], ["/", "Search"], ["p", "Manage / more"], ["Tab", "Focus"]] : [];
-      const expansion = this.canExpand() && this.expansionHint?.();
-      if (expansion) secondary.push(expansion);
-      const footer = layout.footerHeight === 1
-        ? [fittingKeyHints([["Esc", ""], ...primary.slice(1), ...secondary], layout.innerWidth, this.theme, " ")]
-        : layout.innerWidth < 40
-          ? [fittingKeyHints(primary.slice(1), layout.innerWidth, this.theme), fittingKeyHints([primary[0]!, ...secondary], layout.innerWidth, this.theme)]
-          : alignedKeyHints([primary, secondary], layout.innerWidth, this.theme);
-      return panelFrame(layout, [this.heading("Prompt refine · Tasks"), this.muted(`Focus: Preferences${mode === "select" ? " · Changes saved to this Unsent; Enter optimizes" : mode === "search" ? " · Search" : " · Read-only"}`)],
-        [...tabs, ...body], footer, (text) => this.muted(text));
     }
     const action = !this.inspecting && selected?.original && selected.record.status === "unsent" && (this.usage || selected.record.archivedAt === undefined) ? "Optimize" : "Inspect";
     const restored = selected?.record.input.contextUnavailable;

@@ -9,7 +9,7 @@ import { selectHistory } from "../src/context.js";
 import { panelLayout } from "../src/panel-layout.js";
 import { sanitizeTerminalText } from "../src/presentation.js";
 import { formatKeyHint } from "../src/key-hints.js";
-import { type RevisionPreference } from "../src/revision-preferences.js";
+import { selectPreference, type RevisionPreference } from "../src/revision-preferences.js";
 
 // Actual Pi renderers, not a substitute for human visual/IME verification.
 describe.each(["regular", "fullscreen"] as const)("inline preference rendering (%s)", (mode) => {
@@ -68,8 +68,26 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       expect(render()).toContain("› [x] Item 00");
       expect(panel.render(100).join("\n")).toContain(formatKeyHint(["Enter", "Optimize"], theme));
       expect(panel.render(100).join("\n")).toContain(formatKeyHint(["o", "Read"], theme));
+      expect(panel.render(100).join("\n")).toContain(formatKeyHint(["Esc", "Back to tasks"], theme));
+      expect(panel.render(100).join("\n")).toContain(formatKeyHint(["Tab", "Back"], theme));
+      const columns = () => panel.render(100).map(stripVTControlCharacters).filter((line) => line.includes(" │ "));
+      expect(columns().filter((line) => /Item \d+/.test(line.split(" │ ")[0]!)).length).toBeGreaterThanOrEqual(8);
+      expect(columns().map((line) => line.split(" │ ")[0]).join("\n")).not.toContain("Unsent");
+      const reference = () => columns().map((line) => line.split(" │ ")[1]).join("\n");
+      expect(reference()).toContain("ORIGINAL 中文😀");
+      expect(reference()).toContain("Selected · 1");
+      expect(reference()).toContain("Item 00");
+      const beforeBrowsing = reference();
       const initialRedraws = tui.fullRedraws;
-      for (const key of ["\x1b[B", " ", "o", "\r", "\t", "\x1b[Z", "\x1b[6~", "\x1b[5~", "\x1b", "\t", "\x1b[Z"]) { input(key); render(); }
+      input("\x1b[B"); render();
+      expect(reference()).toBe(beforeBrowsing);
+      input(" "); render();
+      expect(reference()).toContain("Selected · 2");
+      expect(reference()).toContain("Item 01");
+      input("o"); render();
+      expect(panel.render(100).join("\n")).not.toContain(formatKeyHint(["Enter", "Optimize"], theme));
+      expect(panel.render(100).map(stripVTControlCharacters).join("\n")).not.toContain(" │ ");
+      for (const key of ["\r", "\t", "\x1b[Z", "\x1b[6~", "\x1b[5~", "\x1b", "\t", "\x1b[Z"]) { input(key); render(); }
       expect(tui.fullRedraws).toBe(initialRedraws);
       expect(complete).not.toHaveBeenCalled();
       for (const [columns, rows] of [[100, 40], [45, 14], [20, 10], [12, 8], [100, 40]]) {
@@ -97,6 +115,15 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       input("/"); input("Item 17"); render(); input("\r"); input(" ");
       expect(render()).toContain("› [x] Item 17");
       expect(load).toHaveBeenCalledTimes(1);
+      const chosen = controller.getRecord(original.id)!.input.preferences!;
+      expect(controller.updateDraftPreferences(controller.getRecord(original.id)!, entries.map(selectPreference))).toBeUndefined();
+      render();
+      expect(reference()).toContain("Selected · 18");
+      expect(reference()).toMatch(/… \d+ more/);
+      expect(reference()).toContain("Item 17");
+      expect(controller.getRecord(original.id)!.input.preferences!.map((entry) => entry.id)).toEqual(entries.map((entry) => entry.id));
+      expect(controller.updateDraftPreferences(controller.getRecord(original.id)!, chosen)).toBeUndefined();
+      render();
       // Refresh failure leaves selected snapshots, a semantic warning and a usable cancel path.
       load.mockRejectedValueOnce(new Error("Permission denied"));
       await picker.refresh();

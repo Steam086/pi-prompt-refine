@@ -5,6 +5,8 @@ import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/
 import { InlinePreferences } from "../src/inline-preferences.js";
 import { TaskPanel, type TaskPanelPosition } from "../src/task-panel.js";
 import { selectHistory } from "../src/context.js";
+import { formatKeyHint } from "../src/key-hints.js";
+import { panelLayout } from "../src/panel-layout.js";
 import type { RefineRecord } from "../src/history.js";
 import type { RevisionPreference } from "../src/revision-preferences.js";
 
@@ -12,7 +14,7 @@ const plain = (lines: string[]) => lines.map(stripVTControlCharacters);
 const checklistRow = (lines: string[]) => plain(lines).findIndex((line) => line.split(" │ ")[1]?.includes("Preferences ·"));
 
 describe("original and checklist geometry", () => {
-  it.each(["dark", "light"])("packs short originals without focus-dependent gaps (%s)", async (name) => {
+  it.each(["dark", "light"])("reuses the task column while selecting without resizing or losing original reading positions (%s)", async (name) => {
     const theme = getThemeByName(name)!;
     const keys = getKeybindings();
     const size = { rows: 40 };
@@ -43,15 +45,23 @@ describe("original and checklist geometry", () => {
         expect(preferences - original).toBe(2);
         expect(frame.join("\n")).not.toContain("\x1b[2J");
         expect(frame.join("\n")).toContain(theme.fg("text", theme.bold("Preferences")));
-        // Ordinary focus changes must neither move the checklist boundary nor resize the frame.
+        // Focus changes replace the tree, not the frame or its single divider.
+        let selecting = false;
         for (const key of ["\t", "\t", " ", "\t"]) {
           panel.handleInput(key);
+          if (key === "\t") selecting = !selecting;
           const next = panel.render(width);
           expect(next).toHaveLength(frame.length);
-          expect(checklistRow(next)).toBe(preferences);
+          expect(next.every((line) => visibleWidth(line) <= width)).toBe(true);
+          if (selecting) {
+            expect(plain(next).some((line) => line.split(" │ ")[0]?.includes("Preferences ·"))).toBe(true);
+            expect(plain(next).some((line) => line.split(" │ ")[1]?.includes("Original 中文😀"))).toBe(true);
+            expect(plain(next).some((line) => line.split(" │ ")[1]?.includes("Selected · 0"))).toBe(true);
+          } else expect(checklistRow(next)).toBe(preferences);
         }
         expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
       }
+      panel.handleInput("\x1b");
       record.input.draft = Array.from({ length: 60 }, (_, i) => `Original line ${i} 中文😀`).join("\n");
       const initial = plain(panel.render(100));
       expect(initial.join("\n")).toContain("Preferences ·");
@@ -63,11 +73,14 @@ describe("original and checklist geometry", () => {
       expect(plain(panel.render(100)).join("\n")).toContain("Library entry");
       panel.handleInput("\x1b"); panel.render(100);
       expect(position.scroll).toBe(scroll);
-      for (const [width, rows] of [[40, 14], [20, 8], [100, 40]]) {
+      for (const [width, rows] of [[100, 40], [80, 40], [40, 14], [20, 10], [20, 8], [12, 8], [100, 40]]) {
         size.rows = rows!;
         const frame = panel.render(width!);
         expect(frame.length).toBeLessThanOrEqual(rows!);
         expect(frame.every((line) => visibleWidth(line) <= width!)).toBe(true);
+        const inner = panelLayout(width!, rows!).innerWidth;
+        expect(frame.join("\n")).toContain(formatKeyHint(["Esc", inner < 40 ? "Back" : "Back to tasks"], theme));
+        expect(frame.join("\n")).toContain(formatKeyHint([inner < 16 ? "↵" : "Enter", inner < 10 ? "Start" : "Optimize"], theme));
       }
       expect(run).not.toHaveBeenCalled();
     } finally { picker.dispose(); }

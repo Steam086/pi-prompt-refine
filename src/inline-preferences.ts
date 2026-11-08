@@ -144,7 +144,7 @@ export class InlinePreferences {
     } else if (position.searching) {
       if (cancel || this.keys.matches(data, "tui.input.submit") || key === "down") position.searching = false;
       else { position.search.handleInput(data); position.index = 0; position.key = undefined; position.top = 0; position.direction = 1; }
-    } else if (cancel || key === "q") return "back";
+    } else if (cancel || key === "q" || key === "tab" || key === "shift+tab") return "back";
     else if (key === "p") return "manage";
     else if (this.keys.matches(data, "tui.input.submit")) return "submit";
     else if (key === "/") position.searching = true;
@@ -182,7 +182,12 @@ export class InlinePreferences {
   get hints(): "search" | "read" | "select" {
     return this.document ? "read" : this.id !== undefined && this.positions.get(this.id)?.searching ? "search" : "select";
   }
-  render(width: number, height: number): string[] {
+  get warning(): string {
+    const errors = [...new Set(Object.values(this.library.errors))];
+    return this.notice || (errors.length ? `Library unavailable: ${errors.join(" · ")}` : "");
+  }
+  /** A host with a full-width warning header may own the feedback row. */
+  render(width: number, height: number, showWarning = true): string[] {
     if (this.disposed || width < 1 || height < 1 || this.id === undefined) return [];
     const target = this.target(this.id), position = this.positions.get(this.id);
     if (!target || !position) return [];
@@ -191,7 +196,7 @@ export class InlinePreferences {
     const heading = this.theme.fg("text", this.theme.bold(`${this.active ? "› " : ""}Preferences`));
     const result = [truncateToWidth(heading + muted(` · ${target.selected.length} selected${this.loading && target.selected.length ? " · Loading…" : ""}`), width, "…")];
     const errors = [...new Set(Object.values(this.library.errors))];
-    const warning = this.notice || (errors.length ? `Library unavailable: ${errors.join(" · ")}` : "");
+    const warning = showWarning ? this.warning : "";
     if (warning && result.length < height) result.push(truncateToWidth(this.theme.fg("warning", `⚠ ${clean(warning)}`), width, "…"));
     else if (warning) result[0] = truncateToWidth(this.theme.fg("warning", `⚠ ${clean(warning)}`), width, "…");
     if (this.document && this.active) {

@@ -225,20 +225,40 @@ describe("inline Unsent preferences", () => {
     f.picker.dispose();
   });
 
+  it("uses only Space to toggle and returns without changing selections on Esc or Tab", async () => {
+    const f = fixture(); await Promise.resolve();
+    for (const key of ["\x1b", "\t", "\x1b[Z", "\x1b[9u"]) {
+      expect(f.picker.handleInput(key)).toBe("back");
+      expect(f.state.selected).toEqual([]);
+    }
+    expect(f.save).not.toHaveBeenCalled();
+    f.picker.handleInput(" ");
+    expect(f.state.selected).toEqual([selectPreference(first)]);
+    for (const key of ["\t", "\x1b", "\x1b[Z"]) {
+      expect(f.picker.handleInput(key)).toBe("back");
+      expect(f.state.selected).toEqual([selectPreference(first)]);
+    }
+    expect(f.save).toHaveBeenCalledTimes(1);
+    f.picker.handleInput(" ");
+    expect(f.state.selected).toEqual([]);
+    expect(f.save).toHaveBeenCalledTimes(2);
+    f.picker.dispose();
+  });
+
   it("returns submission only from selection, including an empty library, never from search or full text", async () => {
     for (const entries of [[], [first]]) {
       const f = fixture(entries); await Promise.resolve();
       expect(f.picker.handleInput("\r")).toBe("submit");
       expect(f.save).not.toHaveBeenCalled();
       f.picker.handleInput("/"); f.picker.handleInput("Keep");
-      expect(f.picker.handleInput("\t")).toBeUndefined();
+      for (const key of ["\t", "\x1b[Z"]) expect(f.picker.handleInput(key)).toBeUndefined();
       expect(f.picker.hints).toBe("search");
       expect(f.picker.handleInput("\r")).toBeUndefined();
       expect(f.picker.hints).toBe("select");
       if (entries.length) {
         f.picker.handleInput("o");
         expect(f.picker.hints).toBe("read");
-        for (const key of ["\r", "\t", "\x13", "p", " "]) expect(f.picker.handleInput(key)).toBeUndefined();
+        for (const key of ["\r", "\t", "\x1b[Z", "\x13", "p", " "]) expect(f.picker.handleInput(key)).toBeUndefined();
         expect(f.picker.hints).toBe("read");
         f.picker.handleInput("\x1b");
       }
