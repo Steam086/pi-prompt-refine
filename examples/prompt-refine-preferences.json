@@ -3,119 +3,119 @@
   "entries": [
     {
       "id": "neutral-prompt-tone",
-      "version": 1,
+      "version": 2,
       "name": "Neutral Prompt Tone",
-      "body": "将 prompt 本身过度口语化、含糊或重复的表达调整为自然、准确、不过度口语化的措辞。保留用户意图、语言、必要语气、不确定性、字面量和授权范围；清楚的表达无需改动。不将这条改写方式写成对主 Agent 回答风格的要求，不添加额外任务。",
+      "body": "仅修改 prompt 中妨碍理解的口语表达、含糊措辞和重复内容；清楚的表达保持原样。保留用户语气，不把口语表达一律改成正式文体。",
       "metadata": {
-        "description": "调整 prompt 本身过度口语化的表达，保留语气、意图和信息；不约束主 Agent 的回答风格。",
+        "description": "修改影响理解的口语表达和重复措辞，保留用户语气；不要求主 Agent 改变回答风格。",
         "kind": "rewrite",
         "activation": "manual"
       }
     },
     {
       "id": "prompt-bullet-structure",
-      "version": 3,
+      "version": 4,
       "name": "Prompt Bullet Structure",
-      "body": "这是用户手动选择的、有条件的 prompt 组织偏好，不证明原稿需要分条。先判断当前用户要求是否确有多个独立、并列的问题或约束；不要把引用、示例、背景描述或有先后依赖的内容当作并列任务。只有条目化确实改善阅读时才整理已有内容；原稿已经清晰、已有合适列表、过于简短或要求保留结构时保持原样。保留问题之间的依赖、条件、显式约束、语言、字面量和授权范围；不增加条目、不扩展任务、不打乱顺序。只调整 prompt 本身，不将本偏好或“请分条回答”等回答格式要求写入结果。",
+      "body": "仅在原稿含多个独立并列的问题或约束、且列表更便于阅读时，将已有内容整理为条目。不要把引用、示例、背景或有先后依赖的内容当作并列任务。原稿已清晰、已有合适列表、过于简短或要求保留结构时保持原样。保留原有顺序、依赖、条件和授权范围，不增加条目。只调整 prompt 的结构，不要求主 Agent 分条回答。",
       "metadata": {
-        "description": "手动选择后，仅在确有独立并列要求且结构需要改善时条目化，不改回答格式或已清晰的结构。",
+        "description": "将需要整理的独立并列要求改为列表；不改变回答格式。",
         "kind": "rewrite",
         "activation": "manual"
       }
     },
     {
       "id": "prompt-step-structure",
-      "version": 3,
+      "version": 4,
       "name": "Prompt Step Structure",
-      "body": "这是用户手动选择的、有条件的 prompt 组织偏好，不证明存在可编号的任务步骤。仅当当前用户要求本身明确给出先后顺序或依赖，且编号确实改善阅读时，按已有关系整理原有内容。不要把背景中系统的运行流程、被解释的引用或示例、优先级、假设和疑问误当成执行指令。原稿已经清晰、已有合适步骤或要求保留结构时保持原样。保留全部已有步骤、条件、限制、语言、字面量和授权范围；不推测缺失步骤，不增加检查、工具或交付物，不把讨论、解释或规划改成执行授权。只组织 prompt 本身，不将本偏好写入结果，不额外要求主 Agent 按步骤回答或披露内部推理。",
+      "body": "仅在用户要求已明确给出先后顺序或依赖、且编号更便于阅读时，按已有关系整理原稿。不要把背景流程、引用、示例、优先级、假设或疑问当作执行步骤。原稿已清晰、已有合适步骤或要求保留结构时保持原样。保留已有步骤、条件、限制和授权范围，不补充步骤、检查、工具或交付物。只调整 prompt 的结构，不要求主 Agent 按步骤回答。",
       "metadata": {
-        "description": "手动选择后，仅在当前要求确有明确先后依赖且需要整理时编号，不将背景流程变成任务或新增授权。",
+        "description": "按要求中已有的先后关系整理步骤；不把背景流程变成任务。",
         "kind": "rewrite",
         "activation": "manual"
       }
     },
     {
       "id": "answer-in-bullet-points",
-      "version": 1,
+      "version": 2,
       "name": "Answer in Bullet Points",
-      "body": "When the task benefits from presenting parallel points, update the candidate prompt to ask the main agent to use bullet points in its answer. Keep each bullet focused on one idea, lead with the key point, and add only necessary explanation. Group related points and merge repetition; do not invent points to meet a quota. Use bullets for unordered information, not to imply an execution sequence. Apply this preference only where it improves readability; preserve natural prose when more suitable. Preserve the original task, language, scope, and explicit output constraints; do not execute the task or change the refiner output protocol.",
+      "body": "Use bullets for parallel points when they are easier to read than prose. Keep one idea per bullet, group related points, and merge repetition. Do not invent points to meet a quota or use unordered bullets to represent a sequence.",
       "metadata": {
-        "description": "当用户选择分条回答时，将适用的回答结构要求写进 prompt；不改变 prompt 本身的组织方式。",
+        "description": "回答中的并列要点使用列表，适合连贯叙述的内容保留段落。",
         "kind": "task",
         "activation": "manual"
       }
     },
     {
       "id": "answer-in-ordered-steps",
-      "version": 1,
+      "version": 2,
       "name": "Answer in Ordered Steps",
-      "body": "For tasks that genuinely involve an ordered procedure, update the candidate prompt to ask the main agent to present actionable numbered steps in execution or dependency order. Include prerequisites, completion checks, branches, or cautions only when relevant and supported by the task. Describe observable actions and results, not private internal reasoning. Do not turn a request to explain, discuss, or plan into authorization to perform actions. Apply this preference only when sequence matters; do not force unrelated points into steps. Preserve the original task, language, scope, and explicit output constraints; do not execute the task or change the refiner output protocol.",
+      "body": "When explaining a procedure, number its steps in execution or dependency order. Describe observable actions and results, not private internal reasoning. Include prerequisites, checks, branches, or cautions only where the task supports them. Do not force unordered information into steps or treat a request to explain or plan as permission to act.",
       "metadata": {
-        "description": "要求主 Agent 对具有实际先后依赖的任务按步骤回答；不授权实施，也不要求披露内部推理。",
+        "description": "有先后依赖的过程按编号步骤回答；不授权实施，也不要求披露内部推理。",
         "kind": "task",
         "activation": "manual"
       }
     },
     {
       "id": "answer-by-topic",
-      "version": 1,
+      "version": 2,
       "name": "Answer by Topic",
-      "body": "When the expected answer is substantial or covers several distinct topics, update the candidate prompt to ask the main agent to organize its answer under short, descriptive topic headings. Keep related material together, use a shallow hierarchy that reflects the actual content, and avoid repeating information across sections. Do not impose generic sections or add an introduction, summary, or next steps unless useful for the requested task. Apply this preference only when headings improve navigation; keep short answers direct. Preserve the original task, language, scope, and explicit output constraints; do not execute the task or change the refiner output protocol.",
+      "body": "Use short topic headings to organize long or multi-topic answers; leave short answers unsectioned. Keep related material together without repeating it across sections. Derive headings from the content rather than filling a fixed outline with an introduction, summary, or next steps.",
       "metadata": {
-        "description": "要求主 Agent 对较长或多主题回答使用简短主题标题，短回答无需强制分节。",
+        "description": "较长或多主题回答按内容分节，短回答不强制加标题。",
         "kind": "task",
         "activation": "manual"
       }
     },
     {
       "id": "discussion-mode",
-      "version": 1,
+      "version": 2,
       "name": "Discussion Mode",
-      "body": "For requirements clarification, solution discussions, and planning, update the candidate prompt to ask the main agent to answer the current question directly, leading with its recommendation, judgment, or current understanding, followed by only the key reasoning needed to support the user's decision. Be concise, concrete, and easy to scan while retaining decision-relevant constraints, trade-offs, risks, and uncertainty. Focus on what needs to be decided in this turn; do not expand into a complete design or implementation plan unless requested. In an ongoing discussion, emphasize new information, changes, and disagreements rather than repeating established context. Prefer short paragraphs or a few bullets; use headings, tables, or examples only when helpful, without imposing fixed sections or repetitive summaries. When multiple viable options exist, recommend one and explain why, comparing only alternatives that could affect the choice. Ask only a small number of questions that could change the direction or block planning. State reasonable assumptions and proceed where possible; do not turn every open detail into a questionnaire or mechanically end with a follow-up question when none is needed. Use as much detail as the current decision requires: do not omit important constraints for brevity or add unrelated analysis. Expand when the user explicitly requests depth or a complete deliverable. Preserve the original task, language, scope, and explicit output constraints. Discussion or planning does not itself authorize implementation or external actions, but this preference must not convert an explicitly requested execution task into discussion only. Do not add tool-use or delegation authority. These are requirements for the separate main agent; do not execute the task or change the refiner output protocol.",
+      "body": "In requirements and planning discussions, answer the current question without expanding into a full design or implementation plan unless requested. When a choice is requested, recommend an option and explain the constraints, trade-offs, risks, and uncertainty that could affect it. In follow-ups, focus on new information and disagreements rather than repeating settled context. Use short paragraphs or bullets without a fixed outline or closing summary. Ask questions only when their answers could change the direction or block planning; otherwise state any needed assumptions and continue. Discussion does not authorize implementation or external actions, and this preference must not convert an explicitly requested execution task into discussion only. Do not add tool-use or delegation authority.",
       "metadata": {
-        "description": "For requirements and planning discussions: lead with a recommendation, retain key reasoning and trade-offs, ask only decision-relevant questions, and avoid unnecessary detail.",
+        "description": "讨论需求和方案时只处理当前问题；需要选择时给出建议与取舍，追问仅限影响方向或阻塞规划的问题。",
         "kind": "task",
         "activation": "manual"
       }
     },
     {
       "id": "brainstorm-alternatives",
-      "version": 1,
+      "version": 2,
       "name": "Brainstorm Alternatives",
-      "body": "Only when the task calls for ideation or exploring alternatives, update the candidate prompt to ask the main agent to use a lightweight brainstorming structure suited to the goal. For open exploration, group genuinely different ideas by approach rather than offering wording variants. For improving an existing idea, use relevant SCAMPER lenses such as substitution, combination, adaptation, elimination, or rearrangement. When the task also calls for choosing a direction, separate idea generation from comparison, then assess a few promising options using relevant criteria and identify key assumptions or a small validation step within the authorized scope. Choose only the useful structure, not every framework; do not force a fixed idea count, premature ranking, extra research, tool use, or implementation. Do not impose brainstorming on factual, narrowly specified, or already-decided tasks. Preserve the original task, language, scope, and explicit output constraints; do not execute the task or change the refiner output protocol.",
+      "body": "For ideation or exploration tasks, offer ideas that differ in approach, not just wording. If the task also asks for a choice, compare the promising options against its stated goals and constraints, noting assumptions that could change the choice. Do not impose a named framework, fixed idea count, ranking, research, or validation work unless requested. Do not apply brainstorming to factual questions or already-decided tasks.",
       "metadata": {
-        "description": "为明确的创意探索任务补充发散与比较要求；不向事实问答或已定方案强加头脑风暴。",
+        "description": "创意探索时提出思路不同的方案；只有任务要求选择方向时才比较。",
         "kind": "task",
         "activation": "manual"
       }
     },
     {
       "id": "clarify-prompt-intent",
-      "version": 2,
+      "version": 3,
       "name": "Clarify Prompt Intent",
-      "body": "Clarify only references or scope that the supplied draft and context resolve unambiguously. Make the smallest useful edit; keep clear prompts unchanged. Do not expand the task, add success criteria or repeat background merely to make the prompt standalone. Preserve uncertainty, literals, language and authorization. Edit the prompt only; do not answer it or add an intent-analysis section.",
+      "body": "Clarify only references or scope that the supplied draft and context resolve unambiguously. Make the smallest useful edit; keep clear prompts unchanged. Do not add success criteria or repeat background merely to make the prompt standalone. Leave unresolved ambiguity intact and do not add an intent-analysis section.",
       "metadata": {
-        "description": "手动澄清有充分依据的指代与范围；沿用最小改写，不默认扩展任务。",
+        "description": "只澄清上下文能确定的指代和范围，保留无法消除的歧义，不扩展任务。",
         "kind": "rewrite",
         "activation": "manual"
       }
     },
     {
       "id": "coordinate-authorized-subagents",
-      "version": 1,
+      "version": 2,
       "name": "Coordinate Authorized Subagents",
-      "body": "Only when the current draft explicitly requests or authorizes delegation, incorporate concise requirements for the main agent to coordinate that authorized work. Preserve any specified agents, roles, order, limits, and approval boundaries. Define bounded assignments and expected results, relevant inputs and constraints, dependencies and ordering, the lead agent’s responsibility for checking and integrating results, and edit ownership or sequencing where needed. Choose parallel work only for independent assignments and sequential work where outputs depend on earlier results. If required agents or capabilities are unavailable, ask the main agent to report the limitation rather than pretend delegation occurred. Do not invent agents, capabilities, tool names, budgets, extra reviews, or additional tasks. Merely discussing subagents, task complexity, or available tools does not authorize their use. If delegation is not authorized, do not add a delegation workflow. These are requirements for the separate main agent, not permission for the refiner to execute work.",
+      "body": "Only when the current draft explicitly authorizes delegation, specify each assignment's scope, inputs, and expected result within that authorization. Preserve specified agents, roles, limits, and approval boundaries. Run independent assignments in parallel and dependent ones in order; assign edit ownership or sequencing when files overlap. The lead agent checks and integrates results. Report unavailable agents or capabilities rather than pretending delegation occurred. Do not invent agents, tools, budgets, extra reviews, or tasks. Mentioning subagents, task complexity, or available tools is not authorization to delegate.",
       "metadata": {
-        "description": "仅在当前任务已明确授权委派时，补充主 Agent 的有界分工、依赖、交接与整合要求；不新增委派授权。",
+        "description": "已明确授权委派时，说明分工范围、依赖和结果整合；编辑同一文件时明确归属或顺序。",
         "kind": "task",
         "activation": "manual"
       }
     },
     {
       "id": "translate-prompt-to-english",
-      "version": 1,
+      "version": 2,
       "name": "Translate Prompt to English",
-      "body": "Refine the current prompt and translate its natural-language content into English, regardless of its original language, so the resulting prompt is in English. If it is already in English, make only useful improvements. Use relevant supplied context to interpret references and terminology only when the evidence is unambiguous; preserve unresolved ambiguity and do not invent facts, requirements, or missing context. Preserve the original intent, tone, uncertainty, task, scope, authorization, constraints, and requested output format. Preserve the structure and formatting, including Markdown, lists, and code fences, except for minimal changes needed for a faithful English rendering. Keep exact literals that must not change, including code, commands, paths, identifiers, URLs, numbers, units, versions, and explicitly verbatim text, even if they contain non-English characters. Translate instructions about the main agent's response language faithfully; do not change them to require an English response merely because the prompt itself is translated. Do not answer or execute the task, add commentary or a bilingual copy, or change the refiner output protocol.",
+      "body": "Translate the prompt's natural-language content into English; leave existing English unchanged unless it needs an edit. Preserve its meaning, tone, uncertainty, structure, and formatting. Keep code, commands, paths, identifiers, URLs, numbers, units, versions, and explicitly verbatim text unchanged, including non-English literals. Translate response-language instructions faithfully: an English prompt does not imply a request for an English answer. Return no bilingual copy or translation commentary.",
       "metadata": {
         "description": "将 prompt 的自然语言译成英文，保留字面量及原有回答语言要求；不等同于要求英文回答。",
         "kind": "rewrite",
