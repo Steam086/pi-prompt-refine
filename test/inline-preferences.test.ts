@@ -128,6 +128,38 @@ describe("inline Unsent preferences", () => {
     f.picker.dispose();
   });
 
+  it.each(["dark", "light"])("wraps the highlighted summary without changing checked snapshots (%s)", async (themeName) => {
+    const description = "简介 中文😀 \x1b[2J literal **text** wraps across several lines without dropping the ending.";
+    const entry = { ...first, metadata: { ...first.metadata!, description } };
+    const f = fixture([entry, second], [selectPreference(entry)], themeName); await Promise.resolve();
+    const selected = structuredClone(f.state.selected);
+    for (const width of [24, 60, 24]) {
+      const summary = f.picker.renderDescription(width, 12);
+      expect(summary[0]).toContain(f.theme.fg("text", f.theme.bold(entry.name)));
+      expect(summary.length).toBeGreaterThan(2);
+      expect(stripVTControlCharacters(summary.join("\n"))).toContain("ending.");
+      expect(summary.every((line) => visibleWidth(line) <= width)).toBe(true);
+      expect(summary.join("\n")).not.toContain("\x1b[2J");
+      expect(summary[1]).toBe(f.theme.fg("muted", stripVTControlCharacters(summary[1]!)));
+      const list = stripVTControlCharacters(f.picker.render(width, 12, true, false).join("\n"));
+      expect(list).not.toContain("简介");
+      expect(list).toContain("[x] Keep 中文😀");
+      const narrow = stripVTControlCharacters(f.render(width, 12).join("\n"));
+      expect(narrow).toContain("简介");
+      expect(narrow.replace(/\s+/gu, " ")).toContain("literal **text**");
+    }
+    const clipped = f.picker.renderDescription(24, 3);
+    expect(clipped).toHaveLength(3);
+    expect(stripVTControlCharacters(clipped[2]!)).toContain("…");
+    f.picker.handleInput("\x1b[B");
+    expect(stripVTControlCharacters(f.picker.renderDescription(60, 6).join("\n"))).toContain("Rewrite description");
+    expect(f.state.selected).toEqual(selected);
+    expect(f.save).not.toHaveBeenCalled(); expect(f.load).toHaveBeenCalledTimes(1);
+    f.picker.handleInput("/"); f.picker.handleInput("no matches");
+    expect(f.picker.renderDescription(60, 6)).toEqual([]);
+    f.picker.dispose();
+  });
+
   it("does not refilter or reload on focus changes and scrolling", async () => {
     const f = fixture(); await Promise.resolve();
     const search = vi.spyOn(String.prototype, "toLowerCase");
