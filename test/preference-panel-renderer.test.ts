@@ -101,9 +101,11 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
       panel.dispose(); tui.removeChild(panel);
       const manageClose = vi.fn();
       let current = [{ ...first, version: 2, body: "Current library 中文😀" }];
+      let versionLimit = false;
       panel = new PreferencePanel(tui, theme, getKeybindings(), {
         load: async () => ({ errors: {}, entries: structuredClone(current) }),
         save: async (scope, value, expected) => {
+          if (versionLimit) throw new Error("Use Add and copy the text into a new entry; this entry's version limit was reached.");
           const saved = { ...value, scope, id: expected!.id, version: expected!.version + 1 };
           current = [saved]; return saved;
         },
@@ -123,6 +125,17 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
       input("\x1b"); input("e"); input("Edited "); input("\x1b[Z"); input("\r");
       for (let i = 0; i < 4; i++) await Promise.resolve();
       expect(render()).toContain("Saved to library");
+      // Storage recovery names the real Add action, including in a short warning row.
+      versionLimit = true;
+      input("e"); input("\x05"); input("\x15"); input("Unsaved 中文😀"); input("\x1b[Z"); input("\r");
+      for (let i = 0; i < 4; i++) await Promise.resolve();
+      for (const [columns, rows] of [[100, 40], [20, 8], [100, 40]]) {
+        Object.assign(terminal, { columns, rows }); panel.invalidate();
+        expect(render()).toContain("Use Add");
+        expect(panel.render(columns!).join("\n")).toContain(theme.fg("error", "⚠").split("⚠")[0] + "⚠");
+      }
+      expect(render()).toContain("Unsaved");
+      input("\x1b"); input("y"); // Explicitly discard only the failed form.
       input("d"); expect(render()).toContain("Delete library entry?");
       input("n"); expect(current).toHaveLength(1);
       input("d"); input("y"); for (let i = 0; i < 4; i++) await Promise.resolve();

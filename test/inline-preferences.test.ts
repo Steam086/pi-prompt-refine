@@ -3,6 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { getKeybindings, visibleWidth } from "@earendil-works/pi-tui";
 import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { InlinePreferences } from "../src/inline-preferences.js";
+import { RefineController } from "../src/controller.js";
+import { selectHistory } from "../src/context.js";
+import * as preferences from "../src/revision-preferences.js";
 import { sanitizeTerminalText } from "../src/presentation.js";
 import { selectPreference, type PreferenceLibrary, type PreferenceRepository, type RevisionPreference, type SelectedPreference } from "../src/revision-preferences.js";
 
@@ -133,6 +136,75 @@ describe("inline Unsent preferences", () => {
     expect(search.mock.calls.length).toBe(searches);
     expect(f.load).toHaveBeenCalledTimes(1);
     search.mockRestore(); f.picker.dispose();
+  });
+
+  it("reuses nonempty search results across cloned controller selections and invalidates on changes", async () => {
+    const controller = new RefineController({ complete: vi.fn(), maxDraftChars: 16000, timeoutMs: 1000, onState() {} }, { provider: "p", id: "m" });
+    controller.setSession("s");
+    const input = { draft: "Original", sessionId: "s", branchLeafId: null, model: { provider: "p", id: "m" },
+      systemPrompt: "Policy", history: selectHistory([], 0, 0), preferences: [selectPreference(first)] };
+    controller.createDraft(input);
+    const original = controller.getHistory()[0]!;
+    const entries = [first, ...Array.from({ length: 400 }, (_, index) => ({ ...second, id: `item-${index}`,
+      scope: index < 200 ? "project" as const : "global" as const, body: "Original body 中文😀 ".repeat(40) }))];
+    const load = vi.fn(async () => ({ entries: structuredClone(entries), errors: {} }));
+    // Match extension.ts's original-row adapter: each lookup is a detached controller read.
+    const target = (id: number) => {
+      const source = controller.getOriginalRecord(id);
+      return source && { selected: source.input.preferences ?? [], save: source.status === "unsent"
+        ? (selected: SelectedPreference[]) => controller.updateDraftPreferences(source, selected) : undefined };
+    };
+    expect(target(original.id)!.selected).not.toBe(target(original.id)!.selected);
+    const picker = new InlinePreferences({ load, save: vi.fn(), remove: vi.fn() }, target,
+      getThemeByName("dark")!, getKeybindings(), vi.fn());
+    try {
+      picker.setTarget(original.id, true); await Promise.resolve();
+      picker.handleInput("/"); picker.handleInput("Original"); picker.handleInput("\r");
+      const search = vi.spyOn(preferences, "searchPreferences");
+      const start = performance.now();
+      picker.render(80, 10);
+      for (let index = 0; index < 30; index++) {
+        picker.focused = index % 2 === 0;
+        picker.setTarget(original.id, index % 2 === 0);
+        picker.render(index % 2 === 0 ? 24 : 100, index % 2 === 0 ? 5 : 12);
+        picker.handleInput("\x1b[B");
+      }
+      if (process.env.REFINE_PERF === "1") console.log({ elapsedMs: performance.now() - start, searches: search.mock.calls.length });
+      expect(search).toHaveBeenCalledTimes(1);
+      expect(load).toHaveBeenCalledTimes(1);
+      const searches = () => search.mock.calls.length;
+      // Same query, new selected content: both filtering and snapshot display must update.
+      const source = controller.getOriginalRecord(original.id)!;
+      const selected = structuredClone(source.input.preferences!);
+      selected[0]!.body = "No longer matches";
+      expect(controller.updateDraftPreferences(source, selected)).toBeUndefined();
+      picker.render(80, 10); expect(searches()).toBe(2);
+      // Query changes and library refreshes also invalidate the cache.
+      picker.handleInput("/"); picker.handleInput(" body"); picker.handleInput("\r");
+      picker.render(80, 10); expect(searches()).toBe(3);
+      await picker.refresh(); picker.render(80, 10); expect(searches()).toBe(4);
+      const current = controller.getOriginalRecord(original.id)!;
+      const next = structuredClone(current.input.preferences!);
+      next[0]!.metadata!.description = "Original body from snapshot";
+      expect(controller.updateDraftPreferences(current, next)).toBeUndefined();
+      expect(stripVTControlCharacters(picker.render(80, 10).join("\n"))).toContain("[x] ! Keep 中文😀");
+      expect(searches()).toBe(5);
+      // No internal preference array/metadata is exposed by controller reads.
+      const detached = target(original.id)!.selected;
+      detached[0]!.metadata!.description = "Caller mutation";
+      expect(target(original.id)!.selected[0]!.metadata!.description).toBe("Original body from snapshot");
+      expect(controller.updateDraftPreferences(controller.getOriginalRecord(original.id)!, [])).toBeUndefined();
+      picker.render(80, 10); expect(searches()).toBe(6);
+    } finally { picker.dispose(); controller.setSession("other"); }
+  });
+
+  it("invalidates the cached selection value even if a caller mutates its array in place", async () => {
+    const f = fixture([first], [selectPreference(first)]); await Promise.resolve();
+    f.picker.handleInput("/"); f.picker.handleInput("Literal"); f.picker.handleInput("\r");
+    expect(f.text()).toContain("[x] Keep 中文😀");
+    f.state.selected[0]!.metadata!.description = "No match";
+    expect(f.text()).toContain("No matches");
+    f.picker.dispose();
   });
 
   it("retains independent document positions across focus changes and originals, but refreshes source comparisons", async () => {

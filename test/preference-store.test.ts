@@ -60,6 +60,19 @@ describe("preference persistence", () => {
     expect(selected.body).toBe("Original");
     expect((await f.store.load()).entries).toEqual([]);
   });
+  it("points version-limit recovery at Add without modifying the source", async () => {
+    const f = await setup();
+    const source: RevisionPreference = { id: "limit", version: Number.MAX_SAFE_INTEGER, scope: "global", name: "A", body: "Original" };
+    const { scope: _, ...stored } = source;
+    const content = JSON.stringify({ version: 1, entries: [stored] });
+    await writeFile(f.global, content);
+    await expect(f.store.save("global", { name: "A", body: "Edited" }, source)).rejects.toThrow("Use Add and copy the text into a new entry");
+    expect(await readFile(f.global, "utf8")).toBe(content);
+    // Add has no expected source, so it creates a new identity at version 1.
+    const added = await f.store.save("global", { name: "Copy", body: source.body });
+    expect(added.id).not.toBe(source.id); expect(added.version).toBe(1);
+    expect((await f.store.load()).entries).toEqual([source, added]);
+  });
   it("serializes competing writers without losing either creation on retry", async () => {
     const f = await setup(); const peer = new PreferenceStore(f.agent, f.cwd);
     const values = [{ name: "One", body: "First" }, { name: "Two", body: "Second" }];
@@ -96,7 +109,7 @@ describe("preference persistence", () => {
     await rm(`${f.global}.lock`);
     await expect(f.store.save("global", { name: "A", body: " " })).rejects.toThrow("Instruction");
     const saved = await f.store.save("global", { name: "A", body: "B" });
-    await expect(f.store.save("project", { name: "A", body: "B" }, saved)).rejects.toThrow("Save as");
+    await expect(f.store.save("project", { name: "A", body: "B" }, saved)).rejects.toThrow("Use Add and copy the text into a new entry in the other scope");
     expect((await f.store.load()).entries).toEqual([saved]);
   });
 });
@@ -147,6 +160,29 @@ describe("typed preferences", () => {
     external.entries[0].metadata.description = "External concurrent edit";
     await writeFile(f.global, JSON.stringify(external));
     await expect(f.store.remove(edited)).rejects.toThrow("changed or was deleted");
+  });
+
+  it.each([false, true])("freezes nested delete expectations before IO (stale source: %s)", async (stale) => {
+    const f = await setup();
+    const saved = await f.store.save("global", { name: entry.name, body: entry.body, metadata: structuredClone(metadata) });
+    const changedMetadata: PreferenceMetadata = { kind: "task", description: "Changed after delete started", activation: "manual" };
+    if (stale) {
+      const external = JSON.parse(await readFile(f.global, "utf8"));
+      external.entries[0].metadata = changedMetadata;
+      await writeFile(f.global, JSON.stringify(external));
+    }
+    const before = await readFile(f.global, "utf8");
+    const pending = f.store.remove(saved);
+    // mutate() must await path/lock IO before comparing. The caller still owns saved.
+    Object.assign(saved.metadata!, changedMetadata);
+    if (stale) {
+      // Mutating a stale expectation to match disk must not bypass conflict checks.
+      await expect(pending).rejects.toThrow("changed or was deleted");
+      expect(await readFile(f.global, "utf8")).toBe(before);
+    } else {
+      await expect(pending).resolves.toBeUndefined();
+      expect((await f.store.load()).entries).toEqual([]);
+    }
   });
 
   it("rejects malformed metadata without overwriting the library", async () => {

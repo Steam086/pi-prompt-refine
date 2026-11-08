@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { Input, parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { sanitizeTerminalText } from "./presentation.js";
@@ -95,7 +96,8 @@ export class InlinePreferences {
   }
   private entries(selected: SelectedPreference[], position: Position): RevisionPreference[] {
     const query = position.search.getValue();
-    if (this.cache && (this.cache.selected === selected || (!selected.length && !this.cache.selected.length)) && this.cache.query === query && this.cache.library === this.library) return this.cache.entries;
+    // One bounded value snapshot: controller reads are detached, not stable references.
+    if (this.cache && this.cache.query === query && this.cache.library === this.library && isDeepStrictEqual(this.cache.selected, selected)) return this.cache.entries;
     const libraryEntries = this.loading ? [] : this.library.entries;
     const keys = new Set(libraryEntries.map(preferenceKey));
     const snapshots = new Map(selected.map((entry) => [preferenceKey(entry), entry]));
@@ -103,7 +105,7 @@ export class InlinePreferences {
       ...selected.filter((entry) => !keys.has(preferenceKey(entry)))];
     const rank = (entry: RevisionPreference) => entry.metadata?.kind === "task" ? 0 : entry.metadata?.kind === "rewrite" ? 1 : 2;
     const entries = searchPreferences(candidates, query).sort((a, b) => rank(a) - rank(b));
-    this.cache = { selected, query, library: this.library, entries };
+    this.cache = { selected: structuredClone(selected), query, library: this.library, entries };
     return entries;
   }
   private highlighted(selected: SelectedPreference[], position: Position): RevisionPreference | undefined {
