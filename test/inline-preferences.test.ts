@@ -74,7 +74,7 @@ describe("inline Unsent preferences", () => {
     await f.picker.refresh();
     f.picker.handleInput("\x1b[H");
     expect(f.text()).toContain("! Keep 中文😀");
-    f.picker.handleInput("\r");
+    f.picker.handleInput("o");
     let document = "";
     for (let i = 0; i < 12; i++) { document += f.text(60, 10); f.picker.handleInput("\x1b[6~"); }
     expect(document).toContain("Selected snapshot"); expect(document).toContain("Original body");
@@ -94,7 +94,7 @@ describe("inline Unsent preferences", () => {
     expect(f.text()).toContain("Library unavailable: Permission denied 中文");
     expect(f.text()).not.toContain("[ ] Rewrite");
     expect(f.text()).toContain("! Keep 中文😀");
-    f.picker.handleInput("\r");
+    f.picker.handleInput("o");
     expect(f.text(60, 20)).toContain("Library unavailable; selected snapshot retained.");
     f.picker.handleInput("\x1b"); f.picker.handleInput(" ");
     expect(f.state.selected).toEqual([]);
@@ -209,7 +209,7 @@ describe("inline Unsent preferences", () => {
 
   it("retains independent document positions across focus changes and originals, but refreshes source comparisons", async () => {
     const f = fixture(); await Promise.resolve();
-    f.picker.handleInput("\r"); f.text(50, 8);
+    f.picker.handleInput("o"); f.text(50, 8);
     f.picker.handleInput("\x1b[6~");
     const scrolled = f.text(50, 8);
     expect(scrolled).not.toContain("Library entry");
@@ -217,12 +217,36 @@ describe("inline Unsent preferences", () => {
     expect(f.text(50, 8)).toBe(scrolled);
     f.picker.setTarget(2, true); expect(f.picker.hints).toBe("select");
     f.picker.setTarget(1, true); expect(f.text(50, 8)).toBe(scrolled);
-    f.picker.handleInput("\x1b"); f.picker.handleInput("\r");
+    f.picker.handleInput("\x1b"); f.picker.handleInput("o");
     expect(f.text(50, 8)).toBe(scrolled);
     f.library({ entries: [{ ...first, version: 2, body: "Changed body" }], errors: {} });
     await f.picker.refresh(); expect(f.picker.hints).toBe("select");
-    f.picker.handleInput("\r"); expect(f.text()).toContain("Changed body");
+    f.picker.handleInput("o"); expect(f.text()).toContain("Changed body");
     f.picker.dispose();
+  });
+
+  it("returns submission only from selection, including an empty library, never from search or full text", async () => {
+    for (const entries of [[], [first]]) {
+      const f = fixture(entries); await Promise.resolve();
+      expect(f.picker.handleInput("\r")).toBe("submit");
+      expect(f.save).not.toHaveBeenCalled();
+      f.picker.handleInput("/"); f.picker.handleInput("Keep");
+      expect(f.picker.handleInput("\t")).toBeUndefined();
+      expect(f.picker.hints).toBe("search");
+      expect(f.picker.handleInput("\r")).toBeUndefined();
+      expect(f.picker.hints).toBe("select");
+      if (entries.length) {
+        f.picker.handleInput("o");
+        expect(f.picker.hints).toBe("read");
+        for (const key of ["\r", "\t", "\x13", "p", " "]) expect(f.picker.handleInput(key)).toBeUndefined();
+        expect(f.picker.hints).toBe("read");
+        f.picker.handleInput("\x1b");
+      }
+      expect(f.picker.handleInput("\r")).toBe("submit");
+      f.state.editable = false;
+      expect(f.picker.handleInput("\r")).toBe("back");
+      f.picker.dispose();
+    }
   });
 
   it("recovers its cursor after End on an empty or loading library and enforces the item limit", async () => {

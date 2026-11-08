@@ -126,8 +126,8 @@ export class InlinePreferences {
     }
     return undefined;
   }
-  /** All keys are consumed while selecting, searching or reading; Enter never starts a request. */
-  handleInput(data: string): "back" | "manage" | undefined {
+  /** Submission is an explicit intent for the host; search/read never return it. */
+  handleInput(data: string): "back" | "manage" | "submit" | undefined {
     if (this.disposed) return "back";
     const position = this.id === undefined ? undefined : this.positions.get(this.id);
     const target = this.id === undefined ? undefined : this.target(this.id);
@@ -146,6 +146,7 @@ export class InlinePreferences {
       else { position.search.handleInput(data); position.index = 0; position.key = undefined; position.top = 0; position.direction = 1; }
     } else if (cancel || key === "q") return "back";
     else if (key === "p") return "manage";
+    else if (this.keys.matches(data, "tui.input.submit")) return "submit";
     else if (key === "/") position.searching = true;
     else {
       const entry = this.highlighted(target.selected, position);
@@ -165,7 +166,7 @@ export class InlinePreferences {
           const next = existing ? selected.filter((item) => preferenceKey(item) !== preferenceKey(entry)) : [...selected, selectPreference(entry)];
           this.notice = target.save(structuredClone(next)) ?? "";
         }
-      } else if (entry && this.keys.matches(data, "tui.input.submit")) {
+      } else if (entry && key === "o") {
         const local = target.selected.find((item) => preferenceKey(item) === preferenceKey(entry));
         const warning = local && this.snapshotWarning(local);
         const parts = [entry.name, ...(warning ? [warning] : []), local ? "Selected snapshot" : "Library entry", (local ?? entry).body];

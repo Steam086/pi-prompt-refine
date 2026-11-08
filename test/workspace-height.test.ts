@@ -88,7 +88,7 @@ describe("workspace height lifecycle", () => {
       f.frame();
       f.resolveLibrary(Array.from({ length: 60 }, (_, i) => `REQUIREMENT ${i}`).join("\n"));
       await Promise.resolve();
-      f.workspace.handleInput("\x1b[Z"); f.workspace.handleInput("\r"); f.frame();
+      f.workspace.handleInput("\t"); f.workspace.handleInput("o"); f.frame();
       f.workspace.handleInput("\x1b[F");
       const before = f.frame();
       f.workspace.handleInput("\x05"); expect(f.frame()).toHaveLength(51);

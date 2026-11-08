@@ -8,6 +8,7 @@ import { TaskPanel } from "../src/task-panel.js";
 import { selectHistory } from "../src/context.js";
 import { panelLayout } from "../src/panel-layout.js";
 import { sanitizeTerminalText } from "../src/presentation.js";
+import { formatKeyHint } from "../src/key-hints.js";
 import { type RevisionPreference } from "../src/revision-preferences.js";
 
 // Actual Pi renderers, not a substitute for human visual/IME verification.
@@ -62,11 +63,13 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
     try {
       tui.start(); render(); await Promise.resolve();
       expect(render()).toContain("Preferences · 0 selected");
-      input("\x1b[Z"); input(" ");
+      input("\t"); input(" ");
       expect(render()).toContain("Focus: Preferences");
       expect(render()).toContain("› [x] Item 00");
+      expect(panel.render(100).join("\n")).toContain(formatKeyHint(["Enter", "Optimize"], theme));
+      expect(panel.render(100).join("\n")).toContain(formatKeyHint(["o", "Read"], theme));
       const initialRedraws = tui.fullRedraws;
-      for (const key of ["\x1b[B", " ", "\r", "\x1b[6~", "\x1b[5~", "\x1b", "\t", "\x1b[Z"]) { input(key); render(); }
+      for (const key of ["\x1b[B", " ", "o", "\r", "\t", "\x1b[Z", "\x1b[6~", "\x1b[5~", "\x1b", "\t", "\x1b[Z"]) { input(key); render(); }
       expect(tui.fullRedraws).toBe(initialRedraws);
       expect(complete).not.toHaveBeenCalled();
       for (const [columns, rows] of [[100, 40], [45, 14], [20, 10], [12, 8], [100, 40]]) {
@@ -102,7 +105,7 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
         expect(panel.render(columns!).join("\n")).toContain(theme.fg("warning", "⚠").split("⚠")[0] + "⚠");
       }
       Object.assign(terminal, { columns: 100, rows: 40 }); render();
-      input("\x1b"); input("\r");
+      input("\r");
       expect(run).toHaveBeenCalledExactlyOnceWith(original.id);
       expect(controller.getRecord(original.id)!.input.preferences?.map((entry) => entry.id)).toEqual(["item-0", "item-1", "item-17"]);
       expect(writes.join("")).not.toContain("\x1b]52;c;payload");

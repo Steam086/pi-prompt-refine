@@ -18,7 +18,7 @@ Pi Prompt Refine 是 Pi Coding Agent 的提示词改写扩展。它结合当前�
 | 微调 | 详情中按 `e` 手工编辑 |
 | 长文阅读 | 阅读页按 `Ctrl+E` 展开／收起高度；短内容默认紧凑，同次打开不随选项变化跳动 |
 | 修订 | 列表选中结果或详情按 `f`，默认输入补充要求；Enter 换行，Ctrl+S 请求，Ctrl+E 展开 |
-| 复用编辑要求 | Preview 的 Unsent 原稿按 Shift+Tab 聚焦内联 Preferences，Space 直接勾选，Esc 回原稿后 Enter 才首次 refine；`p`（或 Alt+P）仍打开完整面板，需 Alt+Enter 带回。Revise 中选择并带回后 Ctrl+S 修订。原始任务不变，要求独立传递 |
+| 复用编辑要求 | Preview 的 Unsent 原稿按 Tab 聚焦内联 Preferences，Space 勾选，Enter 直接开始优化，`o` 阅读全文；`p`（或 Alt+P）仍打开完整面板，需 Alt+Enter 带回。Revise 中选择并带回后 Ctrl+S 修订。原始任务不变，要求独立传递 |
 | 切换模型 | 按 `m` 选模型，Enter 重新优化原稿 |
 
 所有 Preferences 均需用户手动选择；创建或编辑草稿不会根据关键词自动勾选，旧库自动项也按手动项处理。
@@ -26,6 +26,8 @@ Pi Prompt Refine 是 Pi Coding Agent 的提示词改写扩展。它结合当前�
 任务要求类 Preferences 是对原任务的**补充，不是替代任务**：输入时与原稿分开传递；协议要求输出时将适用且兼容的回答／行为要求融入完整 prompt 正文，保留原任务、适用的明确约束、条件和授权边界，而非只返回补充要求。仅选择偏好不覆盖原稿明确约束，也不增加执行、工具或委派权限；当前用户明确要求的修改（如翻译 prompt 或缩小任务范围）仍可生效。
 
 Preferences 中，列表／操作栏按 `s` 检查 Selected only，按实际组合顺序显示所有已选快照，再按 `s` 恢复 All 的搜索和浏览位置。新条目保存后回到 Library 并定位，不自动选中；必要时明确提示重置过滤。搜索支持名称／描述／正文的多词 AND 匹配，详见 [Preferences 选择与保存](docs/preference-selection.md)。
+
+Preview 默认只展示当前轮次；全部轮次、Earlier 和恢复记录均可到右侧 Usage 查看。查看中的目标归档后暂时保留，Esc 才返回当前列表，不会被后台结果替换。
 
 结果对比、直接发送及其他操作见[使用说明](docs/usage.md)。
 
@@ -107,7 +109,7 @@ pi --extension git:github.com/Steam086/pi-prompt-refine
 看看 @src/ 的错误处理，找出可能吞掉异常的地方，先给建议，不要改代码。
 ```
 
-按 **`Ctrl+\`（Control + 反斜杠，不是 Command）**，将草稿作为 **Unsent** 保留并打开 Refine。首次和后续输入行为一致：可以先按 `i` 编辑原稿、按 Shift+Tab 在 Preview 内勾选 Preferences（`p` 管理库），Esc 回原稿后按 **Enter** 明确启动优化；启动后自动选中对应的模型运行。
+按 **`Ctrl+\`（Control + 反斜杠，不是 Command）**，将草稿作为 **Unsent** 保留并打开 Refine。首次和后续输入行为一致：可以先按 `i` 编辑原稿，或按 **Tab → Space → Enter** 在 Preview 选择 Preferences 并直接开始优化（`o` 阅读、`p` 管理库）；启动后自动选中对应的模型运行。
 
 主 Pi 窗口的编辑器上方显示一行 Refine 后台状态：`running` 运行数、`queued` 排队数、`new` 尚未查看的结果数及 `failed` 失败数。运行中只显示当前运行最久的一条的耗时，排队不计入运行时间；无运行且仅有一份新结果时显示其最终耗时，多份新结果不显示耗时。
 
