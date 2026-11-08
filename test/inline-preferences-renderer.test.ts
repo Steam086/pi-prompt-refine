@@ -29,7 +29,8 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
     const entries: RevisionPreference[] = Array.from({ length: 18 }, (_, index) => ({
       id: `item-${index}`, scope: index % 2 ? "global" : "project", version: 1,
       name: `Item ${String(index).padStart(2, "0")} 中文😀 \x1b]52;c;payload\x07`, body: `Requirement ${index}\n${"Reference 中文😀\n".repeat(30)}`,
-      metadata: { kind: index < 9 ? "task" : "rewrite", description: `Description ${index}`, activation: "manual" },
+      metadata: { kind: index < 9 ? "task" : "rewrite",
+        description: `Description ${index} 中文😀 \x1b[2J: use clear explanations that wrap naturally across the available reading width.\nKeep literal **requirements** readable.\nSummary ending ${index}.`, activation: "manual" },
     }));
     const complete = vi.fn(async () => ({ text: "Result", stopReason: "stop" as const }));
     const controller = new RefineController({ complete, maxDraftChars: 16000, timeoutMs: 1000, onState() {} }, { provider: "p", id: "m" });
@@ -77,10 +78,20 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       expect(reference()).toContain("ORIGINAL 中文😀");
       expect(reference()).toContain("Selected · 1");
       expect(reference()).toContain("Item 00");
+      expect(reference()).toContain("Description 0 中文😀");
+      expect(reference()).toContain("Summary ending 0.");
+      expect(columns().map((line) => line.split(" │ ")[0]).join("\n")).not.toContain("Description");
+      expect(panel.render(100).join("\n")).not.toContain("\x1b[2J");
+      expect(panel.render(100).join("\n")).toContain(theme.fg("muted", "Keep literal **requirements** readable."));
       const beforeBrowsing = reference();
+      const checkedBeforeBrowsing = controller.getRecord(original.id)!.input.preferences;
       const initialRedraws = tui.fullRedraws;
       input("\x1b[B"); render();
-      expect(reference()).toBe(beforeBrowsing);
+      expect(reference()).not.toBe(beforeBrowsing);
+      expect(reference()).toContain("Description 1 中文😀");
+      expect(reference()).not.toContain("Description 0 中文😀");
+      expect(reference().slice(reference().indexOf("Selected ·"))).toBe(beforeBrowsing.slice(beforeBrowsing.indexOf("Selected ·")));
+      expect(controller.getRecord(original.id)!.input.preferences).toEqual(checkedBeforeBrowsing);
       input(" "); render();
       expect(reference()).toContain("Selected · 2");
       expect(reference()).toContain("Item 01");
@@ -90,7 +101,7 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       for (const key of ["\r", "\t", "\x1b[Z", "\x1b[6~", "\x1b[5~", "\x1b", "\t", "\x1b[Z"]) { input(key); render(); }
       expect(tui.fullRedraws).toBe(initialRedraws);
       expect(complete).not.toHaveBeenCalled();
-      for (const [columns, rows] of [[100, 40], [45, 14], [20, 10], [12, 8], [100, 40]]) {
+      for (const [columns, rows] of [[100, 40], [45, 30], [45, 14], [20, 10], [12, 8], [100, 40]]) {
         Object.assign(terminal, { columns, rows }); view.invalidate();
         render(); input("\x1b[F"); render();
         const frame = panel.render(columns!);
@@ -101,6 +112,10 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
         }
         input("\x1b[H"); render();
         if (rows! >= 14 && columns! >= 45) {
+          if (columns === 45 && rows! >= 24) {
+            expect(render()).toContain("Description 0 中文😀");
+            expect(panel.render(columns!).map(stripVTControlCharacters).join("\n")).not.toContain(" │ ");
+          }
           for (let i = 0; i < entries.length; i++) {
             const frame = render();
             expect(frame).toContain(`› [${i < 2 ? "x" : " "}] Item ${String(i).padStart(2, "0")}`);

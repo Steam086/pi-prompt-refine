@@ -186,8 +186,21 @@ export class InlinePreferences {
     const errors = [...new Set(Object.values(this.library.errors))];
     return this.notice || (errors.length ? `Library unavailable: ${errors.join(" · ")}` : "");
   }
-  /** A host with a full-width warning header may own the feedback row. */
-  render(width: number, height: number, showWarning = true): string[] {
+  /** Read-only summary of the highlighted choice, independent of checked selections. */
+  renderDescription(width: number, height: number, showName = true): string[] {
+    if (this.disposed || !this.active || width < 1 || height < (showName ? 2 : 1) || this.id === undefined) return [];
+    const target = this.target(this.id), position = this.positions.get(this.id);
+    const entry = target && position && this.highlighted(target.selected, position);
+    if (!entry?.metadata?.description) return [];
+    const heading = showName ? [truncateToWidth(this.theme.fg("text", this.theme.bold(sanitizeTerminalText(entry.name))), width, "…")] : [];
+    const lines = wrapTextWithAnsi(sanitizeTerminalText(entry.metadata.description), width);
+    const room = height - heading.length;
+    const body = lines.slice(0, room);
+    if (lines.length > room) body[room - 1] = truncateToWidth(body[room - 1]! + " …", width, "…");
+    return [...heading, ...body.map((line) => this.theme.fg("muted", line))];
+  }
+  /** A wide host owns the description; narrow selection keeps it below the choices. */
+  render(width: number, height: number, showWarning = true, showDescription = true): string[] {
     if (this.disposed || width < 1 || height < 1 || this.id === undefined) return [];
     const target = this.target(this.id), position = this.positions.get(this.id);
     if (!target || !position) return [];
@@ -216,10 +229,11 @@ export class InlinePreferences {
     }
     const group = (item: RevisionPreference) => item.metadata?.kind === "task" ? "Task requirements" : item.metadata?.kind === "rewrite" ? "Prompt rewriting" : "Unclassified";
     const available = height - result.length;
-    const description = entry.metadata?.description;
-    // Leave room for two choices even across a group boundary before adding metadata.
-    const showDescription = this.active && !!description && available >= 5;
-    const count = Math.max(0, available - (showDescription ? 1 : 0));
+    // Preserve adjacent choices even across a group boundary; grow the summary only
+    // when the list has room, rather than forcing every description into one line.
+    const description = showDescription
+      ? this.renderDescription(width, Math.max(0, Math.min(4, Math.floor(available / 2), available - 4)), false) : [];
+    const count = Math.max(0, available - description.length);
     const window = selectionWindow(entries.length, position.index, count, position.top, (index) => group(entries[index]!), 0, position.direction);
     position.top = window.start;
     this.viewport = Math.max(1, window.end - window.start);
@@ -237,7 +251,7 @@ export class InlinePreferences {
       const line = truncateToWidth(prefix + name + (visibleWidth(prefix + name + source) <= width ? source : ""), width, "…");
       result.push(active ? this.theme.bg("selectedBg", line + " ".repeat(Math.max(0, width - visibleWidth(line)))) : line);
     }
-    if (showDescription) result.push(truncateToWidth(muted(description!), width, "…"));
+    result.push(...description);
     return result.slice(0, height);
   }
 }

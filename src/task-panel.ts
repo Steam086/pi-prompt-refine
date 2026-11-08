@@ -661,13 +661,17 @@ export class TaskPanel {
     if (width >= 72 && mode !== "read") {
       const leftWidth = Math.min(36, Math.floor(width / 3));
       const rightWidth = width - leftWidth - 3;
-      const choices = inline.render(leftWidth, height, showInlineWarning);
-      const feedbackHeight = Math.min(height, Math.max(3, Math.floor(height * 0.4)));
-      const originalHeight = Math.max(0, height - feedbackHeight - 1);
+      const choices = inline.render(leftWidth, height, showInlineWarning, false);
+      const feedbackHeight = Math.min(height, Math.max(2, Math.min(5, Math.floor(height * 0.25))));
+      // Reserve a multi-line summary before sizing the original. Checked names stay
+      // compact and never replace the explanation of the currently highlighted item.
+      const description = inline.renderDescription(rightWidth, Math.min(6, Math.max(0, height - feedbackHeight - 5)));
+      const originalHeight = Math.max(0, height - feedbackHeight - description.length - (description.length ? 2 : 1));
       const original = originalHeight ? this.pane(row, rightWidth, originalHeight, true, false, false) : [];
       const selected = row.record.input.preferences ?? [];
       const feedback = [this.heading("Selected") + this.muted(` · ${selected.length}`)];
-      const room = height - original.length - (original.length ? 1 : 0) - feedback.length;
+      const room = Math.min(feedbackHeight, height - original.length - (original.length ? 1 : 0)
+        - description.length - (description.length ? 1 : 0)) - feedback.length;
       if (!selected.length && room > 0) feedback.push(this.muted("None yet"));
       else if (room > 0) {
         // Keep newly appended selections visible without changing composition order.
@@ -677,7 +681,7 @@ export class TaskPanel {
           feedback.push(truncateToWidth(this.muted("· ") + this.theme.fg("text", sanitizeTerminalText(item.name).replace(/\s+/gu, " ")), rightWidth, "…"));
         }
       }
-      const reference = [...original, ...(original.length ? [""] : []), ...feedback];
+      const reference = [...original, ...(original.length ? [""] : []), ...description, ...(description.length ? [""] : []), ...feedback];
       body = Array.from({ length: height }, (_, i) => {
         const line = choices[i] ?? "";
         return line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line))) + this.muted(" │ ") + (reference[i] ?? "");
