@@ -8,6 +8,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import promptRefineExtension, { modelPickerItems } from "../src/extension.js";
 import { DEFAULT_CONFIG, type RefineConfig } from "../src/config.js";
 import { PreferenceStore } from "../src/preference-store.js";
+import * as preferences from "../src/revision-preferences.js";
 import { flushPromises } from "./helpers.js";
 
 const agentDirs: string[] = [];
@@ -859,6 +860,28 @@ describe("explicit candidate revision", () => {
     expect(h.getEditor()).toBe(original);
     expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
     h.panelInput("q"); await view;
+  });
+
+  it("keeps nonempty inline search cached through the production controller adapter", async () => {
+    const h = await makeHarness();
+    await new PreferenceStore(h.agentDir, h.context.cwd).save("project", { name: "Needle 中文😀", body: "Keep literals." });
+    h.setEditorText("Unsent task"); h.holdPanel(); const view = shortcut(h, "ctrl+\\")(h.context);
+    const output = () => h.panelLines(100).join("\n");
+    h.panelInput("\x1b[Z");
+    await vi.waitFor(() => expect(output()).toContain("[ ] Needle 中文😀"));
+    h.panelInput(" "); h.panelInput("/"); h.panelInput("Needle"); h.panelInput("\r");
+    const search = vi.spyOn(preferences, "searchPreferences");
+    try {
+      expect(output()).toContain("[x] Needle 中文😀");
+      for (let index = 0; index < 30; index++) {
+        h.resize(index % 2 ? 12 : 40);
+        h.panelInput("\t"); h.panelLines(index % 2 ? 24 : 100);
+      }
+      expect(search).toHaveBeenCalledTimes(1);
+      expect(h.complete).not.toHaveBeenCalled();
+      expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
+      h.panelInput("\x1b"); h.panelInput("q"); await view;
+    } finally { search.mockRestore(); }
   });
 
   it.each([

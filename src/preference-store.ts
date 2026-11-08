@@ -114,10 +114,10 @@ export class PreferenceStore implements PreferenceRepository {
     if (value.metadata === undefined && expected?.metadata) value.metadata = structuredClone(expected.metadata);
     const error = preferenceValidation(value);
     if (error) throw new Error(error);
-    if (expected && expected.scope !== scope) throw new Error("Use Save as to copy into another scope.");
+    if (expected && expected.scope !== scope) throw new Error("Use Add and copy the text into a new entry in the other scope; Edit keeps the source scope.");
     return this.mutate(scope, (entries) => {
       const index = expected ? this.current(entries, expected) : entries.length;
-      if (expected?.version === Number.MAX_SAFE_INTEGER) throw new Error("Entry version limit reached; use Save as.");
+      if (expected?.version === Number.MAX_SAFE_INTEGER) throw new Error("Use Add and copy the text into a new entry; this entry's version limit was reached.");
       const entry = { ...value, scope, id: expected?.id ?? randomUUID(), version: (expected?.version ?? 0) + 1 };
       entries[index] = entry;
       return { ...entry };
@@ -125,7 +125,8 @@ export class PreferenceStore implements PreferenceRepository {
   }
 
   async remove(expected: RevisionPreference): Promise<void> {
-    expected = { ...expected };
+    // Match save(): nested metadata is part of the call-time conflict expectation.
+    expected = structuredClone(expected);
     await this.mutate(expected.scope, (entries) => { entries.splice(this.current(entries, expected), 1); });
   }
 }
