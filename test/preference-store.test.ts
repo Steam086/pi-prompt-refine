@@ -143,8 +143,8 @@ describe("typed preferences", () => {
     ]);
     for (const entry of structure) {
       expect(entry.body).not.toContain("用户手动选择");
-      expect(entry.body).toContain("保持原样");
-      expect(entry.body).toContain("授权范围");
+      expect(entry.body).toContain("Leave the draft unchanged");
+      expect(entry.body).toContain("authorization scope");
       expect(entry.body).not.toContain("本地匹配");
     }
     expect(library.entries.every((entry) => entry.metadata?.description && ["rewrite", "task"].includes(entry.metadata.kind))).toBe(true);
