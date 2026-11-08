@@ -234,6 +234,8 @@ export class RefineWorkspace implements Component, Focusable {
     this.preferencePanel = new PreferencePanel(this.tui, this.theme, this.keys, options.repository,
       this.revisionSelected, this.revisionInput.editor.getExpandedText(), options.maxChars, (selected) => {
         this.preferencePanel?.dispose(); this.preferencePanel = undefined;
+        // Library writes are committed independently of bringing back selections.
+        void this.inlinePreferences?.refresh();
         if (selected) { this.revisionSelected = selected; this.rememberRevision(); }
         this.revisionFocus = "input";
         this.focused = this.hasFocus;
