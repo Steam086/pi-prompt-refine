@@ -123,7 +123,20 @@ describe("typed preferences", () => {
     await writeFile(f.global, await readFile(new URL("../examples/prompt-refine-preferences.json", import.meta.url), "utf8"));
     const library = await f.store.load();
     expect(library.errors).toEqual({});
-    expect(library.entries).toHaveLength(10);
+    expect(library.entries).toHaveLength(11);
+    const discussion = library.entries.filter((entry) => entry.id === "discussion-mode");
+    expect(discussion).toHaveLength(1);
+    expect(discussion[0]).toMatchObject({
+      version: 1,
+      name: "Discussion Mode",
+      metadata: {
+        description: "For requirements and planning discussions: lead with a recommendation, retain key reasoning and trade-offs, ask only decision-relevant questions, and avoid unnecessary detail.",
+        kind: "task",
+        activation: "manual",
+      },
+    });
+    expect(discussion[0]!.body).toContain("must not convert an explicitly requested execution task into discussion only");
+    expect(discussion[0]!.body).toContain("Do not add tool-use or delegation authority");
     const structure = library.entries.filter((entry) => ["prompt-bullet-structure", "prompt-step-structure"].includes(entry.id));
     expect(structure.map((entry) => [entry.id, entry.version])).toEqual([
       ["prompt-bullet-structure", 3], ["prompt-step-structure", 3],
