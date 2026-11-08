@@ -31,7 +31,7 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
     const entries: RevisionPreference[] = Array.from({ length: 18 }, (_, index) => ({
       id: `item-${index}`, scope: index % 2 ? "global" : "project", version: 1,
       name: `Item ${String(index).padStart(2, "0")} 中文😀 \x1b]52;c;payload\x07`, body: `Requirement ${index}\n${"Reference 中文😀\n".repeat(30)}`,
-      metadata: { kind: index < 9 ? "task" : "rewrite",
+      metadata: { kind: index < 9 ? "rewrite" : "task",
         description: `Description ${index} 中文😀 \x1b[2J: use clear explanations that wrap naturally across the available reading width.\nKeep literal **requirements** readable.\nSummary ending ${index}.`, activation: "manual" },
     }));
     const complete = vi.fn(async () => ({ text: "Result", stopReason: "stop" as const }));
@@ -40,7 +40,8 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
     controller.createDraft({ draft: "ORIGINAL 中文😀\n".repeat(30), model: { provider: "p", id: "m" }, sessionId: "s", branchLeafId: null,
       systemPrompt: "Policy", history: selectHistory([], 0, 0) });
     const original = controller.getHistory()[0]!;
-    const load = vi.fn(async () => ({ entries, errors: {} }));
+    // Deliberately load task entries first; the UI must prioritize rewriting.
+    const load = vi.fn(async () => ({ entries: [...entries.slice(9), ...entries.slice(0, 9)], errors: {} }));
     const picker = new InlinePreferences({ load, save: vi.fn(), remove: vi.fn() }, (id) => {
       const source = controller.getRecord(id);
       return source ? { selected: source.input.preferences ?? [], save: source.status === "unsent" ? (selected) => controller.updateDraftPreferences(source, selected) : undefined } : undefined;
@@ -76,6 +77,7 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       const columns = () => panel.render(100).map(stripVTControlCharacters).filter((line) => line.includes(" │ "));
       expect(columns().filter((line) => /Item \d+/.test(line.split(" │ ")[0]!)).length).toBeGreaterThanOrEqual(8);
       expect(columns().map((line) => line.split(" │ ")[0]).join("\n")).not.toContain("Unsent");
+      expect(columns().map((line) => line.split(" │ ")[0]).join("\n")).toContain("Prompt rewriting");
       const reference = () => columns().map((line) => line.split(" │ ")[1]).join("\n");
       expect(reference()).toContain("ORIGINAL 中文😀");
       expect(reference()).toContain("Selected · 1");
@@ -140,12 +142,16 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       expect(render()).toContain("› [x] Item 17");
       expect(load).toHaveBeenCalledTimes(1);
       const chosen = controller.getRecord(original.id)!.input.preferences!;
-      expect(controller.updateDraftPreferences(controller.getRecord(original.id)!, entries.map(selectPreference))).toBeUndefined();
+      // Selected feedback follows selection order, not the library's purpose order.
+      const taskFirst = [...entries.slice(9), ...entries.slice(0, 9)];
+      expect(controller.updateDraftPreferences(controller.getRecord(original.id)!, taskFirst.map(selectPreference))).toBeUndefined();
       render();
       expect(reference()).toContain("Selected · 18");
       expect(reference()).toMatch(/… \d+ more/);
-      expect(reference()).toContain("Item 17");
-      expect(controller.getRecord(original.id)!.input.preferences!.map((entry) => entry.id)).toEqual(entries.map((entry) => entry.id));
+      const selectedFeedback = reference().slice(reference().indexOf("Selected ·"));
+      expect(selectedFeedback).toContain("Item 08");
+      expect(selectedFeedback).not.toContain("Item 17");
+      expect(controller.getRecord(original.id)!.input.preferences!.map((entry) => entry.id)).toEqual(taskFirst.map((entry) => entry.id));
       expect(controller.updateDraftPreferences(controller.getRecord(original.id)!, chosen)).toBeUndefined();
       render();
       // Refresh failure leaves selected snapshots, a semantic warning and a usable cancel path.

@@ -106,7 +106,7 @@ export class PreferencePanel {
     const matches = searchPreferences(candidates, query);
     // Selected snapshots are audited in composeRevision order, never search rank.
     const matchedKeys = new Set(matches.map(preferenceKey));
-    const rank = (entry: RevisionPreference) => entry.metadata?.kind === "task" ? 0 : entry.metadata?.kind === "rewrite" ? 1 : 2;
+    const rank = (entry: RevisionPreference) => entry.metadata?.kind === "rewrite" ? 0 : entry.metadata?.kind === "task" ? 1 : 2;
     const entries = this.selectedOnly ? this.working.filter((entry) => matchedKeys.has(preferenceKey(entry)))
       : matches.sort((a, b) => rank(a) - rank(b));
     this.entriesCache = { query, version: this.contentVersion, entries };

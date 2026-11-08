@@ -57,22 +57,25 @@ describe("Library purpose groups", () => {
   const rewrite: RevisionPreference = { ...b, id: "rewrite", name: "A rewrite", metadata: { kind: "rewrite", description: "", activation: "manual" } };
 
   it.each(["dark", "light"])("groups by purpose without changing selection order or source styling (%s)", async (themeName) => {
-    const f = setup([], "", themeName, [rewrite, task, b]);
+    const f = setup([], "", themeName, [task, rewrite, b]);
     await loaded(f.panel);
     const lines = f.panel.render(100);
     const left = lines.map((line) => stripVTControlCharacters(line).split("│")[0]!).join("\n");
-    expect(left.indexOf("Task requirements")).toBeLessThan(left.indexOf(task.name));
-    expect(left.indexOf(task.name)).toBeLessThan(left.indexOf("Prompt rewriting"));
     expect(left.indexOf("Prompt rewriting")).toBeLessThan(left.indexOf(rewrite.name));
-    expect(left.indexOf(rewrite.name)).toBeLessThan(left.indexOf("Unclassified"));
+    expect(left.indexOf(rewrite.name)).toBeLessThan(left.indexOf("Task requirements"));
+    expect(left.indexOf("Task requirements")).toBeLessThan(left.indexOf(task.name));
+    expect(left.indexOf(task.name)).toBeLessThan(left.indexOf("Unclassified"));
     expect(lines.join("\n")).toContain(f.theme.fg("text", f.theme.bold("Task requirements")));
     expect(lines.join("\n")).toContain(f.theme.fg("text", f.theme.bold("Prompt rewriting")));
     expect(lines.join("\n")).toContain(f.theme.fg("muted", "Project"));
     expect(lines.join("\n")).toContain(f.theme.fg("muted", " Global"));
     // Navigation skips non-interactive headings and spacers; bring-back is shared.
-    f.panel.handleInput(" "); f.panel.handleInput(down); f.panel.handleInput(" ");
+    f.panel.handleInput(down); f.panel.handleInput(" "); f.panel.handleInput("\x1b[A"); f.panel.handleInput(" ");
     f.panel.handleInput(bringBack);
-    expect(f.close.mock.calls[0]![0].map((entry: SelectedPreference) => entry.id)).toEqual(["task", "rewrite"]);
+    const selected = f.close.mock.calls[0]![0] as SelectedPreference[];
+    expect(selected.map((entry) => entry.id)).toEqual(["task", "rewrite"]);
+    const composed = composeRevision(selected, "");
+    expect(composed.indexOf("Main-agent task requirements")).toBeLessThan(composed.indexOf("Prompt rewriting instructions"));
   });
 
   it("wraps arrow navigation across groups and filtered/selected lists", async () => {
@@ -93,7 +96,7 @@ describe("Library purpose groups", () => {
   });
 
   it("hides empty groups during search and retains Selected-only adoption order", async () => {
-    const f = setup([selectPreference(rewrite), selectPreference(task)], "", "dark", [rewrite, task]);
+    const f = setup([selectPreference(task), selectPreference(rewrite)], "", "dark", [rewrite, task]);
     await loaded(f.panel);
     search(f.panel, "Z task");
     const left = text(f.panel).split("\n").map((line) => line.split("│")[0]).join("\n");
@@ -102,11 +105,13 @@ describe("Library purpose groups", () => {
     expect(left).not.toContain("Unclassified");
     search(f.panel, ""); f.panel.handleInput("s");
     const selected = text(f.panel).split("\n").map((line) => line.split("│")[0]).join("\n");
-    expect(selected.indexOf(rewrite.name)).toBeLessThan(selected.indexOf(task.name));
+    expect(selected.indexOf(task.name)).toBeLessThan(selected.indexOf(rewrite.name));
+    expect(selected).not.toContain("Task requirements");
+    expect(selected).not.toContain("Prompt rewriting");
   });
 
   it.each(["dark", "light"])("keeps group context and focused entries visible through scroll and resize (%s)", async (themeName) => {
-    const entries = Array.from({ length: 24 }, (_, i) => ({ ...(i < 12 ? task : rewrite), id: `entry-${i}`, name: `Item ${String(i).padStart(2, "0")} 中文😀` }));
+    const entries = Array.from({ length: 24 }, (_, i) => ({ ...(i < 12 ? rewrite : task), id: `entry-${i}`, name: `Item ${String(i).padStart(2, "0")} 中文😀` }));
     const f = setup([], "", themeName, entries); await loaded(f.panel);
     for (const [width, height] of [[100, 16], [45, 14], [100, 20], [100, 40], [45, 14]]) {
       f.terminal.rows = height!;
@@ -115,7 +120,7 @@ describe("Library purpose groups", () => {
         const lines = f.panel.render(width!);
         expect(lines.every((line) => visibleWidth(line) <= width!)).toBe(true);
         const left = lines.map((line) => stripVTControlCharacters(line).split("│")[0]!).join("\n");
-        expect(left).toContain(i < 12 ? "Task requirements" : "Prompt rewriting");
+        expect(left).toContain(i < 12 ? "Prompt rewriting" : "Task requirements");
         expect(left).toContain(entries[i]!.name);
         if (i < entries.length - 1 && (i !== 11 || height! >= 20)) expect(left).toContain(entries[i + 1]!.name);
         expect(lines.join("\n")).toContain(f.theme.fg("text", f.theme.bold(entries[i]!.name)));
