@@ -40,6 +40,11 @@ const pending = (record: RefineRecord) => record.status === "queued" || record.s
 export class TaskPanel {
   private deletion?: { ids: number[]; label: string };
   isConfirmingDelete(): boolean { return !!this.deletion; }
+  /** Explicit page navigation may follow an open archived target, never a late result. */
+  earlierTarget(): { id: number; original: boolean } | undefined {
+    const row = this.selected();
+    return this.retainedEarlier && row ? { id: row.record.id, original: row.original } : undefined;
+  }
   ownsInput(): boolean { return !!this.deletion || !!this.document || this.preferenceFocus; }
   private preferenceFocus = false;
   // A view opened while current may outlive its round. Keep only that view,
@@ -622,6 +627,8 @@ export class TaskPanel {
         }
         if (this.actions.deleteRecords) hints.push(["d", "Delete"]);
       }
+      if (!this.usage) body.push(this.muted("Preview shows the current round. Usage contains current and historical records; → opens Usage after leaving Preferences."), "");
+      else body.push(this.muted("All rounds: current prompts, Earlier records, results and usage details. Restored records have no reusable background."), "");
       if (this.usage && this.actions.historyStorage) hints.push(["b", "History storage status and file location"]);
       body.push(...hints.map((hint) => formatKeyHint(hint, this.theme)), "", this.muted("Read-only help. Return with Esc before using these actions."));
     }
@@ -691,7 +698,11 @@ export class TaskPanel {
         return line + " ".repeat(Math.max(0, half - visibleWidth(line))) + this.muted(" │ ") + (peer[i] ?? "");
       }));
     } else {
-      const right = selected ? this.pane(selected, rightWidth, height) : [this.muted("No prompts yet. Press n to create one.")];
+      const empty = this.usage ? "No records yet. Return to Preview to create a prompt."
+        : this.actions.records().some((record) => record.archivedAt !== undefined)
+          ? "No current prompts. History is still available in Usage. Press → to view it, or n to create a prompt."
+          : "No current prompts. Press n to create one. Usage contains current and historical records.";
+      const right = selected ? this.pane(selected, rightWidth, height) : this.wrapped(this.muted(empty), rightWidth);
       body = Array.from({ length: height }, (_, i) => {
         if (!split) return this.inspecting || this.reading || this.preferenceFocus || !rows.length ? right[i] ?? "" : list[i] ?? "";
         const line = list[i] ?? "";
@@ -742,21 +753,27 @@ export class TaskPanel {
     const title = this.inspecting ? (other ? "Compare results" : "Prompt details") : this.usage ? "Usage · All rounds" : "Prompt refine · Tasks";
     const feedback = this.notice ? this.theme.fg(this.noticeColor, sanitizeTerminalText(this.notice)) : "";
     const subtitle = this.referenceOnly ? this.muted("Read-only reference") : this.notice ? feedback : this.retainedEarlier
-      ? this.muted("Earlier · kept open · Esc returns to current · History in Usage") : this.inspecting
+      ? this.muted(layout.innerWidth < 32 ? "Earlier · Usage →" : layout.innerWidth < 72
+        ? "Earlier · Usage → · Esc current" : "Earlier · kept open · Esc returns to current · History in Usage →") : this.inspecting
       ? (selected && !selected.original
         ? this.muted("Selected: ") + this.heading(`#${selected.record.id} ${selected.record.input.model.id}`)
         : this.heading("Original prompt")) + this.muted(" · ")
         + formatKeyHint(["↑↓", `scroll${previewDetails ? (this.original ? " reference" : " result") : ""}`], this.theme)
         + (previewDetails ? this.muted(" · ") + formatKeyHint(["o", this.original ? "Result" : "Reference"], this.theme)
           : other ? this.muted(" · Same original and conversation context") : "")
-      : this.muted(`${rows.filter((row) => row.original).length} prompts · ${rows.filter((row) => !row.original).length} runs · `)
+      : this.muted(`${this.usage ? "Current + history · " : ""}${rows.filter((row) => row.original).length} prompts · ${rows.filter((row) => !row.original).length} runs · `)
         + formatKeyHint(["↑↓", this.reading ? "scroll" : "select"], this.theme) + this.muted(` · Run: ${this.actions.launchModel?.() ?? "selected model"}`);
-    const earlierPending = !this.usage && this.actions.records().filter((record) => record.archivedAt !== undefined && pending(record)).length;
-    const header = [this.heading(title), earlierPending && !this.retainedEarlier && !this.notice
-      ? this.muted(`Earlier: ${earlierPending} running / queued · View or stop in Usage`) : subtitle];
-    if (this.retainedEarlier && layout.headerHeight < 2 && !this.notice) {
-      if (layout.headerHeight === 1) header[0] = subtitle;
-      else body = [subtitle, ...body];
+    const earlier = this.usage ? [] : this.actions.records().filter((record) => record.archivedAt !== undefined);
+    const earlierPending = earlier.filter(pending).length;
+    const historyHint = layout.innerWidth < 32 ? "History → Usage"
+      : layout.innerWidth < 72 ? `History → Usage · ${earlierPending ? `${earlierPending} active` : `${new Set(earlier.map((record) => record.taskId)).size} earlier prompts`}`
+      : `Current round · History → Usage · ${new Set(earlier.map((record) => record.taskId)).size} earlier prompts${earlierPending ? ` · ${earlierPending} running / queued` : ""}`;
+    const showHistoryHint = earlier.length > 0 && !this.retainedEarlier && !this.notice && !this.inspecting && !this.referenceOnly;
+    const header = [this.heading(title), showHistoryHint ? this.muted(historyHint) : subtitle];
+    const historyStatus = this.retainedEarlier || showHistoryHint;
+    if (historyStatus && layout.headerHeight < 2 && !this.notice) {
+      if (layout.headerHeight === 1) header[0] = header[1]!;
+      else body = [header[1]!, ...body];
     }
     if (!inline && !this.notice && !this.referenceOnly && this.canChoosePreferences(selected)) {
       const summary = this.muted(this.preferenceSummary(selected!.record));
@@ -768,6 +785,6 @@ export class TaskPanel {
       else body = [feedback, ...body];
     }
     return panelFrame(layout, header,
-      [...(layout.headerHeight === 0 && this.notice ? [] : tabs), ...body], footer, (text) => this.muted(text));
+      [...(layout.headerHeight === 0 && (this.notice || historyStatus) ? [] : tabs), ...body], footer, (text) => this.muted(text));
   }
 }

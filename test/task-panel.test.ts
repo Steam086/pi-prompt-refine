@@ -427,14 +427,14 @@ describe("prompt tree and inspection", () => {
   it("exposes archived background work in Usage without restoring it to Preview", () => {
     const running: RefineRecord = { ...record(1), archivedAt: 1, status: "generating", candidate: undefined };
     const f = create("dark", false, [running, record(2, 2)]);
-    expect(f.text()).toContain("Earlier: 1 running / queued");
+    expect(f.text()).toContain("1 running / queued");
     expect(f.text()).not.toContain("model-1");
     const usage = create("dark", true, f.records);
     usage.panel.handleInput("x");
     expect(usage.actions.stop).toHaveBeenCalledExactlyOnceWith(1);
     running.status = "generated";
     running.candidate = record(1).candidate;
-    expect(f.text()).not.toContain("Earlier: 1");
+    expect(f.text()).not.toContain("1 running / queued");
     expect(f.text()).toContain("model-2");
     expect(f.position.selectedId).toBe(2);
   });
@@ -449,6 +449,27 @@ describe("prompt tree and inspection", () => {
     expect(f.actions.run).not.toHaveBeenCalled();
     f.panel.handleInput("\x1b");
     expect(f.text()).not.toContain("Original prompt");
+  });
+
+  it.each(["dark", "light"])("explains the historical destination even in short and narrow Preview empty states (%s)", (name) => {
+    const f = create(name, false, [{ ...record(), archivedAt: 1 }]);
+    for (const [width, rows] of [[100, 40], [40, 24], [20, 12], [100, 40]]) {
+      f.size.rows = rows!;
+      const frame = f.panel.render(width!);
+      const text = stripVTControlCharacters(frame.join("\n"));
+      expect(text).toContain("Usage");
+      expect(frame.every((line) => visibleWidth(line) <= width!)).toBe(true);
+      if (width! >= 40) {
+        expect(text).toContain("No current prompts");
+        expect(text).toContain("History");
+      }
+    }
+    expect(f.panel.render(100).join("\n")).toContain(f.theme.fg("muted", "Current round · History → Usage · 1 earlier prompts"));
+    const usage = create(name, true, f.records);
+    expect(usage.text()).toContain("Current + history");
+    usage.panel.handleInput("?");
+    expect(usage.text()).toContain("All rounds: current prompts");
+    expect(f.actions.run).not.toHaveBeenCalled();
   });
 
   it("uses selectable original roots; Enter runs unsent and otherwise inspects without Apply", () => {

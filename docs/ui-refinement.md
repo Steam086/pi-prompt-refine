@@ -5,6 +5,7 @@
 顶层页面为 **Preview / Usage / Settings**。`task-panel.ts` 实现原稿／运行两层树、固定摘要、详情与结果比较；`workspace.ts` 管理原稿编辑、兼容 Input / Revise 及 Settings；`preview.ts` 保留兼容结果阅读页。
 
 - Preview 任务树默认仅显示未归档的当前轮次（含已完成的当前结果）；Earlier 与恢复记录仅在 Usage 的全部轮次中展示。归档不是删除，不改变持久化规则，Unsent 仍仅在当前 session 内存中保留。已在 Preview 查看中的目标归档后暂时保留该阅读视图与操作目标，并标注 Earlier；Esc 显式返回当前列表，不因归档、resize 或其他后台完成改选结果。旧轮次仍在运行／排队时提示到 Usage 查看或停止，迟到结果不重新插入 Preview。
+- Preview 有历史时以 `History → Usage` 提示去向；没有当前内容时说明历史仍可在 Usage 查看，不把隐藏表述为删除或已保存。Usage 标明 `Current + history`，普通切页恢复自身浏览位置；从暂时保留的 Earlier 视图按右键进入 Usage 时显式定位同一原稿／运行，返回 Preview 不丢失原来的阅读目标。
 - 主界面动作绑定选中父节点／子节点。Enter 启动 Unsent 或查看详情；a 直接接受选中结果，不要求先 Apply。
 - 父节点统一 original prompt，子节点对应每次模型运行。当前 round 在上、旧 round 在下；新任务／运行前移，后台完成不改变顺序或选择。
 - n 新建空白并进入编辑；i / e 编辑原稿；当前 Unsent 原地修改，已提交／旧轮次创建副本。Enter 保存后回列表，另一次 Enter 才启动。

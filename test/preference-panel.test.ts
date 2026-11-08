@@ -976,6 +976,7 @@ function unsentWorkspaceSetup(key: KeyId | null = "alt+p", conflict = false, the
       return { selected, save: (selected) => controller.updateDraftPreferences(source, selected) };
     },
     taskPosition: position,
+    history: () => controller.getHistory(),
     tasks: { records: () => controller.getHistory(), appliedId: () => undefined, activate: () => false, run, stop() {} },
     context: () => ({ instructions: "off", tree: false, skills: false }), contextEnabled: () => false,
     saveContext: async () => ({ message: "", persisted: true }), submit: () => "Unused",
@@ -1150,9 +1151,10 @@ describe("Unsent preference selection", () => {
     expect(f.complete).not.toHaveBeenCalled(); w.dispose();
   });
 
-  it("preserves selection for archived Unsent originals with intact background", async () => {
+  it("preserves selection through Usage for archived Unsent originals with intact background", async () => {
     const f = unsentWorkspaceSetup(); const w = f.workspace;
     f.controller.onMessageStarted("Another Pi task");
+    w.openUsage({ id: f.originals[0]!.id, original: true });
     w.handleInput("p"); await loaded(w);
     expect(text(w)).toContain("Preferences · Unsent original");
     w.handleInput(" "); w.handleInput(bringBack);

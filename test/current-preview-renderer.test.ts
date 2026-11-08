@@ -26,12 +26,13 @@ describe.each(["regular", "fullscreen"] as const)("current-round Preview (%s)", 
       candidate: { ...request, requestId: 1, recordId: 1, generation: 0, version: 1, text: "Result 中文😀\n".repeat(40) } };
     const records = [source];
     const position = { selectedId: 1 };
+    const usagePosition = { selectedId: 2, selectedTaskId: undefined as number | undefined };
     const run = vi.fn();
     const panel = new PreviewPanel({ state: { phase: "ready", requestId: 1, pendingSend: false },
       contextLabel: "Draft only", elapsedSeconds: 0, openHint: "ctrl+\\", canRestore: false }, theme, () => terminal.rows, () => tui.requestRender());
     const workspace = new RefineWorkspace(panel, tui, theme, getKeybindings(), {
       tasks: { records: () => records.map((record) => structuredClone(record)), appliedId: () => 1, activate: () => false, run, stop() {} },
-      history: () => records, taskPosition: position,
+      history: () => records, taskPosition: position, usagePosition,
       context: () => ({ instructions: "always", tree: false, skills: false }), contextEnabled: () => true,
       saveContext: async () => ({ message: "Saved", persisted: true }), submit: () => undefined,
     });
@@ -58,7 +59,11 @@ describe.each(["regular", "fullscreen"] as const)("current-round Preview (%s)", 
         if (columns! >= 40) expect(text).toContain("Earlier");
         expect(text).not.toContain("NEW RESULT");
       }
-      expect(workspace.render(100).join("\n")).toContain(theme.fg("muted", "Earlier · kept open · Esc returns to current · History in Usage"));
+      expect(workspace.render(100).join("\n")).toContain(theme.fg("muted", "Earlier · kept open · Esc returns to current · History in Usage →"));
+      input("\x1b[C"); expect(render()).toContain("Current + history");
+      expect(usagePosition.selectedId).toBe(1);
+      expect(usagePosition.selectedTaskId).toBeUndefined();
+      input("\x1b[D"); expect(render()).toContain("Earlier · kept open");
       input("\x1b"); expect(render()).toContain("NEW CURRENT");
       expect(render()).not.toContain("Earlier · kept open");
       input("\x1b[C"); expect(render()).toContain("Usage");

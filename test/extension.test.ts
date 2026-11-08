@@ -572,7 +572,7 @@ describe("persistent session-local Refine history", () => {
     await h.reload("fork");
     h.holdPanel();
     let view = h.command("history", h.context);
-    expect(h.panelLines(100).join("\n")).toContain("No prompts yet");
+    expect(h.panelLines(100).join("\n")).toContain("No records yet");
     h.panelInput("q"); h.panelInput("q"); await view;
     id.mockReturnValue("session-one"); file.mockReturnValue(originalFile);
     await h.reload("resume");
@@ -662,7 +662,7 @@ describe("persistent session-local Refine history", () => {
     await h.reload();
     h.holdPanel();
     const view = h.command("history", h.context);
-    expect(h.panelLines(100).join("\n")).toContain("No prompts yet");
+    expect(h.panelLines(100).join("\n")).toContain("No records yet");
     h.panelInput("q"); h.panelInput("q"); await view;
   });
 });
