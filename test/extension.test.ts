@@ -861,6 +861,68 @@ describe("explicit candidate revision", () => {
     h.panelInput("q"); await view;
   });
 
+  it.each([
+    ["add", "cancel"], ["add", "bring-back"], ["edit", "cancel"], ["edit", "bring-back"],
+    ["delete", "cancel"], ["delete", "bring-back"],
+  ] as const)("refreshes cached Unsent preferences after Revise library %s / %s", async (change, close) => {
+    const h = await makeHarness();
+    const store = new PreferenceStore(h.agentDir, h.context.cwd);
+    const entry = await store.save("project", { name: "Cached 中文😀", body: "Original requirement." });
+    await trigger(h);
+    h.holdPanel(); const view = h.command("", h.context);
+    const output = () => h.panelLines(100).join("\n");
+    h.panelInput("n"); h.panelInput("Unsent task"); h.panelInput("\r");
+    h.panelInput("\x1b[Z");
+    await vi.waitFor(() => expect(output()).toContain("[ ] Cached 中文😀"));
+    if (change !== "add") h.panelInput(" ");
+    h.panelInput("\x1b"); // Leave inline selection, retaining the same workspace/cache.
+    h.panelInput("\x1b[B"); h.panelInput("\x1b[B"); h.panelInput("f");
+    expect(output()).toContain("Revise current result");
+    h.panelInput("\x1bp");
+    await vi.waitFor(() => expect(output()).toContain("0 selected ·"));
+    await vi.waitFor(() => expect(output()).not.toContain("Working…"));
+    if (change === "delete") {
+      h.panelInput("d"); h.panelInput("y");
+      await vi.waitFor(() => expect(output()).toContain("Deleted from library"));
+    } else {
+      h.panelInput(change === "add" ? "n" : "e");
+      if (change === "add") h.panelInput("Added 中文😀");
+      h.panelInput("\t"); h.panelInput("Updated body. ");
+      for (let i = 0; i < 4; i++) h.panelInput("\t");
+      h.panelInput("\r");
+      await vi.waitFor(() => expect(output()).toContain(change === "add" ? "Saved; not selected" : "Saved to library"));
+    }
+    h.panelInput(close === "cancel" ? "\x1b" : "\x1b[13;3u"); // Library writes survive either selection boundary.
+    h.panelInput("\x1b"); h.panelInput("\x1b"); // Revise -> details -> tasks.
+    h.panelInput("\x1b[A"); h.panelInput("\x1b[A"); h.panelInput("\x1b[Z");
+    await vi.waitFor(() => {
+      if (change === "add") expect(output()).toContain("[ ] Added 中文😀");
+      else expect(output()).toContain("! Cached 中文😀");
+    });
+    if (change !== "add") {
+      h.panelInput("\r");
+      expect(output()).toContain(change === "edit" ? "Source changed" : "Source deleted");
+      expect(output()).toContain(entry.body); // Adopted snapshot was not silently replaced.
+      if (change === "edit") {
+        h.panelInput("\x1b[6~");
+        expect(output()).toContain("Original requirement.Updated body.");
+      }
+      h.panelInput("\x1b"); h.panelInput(" "); // Explicitly deselect the old snapshot.
+      if (change === "delete") expect(output()).not.toContain("Cached 中文😀");
+      else h.panelInput(" "); // Reselect now captures the edited library body.
+    } else {
+      h.panelInput("/"); h.panelInput("Added"); h.panelInput("\r"); h.panelInput(" ");
+    }
+    expect(h.complete).toHaveBeenCalledTimes(1); // Management/selection never submits.
+    if (change !== "delete") {
+      h.panelInput("\x1b"); h.panelInput("\r"); await flushPromises();
+      const packet = JSON.parse((h.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
+      expect(packet.editing_instruction).toContain(change === "edit" ? "Original requirement.Updated body." : "Updated body.");
+    }
+    expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
+    h.panelInput("\x1b"); h.panelInput("q"); await view;
+  });
+
   it("selects Preferences before first refine without a modifier, preserves literal task and snapshots across reopening", async () => {
     const h = await makeHarness({ config: { preferencesKey: null }, persistHistory: true });
     const store = new PreferenceStore(h.agentDir, h.context.cwd);
@@ -987,13 +1049,14 @@ describe("explicit candidate revision", () => {
     const packet = (index: number) => JSON.parse((h.complete.mock.calls[index] as any[])[1].messages[0].content[0].text);
     expect(packet(0).editing_instruction).not.toContain("UNSELECTED BODY");
     expect(packet(0).editing_instruction).toContain(translation.body);
-    for (const [instruction, result] of [["再短一点。", "Explain caching briefly."], ["改回中文。", "简述缓存。"], ["保留字面量。", "简述缓存。"]]) {
+    for (const [instruction, result] of [["再短一点。", "Explain caching briefly."], ["改回中文。", "简述缓存。"],
+      ["保留字面量。", "简述缓存。"], ["保留命令原样。", "简述缓存。"]]) {
       h.panelInput("f"); h.panelInput(instruction!);
       h.complete.mockResolvedValueOnce(refinement(result!));
       h.panelInput("\x13"); await flushPromises();
     }
-    expect(h.complete).toHaveBeenCalledTimes(4);
-    for (const index of [1, 2, 3]) {
+    expect(h.complete).toHaveBeenCalledTimes(5);
+    for (const index of [1, 2, 3, 4]) {
       const sent = packet(index);
       expect(sent.historical_editing_context.initial_instruction).toBe(`Prompt rewriting instructions (manually selected):\n${translation.body}`);
       expect(sent).not.toHaveProperty("editing_instruction");
@@ -1004,6 +1067,11 @@ describe("explicit candidate revision", () => {
     expect(packet(3).historical_editing_context.previous_revision_instruction).toBe("改回中文。");
     expect(JSON.stringify(packet(3))).not.toContain("再短一点。");
     expect(packet(3).previous_candidate).toBe("简述缓存。");
+    // Structural coverage only: the explicit correction has now left the window.
+    // Real model compliance is measured separately by revision-semantics.live.test.ts.
+    expect(packet(4).previous_candidate).toBe("简述缓存。");
+    expect(packet(4).historical_editing_context.previous_revision_instruction).toBe("保留字面量。");
+    expect(JSON.stringify(packet(4))).not.toContain("改回中文。");
     expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
     h.panelInput("q"); await view;
   });
