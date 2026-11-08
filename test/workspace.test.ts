@@ -44,6 +44,25 @@ function create(rows = 40, themeName = "dark", optimizer = false, inputText = ""
 const textOf = (lines: string[]) => lines.join("\n");
 
 describe("shared refine workspace", () => {
+  it.each(["dark", "light"])("keeps rejected input visible in tiny viewports without hiding Back (%s)", (name) => {
+    const { workspace, terminal, actions, theme } = create(40, name);
+    actions.submit.mockReturnValue("Rejected 中文😀\x1b[31m");
+    workspace.handleInput("i"); workspace.handleInput("Retained draft 中文😀"); workspace.handleInput("\r");
+    for (const rows of [5, 8, 9, 12, 40, 8]) for (const width of [20, 40, 100]) {
+      terminal.rows = rows;
+      const lines = workspace.render(width);
+      expect(lines).toHaveLength(panelLayout(width, rows).height);
+      expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+      expect(stripVTControlCharacters(lines.join("\n"))).toContain("Rejected");
+      expect(lines.join("\n")).toContain(theme.fg("warning", "").split("\x1b[39m")[0]);
+      expect(lines.join("\n")).not.toContain("\x1b[31m");
+      if (rows >= 8) expect(lines.at(-1)).toContain(formatKeyHint(["Esc", "Back"], theme));
+    }
+    terminal.rows = 40;
+    expect(textOf(workspace.render(100))).toContain("Retained draft 中文😀");
+    expect(actions.submit).toHaveBeenCalledExactlyOnceWith("Retained draft 中文😀");
+  });
+
   it.each(["dark", "light"])("cycles pages and Settings groups in both directions with shared chrome in %s", (name) => {
     const { workspace, actions, theme } = create(40, name, true);
     const height = workspace.render(100).length;

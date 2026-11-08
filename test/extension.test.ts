@@ -3301,13 +3301,38 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await view;
   });
 
+  it("bounds the model picker through resize without losing its selected model or starting a request", async () => {
+    const harness = await makeHarness({ reasoning: true });
+    const original = harness.context.modelRegistry.getAvailable()[0]!;
+    const models = Array.from({ length: 30 }, (_, index) => ({ ...original,
+      id: `model-${index}-中文😀`.repeat(8), name: `Model ${index} 中文😀`.repeat(8) }));
+    vi.mocked(harness.context.modelRegistry.getAvailable).mockReturnValue([original, ...models]);
+    harness.holdPanel();
+    const picker = harness.command("model", harness.context);
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Choose optimizer model"));
+    harness.panelInput("\x1b[B"); harness.panelInput("\x1b[Z");
+    for (const rows of [8, 12, 24, 40, 80, 12, 40]) for (const width of [1, 20, 40, 100, 180]) {
+      harness.resize(rows);
+      const lines = harness.panelLines(width);
+      expect(lines.length).toBeLessThanOrEqual(rows - 4);
+      expect(lines.every((line) => visibleWidth(line) <= Math.min(width, 100))).toBe(true);
+      if (width >= 40 && rows >= 12) expect(lines.join("\n")).toContain("Model 0 中文😀");
+      if (width >= 100 && rows >= 24) expect(lines.join("\n")).toContain("Thinking level:");
+    }
+    harness.panelInput("\x1b"); await picker;
+    const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
+    expect(saved.model).toEqual({ provider: original.provider, id: original.id });
+    expect(harness.complete).not.toHaveBeenCalled(); expect(harness.editorWrites).toEqual([]);
+  });
+
   it("presents a compact model picker without changing the model on cancel", async () => {
     const harness = await makeHarness();
     harness.setCustomAction("\x1b");
     await harness.command("model", harness.context);
     expect(harness.panelLines().join("\n")).toContain("Choose optimizer model");
     expect(harness.panelLines().join("\n")).toContain("Optimizer only · Main session unchanged");
-    expect(harness.panelLines().join("\n")).toContain("↑↓ Select · Shift+Tab Thinking · Enter Confirm · Esc Cancel");
+    expect(harness.panelLines().join("\n")).toContain("Enter Confirm · ↑↓ Select");
+    expect(harness.panelLines().join("\n")).toContain("Esc Cancel · Shift+Tab Thinking");
     for (const { width, lines } of harness.renderedWidths) {
       for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }

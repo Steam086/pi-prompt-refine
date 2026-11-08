@@ -748,10 +748,18 @@ export class TaskPanel {
         ? `${active ? "›" : " "} ${record.status === "unsent" ? `○ Unsent ·${record.input.preferences?.length ? ` P:${record.input.preferences.length} ·` : ""}` : "▾"} ${old ? "Earlier · " : ""}${record.input.draft.replace(/\s+/g, " ") || "Empty prompt"}`
         : `${prefix}${model}${" ".repeat(Math.max(1, leftWidth - visibleWidth(prefix + model + badge)))}${badge}`;
       const clean = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(label), leftWidth, "…"));
-      const color = old ? "dim" : row.original ? "text" : this.color(record);
-      const warningAt = !row.original && badge.startsWith("⚠") ? clean.lastIndexOf("⚠") : -1;
-      const text = warningAt < 0 ? this.theme.fg(color, clean)
-        : this.theme.fg(color, clean.slice(0, warningAt)) + this.theme.fg("warning", "⚠") + this.theme.fg(color, clean.slice(warningAt + 1));
+      let text: string;
+      if (row.original) {
+        const earlierAt = old ? clean.indexOf("Earlier · ") : -1;
+        text = earlierAt < 0 ? this.theme.fg("text", clean)
+          : this.theme.fg("text", clean.slice(0, earlierAt)) + this.muted("Earlier · ") + this.theme.fg("text", clean.slice(earlierAt + 10));
+      } else {
+        const badgeAt = Math.min(clean.length, label.length - badge.length);
+        const status = clean.slice(badgeAt);
+        text = this.theme.fg("text", clean.slice(0, badgeAt))
+          + (status.startsWith("⚠") ? this.theme.fg("warning", "⚠") + this.theme.fg(this.color(record), status.slice(1))
+            : this.theme.fg(this.color(record), status));
+      }
       return active ? this.theme.bg("selectedBg", text + " ".repeat(Math.max(0, leftWidth - visibleWidth(text)))) : text;
     });
     const previewDetails = this.inspecting && !this.usage && this.compareId === undefined && !!selected && !selected.original && !!selected.record.candidate;
@@ -764,15 +772,28 @@ export class TaskPanel {
       body = this.pane(selected, layout.innerWidth, height);
     } else if (previewDetails && selected) {
       body = this.pane(selected, layout.innerWidth, height, true, true);
-    } else if (other && layout.innerWidth >= 72) {
-      const half = Math.floor((layout.innerWidth - 3) / 2);
-      const right = selected ? this.pane(selected, half, height - 1) : [];
-      const peer = this.pane(other, layout.innerWidth - half - 3, height - 1, false);
-      body = [this.muted("Selected result ← · Tab switches the result to accept")];
-      body.push(...Array.from({ length: height - 1 }, (_, i) => {
-        const line = right[i] ?? "";
-        return line + " ".repeat(Math.max(0, half - visibleWidth(line))) + this.muted(" │ ") + (peer[i] ?? "");
-      }));
+    } else if (other && selected) {
+      // A/B identities stay attached to runs when Tab swaps the action target.
+      const letter = (row: Row) => row.record.id === Math.min(selected.record.id, other.record.id) ? "A" : "B";
+      const identity = (row: Row) => `${letter(row)} · Run #${row.record.id}`;
+      if (layout.innerWidth >= 72) {
+        const half = Math.floor((layout.innerWidth - 3) / 2);
+        const right = this.pane(selected, half, height - 1);
+        const peer = this.pane(other, layout.innerWidth - half - 3, height - 1, false);
+        const label = truncateToWidth(this.heading(identity(selected)), half, "…");
+        body = [label + " ".repeat(Math.max(0, half - visibleWidth(label))) + this.muted(" │ ") + this.heading(identity(other))];
+        body.push(...Array.from({ length: height - 1 }, (_, i) => {
+          const line = right[i] ?? "";
+          return line + " ".repeat(Math.max(0, half - visibleWidth(line))) + this.muted(" │ ") + (peer[i] ?? "");
+        }));
+      } else {
+        let caption = this.heading(identity(selected)) + this.muted(" · ") + formatKeyHint(["Tab", identity(other)], this.theme);
+        if (visibleWidth(caption) > layout.innerWidth) {
+          const compact = (row: Row) => `${letter(row)}#${row.record.id}`;
+          caption = this.heading(compact(selected)) + " " + formatKeyHint(["Tab", compact(other)], this.theme);
+        }
+        body = [caption, ...this.pane(selected, layout.innerWidth, height - 1)];
+      }
     } else {
       const empty = this.usage ? "No records yet. Return to Preview to create a prompt."
         : this.actions.records().some((record) => record.archivedAt !== undefined)
@@ -812,15 +833,25 @@ export class TaskPanel {
     if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["Esc", "Back"], ["?", "Help"], ...compact(primary)], layout.innerWidth, this.theme, " ");
     const title = this.inspecting ? (other ? "Compare results" : "Prompt details") : this.usage ? "Usage · All rounds" : "Prompt refine · Tasks";
     const feedback = this.notice ? this.theme.fg(this.noticeColor, sanitizeTerminalText(this.notice)) : "";
+    let inspectionSubtitle = "";
+    if (this.inspecting && selected) {
+      const scroll = formatKeyHint(["↑↓", `scroll${previewDetails ? (this.original ? " reference" : " result") : ""}`], this.theme);
+      const reference = previewDetails ? formatKeyHint(["o", this.original ? "Result" : "Reference"], this.theme) : "";
+      const prefix = !selected.original && layout.innerWidth >= 48 ? this.muted("Selected: ") : "";
+      const identity = !selected.original ? `#${selected.record.id} ${selected.record.input.model.id}` : "Original prompt";
+      const fullHints = scroll + (reference ? this.muted(" · ") + reference : "");
+      let hints = visibleWidth(prefix + fullHints) + 15 <= layout.innerWidth ? fullHints : reference || scroll;
+      if (visibleWidth(prefix + hints) + 7 > layout.innerWidth) {
+        hints = previewDetails ? formatKeyHint(["o", this.original ? "Result" : "Ref"], this.theme) : formatKeyHint(["↑↓", ""], this.theme);
+      }
+      const space = Math.max(0, layout.innerWidth - visibleWidth(prefix + hints) - 3);
+      const label = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(identity), space, "…"));
+      inspectionSubtitle = prefix + this.heading(label) + this.muted(" · ") + hints;
+    }
     const subtitle = this.referenceOnly ? this.muted("Read-only reference") : this.notice ? feedback : this.retainedEarlier
       ? this.muted(layout.innerWidth < 32 ? "Earlier → Usage" : layout.innerWidth < 72
         ? "Earlier · Usage → · Esc current" : "Earlier · kept open · Esc returns to current · History in Usage →") : this.inspecting
-      ? (selected && !selected.original
-        ? this.muted("Selected: ") + this.heading(`#${selected.record.id} ${selected.record.input.model.id}`)
-        : this.heading("Original prompt")) + this.muted(" · ")
-        + formatKeyHint(["↑↓", `scroll${previewDetails ? (this.original ? " reference" : " result") : ""}`], this.theme)
-        + (previewDetails ? this.muted(" · ") + formatKeyHint(["o", this.original ? "Result" : "Reference"], this.theme)
-          : other ? this.muted(" · Same original and conversation context") : "")
+      ? inspectionSubtitle
       : this.muted(`${this.usage ? "Current + history · " : ""}${rows.filter((row) => row.original).length} prompts · ${rows.filter((row) => !row.original).length} runs · `)
         + formatKeyHint(["↑↓", this.reading ? "scroll" : "select"], this.theme) + this.muted(` · Run: ${this.actions.launchModel?.() ?? "selected model"}`);
     const earlier = this.usage ? [] : this.actions.records().filter((record) => record.archivedAt !== undefined);

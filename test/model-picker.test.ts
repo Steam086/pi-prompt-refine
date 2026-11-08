@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
-import { renderModelChoices } from "../src/model-picker.js";
+import { renderModelChoices, renderModelPicker, type ModelPickerOptions } from "../src/model-picker.js";
+import { panelLayout } from "../src/panel-layout.js";
+import { stripVTControlCharacters } from "node:util";
+import { formatKeyHint } from "../src/key-hints.js";
 
 const items = Array.from({ length: 20 }, (_, i) => ({
   value: `provider/very-long-model-identifier-${i}`,
@@ -10,6 +13,31 @@ const items = Array.from({ length: 20 }, (_, i) => ({
 }));
 
 describe("model picker layout", () => {
+  it.each(["dark", "light"])("budgets the full picker frame across resize, search and thinking changes (%s)", (name) => {
+    const theme = getThemeByName(name)!;
+    const options: ModelPickerOptions = { items, selectedKey: items[12]!.value, query: "", title: "Choose optimizer model",
+      subtitle: "Optimizer only · Main session unchanged", thinkingKeys: "Shift+Tab", thinkingStatus: "Thinking level: high · Last used for this model", run: false };
+    for (const rows of [5, 8, 12, 24, 40, 80, 12]) for (const width of [1, 12, 20, 40, 100, 180]) {
+      const lines = renderModelPicker(options, width, rows, theme);
+      expect(lines).toHaveLength(panelLayout(width, rows).height);
+      expect(lines.every((line) => visibleWidth(line) <= Math.min(width, 100))).toBe(true);
+      if (width >= 20 && rows >= 8) expect(lines.at(-1)).toContain(formatKeyHint(["Esc", "Cancel"], theme));
+      if (width >= 20 && rows === 8) expect(lines.at(-1)).toContain(formatKeyHint(width < 34 ? ["↵", "Use"] : ["Enter", "Confirm"], theme));
+      if (width >= 40 && rows >= 12) expect(lines.join("\n")).toContain("模型 Model 12");
+      if (width >= 100 && rows >= 24) expect(lines.join("\n")).toContain(theme.fg("muted", options.thinkingStatus));
+    }
+    options.query = "中文😀\x1b[31m".repeat(30); options.items = [];
+    const empty = renderModelPicker(options, 40, 40, theme);
+    expect(empty.join("\n")).not.toContain("\x1b[31m");
+    expect(stripVTControlCharacters(empty.join("\n"))).toContain("No matching models");
+    expect(empty.join("\n")).toContain(formatKeyHint(["Esc", "Cancel"], theme));
+    for (const height of [0, 1, 2, 3, 4, 10, 20]) {
+      const choices = renderModelChoices(items, items[12]!.value, 30, height, theme);
+      expect(choices.length).toBeLessThanOrEqual(height);
+      if (height) expect(choices.join("\n")).toContain("模型 Model 12");
+    }
+  });
+
   it.each(["dark", "light"])("fits terminal widths and keeps selection visible (%s)", (name) => {
     const theme = getThemeByName(name)!;
     for (const width of [1, 2, 12, 30, 60, 100, 160]) {
