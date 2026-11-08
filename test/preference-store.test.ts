@@ -127,10 +127,10 @@ describe("typed preferences", () => {
     const discussion = library.entries.filter((entry) => entry.id === "discussion-mode");
     expect(discussion).toHaveLength(1);
     expect(discussion[0]).toMatchObject({
-      version: 1,
+      version: 2,
       name: "Discussion Mode",
       metadata: {
-        description: "For requirements and planning discussions: lead with a recommendation, retain key reasoning and trade-offs, ask only decision-relevant questions, and avoid unnecessary detail.",
+        description: "讨论需求和方案时只处理当前问题；需要选择时给出建议与取舍，追问仅限影响方向或阻塞规划的问题。",
         kind: "task",
         activation: "manual",
       },
@@ -139,16 +139,29 @@ describe("typed preferences", () => {
     expect(discussion[0]!.body).toContain("Do not add tool-use or delegation authority");
     const structure = library.entries.filter((entry) => ["prompt-bullet-structure", "prompt-step-structure"].includes(entry.id));
     expect(structure.map((entry) => [entry.id, entry.version])).toEqual([
-      ["prompt-bullet-structure", 3], ["prompt-step-structure", 3],
+      ["prompt-bullet-structure", 4], ["prompt-step-structure", 4],
     ]);
     for (const entry of structure) {
-      expect(entry.body).toContain("用户手动选择");
+      expect(entry.body).not.toContain("用户手动选择");
       expect(entry.body).toContain("保持原样");
       expect(entry.body).toContain("授权范围");
       expect(entry.body).not.toContain("本地匹配");
     }
     expect(library.entries.every((entry) => entry.metadata?.description && ["rewrite", "task"].includes(entry.metadata.kind))).toBe(true);
     expect(library.entries.every((entry) => entry.metadata?.activation === "manual" && !("match" in entry.metadata))).toBe(true);
+    for (const entry of library.entries) {
+      expect(entry.body).not.toMatch(/本地匹配|本地线索|update the candidate prompt|refiner output protocol|SCAMPER/);
+      expect(entry.metadata?.description).not.toMatch(/本地匹配|本地线索|手动选择后/);
+    }
+    const brainstorm = library.entries.find((entry) => entry.id === "brainstorm-alternatives")!;
+    expect(brainstorm.body).toContain("unless requested");
+    expect(brainstorm.body).toContain("If the task also asks for a choice");
+    const translate = library.entries.find((entry) => entry.id === "translate-prompt-to-english")!;
+    expect(translate.body).toContain("including non-English literals");
+    expect(translate.body).toContain("an English prompt does not imply a request for an English answer");
+    const delegate = library.entries.find((entry) => entry.id === "coordinate-authorized-subagents")!;
+    expect(delegate.body).toContain("Only when the current draft explicitly authorizes delegation");
+    expect(delegate.body).toContain("Report unavailable agents or capabilities");
     const clarify = library.entries.find((entry) => entry.id === "clarify-prompt-intent")!;
     expect(clarify.metadata?.activation).toBe("manual");
     expect(clarify.body.length).toBeLessThan(500);
