@@ -68,6 +68,17 @@
       }
     },
     {
+      "id": "discussion-mode",
+      "version": 1,
+      "name": "Discussion Mode",
+      "body": "For requirements clarification, solution discussions, and planning, update the candidate prompt to ask the main agent to answer the current question directly, leading with its recommendation, judgment, or current understanding, followed by only the key reasoning needed to support the user's decision. Be concise, concrete, and easy to scan while retaining decision-relevant constraints, trade-offs, risks, and uncertainty. Focus on what needs to be decided in this turn; do not expand into a complete design or implementation plan unless requested. In an ongoing discussion, emphasize new information, changes, and disagreements rather than repeating established context. Prefer short paragraphs or a few bullets; use headings, tables, or examples only when helpful, without imposing fixed sections or repetitive summaries. When multiple viable options exist, recommend one and explain why, comparing only alternatives that could affect the choice. Ask only a small number of questions that could change the direction or block planning. State reasonable assumptions and proceed where possible; do not turn every open detail into a questionnaire or mechanically end with a follow-up question when none is needed. Use as much detail as the current decision requires: do not omit important constraints for brevity or add unrelated analysis. Expand when the user explicitly requests depth or a complete deliverable. Preserve the original task, language, scope, and explicit output constraints. Discussion or planning does not itself authorize implementation or external actions, but this preference must not convert an explicitly requested execution task into discussion only. Do not add tool-use or delegation authority. These are requirements for the separate main agent; do not execute the task or change the refiner output protocol.",
+      "metadata": {
+        "description": "For requirements and planning discussions: lead with a recommendation, retain key reasoning and trade-offs, ask only decision-relevant questions, and avoid unnecessary detail.",
+        "kind": "task",
+        "activation": "manual"
+      }
+    },
+    {
       "id": "brainstorm-alternatives",
       "version": 1,
       "name": "Brainstorm Alternatives",
