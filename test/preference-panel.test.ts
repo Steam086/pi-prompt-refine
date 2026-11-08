@@ -189,6 +189,51 @@ describe("Preferences management without selection", () => {
 });
 
 describe("three-action preference library", () => {
+  it.each(["dark", "light"])("sanitizes Edit names through failure/resize without rewriting untouched values (%s)", async (themeName) => {
+    const entry = { ...a, name: "中文😀\t\x1b[999C\x1b]52;c;name-payload\x07\n\u009dC1\u009c" };
+    const f = setup([], "", themeName, [entry]); await loaded(f.panel);
+    const assertSafe = () => {
+      for (const [width, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [100, 40]]) {
+        f.terminal.rows = rows!;
+        const lines = f.panel.render(width!);
+        const output = lines.join("\n");
+        expect(lines).toHaveLength(panelLayout(width!, rows!).height);
+        expect(lines.every((line) => visibleWidth(line) <= width!)).toBe(true);
+        for (const unsafe of ["\x1b[999C", "\x1b]52", "\u009d", "\u009c"]) expect(output).not.toContain(unsafe);
+        if (width === 100) expect(output).toContain(f.theme.fg("text", f.theme.bold("Edit library entry")));
+      }
+    };
+    f.panel.handleInput("e"); assertSafe();
+    expect(text(f.panel).replace(/\x1b_pi:[^\x07]*\x07/g, "")).toContain("Name: 中文😀    �[999C�]52;c;name-payload� �C1�");
+    f.panel.handleInput(esc); // Display normalization alone is not an unsaved change.
+    expect(text(f.panel)).not.toContain("Discard unsaved form?");
+    expect(text(f.panel)).not.toContain("Edit library entry");
+    expect(f.repo.save).not.toHaveBeenCalled();
+    f.panel.handleInput("e");
+    f.repo.save.mockRejectedValueOnce(new Error("Write conflict 中文😀"));
+    save(f.panel); await loaded(f.panel); assertSafe();
+    expect(f.panel.render(100).join("\n")).toContain(f.theme.fg("error", "⚠ Write conflict 中文😀"));
+    expect(f.repo.save).toHaveBeenLastCalledWith(entry.scope, { name: entry.name, body: entry.body }, entry);
+    f.panel.handleInput(enter); await loaded(f.panel); // Explicit retry with the original name and conflict snapshot.
+    expect(f.repo.save).toHaveBeenCalledTimes(2);
+    expect(f.repo.save).toHaveBeenLastCalledWith(entry.scope, { name: entry.name, body: entry.body }, entry);
+    expect(f.library.entries[0]!.name).toBe(entry.name);
+  });
+
+  it.each(["dark", "light"])("saves edited safe names and retains explicit discard boundaries (%s)", async (themeName) => {
+    const entry = { ...a, name: "Original \x1b]52;c;name-payload\x07" };
+    const f = setup([selectPreference(entry)], "", themeName, [entry]); await loaded(f.panel);
+    f.panel.handleInput("e");
+    f.panel.handleInput("\x05"); f.panel.handleInput("\x15"); f.panel.handleInput("Renamed 中文😀");
+    f.panel.handleInput(esc); expect(text(f.panel)).toContain("Discard unsaved form?");
+    f.panel.handleInput("n"); expect(text(f.panel)).toContain("Name: Renamed 中文😀");
+    expect(f.repo.save).not.toHaveBeenCalled();
+    save(f.panel); await loaded(f.panel);
+    expect(f.repo.save).toHaveBeenCalledExactlyOnceWith(entry.scope, { name: "Renamed 中文😀", body: entry.body }, entry);
+    f.panel.handleInput(bringBack);
+    expect(f.close).toHaveBeenCalledWith([selectPreference(entry)]);
+  });
+
   it.each(["dark", "light"])("sanitizes external metadata before editing while preserving untouched JSON (%s)", async (themeName) => {
     const entry: RevisionPreference = { ...a, metadata: { kind: "rewrite", activation: "manual", description: "Literal \u001b[31m红色\n第二行\t😀" } };
     const f = setup([], "", themeName, [entry]); await loaded(f.panel);

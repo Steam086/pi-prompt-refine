@@ -4,10 +4,77 @@ import { getKeybindings, TuiAltScreen, TuiMainScreen, visibleWidth, type Termina
 import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { PreferencePanel } from "../src/preference-panel.js";
 import { panelLayout } from "../src/panel-layout.js";
-import { selectPreference, type RevisionPreference } from "../src/revision-preferences.js";
+import { selectPreference, type PreferenceRepository, type RevisionPreference } from "../src/revision-preferences.js";
 
 // Captured renderer I/O is not human visual or IME validation.
 describe.each(["regular", "fullscreen"] as const)("preference selection terminal rendering (%s)", (mode) => {
+  it.each(["dark", "light"])("keeps external Edit names inert through failed saves, focus, resize and confirmation (%s)", async (themeName) => {
+    vi.useFakeTimers();
+    let input = (_data: string) => {};
+    const writes: string[] = [];
+    const terminal: Terminal = {
+      rows: 40, columns: 100, kittyProtocolActive: true,
+      start: (onInput) => { input = onInput; }, stop() {}, write: (data) => { writes.push(data); },
+      async drainInput() {}, moveBy() {}, hideCursor() {}, showCursor() {}, clearLine() {}, clearFromCursor() {},
+      clearScreen() {}, setTitle() {}, setProgress() {}, setProgramStatus() {},
+    };
+    const tui = mode === "regular" ? new TuiMainScreen(terminal) : new TuiAltScreen(terminal);
+    const theme = getThemeByName(themeName)!;
+    const original: RevisionPreference = { id: "unsafe-name", version: 1, scope: "global",
+      name: "中文😀\t\x1b[999C\x1b]52;c;edit-name\x07\n\u009dC1\u009c", body: "Keep literal commands." };
+    let current = structuredClone(original);
+    const save = vi.fn<PreferenceRepository["save"]>(async (scope, value, expected) => {
+      current = { ...value, scope, id: expected!.id, version: expected!.version + 1 };
+      return current;
+    }).mockRejectedValueOnce(new Error("Write conflict 中文😀"));
+    const close = vi.fn();
+    const panel = new PreferencePanel(tui, theme, getKeybindings(), {
+      load: async () => ({ errors: {}, entries: [structuredClone(current)] }), save, remove: async () => {},
+    }, [], "", 16000, close);
+    tui.addChild(panel); tui.setFocus(panel);
+    const render = () => {
+      tui.renderNow();
+      const lines = panel.render(terminal.columns);
+      expect(lines).toHaveLength(panelLayout(terminal.columns, terminal.rows).height);
+      expect(lines.every((line) => visibleWidth(line) <= terminal.columns)).toBe(true);
+      for (const output of [lines.join("\n"), writes.join("")]) {
+        for (const unsafe of ["\x1b[999C", "\x1b]52;c;edit-name", "\u009d", "\u009c"]) expect(output).not.toContain(unsafe);
+      }
+      return stripVTControlCharacters(lines.join("\n"));
+    };
+    const settled = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
+    try {
+      tui.start(); await settled(); render();
+      input("e"); render();
+      expect(writes.join("")).toContain("�]52;c;edit-name�");
+      input("\x1b"); expect(render()).not.toContain("Discard unsaved form?");
+      expect(save).not.toHaveBeenCalled();
+      input("e"); input("\x1b[Z"); input("\r"); await settled();
+      expect(render()).toContain("Write conflict");
+      expect(save).toHaveBeenLastCalledWith(original.scope, { name: original.name, body: original.body }, original);
+      for (let field = 0; field < 6; field++) {
+        for (const [columns, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [100, 40]]) {
+          Object.assign(terminal, { columns, rows }); panel.invalidate(); render();
+          expect(panel.render(columns!).join("\n")).toContain(theme.fg("error", "⚠").split("⚠")[0] + "⚠");
+        }
+        input("\t");
+      }
+      input("\r"); await settled(); render(); // Retry from Save, without changing the name.
+      expect(save).toHaveBeenCalledTimes(2);
+      expect(current).toEqual({ ...original, version: 2 });
+      const expected = structuredClone(current);
+      input("e"); input("\x05"); input("\x15"); input("Renamed 中文😀"); render();
+      input("\x1b"); expect(render()).toContain("Discard unsaved form?");
+      input("n"); expect(render()).toContain("Renamed 中文😀");
+      expect(save).toHaveBeenCalledTimes(2);
+      input("\x1b[Z"); input("\r"); await settled(); render();
+      expect(save).toHaveBeenLastCalledWith(original.scope, { name: "Renamed 中文😀", body: original.body }, expected);
+      expect(close).not.toHaveBeenCalled();
+    } finally {
+      panel.dispose(); tui.stop(); vi.useRealTimers();
+    }
+  });
+
   it.each(["dark", "light"])("audits selections and reveals a new save through narrow/short resize (%s)", async (themeName) => {
     vi.useFakeTimers();
     let input = (_data: string) => {};
