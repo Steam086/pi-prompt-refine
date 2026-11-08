@@ -312,8 +312,14 @@ export class RefineWorkspace implements Component, Focusable {
     this.tui.requestRender();
   }
 
-  openUsage(): void {
+  openUsage(target?: { id: number; original: boolean }): void {
     const actions = this.actions.tasks;
+    const position = this.actions.usagePosition ?? {};
+    if (target) {
+      position.selectedId = target.id;
+      position.selectedTaskId = target.original ? this.actions.history?.().find((record) => record.id === target.id)?.taskId : undefined;
+      position.scroll = position.scrolls?.[target.original ? `task-${position.selectedTaskId}` : `run-${target.id}`] ?? 0;
+    }
     this.historyPanel = new TaskPanel({
       ...actions,
       records: () => this.actions.history?.() ?? [],
@@ -329,7 +335,7 @@ export class RefineWorkspace implements Component, Focusable {
       revise: (id) => this.openRevision(id),
       preferences: this.actions.preferences ? (id, original) => this.openDraftPreferences(id, original) : undefined,
       preferencesKey: this.preferencesKey,
-    }, this.theme, () => this.tui.terminal.rows, this.keys, true, this.actions.usagePosition, this.layout, this.expansionHint);
+    }, this.theme, () => this.tui.terminal.rows, this.keys, true, position, this.layout, this.expansionHint);
     this.switchMode("usage");
   }
 
@@ -356,7 +362,7 @@ export class RefineWorkspace implements Component, Focusable {
       if (!this.settingsInitialized) this.openSettings();
       else { this.switchMode("context"); this.refreshSettings(); }
     } else if (next === "Preview") this.switchMode("main");
-    else this.openUsage();
+    else this.openUsage(this.mode === "main" ? this.taskPanel?.earlierTarget() : undefined);
   }
 
   openSettings(selected = this.actions.context(), cursor = this.cursor): void {

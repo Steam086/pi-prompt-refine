@@ -116,7 +116,7 @@ describe("Revise visual hierarchy and feedback", () => {
     const f = setup(name);
     f.record.input.budget = { status: "trimmed", message: "Trimmed", inputTokens: 1, outputTokens: 1, safetyTokens: 1, contextWindow: 4,
       outputLimit: 1, removedMessages: 1, removedProjectParts: [] };
-    const panel = new TaskPanel({ records: () => [f.record], appliedId: () => 3, activate: () => true, run() {}, stop() {} }, f.theme, () => 40, getKeybindings());
+    const panel = new TaskPanel({ records: () => [f.record], appliedId: () => 3, activate: () => true, run() {}, stop() {} }, f.theme, () => 40, getKeybindings(), true);
     const badge = f.theme.fg("warning", "⚠ ") + f.theme.fg("success", "✓ Done");
     expect(panel.render(100).join("\n")).toContain(badge);
     f.record.archivedAt = 1;
