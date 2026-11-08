@@ -5,7 +5,7 @@
       "id": "neutral-prompt-tone",
       "version": 2,
       "name": "Neutral Prompt Tone",
-      "body": "仅修改 prompt 中妨碍理解的口语表达、含糊措辞和重复内容；清楚的表达保持原样。保留用户语气，不把口语表达一律改成正式文体。",
+      "body": "Edit colloquial expressions, vague wording, and repetition in the prompt only where they hinder understanding; leave clear wording unchanged. Preserve the user's tone rather than routinely replacing informal language with formal prose.",
       "metadata": {
         "description": "修改影响理解的口语表达和重复措辞，保留用户语气；不要求主 Agent 改变回答风格。",
         "kind": "rewrite",
@@ -16,7 +16,7 @@
       "id": "prompt-bullet-structure",
       "version": 4,
       "name": "Prompt Bullet Structure",
-      "body": "仅在原稿含多个独立并列的问题或约束、且列表更便于阅读时，将已有内容整理为条目。不要把引用、示例、背景或有先后依赖的内容当作并列任务。原稿已清晰、已有合适列表、过于简短或要求保留结构时保持原样。保留原有顺序、依赖、条件和授权范围，不增加条目。只调整 prompt 的结构，不要求主 Agent 分条回答。",
+      "body": "Organize existing content into bullets only when the draft contains multiple independent questions or constraints and a list would make them easier to read. Do not treat quotations, examples, background, or content with sequencing or dependencies as parallel tasks. Leave the draft unchanged if it is already clear, already has a suitable list, is too short to benefit, or explicitly requires preserving its structure. Preserve the original order, dependencies, conditions, and authorization scope; do not add items. Change only the prompt's structure, not the main agent's response format.",
       "metadata": {
         "description": "将需要整理的独立并列要求改为列表；不改变回答格式。",
         "kind": "rewrite",
@@ -27,7 +27,7 @@
       "id": "prompt-step-structure",
       "version": 4,
       "name": "Prompt Step Structure",
-      "body": "仅在用户要求已明确给出先后顺序或依赖、且编号更便于阅读时，按已有关系整理原稿。不要把背景流程、引用、示例、优先级、假设或疑问当作执行步骤。原稿已清晰、已有合适步骤或要求保留结构时保持原样。保留已有步骤、条件、限制和授权范围，不补充步骤、检查、工具或交付物。只调整 prompt 的结构，不要求主 Agent 按步骤回答。",
+      "body": "Organize the draft into numbered steps only when the user's requirements already specify an explicit sequence or dependencies and numbering would improve readability. Follow only those existing relationships. Do not turn background processes, quotations, examples, priorities, hypotheses, or questions into execution steps. Leave the draft unchanged if it is already clear, already has suitable steps, or explicitly requires preserving its structure. Preserve the existing steps, conditions, constraints, and authorization scope; do not add steps, checks, tools, or deliverables. Change only the prompt's structure, not the main agent's response format.",
       "metadata": {
         "description": "按要求中已有的先后关系整理步骤；不把背景流程变成任务。",
         "kind": "rewrite",
