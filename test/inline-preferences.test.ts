@@ -31,8 +31,33 @@ function fixture(entries = [first, second], selected: SelectedPreference[] = [],
 }
 
 describe("inline Unsent preferences", () => {
+  it.each(["dark", "light"])("puts rewriting before task and legacy entries without reordering selections (%s)", async (themeName) => {
+    const legacy = { ...first, id: "legacy", name: "Legacy", metadata: undefined };
+    const f = fixture([first, legacy, second], [], themeName); await Promise.resolve();
+    const assertOrder = () => {
+      const plain = f.text(60, 16);
+      const labels = ["Prompt rewriting", second.name, "Task requirements", first.name, "Unclassified", legacy.name];
+      for (let index = 1; index < labels.length; index++) {
+        expect(plain.indexOf(labels[index - 1]!)).toBeGreaterThanOrEqual(0);
+        expect(plain.indexOf(labels[index]!)).toBeGreaterThan(plain.indexOf(labels[index - 1]!));
+      }
+    };
+    assertOrder();
+    f.picker.handleInput("\x1b[B"); f.picker.handleInput(" ");
+    f.picker.handleInput("\x1b[A"); f.picker.handleInput(" ");
+    expect(f.state.selected.map((entry) => entry.id)).toEqual([first.id, second.id]);
+    assertOrder();
+    // Both typed entries match; filtering must retain the same purpose order.
+    f.picker.handleInput("/"); f.picker.handleInput("description"); f.picker.handleInput("\r");
+    const filtered = f.text(60, 16);
+    expect(filtered.indexOf("Prompt rewriting")).toBeLessThan(filtered.indexOf("Task requirements"));
+    expect(filtered).not.toContain("Unclassified");
+    expect(f.state.selected.map((entry) => entry.id)).toEqual([first.id, second.id]);
+    f.picker.dispose();
+  });
+
   it.each(["dark", "light"])("previews adjacent choices while navigating groups and resizing (%s)", async (themeName) => {
-    const entries = Array.from({ length: 18 }, (_, i) => ({ ...(i < 9 ? first : second), id: `item-${i}`, name: `Item ${String(i).padStart(2, "0")} 中文😀` }));
+    const entries = Array.from({ length: 18 }, (_, i) => ({ ...(i < 9 ? second : first), id: `item-${i}`, name: `Item ${String(i).padStart(2, "0")} 中文😀` }));
     const f = fixture(entries, [], themeName); await Promise.resolve();
     for (const [width, height] of [[60, 10], [24, 5], [60, 10]]) {
       f.picker.handleInput("\x1b[H");
@@ -63,16 +88,16 @@ describe("inline Unsent preferences", () => {
     const copy = { ...first, id: "copy", scope: "global" as const, name: "Duplicate" };
     const f = fixture([first, copy, second], [selectPreference(first)], themeName);
     await Promise.resolve();
-    f.picker.handleInput("\x1b[B"); f.picker.handleInput(" ");
+    f.picker.handleInput("\x1b[F"); f.picker.handleInput(" ");
     expect(f.text()).toContain("Same requirements already selected");
     expect(f.state.selected).toEqual([selectPreference(first)]);
-    f.picker.handleInput("\x1b[B"); f.picker.handleInput(" ");
+    f.picker.handleInput("\x1b[H"); f.picker.handleInput(" ");
     expect(f.state.selected).toEqual([selectPreference(first), selectPreference(second)]);
     // Toggling does not move the cursor or reorder the remaining library rows.
     expect(f.text()).toContain("› [x] Rewrite");
     f.library({ entries: [{ ...first, version: 2, name: "Renamed source", body: "Updated source" }, second], errors: {} });
     await f.picker.refresh();
-    f.picker.handleInput("\x1b[H");
+    f.picker.handleInput("\x1b[F");
     expect(f.text()).toContain("! Keep 中文😀");
     f.picker.handleInput("o");
     let document = "";
@@ -108,6 +133,7 @@ describe("inline Unsent preferences", () => {
   it("keeps focus, descriptions, search text and warnings safe and bounded with ANSI and wide text", async () => {
     const malicious = { ...first, name: "Safe 中文😀 \x1b]52;c;payload\x07", metadata: { ...first.metadata!, description: "Info \x1b[2J 中文😀" } };
     const f = fixture([malicious, second]); await Promise.resolve();
+    f.picker.handleInput("\x1b[F");
     const full = f.render().join("\n");
     expect(full).toContain(f.theme.fg("text", f.theme.bold(sanitizeTerminalText(malicious.name))));
     expect(full).toContain(f.theme.fg("muted", sanitizeTerminalText(malicious.metadata.description)));
@@ -132,6 +158,7 @@ describe("inline Unsent preferences", () => {
     const description = "简介 中文😀 \x1b[2J literal **text** wraps across several lines without dropping the ending.";
     const entry = { ...first, metadata: { ...first.metadata!, description } };
     const f = fixture([entry, second], [selectPreference(entry)], themeName); await Promise.resolve();
+    f.picker.handleInput("\x1b[F");
     const selected = structuredClone(f.state.selected);
     for (const width of [24, 60, 24]) {
       const summary = f.picker.renderDescription(width, 12);
@@ -151,7 +178,7 @@ describe("inline Unsent preferences", () => {
     const clipped = f.picker.renderDescription(24, 3);
     expect(clipped).toHaveLength(3);
     expect(stripVTControlCharacters(clipped[2]!)).toContain("…");
-    f.picker.handleInput("\x1b[B");
+    f.picker.handleInput("\x1b[A");
     expect(stripVTControlCharacters(f.picker.renderDescription(60, 6).join("\n"))).toContain("Rewrite description");
     expect(f.state.selected).toEqual(selected);
     expect(f.save).not.toHaveBeenCalled(); expect(f.load).toHaveBeenCalledTimes(1);
@@ -219,6 +246,7 @@ describe("inline Unsent preferences", () => {
       const next = structuredClone(current.input.preferences!);
       next[0]!.metadata!.description = "Original body from snapshot";
       expect(controller.updateDraftPreferences(current, next)).toBeUndefined();
+      picker.handleInput("\x1b[F"); // Task snapshots follow the rewriting group.
       expect(stripVTControlCharacters(picker.render(80, 10).join("\n"))).toContain("[x] ! Keep 中文😀");
       expect(searches()).toBe(5);
       // No internal preference array/metadata is exposed by controller reads.
@@ -241,6 +269,7 @@ describe("inline Unsent preferences", () => {
 
   it("retains independent document positions across focus changes and originals, but refreshes source comparisons", async () => {
     const f = fixture(); await Promise.resolve();
+    f.picker.handleInput("\x1b[F");
     f.picker.handleInput("o"); f.text(50, 8);
     f.picker.handleInput("\x1b[6~");
     const scrolled = f.text(50, 8);
@@ -259,6 +288,7 @@ describe("inline Unsent preferences", () => {
 
   it("uses only Space to toggle and returns without changing selections on Esc or Tab", async () => {
     const f = fixture(); await Promise.resolve();
+    f.picker.handleInput("\x1b[F");
     for (const key of ["\x1b", "\t", "\x1b[Z", "\x1b[9u"]) {
       expect(f.picker.handleInput(key)).toBe("back");
       expect(f.state.selected).toEqual([]);
@@ -304,7 +334,7 @@ describe("inline Unsent preferences", () => {
   it("recovers its cursor after End on an empty or loading library and enforces the item limit", async () => {
     const f = fixture();
     f.picker.handleInput("\x1b[F"); // Before the initial asynchronous load settles.
-    await Promise.resolve(); expect(f.text()).toContain("› [ ] Keep");
+    await Promise.resolve(); expect(f.text()).toContain("› [ ] Rewrite");
     f.picker.handleInput(" "); expect(f.state.selected).toHaveLength(1);
     f.state.selected = Array.from({ length: 50 }, (_, index) => selectPreference({ ...first, id: `selected-${index}`, body: `Body ${index}` }));
     f.picker.handleInput(" ");

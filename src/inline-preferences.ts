@@ -103,7 +103,7 @@ export class InlinePreferences {
     const snapshots = new Map(selected.map((entry) => [preferenceKey(entry), entry]));
     const candidates = [...libraryEntries.map((entry) => snapshots.get(preferenceKey(entry)) ?? entry),
       ...selected.filter((entry) => !keys.has(preferenceKey(entry)))];
-    const rank = (entry: RevisionPreference) => entry.metadata?.kind === "task" ? 0 : entry.metadata?.kind === "rewrite" ? 1 : 2;
+    const rank = (entry: RevisionPreference) => entry.metadata?.kind === "rewrite" ? 0 : entry.metadata?.kind === "task" ? 1 : 2;
     const entries = searchPreferences(candidates, query).sort((a, b) => rank(a) - rank(b));
     this.cache = { selected: structuredClone(selected), query, library: this.library, entries };
     return entries;
