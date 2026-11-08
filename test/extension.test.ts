@@ -840,12 +840,12 @@ describe("explicit candidate revision", () => {
     const original = "  Explain this literal task; do not run commands.\n";
     h.setEditorText(original); h.holdPanel(); let view = shortcut(h, "ctrl+\\")(h.context);
     const output = () => h.panelLines(100).join("\n");
-    h.panelInput("\x1b[Z");
+    h.panelInput("\t");
     await vi.waitFor(() => expect(output()).toContain("[ ] Inline 中文😀"));
     h.panelInput(" ");
     expect(output()).toContain("[x] Inline 中文😀");
     expect(output()).not.toContain("Bring back");
-    h.panelInput("\r"); expect(output()).toContain(entry.body);
+    h.panelInput("o"); expect(output()).toContain(entry.body);
     for (const key of ["\x13", "\r", "p", "i", "f"]) h.panelInput(key);
     expect(h.complete).not.toHaveBeenCalled();
     expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
@@ -853,7 +853,7 @@ describe("explicit candidate revision", () => {
     await store.save("project", { name: "Changed", body: "Do not replace the captured body." }, entry);
     view = h.command("", h.context);
     expect(output()).toContain("Preferences · 1 selected");
-    h.panelInput("\r"); await flushPromises();
+    h.panelInput("\t"); h.panelInput("\r"); await flushPromises();
     expect(h.complete).toHaveBeenCalledTimes(1);
     const packet = JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
     expect(packet).toMatchObject({ draft: original, editing_instruction: `Saved editing requirements (manually selected):\n${entry.body}` });
@@ -923,7 +923,7 @@ describe("explicit candidate revision", () => {
       else expect(output()).toContain("! Cached 中文😀");
     });
     if (change !== "add") {
-      h.panelInput("\r");
+      h.panelInput("o");
       expect(output()).toContain(change === "edit" ? "Source changed" : "Source deleted");
       expect(output()).toContain(entry.body); // Adopted snapshot was not silently replaced.
       if (change === "edit") {

@@ -182,6 +182,17 @@ export class TaskPanel {
     return !this.usage && !this.referenceOnly && !this.inspecting && this.canChoosePreferences(row) &&
       this.actions.inlinePreferences?.available(row!.record.id) ? this.actions.inlinePreferences : undefined;
   }
+  private runOriginal(row: Row): void {
+    this.actions.run(row.record.id);
+    // Failed starts retain the original and focus. Successful starts follow only
+    // this explicit target, never whichever candidate completed in the meantime.
+    const started = this.entries().find((item) => !item.original && item.record.id === row.record.id);
+    if (started) {
+      this.preferenceFocus = false; this.reading = false;
+      this.actions.inlinePreferences?.setTarget(undefined, false);
+      this.select(started);
+    }
+  }
   private preferenceSummary(record: RefineRecord): string {
     const selected = record.input.preferences ?? [];
     return `Preferences: ${selected.length ? `${selected.length} · ${selected.map((entry) => entry.name).join(", ")}` : "None"}`;
@@ -221,10 +232,8 @@ export class TaskPanel {
       this.setNotice("Original changed or already started; no selection applied.", "warning");
       return true;
     }
-    if (inline && (key === "tab" || key === "shift+tab")) {
-      const focus = this.preferenceFocus ? 2 : this.reading ? 1 : 0;
-      const next = (focus + (key === "tab" ? 1 : 2)) % 3;
-      this.preferenceFocus = next === 2; this.reading = next === 1;
+    if (inline && (key === "tab" || key === "shift+tab") && (!this.preferenceFocus || inline.hints === "select")) {
+      this.preferenceFocus = !this.preferenceFocus; this.reading = false;
       inline.setTarget(inlineRow!.record.id, this.preferenceFocus);
       return true;
     }
@@ -235,7 +244,12 @@ export class TaskPanel {
         const action = inline.handleInput(data);
         if (action === "back") { this.preferenceFocus = false; this.reading = false; inline.setTarget(inlineRow!.record.id, false); }
         else if (action === "manage") this.actions.preferences?.(inlineRow!.record.id, true);
+        else if (action === "submit") this.runOriginal(inlineRow!);
       }
+      return true;
+    }
+    if (inline && key === "o") {
+      this.reading = !this.reading;
       return true;
     }
     if (key === "?" || (key === "b" && this.usage && this.actions.historyStorage)) {
@@ -265,14 +279,12 @@ export class TaskPanel {
       if (this.compareId !== undefined && row) {
         const other = this.entries(this.retainedEarlier).find((item) => !item.original && item.record.id === this.compareId);
         if (other) { this.compareId = row.record.id; this.select(other); }
-      } else if (!this.inspecting) this.reading = !this.reading;
+      } else if (!this.inspecting && !this.retainedEarlier) this.reading = !this.reading;
       return true;
     }
     if (this.keys.matches(data, "tui.select.confirm")) {
-      if (row?.original && row.record.status === "unsent" && row.record.archivedAt === undefined && !this.inspecting) {
-        this.actions.run(row.record.id);
-        // Only explicit submission moves focus; failed starts and background updates do not.
-        this.select(this.entries().find((item) => !item.original && item.record.id === row.record.id));
+      if (row?.original && row.record.status === "unsent" && (this.usage || row.record.archivedAt === undefined) && !this.inspecting) {
+        this.runOriginal(row);
       } else if (row) { this.inspecting = true; this.reading = true; }
       return true;
     }
@@ -609,8 +621,8 @@ export class TaskPanel {
       const expansion = this.expansionHint?.();
       if (expansion) hints.push(expansion);
       const inline = this.inline(row);
-      if (!this.inspecting) hints.push(["Enter", row?.original && row.record.status === "unsent" ? "Run from original focus" : "Inspect"], ["Tab", inline ? "List / Read / Preferences" : this.reading ? "Select" : "Read"], ["n", "New"]);
-      if (inline) hints.push(["Shift+Tab", "Choose inline preferences from list"], ["Space", "Toggle at Preferences focus; saved immediately"], ["Enter", "Read at Preferences focus; never starts a run"], ["/", "Search at Preferences focus"]);
+      if (!this.inspecting) hints.push(["Enter", row?.original && row.record.status === "unsent" && (this.usage || row.record.archivedAt === undefined) ? "Optimize from original focus" : "Inspect"], ...(!this.retainedEarlier ? [["Tab", inline ? "List / Preferences" : this.reading ? "Select" : "Read"] as KeyHint] : []), ["n", "New"]);
+      if (inline) hints.push(["Tab / Shift+Tab", "Choose inline preferences directly"], ["Space", "Toggle at Preferences focus; saved immediately"], ["Enter", "Optimize this Unsent at Preferences focus; search/read never submit"], ["o", "Read original or full preference at its focus"], ["/", "Search at Preferences focus"]);
       if (this.canOpenPreferences()) hints.push(["p", inline ? "Manage / more; Alt+Enter brings back child changes" : "Preferences"]);
       if (row) {
         hints.push(["i", row.record.input.contextUnavailable ? "Copy to current" : "Edit original"]);
@@ -711,10 +723,10 @@ export class TaskPanel {
     }
     if (inline && this.preferenceFocus) {
       const mode = inline.hints;
-      const primary: KeyHint[] = mode === "search" ? [["Esc", "Finish search"], ["Enter", "Choose"]]
-        : mode === "read" ? [["Esc", "Back to preferences"], ["↑↓", "Scroll"]]
-        : [["Esc", "Back"], ["Space", "Toggle"], ["Enter", "Read"], ["↑↓", "Choose"]];
-      const secondary: KeyHint[] = mode === "select" ? [["Tab / Shift+Tab", "Focus"], ["/", "Search"], ["p", "Manage / more"]] : [["Tab / Shift+Tab", "Focus"]];
+      const primary: KeyHint[] = mode === "search" ? [["Esc", layout.innerWidth < 40 ? "Back" : "Finish search"], ["Enter", "Choose"]]
+        : mode === "read" ? [["Esc", layout.innerWidth < 40 ? "Back" : "Back to preferences"], ["↑↓", "Scroll"]]
+        : [["Esc", "Back"], [layout.innerWidth < 40 ? "↵" : "Enter", "Optimize"], ["Space", "Toggle"]];
+      const secondary: KeyHint[] = mode === "select" ? [["o", "Read"], ["↑↓", "Choose"], ["/", "Search"], ["p", "Manage / more"], ["Tab", "Focus"]] : [];
       const expansion = this.canExpand() && this.expansionHint?.();
       if (expansion) secondary.push(expansion);
       const footer = layout.footerHeight === 1
@@ -722,14 +734,14 @@ export class TaskPanel {
         : layout.innerWidth < 40
           ? [fittingKeyHints(primary.slice(1), layout.innerWidth, this.theme), fittingKeyHints([primary[0]!, ...secondary], layout.innerWidth, this.theme)]
           : alignedKeyHints([primary, secondary], layout.innerWidth, this.theme);
-      return panelFrame(layout, [this.heading("Prompt refine · Tasks"), this.muted(`Focus: Preferences${mode === "select" ? " · Changes saved to this Unsent; not run" : mode === "search" ? " · Search" : " · Read-only"}`)],
+      return panelFrame(layout, [this.heading("Prompt refine · Tasks"), this.muted(`Focus: Preferences${mode === "select" ? " · Changes saved to this Unsent; Enter optimizes" : mode === "search" ? " · Search" : " · Read-only"}`)],
         [...tabs, ...body], footer, (text) => this.muted(text));
     }
-    const action = !this.inspecting && selected?.original && selected.record.status === "unsent" && selected.record.archivedAt === undefined ? "Run" : "Inspect";
+    const action = !this.inspecting && selected?.original && selected.record.status === "unsent" && (this.usage || selected.record.archivedAt === undefined) ? "Optimize" : "Inspect";
     const restored = selected?.record.input.contextUnavailable;
     const primary: KeyHint[] = this.inspecting ? [["i", restored ? "Copy to current" : "Edit original"], ...(!restored ? [["m", "Run model"] as const] : [])]
       : [["Enter", action], ["i", restored ? "Copy to current" : "Edit original"], ["n", "New"], ...(!restored ? [["m", selected ? "Run model" : "Model"] as const] : [])];
-    if (inline) primary.splice(1, 0, [this.reading ? "Tab" : "Shift+Tab", layout.innerWidth < 56 ? "Preferences" : "Choose preferences"]);
+    if (inline) primary.splice(1, 0, ["Tab", layout.innerWidth < 56 ? "Preferences" : "Choose preferences"]);
     if (this.canOpenPreferences()) primary.splice(this.inspecting ? 0 : inline ? 2 : 1, 0, ["p", inline ? "Manage / more" : "Preferences"]);
     if (selected && !selected.original && pending(selected.record)) primary.unshift(["x", "Stop"]);
     if (selected && !selected.original && selected.record.candidate) {
@@ -738,8 +750,8 @@ export class TaskPanel {
     }
     if (selected && this.actions.deleteRecords) primary.push(["d", "Delete"]);
     // Reserve both focus labels so Tab never shifts columns or changes which hints fit.
-    const focusAction = inline ? (this.reading ? "Preferences" : "Read") : (this.reading ? "Select" : "Read").padEnd("Select".length);
-    const secondary: KeyHint[] = [["Esc", "Back"], ["?", layout.innerWidth < 56 ? "Help" : "Actions"], ...(this.usage && this.actions.historyStorage ? [["b", "Storage"] as const] : []), ...(!this.inspecting && selected && !selected.original && selected.record.candidate && !restored && this.actions.revise ? [["f", "Revise"] as KeyHint] : []), ...(previewDetails ? [["o", this.original ? "Result" : "Reference"] as KeyHint] : []), ...(other || !this.inspecting ? [["Tab", other ? "Switch result" : focusAction] as KeyHint] : [])];
+    const focusAction = (this.reading ? "Select" : "Read").padEnd("Select".length);
+    const secondary: KeyHint[] = [["Esc", "Back"], ["?", layout.innerWidth < 56 ? "Help" : "Actions"], ...(this.usage && this.actions.historyStorage ? [["b", "Storage"] as const] : []), ...(!this.inspecting && selected && !selected.original && selected.record.candidate && !restored && this.actions.revise ? [["f", "Revise"] as KeyHint] : []), ...(previewDetails ? [["o", this.original ? "Result" : "Reference"] as KeyHint] : []), ...(inline ? [["o", this.reading ? "Select" : "Read original"] as KeyHint] : other || (!this.inspecting && !this.retainedEarlier) ? [["Tab", other ? "Switch result" : focusAction] as KeyHint] : [])];
     if (this.inspecting && selected && !selected.original && selected.record.candidate) {
       secondary.push(...(selected.records.some((record) => record.id !== selected.record.id && record.candidate) ? [["c", other ? "Next comparison" : "Compare"] as KeyHint] : []), ["e", "Edit result"], ...(!restored ? [["f", "Revise"] as const] : []));
     }
@@ -753,7 +765,7 @@ export class TaskPanel {
     const title = this.inspecting ? (other ? "Compare results" : "Prompt details") : this.usage ? "Usage · All rounds" : "Prompt refine · Tasks";
     const feedback = this.notice ? this.theme.fg(this.noticeColor, sanitizeTerminalText(this.notice)) : "";
     const subtitle = this.referenceOnly ? this.muted("Read-only reference") : this.notice ? feedback : this.retainedEarlier
-      ? this.muted(layout.innerWidth < 32 ? "Earlier · Usage →" : layout.innerWidth < 72
+      ? this.muted(layout.innerWidth < 32 ? "Earlier → Usage" : layout.innerWidth < 72
         ? "Earlier · Usage → · Esc current" : "Earlier · kept open · Esc returns to current · History in Usage →") : this.inspecting
       ? (selected && !selected.original
         ? this.muted("Selected: ") + this.heading(`#${selected.record.id} ${selected.record.input.model.id}`)
@@ -765,15 +777,24 @@ export class TaskPanel {
         + formatKeyHint(["↑↓", this.reading ? "scroll" : "select"], this.theme) + this.muted(` · Run: ${this.actions.launchModel?.() ?? "selected model"}`);
     const earlier = this.usage ? [] : this.actions.records().filter((record) => record.archivedAt !== undefined);
     const earlierPending = earlier.filter(pending).length;
+    const earlierCount = new Set(earlier.map((record) => record.taskId)).size;
+    const earlierLabel = `${earlierCount} earlier prompt${earlierCount === 1 ? "" : "s"}`;
     const historyHint = layout.innerWidth < 32 ? "History → Usage"
-      : layout.innerWidth < 72 ? `History → Usage · ${earlierPending ? `${earlierPending} active` : `${new Set(earlier.map((record) => record.taskId)).size} earlier prompts`}`
-      : `Current round · History → Usage · ${new Set(earlier.map((record) => record.taskId)).size} earlier prompts${earlierPending ? ` · ${earlierPending} running / queued` : ""}`;
+      : layout.innerWidth < 72 ? `History → Usage · ${earlierPending ? `${earlierPending} active` : earlierLabel}`
+      : `Current round · History → Usage · ${earlierPending ? `${earlierPending} running / queued · ` : ""}${earlierLabel}`;
     const showHistoryHint = earlier.length > 0 && !this.retainedEarlier && !this.notice && !this.inspecting && !this.referenceOnly;
-    const header = [this.heading(title), showHistoryHint ? this.muted(historyHint) : subtitle];
+    // Keep launch-model metadata and the selected run identity visible: history
+    // navigation shares the title, not their subtitle or the result body.
+    const identity = this.retainedEarlier && selected && !selected.original
+      ? this.muted(" · ") + this.heading(`#${selected.record.id} ${selected.record.input.model.id}`) : "";
+    const header = [showHistoryHint
+      ? (layout.innerWidth >= 72 ? this.heading(title) + this.muted(` · ${historyHint}`) : this.muted(historyHint))
+      : this.heading(title) + identity, subtitle];
     const historyStatus = this.retainedEarlier || showHistoryHint;
     if (historyStatus && layout.headerHeight < 2 && !this.notice) {
-      if (layout.headerHeight === 1) header[0] = header[1]!;
-      else body = [header[1]!, ...body];
+      const status = showHistoryHint ? this.muted(historyHint) : subtitle;
+      if (layout.headerHeight === 1) header[0] = status;
+      else body = [status, ...body];
     }
     if (!inline && !this.notice && !this.referenceOnly && this.canChoosePreferences(selected)) {
       const summary = this.muted(this.preferenceSummary(selected!.record));

@@ -35,6 +35,7 @@ describe("original and checklist geometry", () => {
       expect(run).not.toHaveBeenCalled();
       panel.render(100); await Promise.resolve();
       for (const width of [100, 80, 100]) {
+        panel.handleInput("\x1b");
         const frame = panel.render(width);
         const lines = plain(frame);
         const original = lines.findIndex((line) => line.split(" │ ")[1]?.includes("Original 中文😀"));
@@ -54,11 +55,11 @@ describe("original and checklist geometry", () => {
       record.input.draft = Array.from({ length: 60 }, (_, i) => `Original line ${i} 中文😀`).join("\n");
       const initial = plain(panel.render(100));
       expect(initial.join("\n")).toContain("Preferences ·");
-      panel.handleInput("\t"); panel.handleInput("\x1b[6~");
+      panel.handleInput("\x1b"); panel.handleInput("o"); panel.handleInput("\x1b[6~");
       expect(plain(panel.render(100)).join("\n")).not.toContain("Original line 0 中文😀");
       expect(checklistRow(panel.render(100))).toBe(checklistRow(initial));
       const scroll = position.scroll;
-      panel.handleInput("\t"); panel.handleInput("\r");
+      panel.handleInput("\t"); panel.handleInput("o");
       expect(plain(panel.render(100)).join("\n")).toContain("Library entry");
       panel.handleInput("\x1b"); panel.render(100);
       expect(position.scroll).toBe(scroll);

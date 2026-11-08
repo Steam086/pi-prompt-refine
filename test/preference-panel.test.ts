@@ -952,12 +952,12 @@ describe("preference rendering and responsiveness", () => {
   });
 });
 
-function unsentWorkspaceSetup(key: KeyId | null = "alt+p", conflict = false, theme = "dark", maxChars = 16000) {
+function unsentWorkspaceSetup(key: KeyId | null = "alt+p", conflict = false, theme = "dark", maxChars = 16000, maxConcurrent = 4) {
   const f = setup([], "", theme); f.panel.dispose();
   if (conflict) f.keys.setUserBindings({ "tui.editor.cursorLineEnd": "alt+p" });
   const complete = vi.fn(async (_request: unknown) => ({ text: "Result", stopReason: "stop" as const }));
   const model = { provider: "p", id: "m" };
-  const controller = new RefineController({ complete, maxDraftChars: maxChars, timeoutMs: 1000, onState() {} }, model);
+  const controller = new RefineController({ complete, maxDraftChars: maxChars, maxConcurrent, timeoutMs: 1000, onState() {} }, model);
   controller.setSession("s");
   for (const draft of ["Original task 中文😀 --literal", "Second original"]) controller.createDraft({ draft, model,
     sessionId: "s", branchLeafId: null, systemPrompt: "Policy", history: selectHistory([], 0, 0) });
@@ -986,10 +986,10 @@ function unsentWorkspaceSetup(key: KeyId | null = "alt+p", conflict = false, the
 }
 
 describe("Unsent preference selection", () => {
-  it.each(["dark", "light"])("selects inline without a child or bring-back, and only runs from the original (%s)", async (theme) => {
+  it.each(["dark", "light"])("selects inline with one Tab and optimizes directly with Enter (%s)", async (theme) => {
     const f = unsentWorkspaceSetup(null, false, theme); const w = f.workspace;
     text(w); await vi.waitFor(() => expect(text(w)).toContain(`[ ] ${a.name}`));
-    w.handleInput(backTab);
+    w.handleInput(tab);
     expect(text(w)).toContain("Focus: Preferences");
     expect(text(w)).not.toContain("Bring back");
     w.handleInput(" "); w.handleInput(down); w.handleInput("\x1b[32u");
@@ -999,14 +999,14 @@ describe("Unsent preference selection", () => {
     expect(styled).toContain(f.theme.fg("text", f.theme.bold(b.name)));
     expect(styled).toContain(formatKeyHint(["Space", "Toggle"], f.theme));
     expect(styled).toContain(f.theme.fg("muted", " · P"));
-    w.handleInput(enter); expect(text(w)).toContain(b.body);
+    w.handleInput("o"); expect(text(w)).toContain(b.body);
     for (const key of [" ", "i", "f", "n", ctrlS, bringBack, enter]) w.handleInput(key);
     expect(f.run).not.toHaveBeenCalled(); expect(f.complete).not.toHaveBeenCalled();
     expect(f.repo.save).not.toHaveBeenCalled();
-    w.handleInput(esc); w.handleInput(esc); // Close reading, then focus the original.
-    expect(text(w)).not.toContain("Focus: Preferences");
+    w.handleInput(esc); // Close reading, keeping preference selection focused.
+    expect(text(w)).toContain("Focus: Preferences");
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.draft).toBe(f.originals[0]!.input.draft);
-    w.handleInput(enter);
+    w.handleInput(theme === "dark" ? enter : "\x1b[13u");
     expect(f.run).toHaveBeenCalledExactlyOnceWith(f.originals[0]!.id);
     expect(f.complete.mock.calls[0]![0]).toMatchObject({ editingInstruction: composeRevision([selectPreference(a), selectPreference(b)], "") });
     await Promise.resolve(); w.dispose();
@@ -1023,7 +1023,7 @@ describe("Unsent preference selection", () => {
     expect(f.run).not.toHaveBeenCalled();
     w.handleInput(enter); w.handleInput(" ");
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(b)]);
-    w.handleInput(esc); w.handleInput(tab); w.handleInput(tab);
+    w.handleInput(esc); w.handleInput(tab);
     expect(text(w)).toContain("Search: Literal");
     expect(f.repo.load).toHaveBeenCalledTimes(loads);
     w.handleInput(esc);
@@ -1057,6 +1057,77 @@ describe("Unsent preference selection", () => {
       expect(lines.join("\n")).toContain(f.theme.fg("warning", "⚠").split("⚠")[0] + "⚠");
     }
     expect(f.complete).not.toHaveBeenCalled(); w.dispose();
+  });
+
+  it.each(["generating", "queued"])("follows a directly submitted %s run without resubmitting on the next Enter", async (status) => {
+    const f = unsentWorkspaceSetup(null, false, "dark", 16000, 1); const w = f.workspace;
+    f.complete.mockImplementation(() => new Promise(() => {}));
+    if (status === "queued") f.controller.startRecord(f.originals[1]!.id);
+    text(w); await vi.waitFor(() => expect(text(w)).toContain(a.name));
+    w.handleInput(tab); w.handleInput(" "); w.handleInput(enter);
+    expect(f.controller.getRecord(f.originals[0]!.id)!.status).toBe(status);
+    expect(f.position.selectedTaskId).toBeUndefined();
+    expect(text(w)).not.toContain("Focus: Preferences");
+    w.handleInput(enter);
+    expect(f.run).toHaveBeenCalledExactlyOnceWith(f.originals[0]!.id);
+    w.dispose(); f.controller.setSession("other");
+  });
+
+  it("retains checked preferences and focus after a rejected start, then follows only the explicitly started run", async () => {
+    const f = unsentWorkspaceSetup(); const w = f.workspace;
+    text(w); await vi.waitFor(() => expect(text(w)).toContain(a.name));
+    w.handleInput(tab); w.handleInput(" ");
+    f.run.mockImplementationOnce(() => {});
+    w.handleInput(enter);
+    expect(text(w)).toContain("Focus: Preferences");
+    expect(text(w)).toContain(`[x] ${a.name}`);
+    expect(f.position.selectedTaskId).toBe(f.originals[0]!.taskId);
+    expect(f.complete).not.toHaveBeenCalled();
+    w.handleInput(enter);
+    expect(f.run).toHaveBeenCalledTimes(2);
+    expect(text(w)).not.toContain("Focus: Preferences");
+    expect(f.position.selectedTaskId).toBeUndefined();
+    w.handleInput(enter); // The submitted run is inspected, never submitted twice.
+    expect(f.run).toHaveBeenCalledTimes(2);
+    expect(f.complete).toHaveBeenCalledTimes(1);
+    await Promise.resolve(); w.dispose();
+  });
+
+  it("consumes Enter after archival without running a new current target", async () => {
+    const f = unsentWorkspaceSetup(); const w = f.workspace;
+    text(w); await vi.waitFor(() => expect(text(w)).toContain(a.name));
+    w.handleInput(tab); w.handleInput(" ");
+    f.controller.onMessageStarted("Another Pi task");
+    f.controller.createDraft({ ...f.originals[0]!.input, draft: "New current target" });
+    text(w); w.handleInput(enter);
+    expect(text(w)).toContain("Original changed or already started");
+    expect(f.run).not.toHaveBeenCalled(); expect(f.complete).not.toHaveBeenCalled();
+    expect(f.position.selectedTaskId).toBe(f.originals[0]!.taskId);
+    w.dispose();
+  });
+
+  it("keeps search and full text isolated from submission and preserves explicit child bring-back", async () => {
+    const f = unsentWorkspaceSetup(); const w = f.workspace;
+    text(w); await vi.waitFor(() => expect(text(w)).toContain(a.name));
+    w.handleInput("o"); expect(text(w)).toContain("Original prompt");
+    w.handleInput(tab); w.handleInput("/"); w.handleInput(a.name);
+    for (const key of [tab, backTab, ctrlS]) w.handleInput(key);
+    expect(text(w)).toContain("Focus: Preferences · Search");
+    w.handleInput(enter);
+    expect(f.run).not.toHaveBeenCalled();
+    w.handleInput("o");
+    for (const key of [tab, backTab, enter, enter, ctrlS, bringBack]) w.handleInput(key);
+    expect(text(w)).toContain("Focus: Preferences · Read-only");
+    expect(f.run).not.toHaveBeenCalled();
+    w.handleInput(esc); w.handleInput("p"); await loaded(w);
+    w.handleInput(" "); w.handleInput(enter); w.handleInput(enter);
+    expect(f.run).not.toHaveBeenCalled();
+    w.handleInput(esc); w.handleInput(bringBack);
+    expect(f.run).not.toHaveBeenCalled();
+    expect(text(w)).toContain("Focus: Preferences");
+    w.handleInput(enter);
+    expect(f.run).toHaveBeenCalledExactlyOnceWith(f.originals[0]!.id);
+    await Promise.resolve(); w.dispose();
   });
 
   it("consumes the focused Enter if its Unsent starts elsewhere, rather than inspecting or running another item", async () => {
@@ -1159,7 +1230,11 @@ describe("Unsent preference selection", () => {
     expect(text(w)).toContain("Preferences · Unsent original");
     w.handleInput(" "); w.handleInput(bringBack);
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(a)]);
-    expect(f.complete).not.toHaveBeenCalled(); w.dispose();
+    expect(f.complete).not.toHaveBeenCalled();
+    w.handleInput(enter);
+    expect(f.run).toHaveBeenCalledExactlyOnceWith(f.originals[0]!.id);
+    expect(f.complete.mock.calls[0]![0]).toMatchObject({ roundId: f.originals[0]!.input.roundId });
+    await Promise.resolve(); w.dispose();
   });
 
   it("rejects bring-back if an editable original starts while the child is open", async () => {

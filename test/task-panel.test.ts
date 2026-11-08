@@ -409,6 +409,7 @@ describe("prompt tree and inspection", () => {
         if (width! >= 40) {
           expect(stripVTControlCharacters(frame.join("\n"))).toContain("Earlier");
           expect(stripVTControlCharacters(frame.join("\n"))).toContain("Result 1");
+          if (width! >= 100) expect(frame.join("\n")).toContain(f.theme.fg("text", f.theme.bold("#1 model-1")));
         }
       }
       f.records[1]!.candidate!.text = "Late old result";
@@ -428,6 +429,7 @@ describe("prompt tree and inspection", () => {
     const running: RefineRecord = { ...record(1), archivedAt: 1, status: "generating", candidate: undefined };
     const f = create("dark", false, [running, record(2, 2)]);
     expect(f.text()).toContain("1 running / queued");
+    expect(f.text()).toContain("Run: Default model");
     expect(f.text()).not.toContain("model-1");
     const usage = create("dark", true, f.records);
     usage.panel.handleInput("x");
@@ -464,7 +466,7 @@ describe("prompt tree and inspection", () => {
         expect(text).toContain("History");
       }
     }
-    expect(f.panel.render(100).join("\n")).toContain(f.theme.fg("muted", "Current round · History → Usage · 1 earlier prompts"));
+    expect(f.panel.render(100).join("\n")).toContain(f.theme.fg("muted", " · Current round · History → Usage · 1 earlier prompt"));
     const usage = create(name, true, f.records);
     expect(usage.text()).toContain("Current + history");
     usage.panel.handleInput("?");
