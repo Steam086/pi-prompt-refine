@@ -648,7 +648,7 @@ export class TaskPanel {
     page.scroll = Math.min(page.scroll, Math.max(0, lines.length - this.viewport));
     const footer = [fittingKeyHints([["Esc", "Back"], ["↑↓", "Scroll"]], layout.innerWidth, this.theme)];
     return panelFrame(layout, [this.heading(title), this.muted(`${page.scroll + 1}–${Math.min(lines.length, page.scroll + this.viewport)} / ${lines.length} lines`)],
-      lines.slice(page.scroll, page.scroll + this.viewport), footer, (text) => this.muted(text));
+      lines.slice(page.scroll, page.scroll + this.viewport), footer, (text) => this.muted(text), { footerAfterBodyRows: 0 });
   }
   /** Selection temporarily replaces the task tree; references never gain an action focus. */
   private renderPreferences(row: Row, inline: InlinePreferences, layout: PanelLayout, tabs: string[]): string[] {
@@ -712,7 +712,7 @@ export class TaskPanel {
       header[layout.headerHeight - 1] = formatKeyHint(submit, this.theme);
     }
     if (warning && layout.headerHeight > 0) header[layout.headerHeight - 1] = this.theme.fg("warning", sanitizeTerminalText(`⚠ ${warning}`));
-    return panelFrame(layout, header, [...tabs, ...body], footer, (text) => this.muted(text));
+    return panelFrame(layout, header, [...tabs, ...body], footer, (text) => this.muted(text), { footerAfterBodyRows: tabs.length });
   }
   render(width: number, _empty?: () => string[]): string[] {
     if (width < 1) return [];
@@ -723,7 +723,7 @@ export class TaskPanel {
         "\n\nRunning requests will be stopped; queued requests will be removed.\nThis removes Refine history. Pi editor and conversation stay unchanged.", layout.innerWidth);
       return panelFrame(layout, [this.heading("Delete request"), this.muted("Confirmation required")],
         body, [fittingKeyHints([["Esc / n", "Cancel"], ["y", "Delete"]], layout.innerWidth, this.theme)],
-        (text) => this.muted(text));
+        (text) => this.muted(text), { footerAfterBodyRows: 0 });
     }
     const tabs = workspaceTabs(layout, this.usage ? "Usage" : "Preview", this.theme, !this.referenceOnly && !this.preferenceFocus);
     const height = Math.max(1, layout.bodyHeight - tabs.length);
@@ -884,7 +884,10 @@ export class TaskPanel {
       if (layout.headerHeight === 1) header[0] = truncateToWidth(feedback, layout.innerWidth, "…");
       else body = [feedback, ...body];
     }
+    const visibleTabs = layout.headerHeight === 0 && (this.notice || historyStatus) ? [] : tabs;
+    // Retain source geometry in Revise, but hide actions while its editor owns focus.
     return panelFrame(layout, header,
-      [...(layout.headerHeight === 0 && (this.notice || historyStatus) ? [] : tabs), ...body], footer, (text) => this.muted(text));
+      [...visibleTabs, ...body], this.referenceOnly ? [] : footer, (text) => this.muted(text),
+      { footerAfterBodyRows: visibleTabs.length });
   }
 }

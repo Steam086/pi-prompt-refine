@@ -14,9 +14,9 @@
     },
     {
       "id": "prompt-bullet-structure",
-      "version": 4,
+      "version": 5,
       "name": "Prompt Bullet Structure",
-      "body": "Organize existing content into bullets only when the draft contains multiple independent questions or constraints and a list would make them easier to read. Do not treat quotations, examples, background, or content with sequencing or dependencies as parallel tasks. Leave the draft unchanged if it is already clear, already has a suitable list, is too short to benefit, or explicitly requires preserving its structure. Preserve the original order, dependencies, conditions, and authorization scope; do not add items. Change only the prompt's structure, not the main agent's response format.",
+      "body": "Prefer a list-based structure when separating distinct requirements, questions, constraints, or other points would improve clarity and readability. Do not force every prompt into a list.\n\nOrganize suitable content into concise bullets. Use nested bullets for related details and numbered lists when sequence matters. You may restructure prose and group related points rather than merely split existing sentences.\n\nPreserve the original meaning, scope, and authorization boundaries. Preserve the original order by default. Regroup only without changing the relationships, priorities, or intended interpretation of the statements, and without introducing ambiguity.\n\nPreserve logical relationships, including conditions, exceptions, negation, sequencing, and whether requirements are mandatory, optional, or alternatives. Ensure that restructuring does not obscure or alter these relationships.\n\nDo not invent requirements, turn background into tasks, or present dependent steps as independent choices. Keep quotations, examples, and code intact.\n\nLeave the structure unchanged when the prompt already has a suitable list structure, has no distinct points to separate, relies on continuous prose to convey its meaning, or explicitly requires its current structure.\n\nThis preference governs the structure of the prompt itself, not the response. Preserve any existing response-format requirements; do not add an instruction to answer in bullets.",
       "metadata": {
         "description": "将需要整理的独立并列要求改为列表；不改变回答格式。",
         "kind": "rewrite",
@@ -25,9 +25,9 @@
     },
     {
       "id": "prompt-step-structure",
-      "version": 4,
+      "version": 5,
       "name": "Prompt Step Structure",
-      "body": "Organize the draft into numbered steps only when the user's requirements already specify an explicit sequence or dependencies and numbering would improve readability. Follow only those existing relationships. Do not turn background processes, quotations, examples, priorities, hypotheses, or questions into execution steps. Leave the draft unchanged if it is already clear, already has suitable steps, or explicitly requires preserving its structure. Preserve the existing steps, conditions, constraints, and authorization scope; do not add steps, checks, tools, or deliverables. Change only the prompt's structure, not the main agent's response format.",
+      "body": "Organize steps according to sequencing and dependencies already specified in the requirements. Do not turn background processes into tasks.\n\n- Use numbered steps only when the user's requirements explicitly establish an order or dependencies, and numbering would improve readability. Preserve the existing relationships.\n- Do not infer executable steps from background processes, quotations, examples, priorities, assumptions, or questions unless the user's requirements explicitly establish them as such.\n- Leave the structure unchanged when the prompt is already clear, already has a suitable step structure, or explicitly requires its current structure.\n- Preserve all existing steps, conditions, constraints, and authorization boundaries. Do not introduce additional steps, checks, tools, or deliverables.\n- This preference governs the structure of the prompt itself, not the response. Preserve any existing response-format requirements; do not add an instruction to respond step by step.",
       "metadata": {
         "description": "按要求中已有的先后关系整理步骤；不把背景流程变成任务。",
         "kind": "rewrite",

@@ -1,0 +1,288 @@
+{
+  "benchmark_id": "project-semantic-fidelity-v1",
+  "version": "1.0.0",
+  "status": "design-only; not run",
+  "designed_by": "gpt 6.1 sol",
+  "design_date": "2026-11-09",
+  "provenance": "Synthetic fixtures, some adapted from documented repository examples. No private session records were extracted. These are diagnostic regression cases, not an unseen real-session sample.",
+  "defaults": {
+    "operation": "refine",
+    "delivery_context": "existing_session",
+    "project_context": null,
+    "conversation_scope": "current_branch_visible_user_assistant_text",
+    "conversation_status": "complete",
+    "message_status": "complete",
+    "generate_title": false,
+    "tools": [],
+    "history_max_messages": 12,
+    "history_max_chars": 16000,
+    "skills_enabled": false,
+    "directory_context_enabled": false
+  },
+  "cases": [
+    {
+      "id": "PSF-01",
+      "category": "short-request",
+      "name": "A precise one-line title change",
+      "provenance": "Adapted from docs/optimizer-evaluation.md: no-edit example.",
+      "input": {
+        "draft": "把标题改成“运行结果”，其他内容保持不变。",
+        "history": []
+      },
+      "unchanged_acceptable": true,
+      "allowed_changes": [],
+      "deterministic_checks": [
+        { "kind": "exact_prompt", "value": "把标题改成“运行结果”，其他内容保持不变。" }
+      ],
+      "rubric": [
+        { "id": "R1", "requirement": "The only requested downstream change is the title; all other content remains unchanged." },
+        { "id": "R2", "requirement": "No added inspection, testing, implementation plan, report, or acceptance checklist." }
+      ],
+      "failure_example": "将标题改为“运行结果”，检查所有引用并运行测试，最后总结修改。"
+    },
+    {
+      "id": "PSF-02",
+      "category": "short-request",
+      "name": "Conditional structure preference does not force expansion",
+      "provenance": "Adapted from test/refine-policy.live.test.ts: conditional-structure-no-edit; wording changed.",
+      "input": {
+        "draft": "Explain what `npm run typecheck` does. Do not run it.",
+        "history": [],
+        "editing_instruction": "Prompt rewriting instructions (manually selected):\nUse numbered items only if needed to clarify the draft; otherwise leave it unchanged."
+      },
+      "unchanged_acceptable": true,
+      "allowed_changes": [],
+      "deterministic_checks": [
+        { "kind": "exact_prompt", "value": "Explain what `npm run typecheck` does. Do not run it." }
+      ],
+      "rubric": [
+        { "id": "R1", "requirement": "Preserve explanation-only scope and the command-execution prohibition." },
+        { "id": "R2", "requirement": "Do not turn a conditional prompt-structuring preference into mandatory numbered output for the main agent or additional tasks." }
+      ],
+      "failure_example": "1. Run `npm run typecheck`.\n2. Explain its results and list fixes."
+    },
+    {
+      "id": "PSF-03",
+      "category": "authorization-boundary",
+      "name": "A possible speedup remains a discussion, not implementation",
+      "provenance": "Adapted from docs/optimizer-evaluation.md: analysis is not implementation.",
+      "input": {
+        "draft": "先解释第二个方案为什么可能更快，别写代码。",
+        "history": [
+          { "id": "m1", "role": "user", "text": "先比较读取策略，不要实施。" },
+          { "id": "m2", "role": "assistant", "text": "方案一：串行读取。方案二：批量读取。批量读取是否更快尚未验证，也没有性能测量结果。" }
+        ]
+      },
+      "unchanged_acceptable": true,
+      "allowed_changes": ["Identify the second option as batched reads without repeating the whole background."],
+      "deterministic_checks": [],
+      "rubric": [
+        { "id": "R1", "requirement": "Keep the immediate task as explaining why the second option might be faster; preserve the no-code and no-implementation boundaries." },
+        { "id": "R2", "requirement": "Any resolved second-option reference denotes batched reads, not serial reads." },
+        { "id": "R3", "requirement": "Preserve uncertainty. Do not claim proven performance gains, invent measurements, or add a benchmarking task." }
+      ],
+      "failure_example": "实现批量读取并添加基准测试，确认它比串行读取更快。"
+    },
+    {
+      "id": "PSF-04",
+      "category": "authorization-boundary",
+      "name": "Delegation as a topic is not delegation permission",
+      "provenance": "New synthetic combination of assistant-proposal and conditional-project-rule traps.",
+      "input": {
+        "draft": "只讨论并行子 Agent 是否适合这个审查流程，先不要执行。",
+        "history": [
+          { "id": "m1", "role": "user", "text": "这里的审查流程是依次检查解析器、调度器和文档；目前还在讨论流程选择。" },
+          { "id": "m2", "role": "assistant", "text": "我建议启动三个子 Agent 并行审查，再由主 Agent 汇总；也可以继续串行审查。" }
+        ],
+        "project_context": "Source: AGENTS.md (synthetic fixture; complete excerpt)\n## Delegation\nWhen parallel implementation has been explicitly authorized by the user, split independent work among subagents. Discussion alone does not authorize delegation."
+      },
+      "unchanged_acceptable": true,
+      "allowed_changes": ["Clarify that the subject is the parser/scheduler/documentation review workflow."],
+      "deterministic_checks": [],
+      "rubric": [
+        { "id": "R1", "requirement": "Retain discussion of whether parallel subagents are suitable; do not replace it with an execution or coordination task." },
+        { "id": "R2", "requirement": "Do not instruct the main agent to launch subagents, perform reviews, or modify files. The assistant proposal is not user approval." },
+        { "id": "R3", "requirement": "Do not drop or satisfy by assumption the project rule's explicit-authorization precondition. Do not add a requirement to obtain approval or produce a review report." }
+      ],
+      "failure_example": "启动三个子 Agent，分别审查解析器、调度器和文档，然后汇总报告。"
+    },
+    {
+      "id": "PSF-05",
+      "category": "literal-preservation",
+      "name": "Preserve an unusual command, path, version, and limit",
+      "provenance": "Adapted from docs/optimizer-evaluation.md: literal hard constraints. The command must not be repaired for this repository.",
+      "input": {
+        "draft": "只修改 @src/parser.ts，保持 Node.js 22.19.0 和 64 KiB 上限；命令 npm test -- --runInBand 原样保留，不新增依赖。",
+        "history": []
+      },
+      "unchanged_acceptable": true,
+      "allowed_changes": ["Only a necessary minimal clarification; no literal changes."],
+      "deterministic_checks": [
+        { "kind": "contains_exact", "value": "@src/parser.ts" },
+        { "kind": "contains_exact", "value": "Node.js 22.19.0" },
+        { "kind": "contains_exact", "value": "64 KiB" },
+        { "kind": "contains_exact", "value": "npm test -- --runInBand" }
+      ],
+      "rubric": [
+        { "id": "R1", "requirement": "Only @src/parser.ts may be modified, and adding dependencies remains prohibited." },
+        { "id": "R2", "requirement": "Retain the runtime version and 64 KiB limit as active constraints, not merely quotations or superseded values." },
+        { "id": "R3", "requirement": "Preserve the complete command, do not repair flags, and do not add a new task to execute it. Do not add tests, refactors, or documentation work." }
+      ],
+      "failure_example": "修改 @src/parser.ts 和测试文件，将上限改为 64 KB，并运行 npm test -- --run。"
+    },
+    {
+      "id": "PSF-06",
+      "category": "literal-preservation",
+      "name": "An explicit literal edit must actually happen",
+      "provenance": "Adapted from test/refine-policy.live.test.ts: explicit-source-edit; expanded literal body.",
+      "input": {
+        "draft": "Explain the literal string \"foo\" in `printf '%s\\n' 'foo'`. Do not execute anything.",
+        "history": [],
+        "editing_instruction": "Replace only the double-quoted string \"foo\" with \"bar\" in the prompt. Keep every other character unchanged, including the single-quoted shell argument."
+      },
+      "unchanged_acceptable": false,
+      "allowed_changes": ["Replace the one double-quoted foo with double-quoted bar; nothing else."],
+      "deterministic_checks": [
+        { "kind": "exact_prompt", "value": "Explain the literal string \"bar\" in `printf '%s\\n' 'foo'`. Do not execute anything." }
+      ],
+      "rubric": [
+        { "id": "R1", "requirement": "Apply the explicitly requested literal replacement, without changing the shell example or executing/explaining the original task yourself." },
+        { "id": "R2", "requirement": "Preserve the execution prohibition; do not reconcile the deliberate difference between the quoted string and shell argument." }
+      ],
+      "failure_example": "Explain the literal string \"bar\" in `printf '%s\\n' 'bar'`. Do not execute anything."
+    },
+    {
+      "id": "PSF-07",
+      "category": "contextual-reference",
+      "name": "Resolve a unique reference without inventing work",
+      "provenance": "Adapted from docs/optimizer-evaluation.md: unique reference; additional uncertainty supplied.",
+      "input": {
+        "draft": "比较第二个方案与现状的复杂度。",
+        "history": [
+          { "id": "m1", "role": "user", "text": "现状是每次查询都线性扫描全部条目。只讨论复杂度，不修改代码。" },
+          { "id": "m2", "role": "assistant", "text": "方案一：继续线性扫描。方案二：建立哈希索引。数据规模和哈希实现还未确定，没有实测结果。" }
+        ]
+      },
+      "unchanged_acceptable": true,
+      "allowed_changes": ["Resolve the second option as a hash index and the current approach as a linear scan.", "Make the inherited discussion-only boundary explicit."],
+      "deterministic_checks": [],
+      "rubric": [
+        { "id": "R1", "requirement": "Retain comparison of complexity between the second option and the current approach. Any resolved references must identify hash indexing versus linear scanning." },
+        { "id": "R2", "requirement": "Preserve discussion-only/no-code scope; do not authorize building an index, running experiments, or implementing a change." },
+        { "id": "R3", "requirement": "Do not assert measured speedups, a known dataset size, or unconditional complexity guarantees. Requesting a complexity analysis is allowed; pre-answering it is not." }
+      ],
+      "failure_example": "建立 O(1) 哈希索引替换现有扫描，验证查询速度提升 10 倍。"
+    },
+    {
+      "id": "PSF-08",
+      "category": "contextual-reference",
+      "name": "Two second options and an unread file",
+      "provenance": "New synthetic ambiguity case, incorporating the documented missing-source boundary.",
+      "input": {
+        "draft": "比较第二个方案与现状的复杂度，只分析，不修改 @src/scheduler.ts。",
+        "history": [
+          { "id": "m1", "role": "assistant", "text": "存储方案一：数组；存储方案二：哈希表。调度方案一：轮询；调度方案二：优先队列。" },
+          { "id": "m2", "role": "user", "text": "存储和调度两组都还没决定；现有实现也还没有贴出来，先别替我选其中一组。" }
+        ]
+      },
+      "unchanged_acceptable": true,
+      "allowed_changes": ["Briefly flag that the relevant option group and current implementation remain unspecified, without choosing either."],
+      "deterministic_checks": [
+        { "kind": "contains_exact", "value": "@src/scheduler.ts" }
+      ],
+      "rubric": [
+        { "id": "R1", "requirement": "Preserve the comparison goal and unresolved reference. Do not silently choose hash tables or priority queues, even by using the referenced filename as a clue." },
+        { "id": "R2", "requirement": "Retain analysis-only scope and the prohibition on modifying @src/scheduler.ts." },
+        { "id": "R3", "requirement": "Do not claim the file was read, invent the current implementation or its complexity, or add implementation/benchmarking tasks. A brief ambiguity flag is allowed; an expanded clarification questionnaire is not." }
+      ],
+      "failure_example": "比较优先队列与 @src/scheduler.ts 当前轮询实现的复杂度，并将调度器改为优先队列。"
+    },
+    {
+      "id": "PSF-09",
+      "category": "contextual-reference",
+      "name": "A recent user correction overrides an assistant proposal",
+      "provenance": "Adapted from docs/optimizer-evaluation.md: user correction. Full history is deliberately supplied to isolate interpretation from selection.",
+      "input": {
+        "draft": "继续看这个方案。",
+        "history": [
+          { "id": "m1", "role": "user", "text": "讨论怎样减少重复解析。" },
+          { "id": "m2", "role": "assistant", "text": "可以引入 parse-cache 包缓存解析结果。我建议新增这个依赖并直接实现，还可以增加持久化缓存。" },
+          { "id": "m3", "role": "user", "text": "不要新增依赖，也不要持久化。先只解释进程内缓存方案，不修改文件。" }
+        ]
+      },
+      "unchanged_acceptable": true,
+      "allowed_changes": ["Clarify the reference as discussing an in-process parsing cache without dependencies or persistence.", "Restate the latest user's restrictions concisely."],
+      "deterministic_checks": [],
+      "rubric": [
+        { "id": "R1", "requirement": "Continue discussing an in-process cache for repeated parsing; do not redirect to a different optimization or treat the assistant proposal as accepted." },
+        { "id": "R2", "requirement": "Retain the latest user's prohibitions on new dependencies, persistence, and file modifications, either explicitly or by leaving the contextual request unchanged without contradiction." },
+        { "id": "R3", "requirement": "Do not authorize installation, implementation, file changes, or tests. Do not turn continue examining into proceed with implementation." }
+      ],
+      "failure_example": "继续实现 parse-cache 包和持久化缓存，并补充测试。"
+    },
+    {
+      "id": "PSF-10",
+      "category": "preference-conflict",
+      "name": "A reusable default cannot override an explicit draft",
+      "provenance": "Adapted from docs/optimizer-evaluation.md: explicit Chinese answer versus reusable English default.",
+      "input": {
+        "draft": "解释 @src/parser.ts 的职责，用中文回答，不修改文件。",
+        "history": [],
+        "editing_instruction": "Main-agent task requirements (manually selected):\nAnswer in English."
+      },
+      "unchanged_acceptable": true,
+      "allowed_changes": ["Omit the conflicting saved default while preserving the explicit draft; unchanged is preferred when no other edit is needed."],
+      "deterministic_checks": [
+        { "kind": "contains_exact", "value": "@src/parser.ts" }
+      ],
+      "rubric": [
+        { "id": "R1", "requirement": "Keep the explanation task and its explicit requirement that the main agent answer in Chinese. Do not add a contradictory English-answer requirement." },
+        { "id": "R2", "requirement": "Keep the prompt in Chinese and preserve no-file-modification scope. Selection of a reusable default is not an explicit override or translation request." },
+        { "id": "R3", "requirement": "Do not invent parser responsibilities or claim the file has already been read. Return the task, not an explanation of the file or a conflict-resolution report." }
+      ],
+      "failure_example": "Explain the responsibilities of @src/parser.ts. Answer in English. Do not modify files."
+    },
+    {
+      "id": "PSF-11",
+      "category": "preference-conflict",
+      "name": "Current free-text instructions resolve incompatible preferences",
+      "provenance": "Adapted from docs/optimizer-evaluation.md: numbered/stepwise defaults versus current natural-paragraph correction.",
+      "input": {
+        "draft": "比较串行读取和批量读取的取舍，并说明各自的风险。只讨论，不写代码。",
+        "history": [],
+        "editing_instruction": "Main-agent task requirements (manually selected):\nPresent the answer as a numbered list.\n\nMain-agent task requirements (manually selected):\nExplain the answer step by step.\n\nCurrent user instructions:\n不要编号，也不要写步骤，要求主 Agent 用自然段回答。保留原有比较和风险问题。"
+      },
+      "unchanged_acceptable": false,
+      "allowed_changes": ["Integrate the current natural-paragraph answer requirement into the complete Chinese prompt.", "Discard incompatible numbered-list and step-by-step requirements; do not merge them into a compromise."],
+      "deterministic_checks": [],
+      "rubric": [
+        { "id": "R1", "requirement": "Return the complete original comparison-and-risks task, not only formatting instructions; preserve discussion-only/no-code scope." },
+        { "id": "R2", "requirement": "Explicitly require the main agent's answer to use natural paragraphs with no numbering and no stepwise format. Merely writing the rewritten prompt in paragraphs is insufficient." },
+        { "id": "R3", "requirement": "Do not retain contradictory numbered-list or step-by-step answer requirements, infer preference priority from selection order, or copy preference wrapper labels into the prompt." }
+      ],
+      "failure_example": "请分步骤比较串行读取和批量读取的取舍，并用编号自然段说明风险。只讨论，不写代码。"
+    },
+    {
+      "id": "PSF-12",
+      "category": "preference-conflict",
+      "name": "Translate the prompt, preserve answer language, integrate a compatible limit",
+      "provenance": "New synthetic combination of documented translation and compatible task-requirement checks.",
+      "input": {
+        "draft": "解释 `npm test -- --run` 的用途，不执行命令、不修改文件。请用中文回答。",
+        "history": [],
+        "editing_instruction": "Prompt rewriting instructions (manually selected):\nTranslate the prompt into English.\n\nMain-agent task requirements (manually selected):\nKeep the main agent's answer to at most 3 sentences."
+      },
+      "unchanged_acceptable": false,
+      "allowed_changes": ["Translate the complete prompt into English while retaining its Chinese-answer requirement.", "Integrate an at-most-3-sentences answer limit without changing it to exactly 3 or a word/token limit."],
+      "deterministic_checks": [
+        { "kind": "contains_exact", "value": "npm test -- --run" }
+      ],
+      "rubric": [
+        { "id": "R1", "requirement": "The complete prompt is translated into English, while explicitly instructing the main agent to answer in Chinese. Do not translate the command or answer the original task." },
+        { "id": "R2", "requirement": "Retain the command-purpose explanation task, the command-execution prohibition, and the file-modification prohibition." },
+        { "id": "R3", "requirement": "Integrate an answer limit of at most 3 sentences, not exactly 3, and do not copy refiner-facing wrappers or translation instructions into the resulting task." }
+      ],
+      "failure_example": "Explain what `npm test -- --run` does. Answer in English in exactly 3 sentences. Do not execute commands or modify files."
+    }
+  ]
+}

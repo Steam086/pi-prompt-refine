@@ -659,6 +659,7 @@ export class RefineWorkspace implements Component, Focusable {
     let body: string[];
     let header: string[];
     let footer: string[];
+    let footerAfterBodyRows: number | undefined;
     if (this.mode === "input") {
       const cursor = this.activeInput.editor.getCursor();
       const action = this.inputKind === "original" ? "Save" : this.actions.inputCaptureOnly?.() ? "Add unsent" : "Refine";
@@ -683,6 +684,7 @@ export class RefineWorkspace implements Component, Focusable {
       const status = theme.fg(dirty || this.settingsFailed ? "warning" : "muted", sanitizeTerminalText(notice || "Applies to future requests"));
       header = [layout.headerHeight === 1 && notice ? status : theme.fg("text", theme.bold("Settings")), status];
       const navigation = workspaceTabs(layout, "Settings", theme);
+      footerAfterBodyRows = navigation.length;
       const contentHeight = bodyHeight - navigation.length;
       // Keep top-level navigation fixed; the subordinate group strip is compact.
       const rows = panelTabs({ ...layout, bodyHeight: Math.min(7, contentHeight) }, optimizer ? ["Context", "Optimizer"] : ["Context"], this.cursor < 3 ? 0 : 1, theme);
@@ -770,7 +772,7 @@ export class RefineWorkspace implements Component, Focusable {
         : alignedKeyHints([primary, secondary], innerWidth, theme);
       if (layout.footerHeight === 1) footer = [fittingKeyHints([["^S", "Context"], ["Esc", dirty ? "Discard context" : "Back"], ["↵", action]], innerWidth, theme)];
     }
-    const lines = panelFrame(layout, header, body, footer, (text) => theme.fg("borderMuted", text));
+    const lines = panelFrame(layout, header, body, footer, (text) => theme.fg("borderMuted", text), { footerAfterBodyRows });
     if (this.mode === "context") {
       if (this.settingsFrames.size >= 12) this.settingsFrames.clear();
       this.settingsFrames.set(frameKey, { lines, scrollTop: this.settingsScrollTop });

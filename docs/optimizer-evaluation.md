@@ -1,6 +1,6 @@
 # Optimizer 首轮语义验收样例
 
-本轮自动测试验证输入选择、序列化、协议与生命周期；以下是供真实 Provider 验收的小型样例集，**尚未运行模型 A/B**，不应将模板字符串测试当作质量提升证据。没有唯一标准措辞；语义不变、原样返回也可以成功。
+自动测试验证输入选择、序列化、协议与生命周期；以下是供真实 Provider 验收的小型样例集，**整套样例尚未运行模型 A/B**，不应将模板字符串测试当作质量提升证据。首次 Refine 的保守策略已另做 [IFEval 小样本回归](experiments/ifeval-conservative-policy.md) 与六项显式编辑／保留实测，不代表本页全部场景通过。没有唯一标准措辞；语义不变、原样返回也可以成功。
 
 ## 样例与判定
 
@@ -34,9 +34,20 @@ printf '%s\n' '--- END CURRENT DRAFT ---'
 
 渐进式披露、`need_context`、文件补读及自动摘要均不属于本轮实现或验收要求。
 
+### 保守策略的显式编辑防退化检查
+
+`test/refine-policy.live.test.ts` 默认跳过，仅在显式开启时通过本地 Pi 凭据调用模型。六项合成样例检查清楚请求原样返回、条件式结构偏好不强制改写、翻译 prompt 不改变回答语言、明确修改引用字面量、整合兼容的任务要求，以及 Revise 的明确格式修改。它们不执行原任务，也不是 IFEval 下游分数；应结合保存的输出审查，不能据此宣称普遍保真。
+
+```sh
+REFINE_POLICY_LIVE=1 REFINE_POLICY_OUTPUT=/tmp/refine-policy.jsonl \
+  npm test -- test/refine-policy.live.test.ts
+```
+
+默认模型为 `openai-codex/gpt-6-luna`、thinking `high`；可用 `REFINE_POLICY_PROVIDER` 和 `REFINE_POLICY_MODEL` 指定本地已配置模型。输出追加到指定 JSONL，不重试失败断言；复测时使用新文件，避免混淆独立实验。
+
 ## Preferences 分类与组合验收
 
-以下新增样例仍需真实 Provider 语义验收；自动测试仅验证分类、组合和生命周期，不证明模型遵循效果。
+下表尚未完成全量真实 Provider 语义验收；上方六项实测仅覆盖部分场景。离线自动测试仅验证分类、组合和生命周期，不证明模型遵循效果。
 
 | 输入与已选要求 | 判定 |
 | --- | --- |
