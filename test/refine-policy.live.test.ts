@@ -9,7 +9,15 @@ import { buildRefineInput, buildRefineSystemPrompt, parseRefineOutput, selectHis
 // REFINE_POLICY_LIVE=1 REFINE_POLICY_OUTPUT=/tmp/refine-policy.jsonl npm test -- test/refine-policy.live.test.ts
 const command = "npm test -- --run";
 const clear = `Explain what \`${command}\` does. Do not execute it.`;
-const literal = 'Explain the literal string "foo". Do not execute anything.';
+const literal = 'Explain the literal string "foo" in `printf \'%s\\n\' \'foo\'`. Do not execute anything.';
+const paths = ["../src/context.ts:144:7", "./config/dev.json", "../../data/input.csv"];
+const url = "https://example.com/a%2Fb?q=Hello+World#L7";
+const configValue = "`Mode=Dev_01`";
+const pathDraft = `检查 ${paths[0]} 的引用，使用 ${paths[1]} 和 ${paths[2]}。参考 ${url}，配置值是 ${configValue}。只解释，不修改文件。`;
+// Intentionally invalid syntax, mixed indentation, Chinese comments, and trailing spaces.
+const codeBlock = ['```python', 'def Hello(User_Name)', '\t# 保留原注释  ', '    print("你好", User_Name)  ', '```'].join("\n");
+const codeDraft = `修复下面代码的语法错误，并解释修改原因：\n\n${codeBlock}`;
+const revisedPaths = pathDraft.replace(paths[0], "../src/context.ts:145:7");
 const cases = [
   { name: "clear-no-edit", draft: clear, instruction: undefined, revision: undefined,
     check: (text: string) => expect(text).toBe(clear) },
@@ -27,8 +35,43 @@ const cases = [
       expect(text).not.toMatch(/[\u3400-\u9fff]/u);
     } },
   { name: "explicit-source-edit", draft: literal,
-    instruction: 'Replace only the quoted string "foo" with "bar" in the prompt; keep every other character unchanged.',
+    instruction: 'Replace only the double-quoted string "foo" with "bar" in the prompt; keep every other character unchanged, including the shell example.',
     revision: undefined, check: (text: string) => expect(text).toBe(literal.replace('"foo"', '"bar"')) },
+  { name: "relative-paths-and-literal-values", draft: pathDraft,
+    instruction: "Improve clarity and structure where useful.", revision: undefined,
+    check: (text: string) => {
+      for (const value of [...paths, url, configValue]) expect(text).toContain(value);
+    } },
+  { name: "code-repair-is-main-agent-task", draft: codeDraft,
+    instruction: "Improve clarity and structure where useful.", revision: undefined,
+    check: (text: string) => {
+      expect(text).toContain(codeBlock);
+      expect(text).toMatch(/修复|修正|纠正/u);
+      expect(text).toMatch(/解释|说明/u);
+    } },
+  { name: "prompt-translation-keeps-code-and-comments", draft: codeDraft,
+    instruction: "Translate the prompt into English.", revision: undefined,
+    check: (text: string) => {
+      expect(text).toContain(codeBlock);
+      const surrounding = text.replace(codeBlock, "");
+      expect(surrounding).toMatch(/fix|correct|repair/i);
+      expect(surrounding).toMatch(/explain/i);
+      expect(surrounding).not.toMatch(/[\u3400-\u9fff]/u);
+    } },
+  { name: "revise-preserves-code", draft: codeDraft, instruction: undefined,
+    revision: { previousCandidate: codeDraft, instruction: "Improve the wording and structure where useful." },
+    check: (text: string) => expect(text).toContain(codeBlock) },
+  { name: "revise-preserves-authorized-path-edit", draft: pathDraft, instruction: undefined,
+    revision: { previousCandidate: revisedPaths, instruction: "Improve clarity where useful.",
+      previousInstruction: 'Replace only "../src/context.ts:144:7" with "../src/context.ts:145:7".' },
+    check: (text: string) => {
+      for (const value of ["../src/context.ts:145:7", ...paths.slice(1), url, configValue]) expect(text).toContain(value);
+      expect(text).not.toContain(paths[0]);
+    } },
+  { name: "revise-explicit-source-edit", draft: literal, instruction: undefined,
+    revision: { previousCandidate: literal,
+      instruction: 'Replace only the double-quoted string "foo" with "bar"; keep every other character unchanged, including the shell example.' },
+    check: (text: string) => expect(text).toBe(literal.replace('"foo"', '"bar"')) },
   { name: "compatible-task-requirement", draft: clear,
     instruction: "Main-agent task requirements (manually selected):\nAnswer in Chinese.", revision: undefined,
     check: (text: string) => {
