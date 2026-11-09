@@ -870,7 +870,7 @@ describe("native overlay workspace", () => {
           expect(h.panelLines(98).join("\n")).not.toContain(title);
           expect(h.complete).toHaveBeenCalledTimes(requests);
           expect(await readFile(join(h.agentDir, "prompt-refine.json"), "utf8")).toBe(before);
-          if (origin === "settings") expect(h.panelLines(98).join("\n")).toContain("Unsaved context changes");
+          if (origin === "settings") expect(h.panelLines(98).join("\n")).toContain("Unsaved settings changes");
           if (origin === "usage") expect(h.panelLines(98).join("\n")).toContain("Usage · All rounds");
           await input(open);
           expect(h.panelLines(98).join("\n")).toContain(title);
@@ -887,7 +887,7 @@ describe("native overlay workspace", () => {
           expect(h.editorWrites).toEqual([]);
           expect(h.sent).toEqual([]);
           if (origin === "settings") {
-            expect(h.panelLines(98).join("\n")).toContain("Unsaved context changes");
+            expect(h.panelLines(98).join("\n")).toContain("Unsaved settings changes");
             const saved = JSON.parse(await readFile(join(h.agentDir, "prompt-refine.json"), "utf8"));
             expect(saved.projectContext.instructionsEnabled).toBe(false);
           }
@@ -922,7 +922,7 @@ describe("native overlay workspace", () => {
     const view = h.command("view", h.context);
     h.panelInput("\x1b[D"); h.panelInput(" "); h.panelInput("\t"); h.panelInput("\r");
     await flushPromises();
-    expect(h.panelLines().join("\n")).toContain("Unsaved context changes");
+    expect(h.panelLines().join("\n")).toContain("Unsaved settings changes");
     expect(h.notifications.at(-1)).toContain("No authorized text-generation models");
     expect(h.customCalls()).toBe(1);
     h.panelInput("\x1b"); h.panelInput("q"); await view;
@@ -1594,7 +1594,7 @@ describe("explicit candidate revision", () => {
     harness.panelInput("\x1b[D");
     harness.panelInput(" "); // Disable project instructions for the next round.
     harness.panelInput("\x13");
-    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved"));
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Settings saved"));
     harness.panelInput("\r"); // Inspect the selected result before revising.
     harness.panelInput("f");
     harness.panelInput("Shorter");
@@ -1785,6 +1785,35 @@ describe("project context injection", () => {
     expect(input).not.toContain("target.ts");
   });
 
+  it.each(["references", "project"])("applies the Settings %s switch independently on the next round", async (disabled) => {
+    const harness = await makeHarness({ config: { projectContext: projectConfig(false) } });
+    await mkdir(join(harness.agentDir, "src"));
+    await writeFile(join(harness.agentDir, "src", "target.ts"), "");
+    vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
+    harness.setEditorText("Explain @src"); await trigger(harness);
+    await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledOnce());
+    const packet = (index: number) => JSON.parse((harness.complete.mock.calls[index] as any[])[1].messages[0].content[0].text);
+    expect(packet(0).project_context).toContain("target.ts");
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("\x1b[D");
+    for (let i = 0; i < (disabled === "project" ? 3 : 4); i++) harness.panelInput("\x1b[B");
+    harness.panelInput(" "); harness.panelInput("\x13");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Settings saved"));
+    harness.panelInput("q"); await view;
+    harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Sent" } }, harness.context);
+    harness.setEditorText("Explain @src again"); await trigger(harness);
+    await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(2));
+    const second = packet(1);
+    expect(second.project_context ?? "").not.toContain("target.ts");
+    expect(second.conversation.items).toHaveLength(2);
+    if (disabled === "project") expect(second.project_context).toBeNull();
+    else {
+      expect(second.project_context).toContain("Use the project venv.");
+      expect(second.project_context).toContain("Extract PDF tables");
+    }
+  });
+
   it("does not collect directories mentioned only in visible history", async () => {
     const harness = await makeHarness({ config: { projectContext: projectConfig(true) } });
     await mkdir(join(harness.agentDir, "src"));
@@ -1870,7 +1899,7 @@ describe("project context injection", () => {
       for (let i = 0; i < presses; i++) harness.panelInput(" ");
       expect(harness.panelLines().join("\n")).toMatch(new RegExp(`Project instructions +${mode}`));
       harness.panelInput("\x13");
-      await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved · Applies to next round"));
+      await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Settings saved · Context applies to next round"));
       harness.panelInput("q");
       await settings;
       const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
@@ -3030,7 +3059,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(settings[1]).toContain("Settings");
     expect(settings).toHaveLength(main.length);
     expect(settings[0]).toBe(main[0]);
-    const settingsHints = settings.findIndex((line) => line.includes("Ctrl+S Save context"));
+    const settingsHints = settings.findIndex((line) => line.includes("Ctrl+S Save settings"));
     expect(settingsHints).toBeGreaterThan(settings.findIndex((line) => line.includes("←")));
     expect(settings[settingsHints + 2]).toBe(main.at(-4));
     expect(settings.findIndex((line) => line.includes("Directory tree"))).toBeGreaterThan(settingsHints + 2);
@@ -3040,12 +3069,13 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\t");
     expect(harness.panelLines().join("\n")).toContain("Model");
     harness.panelInput("\t");
+    harness.panelInput("\t");
     expect(harness.panelLines()).toEqual(edited);
     harness.panelInput(back);
     await flushPromises();
     expect(harness.complete).not.toHaveBeenCalled();
     expect(harness.customCalls()).toBe(1);
-    expect(harness.panelLines().join("\n")).not.toContain("Unsaved context changes");
+    expect(harness.panelLines().join("\n")).not.toContain("Unsaved settings changes");
     expect(harness.panelLines().join("\n")).toContain("Prompt refine");
     harness.panelInput("q");
     await view;
@@ -3055,6 +3085,100 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(input).not.toContain("Use the project venv.");
     expect(input).not.toContain("PROJECT TREE");
     expect(input).not.toContain("Extract PDF tables");
+  });
+
+  it("saves all seven Settings additions and applies runtime limits without reload", async () => {
+    const harness = await makeHarness({ config: { projectContext: projectConfig(false) } });
+    vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
+    const file = join(harness.agentDir, "prompt-refine.json");
+    const before = await readFile(file, "utf8");
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    const down = (count: number) => { for (let i = 0; i < count; i++) harness.panelInput("\x1b[B"); };
+    const number = (text: string) => { harness.panelInput("\r"); harness.panelInput("\x15"); harness.panelInput(text); harness.panelInput("\r"); };
+    harness.panelInput("\x1b[D");
+    down(3); harness.panelInput(" "); // Project context off.
+    down(1); harness.panelInput(" "); // Explicit directory references off.
+    down(1); number("0");
+    down(1); number("9000");
+    harness.panelInput("\t"); down(3); number("4096");
+    down(1); number("120");
+    harness.panelInput("\t"); number("32");
+    expect(await readFile(file, "utf8")).toBe(before);
+    expect(harness.complete).not.toHaveBeenCalled();
+    expect(harness.customCalls()).toBe(1); // Numeric editors stay inside the same shell.
+    harness.panelInput("\x13");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Settings saved"));
+    const saved = JSON.parse(await readFile(file, "utf8"));
+    expect(saved).toMatchObject({ maxOutputTokens: 4096, timeoutMs: 120000, maxDraftChars: 32,
+      context: { maxMessages: 0, maxChars: 9000 }, projectContext: { enabled: false, referencedDirectories: { enabled: false, maxReferences: 8 } } });
+    harness.panelInput("q"); await view;
+    harness.setEditorText("x".repeat(33));
+    await trigger(harness);
+    expect(harness.complete).not.toHaveBeenCalled();
+    expect(harness.getEditor()).toBe("x".repeat(33));
+    expect(harness.notifications.join(" ")).toContain("exceeds 32 characters");
+    const timer = vi.spyOn(globalThis, "setTimeout");
+    try {
+      harness.setEditorText("x".repeat(32));
+      await trigger(harness);
+      expect(harness.complete).toHaveBeenCalledOnce();
+      expect(timer).toHaveBeenCalledWith(expect.any(Function), 120000);
+      const call = harness.complete.mock.calls[0] as any[];
+      expect(call[2].maxTokens).toBe(4096);
+      expect(JSON.parse(call[1].messages[0].content[0].text)).toMatchObject({ project_context: null, conversation: { items: [] } });
+    } finally { timer.mockRestore(); }
+    await harness.reload();
+    harness.setEditorText("Reloaded prompt");
+    await trigger(harness);
+    expect((harness.complete.mock.calls[1] as any[])[2].maxTokens).toBe(4096);
+    expect(harness.editorWrites).toEqual([]);
+    expect(harness.sent).toEqual([]);
+  });
+
+  it.each([5, 6])("freezes history settings until the next round (Context row %i)", async (row) => {
+    const harness = await makeHarness();
+    await trigger(harness);
+    const packet = (index: number) => JSON.parse((harness.complete.mock.calls[index] as any[])[1].messages[0].content[0].text);
+    const first = packet(0).conversation;
+    expect(first.items).toHaveLength(2);
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("\x1b[D");
+    for (let i = 0; i < row; i++) harness.panelInput("\x1b[B");
+    harness.panelInput("\r"); harness.panelInput("\x15"); harness.panelInput("0"); harness.panelInput("\r");
+    harness.panelInput("\x13");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Settings saved"));
+    harness.panelInput("q"); await view;
+    harness.setEditorText("Second draft in frozen round"); await trigger(harness);
+    expect(packet(1).conversation).toEqual(first);
+    harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Sent" } }, harness.context);
+    harness.setEditorText("Third draft in a new round"); await trigger(harness);
+    expect(packet(2).conversation.items).toEqual([]);
+  });
+
+  it("keeps running output limits unchanged when saving a smaller limit", async () => {
+    const harness = await makeHarness();
+    let resolve!: (response: any) => void;
+    harness.complete.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    await trigger(harness);
+    expect((harness.complete.mock.calls[0] as any[])[2].maxTokens).toBe(8192);
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    harness.panelInput("\x1b[D"); harness.panelInput("\t");
+    for (let i = 0; i < 3; i++) harness.panelInput("\x1b[B");
+    harness.panelInput("\r"); harness.panelInput("\x15"); harness.panelInput("16"); harness.panelInput("\r");
+    harness.panelInput("\x13");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Settings saved"));
+    const result = "x".repeat(20000); // Above the new character guard, within the old one.
+    resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: result }) }], stopReason: "stop" });
+    await flushPromises();
+    harness.panelInput("\x1b[B"); // Original root -> completed run.
+    harness.panelInput("a");
+    await vi.waitFor(() => expect(harness.getEditor(), harness.panelLines(100).join("\n")).toBe(result));
+    await view;
+    harness.setEditorText("Next draft"); await trigger(harness);
+    expect((harness.complete.mock.calls[1] as any[])[2].maxTokens).toBe(16);
   });
 
   it("saves vertical context selections and applies them after reload", async () => {
@@ -3074,7 +3198,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\x1b[B");
     harness.panelInput(" ");
     harness.panelInput("\x13");
-    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved"));
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Settings saved"));
     harness.panelInput("q");
     await view;
     const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
@@ -3101,7 +3225,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\x1b[D");
     expect(harness.panelLines().join("\n")).toMatch(new RegExp(`Project instructions +${label}`));
     harness.panelInput("\x13");
-    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved"));
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Settings saved"));
     const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
     expect(saved.projectContext.instructionsEnabled).toBe(enabled);
     expect(saved.projectContext.instructionsOnFollowUp).toBe(followUp);
@@ -3173,7 +3297,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput(" ");
     harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Not persisted"));
-    expect(harness.panelLines().join("\n")).not.toContain("Context saved");
+    expect(harness.panelLines().join("\n")).not.toContain("Settings saved");
     expect(harness.panelLines().join("\n")).toContain("Settings");
     harness.panelInput("q"); // Failed persistence stays in Settings for retry.
     harness.panelInput("q");
@@ -3467,7 +3591,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await vi.waitFor(() => expect(harness.customCalls()).toBe(2));
     expect(harness.context.ui.editor).toHaveBeenCalledWith(expect.any(String), original);
     expect(harness.context.ui.confirm).toHaveBeenCalledTimes(typeof choice === "boolean" ? 1 : 0);
-    expect(harness.panelLines().join("\n")).toContain("Unsaved context changes");
+    expect(harness.panelLines().join("\n")).toContain("Unsaved settings changes");
     harness.panelInput("\x1b");
     harness.panelInput("q");
     await view;
@@ -3499,7 +3623,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.customCalls()).toBe(1);
     const lines = harness.panelLines().join("\n");
     expect(lines).not.toContain("Choose optimizer model");
-    expect(lines).toContain(origin === "settings" ? "Unsaved context changes" : "m Model");
+    expect(lines).toContain(origin === "settings" ? "Unsaved settings changes" : "m Model");
     const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
     expect(saved.model).toEqual({ provider: "fake-provider", id: "fake-chat" });
     expect(harness.notifications.join(" ")).toContain("Optimizer model set to fake-provider/fake-chat");
@@ -3524,8 +3648,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Choose optimizer model"));
     harness.panelInput("\x1b");
-    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Unsaved context changes"));
-    harness.panelInput("\t");
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Unsaved settings changes"));
+    harness.panelInput("\x1b[D");
     expect(harness.panelLines().join("\n")).toMatch(/Project instructions +Always/);
     harness.panelInput("\t");
     harness.panelInput("\x1b[B");
@@ -3572,10 +3696,10 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const view = harness.command("view", harness.context);
     harness.panelInput("\x1b[D");
     harness.panelInput("\r");
-    expect(harness.panelLines().join("\n")).toContain("Unsaved context changes");
+    expect(harness.panelLines().join("\n")).toContain("Unsaved settings changes");
     harness.panelInput("\t");
     harness.panelInput("\x13");
-    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Context saved"));
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Settings saved"));
     expect(harness.customCalls()).toBe(1);
     const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
     expect(saved.projectContext.instructionsEnabled).toBe(true);

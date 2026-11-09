@@ -116,7 +116,7 @@ Preview、Usage、Settings、原稿编辑、Revise、Preferences 和模型选择
 - **原稿编辑**：主界面 n / i 使用原稿编辑器，保存不调用模型；n 新建空白原稿，i 编辑所选任务原稿。
 - **兼容 Input**：`/refine view` 的 i 仍保留独立输入稿，Enter 在空工作区启动优化，已有内容时只追加未发送条目；Shift+Enter / Ctrl+J 换行。提交不写 Pi 输入框。按 session 保存运行期草稿，提交、关窗、切模型和后台完成都不清空；主动清空也被记住。
 - **Revise**：列表选中可修订结果按 f，先进入该结果详情再展开输入区；Inspect / 兼容结果页也可按 f。默认聚焦补充要求，标题标明模型与 Run 编号，上方保留来源结果与阅读位置；小终端自动使用完整输入页。**Enter 换行、Ctrl+S 明确请求、Ctrl+E 切换仅编辑／显示来源、Esc 返回**。输入时浏览快捷键只是文字，不会触发接受／发送；仅当窗口尺寸支持两种布局时，显示并启用 Ctrl+E。状态 Revision not submitted 指本次修订尚未请求，不代表来源结果从未发送。修改要求与原稿编辑分离，按结果及 session 身份保留当前扩展运行期内的临时草稿（最多 100 份，关闭浮窗后仍可继续，重载／重启后清除）。成功追加结果，失败／超时保留来源候选；输入绑定候选 token，目标变化后拒绝旧操作。修订使用来源冻结上下文，不采纳中途修改的 Context；恢复记录没有背景，不提供 Revise。
-- **Settings**：Context / Optimizer 两组，Tab 或左右键切组；外侧边界左右键切顶层页。↑↓选择，Enter / Space 更改项目，Ctrl+S 保存 Context。Context／Thinking 已在进程内生效但写盘失败时，以警告显示 `Not persisted`；Context 留在 Settings，保留选择供 Ctrl+S 重试，不宣称保存成功。切页保留暂存设置；在 Settings 取消或关闭工作区时放弃未保存 Context。
+- **Settings**：Context / Optimizer / Advanced 三组，Tab 循环切组，左右键移到相邻组，外侧边界切顶层页。↑↓选择，Enter / Space 切换开关；数值项 Enter 打开编辑页，自定义输入或 Tab / Shift+Tab 切换常用档位，Enter 带回暂存值，Esc 取消本次数值编辑。回到 Settings 后 Ctrl+S 统一保存上下文开关、历史数量／字符预算、输出 token 上限、请求超时及原稿字符上限。模型、Thinking 和策略仍保持独立保存边界。写盘失败以警告显示 `Not persisted`，保留选择供重试；若已内存生效，取消不撤销已应用值。切页保留暂存设置，在 Settings 取消或关闭工作区放弃未保存值。上下文从下一 round 生效；请求限制不修改在途请求。详见[配置参考](configuration.md#settings-面板)。
 - **Context 设置**：规则 `First request only` / `Always` / `Off`、默认目录树和技能元数据。规则 First 模式对修订省略规则，策略在 round 捕获时冻结。配置修改用于**下一 round**，不偷偷改变当前任务。
 - **Optimizer 设置**：模型与 thinking 选择用于下一次显式启动，不改变主 Agent。系统编辑策略变更同样要等下一 round 捕获。配置持久化失败会明确提示仅进程内有效。
 

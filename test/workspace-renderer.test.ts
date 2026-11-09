@@ -88,7 +88,7 @@ describe("workspace terminal rendering", () => {
         tui.requestRender(); tui.renderNow();
         const frame = workspace.render(columns);
         const settings = frame.map(stripVTControlCharacters);
-        const save = settings.findIndex((line) => /(?:Ctrl\+S Save context|\^S Context)/.test(line));
+        const save = settings.findIndex((line) => /(?:Ctrl\+S Save settings|\^S Save)/.test(line));
         const back = settings.findIndex((line) => line.includes("Esc Back"));
         const selected = settings.findIndex((line) => line.includes("› "));
         expect(save).toBeGreaterThan(settings.findIndex((line) => line.includes("←") && line.includes("Settings")));
@@ -96,6 +96,16 @@ describe("workspace terminal rendering", () => {
         expect(selected).toBeGreaterThan(back);
         expect(frame).toHaveLength(initialHeight);
         expect(frame.every((line) => visibleWidth(line) <= columns)).toBe(true);
+      }
+      for (const cursor of [8, 9, 10, 11, 12]) {
+        workspace.openSettings(undefined, cursor);
+        for (const key of ["\r", "\x15", "中文😀", "\r", "\t", "\r"]) {
+          input(key); tui.renderNow();
+          const frame = workspace.render(columns);
+          expect(frame).toHaveLength(initialHeight);
+          expect(frame.every((line) => visibleWidth(line) <= columns)).toBe(true);
+          expect(frame.join("\n")).toContain(theme.fg("text", "Esc"));
+        }
       }
       input("\x1b"); tui.renderNow();
       for (let repeat = 0; repeat < 10; repeat++) {
