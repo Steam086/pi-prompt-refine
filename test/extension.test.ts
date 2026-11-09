@@ -10,6 +10,7 @@ import { DEFAULT_CONFIG, type RefineConfig } from "../src/config.js";
 import { PreferenceStore } from "../src/preference-store.js";
 import * as preferences from "../src/revision-preferences.js";
 import { flushPromises } from "./helpers.js";
+import { screenDraft } from "./fixtures/reference-preservation.js";
 
 const agentDirs: string[] = [];
 const activeHarnesses: Harness[] = [];
@@ -398,6 +399,84 @@ describe("first optimizer model setup", () => {
     const harness = await makeHarness({ configureModel: false, mode: "print" });
     expect(harness.notifications).toEqual([]);
     expect(harness.complete).not.toHaveBeenCalled();
+  });
+});
+
+describe("source preservation in the provider path", () => {
+  it("retains the complete draft and warns when a model discards a pasted TUI reference", async () => {
+    const h = await makeHarness({ persistHistory: true });
+    h.setEditorText(screenDraft);
+    h.complete.mockResolvedValueOnce(refinement("右侧的正文部分是不是太靠下了？讨论能否删掉一部分。", "Misleading generated title"));
+    await trigger(h);
+    expect(h.notifications.some((message) => message.includes("omitted most of a pasted TUI reference"))).toBe(true);
+    expect(h.getEditor()).toBe(screenDraft); // Never auto-accept.
+    expect(h.getSessionName()).toBeUndefined(); // Discard the unsafe result's title too.
+    await vi.waitFor(async () => {
+      const saved = JSON.parse(await readFile(`${h.context.sessionManager.getSessionFile()}.prompt-refine.json`, "utf8"));
+      expect(saved.records[0].result).toBe(screenDraft);
+    });
+    expect(h.context.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Original draft kept"), "warning");
+    await panelAction(h, "a");
+    expect(h.getSessionName()).toBeUndefined(); // Also after explicit acceptance.
+  });
+
+  it.each(["rewrite", "task"] as const)("respects the scope of a selected %s removal preference", async (kind) => {
+    const h = await makeHarness();
+    const store = new PreferenceStore(h.agentDir, h.context.cwd);
+    await store.save("project", { name: "Removal", body: "Remove the screenshot.",
+      metadata: { kind, description: "Removal scope", activation: "manual" } });
+    h.setEditorText(screenDraft);
+    h.complete.mockResolvedValueOnce(refinement("Right side too low?", "Layout question"));
+    h.holdPanel(); const view = shortcut(h, "ctrl+\\")(h.context);
+    h.panelInput("p");
+    await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Removal"));
+    h.panelInput(" "); h.panelInput("\x1b[13;3u");
+    h.panelInput("\r"); await flushPromises();
+    const packet = JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
+    expect(packet.editing_instruction).toContain("Remove the screenshot.");
+    expect(h.notifications.some((message) => message.includes("Original draft kept"))).toBe(kind === "task");
+    h.panelInput("a"); await view; await flushPromises();
+    expect(h.getEditor()).toBe(kind === "rewrite" ? "Right side too low?" : screenDraft);
+    expect(h.getSessionName()).toBe(kind === "rewrite" ? "Layout question" : undefined);
+  });
+
+  it.each(["length", "toolUse", "error", "invalid-json"])("never turns %s into a successful original-draft fallback", async (failure) => {
+    const h = await makeHarness();
+    h.setEditorText(screenDraft);
+    h.complete.mockResolvedValueOnce(failure === "invalid-json"
+      ? { content: [{ type: "text", text: "Not JSON" }], stopReason: "stop" }
+      : { ...refinement("Right side too low?", "Unsafe title"), stopReason: failure });
+    await trigger(h);
+    expect(h.widgetLines().join("\n")).toContain("1 failed");
+    expect(h.notifications.join("\n")).not.toContain("Original draft kept");
+    expect(h.editorWrites).toEqual([]);
+  });
+
+  it("does not warn for a canceled provider result arriving late", async () => {
+    const h = await makeHarness();
+    h.setEditorText(screenDraft);
+    let resolve!: (value: ReturnType<typeof refinement>) => void;
+    h.complete.mockReturnValueOnce(new Promise((done) => { resolve = done; }));
+    await trigger(h);
+    await h.command("cancel", h.context);
+    resolve(refinement("Right side too low?", "Unsafe title"));
+    await flushPromises();
+    expect(h.notifications.join("\n")).not.toContain("Original draft kept");
+    expect(h.editorWrites).toEqual([]);
+  });
+
+  it("does not restore the original reference during Revise", async () => {
+    const h = await makeHarness();
+    h.setEditorText(screenDraft);
+    h.complete.mockResolvedValueOnce(refinement(screenDraft, "Layout"));
+    await trigger(h);
+    h.holdPanel(); const view = h.command("view", h.context);
+    h.panelInput("f"); h.panelInput("Remove the screenshot.");
+    h.complete.mockResolvedValueOnce(refinement("Right side too low?", "Layout question"));
+    h.panelInput("\x13"); await flushPromises();
+    expect(h.notifications.join("\n")).not.toContain("Original draft kept");
+    h.panelInput("a"); await view; await flushPromises();
+    expect(h.getEditor()).toBe("Right side too low?");
   });
 });
 

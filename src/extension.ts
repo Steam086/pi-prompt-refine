@@ -11,6 +11,7 @@ import {
   loadConfig,
 } from "./config.js";
 import { buildRefineInput, buildRefineSystemPrompt, parseRefineOutput, selectHistory, REFINE_SYSTEM_PROMPT, type HistorySnapshot } from "./context.js";
+import { preserveDroppedTuiReference } from "./reference-preservation.js";
 import { budgetRequest } from "./budget.js";
 import { BackgroundStatus, renderBackgroundStatus } from "./background-status.js";
 import { renderModelPicker } from "./model-picker.js";
@@ -244,9 +245,12 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         .join("\n");
       const stopReason = response.content.some((block) => block.type === "toolCall") ? "toolUse" : response.stopReason;
       const parsed = stopReason === "stop" ? parseRefineOutput(text) : undefined;
+      const guarded = parsed && !request.revision ? preserveDroppedTuiReference(request.draft, parsed.text, request.editingInstruction) : undefined;
+      if (guarded?.restored && !signal.aborted) notifyIfSameSession(request.sessionId,
+        `Refine #${request.recordId} omitted most of a pasted TUI reference. Original draft kept; review the result before accepting.`);
       return {
-        text: parsed?.text ?? "",
-        title: request.generateTitle ? parsed?.title : undefined,
+        text: guarded?.text ?? parsed?.text ?? "",
+        title: request.generateTitle && !guarded?.restored ? parsed?.title : undefined,
         invalidOutput: stopReason === "stop" && !parsed,
         stopReason,
         usage: readRunUsage(response.usage, usageOptions),
