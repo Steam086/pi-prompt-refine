@@ -3,9 +3,9 @@
   "entries": [
     {
       "id": "neutral-prompt-tone",
-      "version": 2,
+      "version": 3,
       "name": "Neutral Prompt Tone",
-      "body": "Edit colloquial expressions, vague wording, and repetition in the prompt only where they hinder understanding; leave clear wording unchanged. Preserve the user's tone rather than routinely replacing informal language with formal prose.",
+      "body": "Revise colloquial expressions, ambiguous wording, and repetition in the prompt only when they hinder understanding; leave clear wording unchanged. Preserve the user's original tone, including informal language, rather than making the prompt more formal.\n\nThis preference governs the wording of the prompt itself, not the response. Do not add response-style instructions on the basis of this preference.",
       "metadata": {
         "description": "修改影响理解的口语表达和重复措辞，保留用户语气；不要求主 Agent 改变回答风格。",
         "kind": "rewrite",
