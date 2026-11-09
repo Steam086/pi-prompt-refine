@@ -118,6 +118,24 @@ describe("typed preferences", () => {
   const metadata: PreferenceMetadata = { kind: "rewrite", description: "并列问题条目化", activation: "manual" };
   const entry: RevisionPreference = { id: "structured", version: 1, scope: "global", name: "Structure", body: "Keep literal 中文\tcommands.", metadata };
 
+  it("keeps neutral prompt tone conditional and scoped to prompt wording", async () => {
+    const f = await setup();
+    await writeFile(f.global, await readFile(new URL("../examples/prompt-refine-preferences.json", import.meta.url), "utf8"));
+    const library = await f.store.load();
+    expect(library.errors).toEqual({});
+    const tone = library.entries.find((entry) => entry.id === "neutral-prompt-tone")!;
+    expect(tone).toMatchObject({
+      version: 3,
+      name: "Neutral Prompt Tone",
+      metadata: { kind: "rewrite", activation: "manual" },
+    });
+    expect(tone.body).toBe([
+      "Revise colloquial expressions, ambiguous wording, and repetition in the prompt only when they hinder understanding; leave clear wording unchanged. Preserve the user's original tone, including informal language, rather than making the prompt more formal.",
+      "This preference governs the wording of the prompt itself, not the response. Do not add response-style instructions on the basis of this preference.",
+    ].join("\n\n"));
+    expect(composeRevision([selectPreference(tone)], "")).toBe(`Prompt rewriting instructions (manually selected):\n${tone.body}`);
+  });
+
   it("loads the reorganized preset catalog through the production reader", async () => {
     const f = await setup();
     await writeFile(f.global, await readFile(new URL("../examples/prompt-refine-preferences.json", import.meta.url), "utf8"));
