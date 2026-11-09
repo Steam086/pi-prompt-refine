@@ -7,6 +7,7 @@ import { RefineController } from "../src/controller.js";
 import { TaskPanel } from "../src/task-panel.js";
 import { selectHistory } from "../src/context.js";
 import { panelLayout } from "../src/panel-layout.js";
+import { workspaceLayout } from "../src/workspace-overlay.js";
 import { sanitizeTerminalText } from "../src/presentation.js";
 import { formatKeyHint } from "../src/key-hints.js";
 import { selectPreference, type RevisionPreference } from "../src/revision-preferences.js";
@@ -30,7 +31,7 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
     const keys = getKeybindings();
     const entries: RevisionPreference[] = Array.from({ length: 18 }, (_, index) => ({
       id: `item-${index}`, scope: index % 2 ? "global" : "project", version: 1,
-      name: `Item ${String(index).padStart(2, "0")} 中文😀 \x1b]52;c;payload\x07`, body: `Requirement ${index}\n${"Reference 中文😀\n".repeat(30)}`,
+      name: `Item ${String(index).padStart(2, "0")} 中文😀 \x1b]52;c;payload\x07`, body: `Requirement ${index} **literal**\n${"Reference 中文😀\x1b[2J\n".repeat(30)}`,
       metadata: { kind: index < 9 ? "rewrite" : "task",
         description: `Description ${index} 中文😀 \x1b[2J: use clear explanations that wrap naturally across the available reading width.\nKeep literal **requirements** readable.\nSummary ending ${index}.`, activation: "manual" },
     }));
@@ -47,8 +48,10 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       return source ? { selected: source.input.preferences ?? [], save: source.status === "unsent" ? (selected) => controller.updateDraftPreferences(source, selected) : undefined } : undefined;
     }, theme, keys, () => tui.requestRender());
     const run = vi.fn((id: number) => { controller.startRecord(id); });
+    let useWorkspaceLayout = false;
+    const layout = (width: number) => useWorkspaceLayout ? workspaceLayout(width, terminal.rows) : panelLayout(width, terminal.rows);
     const panel = new TaskPanel({ records: () => controller.getHistory(), appliedId: () => undefined, activate: () => false,
-      run, stop() {}, preferences() {}, inlinePreferences: picker }, theme, () => terminal.rows, keys, false, { selectedTaskId: original.taskId });
+      run, stop() {}, preferences() {}, inlinePreferences: picker }, theme, () => terminal.rows, keys, false, { selectedTaskId: original.taskId }, layout);
     const view = {
       set focused(value: boolean) { picker.focused = value; },
       render: (width: number) => panel.render(width),
@@ -59,7 +62,7 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
     const render = () => {
       tui.renderNow();
       const lines = panel.render(terminal.columns);
-      expect(lines).toHaveLength(panelLayout(terminal.columns, terminal.rows).height);
+      expect(lines).toHaveLength(layout(terminal.columns).height);
       expect(lines.every((line) => visibleWidth(line) <= terminal.columns)).toBe(true);
       expect(lines.join("\n")).not.toContain("\x1b]52;c;payload");
       return stripVTControlCharacters(lines.join("\n"));
@@ -90,16 +93,26 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       expect(selectedLine).toContain(theme.fg("muted", "· ") + theme.fg("text", sanitizeTerminalText(entries[0]!.name).replace(/\s+/gu, " ")));
       expect(selectedLine).not.toContain("\x1b[1m");
       expect(reference()).toContain("Description 0 中文😀");
-      expect(reference()).toContain("Summary ending 0.");
+      expect(reference()).toContain("Requirement 0 **literal**");
+      expect(reference()).toContain("o Read full");
+      const descriptionLine = styledReference.split("\n").find((line) => stripVTControlCharacters(line).startsWith("Description 0"))!;
+      expect(descriptionLine).toBe(theme.fg("muted", stripVTControlCharacters(descriptionLine)));
+      const instructionLine = styledReference.split("\n").find((line) => stripVTControlCharacters(line).startsWith("Requirement 0"))!;
+      expect(instructionLine).toBe(theme.fg("text", "Requirement 0 **literal**"));
+      expect(instructionLine).not.toContain("\x1b[1m");
+      const originalLine = styledReference.split("\n").find((line) => stripVTControlCharacters(line).startsWith("ORIGINAL"))!;
+      expect(originalLine).toContain(theme.fg("text", "ORIGINAL 中文😀").split("\x1b[39m")[0]);
+      expect(originalLine).not.toContain("\x1b[1m");
       expect(columns().map((line) => line.split(" │ ")[0]).join("\n")).not.toContain("Description");
       expect(panel.render(100).join("\n")).not.toContain("\x1b[2J");
-      expect(panel.render(100).join("\n")).toContain(theme.fg("muted", "Keep literal **requirements** readable."));
       const beforeBrowsing = reference();
       const checkedBeforeBrowsing = controller.getRecord(original.id)!.input.preferences;
       const initialRedraws = tui.fullRedraws;
       input("\x1b[B"); render();
       expect(reference()).not.toBe(beforeBrowsing);
       expect(reference()).toContain("Description 1 中文😀");
+      expect(reference()).toContain("Requirement 1 **literal**");
+      expect(reference()).not.toContain("Requirement 0 **literal**");
       expect(reference()).not.toContain("Description 0 中文😀");
       expect(reference().slice(reference().indexOf("Selected ·"))).toBe(beforeBrowsing.slice(beforeBrowsing.indexOf("Selected ·")));
       expect(controller.getRecord(original.id)!.input.preferences).toEqual(checkedBeforeBrowsing);
@@ -154,6 +167,34 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       expect(controller.getRecord(original.id)!.input.preferences!.map((entry) => entry.id)).toEqual(taskFirst.map((entry) => entry.id));
       expect(controller.updateDraftPreferences(controller.getRecord(original.id)!, chosen)).toBeUndefined();
       render();
+      // Use the expanded workspace canvas, including wide/short and narrow layouts.
+      useWorkspaceLayout = true;
+      input("/"); input("\x15"); input("\r"); input("\x1b[H");
+      for (const [columns, rows] of [[160, 60], [130, 40], [160, 14], [45, 24], [160, 60]]) {
+        Object.assign(terminal, { columns, rows }); view.invalidate(); render();
+        const frame = panel.render(columns!);
+        const divided = frame.filter((line) => stripVTControlCharacters(line).includes(" │ "));
+        if (rows! >= 40) {
+          const left = divided.map((line) => line.split(theme.fg("muted", " │ "))[0]!);
+          const leftWidth = visibleWidth(left[0]!) - layout(columns!).inset;
+          expect(leftWidth).toBeGreaterThan(36);
+          expect(leftWidth).toBeLessThanOrEqual(48);
+          const right = divided.map((line) => line.split(theme.fg("muted", " │ "))[1] ?? "");
+          const content = stripVTControlCharacters(right.join("\n"));
+          expect(content.match(/ORIGINAL 中文😀/g)?.length).toBeLessThanOrEqual(4);
+          expect(content.match(/Reference 中文😀/g)!.length).toBeGreaterThan(2);
+          expect(content).toContain("Selected · 3");
+          expect(content.indexOf("ORIGINAL")).toBeLessThan(content.indexOf("Requirement 0"));
+          expect(content.indexOf("Requirement 0")).toBeLessThan(content.indexOf("Selected ·"));
+          const description = right.find((line) => stripVTControlCharacters(line).startsWith("Keep literal **requirements** readable."))!;
+          expect(description).toBeDefined();
+          expect(description).toBe(theme.fg("muted", stripVTControlCharacters(description)));
+        } else if (columns === 45) expect(divided).toHaveLength(0);
+      }
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(complete).not.toHaveBeenCalled();
+      useWorkspaceLayout = false;
+      Object.assign(terminal, { columns: 100, rows: 40 }); view.invalidate(); render();
       // Refresh failure leaves selected snapshots, a semantic warning and a usable cancel path.
       load.mockRejectedValueOnce(new Error("Permission denied"));
       await picker.refresh();
