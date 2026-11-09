@@ -1,4 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { stripVTControlCharacters } from "node:util";
+import { workspaceHeight } from "../src/workspace-overlay.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -57,6 +59,7 @@ interface Harness {
   panelLines(width?: number): string[];
   resize(rows: number): void;
   customCalls(): number;
+  customOptions: Array<{ overlay?: boolean; overlayOptions?: unknown }>;
 }
 
 async function makeHarness(options: { persistHistory?: boolean; freshInstall?: boolean; sessionName?: string; mode?: "tui" | "rpc" | "print"; busy?: boolean; configureModel?: boolean; noAvailableModels?: boolean; reasoning?: boolean; thinkingLevel?: ModelThinkingLevel; config?: Partial<RefineConfig>; useDefaultShortcuts?: boolean } = {}): Promise<Harness> {
@@ -127,6 +130,7 @@ async function makeHarness(options: { persistHistory?: boolean; freshInstall?: b
   let panel: { render(width: number): string[]; handleInput?(data: string): void } | undefined;
   let holdPanel = false;
   let customCalls = 0;
+  const customOptions: Harness["customOptions"] = [];
   const terminal = { rows: 40 };
   const theme = {
     fg: (_color: string, text: string) => text, bg: (_color: string, text: string) => text, bold: (text: string) => text,
@@ -154,8 +158,10 @@ async function makeHarness(options: { persistHistory?: boolean; freshInstall?: b
       if (confirmMutation !== undefined) editor = confirmMutation;
       return Promise.resolve(confirmResult);
     }),
-    custom: async <T>(factory: (tui: any, theme: any, keybindings: any, done: (value: T) => void) => any): Promise<T> => {
+    custom: async <T>(factory: (tui: any, theme: any, keybindings: any, done: (value: T) => void) => any,
+      options: Harness["customOptions"][number] = {}): Promise<T> => {
       customCalls += 1;
+      customOptions.push(options);
       return await new Promise<T>((resolve) => {
         const component = factory(
           { requestRender: vi.fn(), terminal },
@@ -271,6 +277,7 @@ async function makeHarness(options: { persistHistory?: boolean; freshInstall?: b
     },
     agentDir,
     renderedWidths,
+    customOptions,
     widgetLines: (width = 80) => widget?.render(width) ?? [],
     holdPanel: () => { holdPanel = true; },
     panelInput: (key) => panel?.handleInput?.(key),
@@ -743,6 +750,37 @@ describe("persistent session-local Refine history", () => {
     const view = h.command("history", h.context);
     expect(h.panelLines(100).join("\n")).toContain("No records yet");
     h.panelInput("q"); h.panelInput("q"); await view;
+  });
+});
+
+describe("native overlay workspace", () => {
+  it("uses the same overlay shell for Refine and model selection without stacking", async () => {
+    const h = await makeHarness(); h.holdPanel();
+    const view = h.command("view", h.context);
+    const expected = { overlay: true, overlayOptions: { anchor: "center", width: "98%", maxHeight: "96%", margin: 0 } };
+    expect(h.customOptions).toEqual([expected]);
+    const initial = h.panelLines();
+    h.panelInput("m");
+    await vi.waitFor(() => expect(h.customCalls()).toBe(2));
+    expect(h.panelLines()).toHaveLength(initial.length);
+    expect(h.panelLines()[0]).toBe(initial[0]);
+    h.panelInput("\x1b");
+    await vi.waitFor(() => expect(h.customCalls()).toBe(3));
+    expect(h.customOptions).toEqual([expected, expected, expected]);
+    h.panelInput("q"); await view;
+    expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
+  });
+
+  it("restores an unsubmitted revision after leaving for the main session", async () => {
+    const h = await makeHarness(); await trigger(h); h.holdPanel();
+    const view = h.command("view", h.context);
+    h.panelInput("f"); h.panelInput("Keep 中文😀 commands");
+    h.panelInput("\x1b"); h.panelInput("q"); await view;
+    const reopened = h.command("view", h.context); h.panelInput("f");
+    expect(h.panelLines().join("\n")).toContain("Keep 中文😀 commands");
+    expect(h.complete).toHaveBeenCalledOnce();
+    h.panelInput("\x1b"); h.panelInput("q"); await reopened;
+    expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
   });
 });
 
@@ -2821,7 +2859,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     const main = harness.panelLines();
-    expect(main[0]).toMatch(/^  ─+$/);
+    expect(main[0]).toMatch(/^╭─+╮$/);
     expect(main[1]).toContain("Prompt refine");
     harness.panelInput("t");
     expect(harness.panelLines()).toEqual(main);
@@ -2831,8 +2869,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(settings[1]).toContain("Settings");
     expect(settings).toHaveLength(main.length);
     expect(settings[0]).toBe(main[0]);
-    expect(settings.at(-3)).toBe(main.at(-3));
-    expect(settings[1]?.startsWith("  ")).toBe(true);
+    expect(settings.at(-4)).toBe(main.at(-4));
+    expect(settings[1]?.startsWith("│  ")).toBe(true);
     harness.panelInput(" ");
     const edited = harness.panelLines();
     harness.panelInput("\t");
@@ -3073,7 +3111,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     const lines = harness.panelLines();
-    expect(lines[2]?.trim()).toBe(`fake-provider/fake-chat · ${options.expected}`);
+    expect(stripVTControlCharacters(lines[2]!).replace(/^│|│$/g, "").trim()).toBe(`fake-provider/fake-chat · ${options.expected}`);
     expect(lines.join("\n").match(/fake-provider\/fake-chat/g)).toHaveLength(1);
     expect(lines.join("\n")).toContain("No result yet.");
     expect(harness.complete).not.toHaveBeenCalled();
@@ -3393,8 +3431,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     for (const rows of [8, 12, 24, 40, 80, 12, 40]) for (const width of [1, 20, 40, 100, 180]) {
       harness.resize(rows);
       const lines = harness.panelLines(width);
-      expect(lines.length).toBeLessThanOrEqual(rows - 4);
-      expect(lines.every((line) => visibleWidth(line) <= Math.min(width, 100))).toBe(true);
+      expect(lines).toHaveLength(workspaceHeight(rows));
+      expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
       if (width >= 40 && rows >= 12) expect(lines.join("\n")).toContain("Model 0 中文😀");
       if (width >= 100 && rows >= 24) expect(lines.join("\n")).toContain("Thinking level:");
     }
@@ -3404,7 +3442,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.complete).not.toHaveBeenCalled(); expect(harness.editorWrites).toEqual([]);
   });
 
-  it("presents a compact model picker without changing the model on cancel", async () => {
+  it("presents an overlay model picker without changing the model on cancel", async () => {
     const harness = await makeHarness();
     harness.setCustomAction("\x1b");
     await harness.command("model", harness.context);

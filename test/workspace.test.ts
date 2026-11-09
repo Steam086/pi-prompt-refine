@@ -4,7 +4,12 @@ import { CURSOR_MARKER, KeybindingsManager, TUI_KEYBINDINGS, visibleWidth, type 
 import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { PreviewPanel, type PreviewOptions } from "../src/preview.js";
 import { RefineWorkspace, type SettingsResult } from "../src/workspace.js";
-import { panelLayout } from "../src/panel-layout.js";
+import { workspaceHeight, workspaceLayout, workspaceViewport } from "../src/workspace-overlay.js";
+
+// Outer bounds and body offsets include the single shell, unlike child geometry.
+const panelLayout = (width: number, rows: number) => ({ ...workspaceLayout(width, rows), height: workspaceHeight(rows),
+  topSeparatorHeight: workspaceViewport(width, rows).framed ? 1 : 0 });
+const footer = (lines: string[]) => stripVTControlCharacters(lines.at(-1)!).startsWith("╰") ? lines.slice(-3, -1) : lines.slice(-2);
 import { formatKeyHint } from "../src/key-hints.js";
 import type { RefineRecord } from "../src/history.js";
 import { selectHistory } from "../src/context.js";
@@ -56,7 +61,7 @@ describe("shared refine workspace", () => {
       expect(stripVTControlCharacters(lines.join("\n"))).toContain("Rejected");
       expect(lines.join("\n")).toContain(theme.fg("warning", "").split("\x1b[39m")[0]);
       expect(lines.join("\n")).not.toContain("\x1b[31m");
-      if (rows >= 8) expect(lines.at(-1)).toContain(formatKeyHint(["Esc", "Back"], theme));
+      if (rows >= 8) expect(footer(lines).at(-1)).toContain(formatKeyHint(["Esc", "Back"], theme));
     }
     terminal.rows = 40;
     expect(textOf(workspace.render(100))).toContain("Retained draft 中文😀");
@@ -205,9 +210,9 @@ describe("shared refine workspace", () => {
     for (const width of [40, 80, 100]) {
       const row = workspace.render(width).find((line) => stripVTControlCharacters(line).includes("› Model"))!;
       expect(row).toContain("…");
-      expect(row).not.toContain("\x1b[0m");
+      expect(row.slice(row.indexOf("›"), row.indexOf("\x1b[49m"))).not.toContain("\x1b[0m");
       expect(row).toContain(theme.bg("selectedBg", "").split("\x1b[49m")[0]);
-      expect(visibleWidth(row)).toBe(panelLayout(width, 40).innerWidth + panelLayout(width, 40).inset);
+      expect(visibleWidth(row)).toBe(width);
     }
   });
 
@@ -243,7 +248,7 @@ describe("shared refine workspace", () => {
       expect(stripVTControlCharacters(textOf(optimizer))).toContain("› Model");
       workspace.handleInput("\x1b[D");
       const context = workspace.render(width);
-      expect(stripVTControlCharacters(textOf(context))).toContain(width < 40 ? "› Skill metadat…" : "› Skill metadata");
+      expect(stripVTControlCharacters(textOf(context))).toContain(width < 40 ? "› Skill meta" : "› Skill metadata");
       for (const line of [...context, ...optimizer]) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       if (rows === 40 && width === 100) {
         expect(textOf(context)).toContain(formatKeyHint(["←", "Usage"], theme));
@@ -261,7 +266,7 @@ describe("shared refine workspace", () => {
       const { workspace } = create(40, "dark", optimizer);
       workspace.openSettings();
       workspace.handleInput("\x1b[D");
-      expect(stripVTControlCharacters(workspace.render(100)[1]!)).toBe("  Usage · All rounds");
+      expect(stripVTControlCharacters(workspace.render(100)[1]!)).toContain("Usage · All rounds");
       workspace.handleInput("\x1b[C");
       expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Project instructions");
       if (optimizer) {
@@ -269,7 +274,7 @@ describe("shared refine workspace", () => {
         expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Model");
       }
       workspace.handleInput("\x1b[C");
-      expect(stripVTControlCharacters(workspace.render(100)[1]!)).toBe("  Prompt refine");
+      expect(stripVTControlCharacters(workspace.render(100)[1]!)).toContain("Prompt refine");
     }
   });
 
@@ -287,7 +292,7 @@ describe("shared refine workspace", () => {
       workspace.handleInput("\x1b[C");
       expect(workspace.render(100)).toEqual(settings);
     }
-    expect(paint).not.toHaveBeenCalled();
+    expect(paint.mock.calls.filter(([color]) => color !== "borderMuted")).toEqual([]);
     expect(optimizer).toHaveBeenCalledOnce();
     paint.mockRestore();
     optimizer.mockRestore();
@@ -316,8 +321,8 @@ describe("shared refine workspace", () => {
     expect(main[4]).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Preview "))));
     expect(settings[4]).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Settings "))));
     expect(textOf(settings)).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Context "))));
-    expect(main.at(-2)).toContain(formatKeyHint(["a", "Accept"], theme));
-    expect(settings.at(-2)).toContain(formatKeyHint(["Enter", "Change"], theme));
+    expect(footer(main)[0]).toContain(formatKeyHint(["a", "Accept"], theme));
+    expect(footer(settings)[0]).toContain(formatKeyHint(["Enter", "Change"], theme));
     expect(main).toHaveLength(settings.length);
   });
 
@@ -329,7 +334,7 @@ describe("shared refine workspace", () => {
     for (let i = 0; i < 3; i++) { workspace.render(100); workspace.handleInput("\x1b[B"); }
     paint.mockClear();
     for (let i = 0; i < 12; i++) { workspace.render(100); workspace.handleInput("\x1b[B"); }
-    expect(paint).not.toHaveBeenCalled();
+    expect(paint.mock.calls.filter(([color]) => color !== "borderMuted")).toEqual([]);
     expect(optimizer).toHaveBeenCalledOnce();
     paint.mockRestore();
     optimizer.mockReturnValue({ model: "provider/updated-model", thinking: "low", thinkingEnabled: true });
@@ -382,7 +387,7 @@ describe("shared refine workspace", () => {
           if (cursor === 4) workspace.handleInput("\x1b[B");
           const lines = workspace.render(width);
           expect(lines).toHaveLength(panelLayout(width, rows).height);
-          for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(Math.min(width, 100));
+          for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
           if (width >= 20) expect(textOf(lines)).toContain(cursor === 3 ? "Model" : "Thinking");
         }
       }
@@ -392,11 +397,11 @@ describe("shared refine workspace", () => {
   it("shows a full model value below the table and keeps long rows fixed", () => {
     const { workspace } = create(40, "dark", true);
     workspace.openSettings(undefined, 3);
-    expect(workspace.render(100).at(-5)).toContain("Model: provider/long-model-identifier-with-extra-details");
+    expect(textOf(workspace.render(100))).toContain("Model: provider/long-model-identifier-with-extra-details");
     const lines = workspace.render(40).map(stripVTControlCharacters);
     const model = lines.findIndex((line) => line.includes("› Model:"));
     expect(lines[model]).toContain("…");
-    expect(lines[model]?.trimEnd()).toMatch(/›$/);
+    expect(lines[model]?.replace(/│\s*$/, "").trimEnd()).toMatch(/›$/);
     expect(lines[model + 1]).toContain("Thinking:");
     workspace.handleInput("\x1b[B");
     expect(workspace.render(40).findIndex((line) => line.includes("Model:"))).toBe(model);
@@ -407,7 +412,7 @@ describe("shared refine workspace", () => {
     workspace.openSettings();
     for (const width of [20, 40, 100]) {
       const header = workspace.render(width).slice(0, 3);
-      if (width >= 40) expect(header[2]).toBe("  " + theme.fg("muted", "Applies to future requests"));
+      if (width >= 40) expect(header[2]).toContain(theme.fg("muted", "Applies to future requests"));
       for (const key of ["\x1b[C", "\x1b[D", "\t", "\t"]) {
         workspace.handleInput(key);
         const lines = workspace.render(width);
@@ -420,7 +425,7 @@ describe("shared refine workspace", () => {
     for (const key of ["\x1b[C", "\x1b[D", "\t", "\t"]) {
       workspace.handleInput(key);
       const lines = workspace.render(100);
-      expect(lines[2]).toBe("  " + theme.fg("warning", "Unsaved context changes"));
+      expect(lines[2]).toContain(theme.fg("warning", "Unsaved context changes"));
       expect(textOf(lines)).not.toContain("Applies to future requests");
       expect(textOf(lines)).toContain("Discard context changes");
     }
@@ -429,7 +434,7 @@ describe("shared refine workspace", () => {
   it.each([0, 3])("aligns Settings action and navigation rows at cursor %i", (cursor) => {
     const { workspace } = create(40, "dark", true);
     workspace.openSettings(undefined, cursor);
-    const [top, bottom] = workspace.render(100).slice(-2).map((line) => stripVTControlCharacters(line).trim());
+    const [top, bottom] = footer(workspace.render(100)).map((line) => stripVTControlCharacters(line).replace(/^│|│$/g, "").trim());
     expect(top).toBe(`Ctrl+S Save context · Enter Change${cursor === 0 ? " · Space Change" : ""}`);
     expect(bottom!.split(" · ")).toEqual([
       "Esc Back".padEnd(19), "Tab Group".padEnd(12),
@@ -454,17 +459,17 @@ describe("shared refine workspace", () => {
         workspace.openSettings({ ...actions.context(), tree: !dirty }, cursor);
         for (const width of [34, 40, 60, 80, 100, 160]) {
           const lines = workspace.render(width);
-          const footer = lines.slice(-2);
-          const [top, bottom] = footer.map(stripVTControlCharacters);
+          const footerRows = footer(lines);
+          const [top, bottom] = footerRows.map(stripVTControlCharacters);
           const count = Math.min(starts(top!).length, starts(bottom!).length);
           expect(starts(top!).slice(0, count)).toEqual(starts(bottom!).slice(0, count));
           expect(top).toContain("Ctrl+S Save context");
           expect(bottom).toContain(dirty ? "Esc Discard context changes" : "Esc Back");
-          expect(footer[0]).toContain(formatKeyHint(["Ctrl+S", "Save context"], theme));
-          expect(footer[1]).toContain(formatKeyHint(["Esc", dirty ? "Discard context changes" : "Back"], theme));
-          expect(footer.join("\n")).not.toContain("\t");
+          expect(footerRows[0]).toContain(formatKeyHint(["Ctrl+S", "Save context"], theme));
+          expect(footerRows[1]).toContain(formatKeyHint(["Esc", dirty ? "Discard context changes" : "Back"], theme));
+          expect(footerRows.join("\n")).not.toContain("\t");
           expect(lines).toHaveLength(panelLayout(width, 40).height);
-          for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(Math.min(width, 100));
+          for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
           if (width >= 100) {
             expect(top).toContain(`Enter ${cursor === 4 ? "Unavailable" : "Change"}`);
             expect(top!.includes("Space Change")).toBe(cursor < 3);
@@ -486,19 +491,19 @@ describe("shared refine workspace", () => {
     for (const cursor of [0, 3]) {
       workspace.openSettings(undefined, cursor);
       for (const width of [12, 20, 24, 30]) {
-        const footer = workspace.render(width).slice(-2).map(stripVTControlCharacters);
-        expect(footer[0]).toContain("^S Context");
-        expect(footer[1]).toContain("Esc Back");
-        for (const line of footer) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+        const footerRows = footer(workspace.render(width)).map(stripVTControlCharacters);
+        expect(footerRows[0]).toContain("^S Context");
+        expect(footerRows[1]).toContain("Esc Back");
+        for (const line of footerRows) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       }
       workspace.openSettings({ instructions: "always", tree: false, skills: false }, cursor);
-      expect(stripVTControlCharacters(workspace.render(24).at(-1)!)).toContain("Esc Discard context");
+      expect(stripVTControlCharacters(footer(workspace.render(24)).at(-1)!)).toContain("Esc Discard context");
     }
-    terminal.rows = 8;
-    expect(stripVTControlCharacters(workspace.render(100).at(-1)!).trim()).toBe("^S Context · Esc Discard context · ↵ Change");
+    terminal.rows = 5;
+    expect(stripVTControlCharacters(footer(workspace.render(100)).at(-1)!).trim()).toBe("^S Context · Esc Discard context · ↵ Change");
     workspace.openSettings();
-    expect(stripVTControlCharacters(workspace.render(100).at(-1)!).trim()).toBe("^S Context · Esc Back · ↵ Change");
-    expect(stripVTControlCharacters(workspace.render(12).at(-1)!).trim()).toBe("^S Context");
+    expect(stripVTControlCharacters(footer(workspace.render(100)).at(-1)!).trim()).toBe("^S Context · Esc Back · ↵ Change");
+    expect(stripVTControlCharacters(footer(workspace.render(12)).at(-1)!).trim()).toBe("^S Context");
   });
 
   it("keeps disabled context warnings visible and omits unavailable groups", () => {
@@ -527,9 +532,9 @@ describe("shared refine workspace", () => {
     expect(textOf(workspace.render(100))).toContain(formatKeyHint(["Enter", "Refine"], theme));
   });
 
-  it.each([[24, 16], [32, 21], [40, 24], [60, 24]])("budgets %i terminal rows as %i panel rows", (rows, height) => {
+  it.each([[24, 23], [32, 30], [40, 38], [60, 57]])("budgets %i terminal rows as %i panel rows", (rows, height) => {
     expect(panelLayout(80, rows).height).toBe(height);
-    expect(panelLayout(80, rows).bodyHeight).toBe(height - 6);
+    expect(panelLayout(80, rows).bodyHeight).toBe(height - 7);
   });
 
   it.each(["dark", "light"])("keeps geometry, cursor and controls bounded in %s theme", (theme) => {
@@ -546,7 +551,7 @@ describe("shared refine workspace", () => {
         for (const lines of [main, context, input]) {
           expect(lines).toHaveLength(layout.height);
           if (layout.topSeparatorHeight) expect(lines[0]).toContain("─".repeat(layout.innerWidth));
-          for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(Math.min(width, 100));
+          for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
         }
         expect(textOf(input)).toContain(CURSOR_MARKER);
         expect(terminal.rows).toBe(rows); // Editor facade must not mutate the host.
@@ -752,7 +757,7 @@ describe("shared refine workspace", () => {
     workspace.openSettings();
     workspace.handleInput("\r");
     workspace.handleInput(key);
-    expect(stripVTControlCharacters(workspace.render(100)[1]!)).toBe("  Prompt refine");
+    expect(stripVTControlCharacters(workspace.render(100)[1]!)).toContain("Prompt refine");
     workspace.openSettings();
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toMatch(/› Project instructions +Always/);
     expect(textOf(workspace.render(100))).not.toContain("Unsaved context changes");
