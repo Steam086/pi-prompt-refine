@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import { getKeybindings, TuiAltScreen, TuiMainScreen, visibleWidth, type Terminal } from "@earendil-works/pi-tui";
 import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
@@ -7,6 +8,7 @@ import type { RefineRecord } from "../src/history.js";
 import { selectHistory } from "../src/context.js";
 import { composeRevision } from "../src/revision-preferences.js";
 import type { TaskPanelPosition } from "../src/task-panel.js";
+import { workspaceLayout, workspaceViewport } from "../src/workspace-overlay.js";
 
 // Exercise the real Pi diff renderers, not just component snapshots. Terminal I/O
 // is captured, so these tests make no claims about a physical terminal's latency/IME.
@@ -70,10 +72,32 @@ describe("workspace terminal rendering", () => {
     try {
       tui.start();
       tui.renderNow();
-      const initialHeight = workspace.render(columns).length;
+      const initialFrame = workspace.render(columns);
+      const initialHeight = initialFrame.length;
+      const plain = initialFrame.map(stripVTControlCharacters);
+      const back = plain.findIndex((line) => line.includes("Esc Back"));
+      const selectedRun = plain.findIndex((line) => line.includes("›"));
+      expect(back).toBeGreaterThanOrEqual(0);
+      expect(selectedRun).toBeGreaterThan(back);
       const initialRedraws = tui.fullRedraws;
       const clearCalls = vi.mocked(terminal.clearScreen).mock.calls.length;
       writes.length = 0;
+      workspace.openSettings();
+      for (const key of ["", "\x1b[B", "\t", "\x1b[B", "\t"]) {
+        if (key) input(key);
+        tui.requestRender(); tui.renderNow();
+        const frame = workspace.render(columns);
+        const settings = frame.map(stripVTControlCharacters);
+        const save = settings.findIndex((line) => /(?:Ctrl\+S Save context|\^S Context)/.test(line));
+        const back = settings.findIndex((line) => line.includes("Esc Back"));
+        const selected = settings.findIndex((line) => line.includes("› "));
+        expect(save).toBeGreaterThan(settings.findIndex((line) => line.includes("←") && line.includes("Settings")));
+        expect(back).toBeGreaterThanOrEqual(save);
+        expect(selected).toBeGreaterThan(back);
+        expect(frame).toHaveLength(initialHeight);
+        expect(frame.every((line) => visibleWidth(line) <= columns)).toBe(true);
+      }
+      input("\x1b"); tui.renderNow();
       for (let repeat = 0; repeat < 10; repeat++) {
         panel.update({
           state: { phase: "generating", requestId: repeat + 2, pendingSend: false },
@@ -112,7 +136,20 @@ describe("workspace terminal rendering", () => {
         expect(workspace.render(columns)).toHaveLength(initialHeight);
       }
       workspace.openTasks(); taskPosition.selectedTaskId = unsent.taskId;
-      input("p"); await Promise.resolve();
+      input("\t"); await Promise.resolve();
+      tui.requestRender(); tui.renderNow();
+      const inlineFrame = workspace.render(columns);
+      const inlineLayout = workspaceLayout(columns, rows);
+      const choicesWidth = inlineLayout.innerWidth >= 72 ? Math.min(36, Math.floor(inlineLayout.innerWidth / 3)) : inlineLayout.innerWidth;
+      const sourceLabel = choicesWidth >= 28 ? " Global" : "G";
+      const source = theme.fg("muted", sourceLabel);
+      const sourceRow = inlineFrame.find((line) => line.includes(source))!;
+      expect(sourceRow).toBeDefined();
+      expect(visibleWidth(sourceRow.slice(0, sourceRow.indexOf(source))) + visibleWidth(sourceLabel)).toBe(
+        (workspaceViewport(columns, rows).framed ? 1 : 0) + inlineLayout.inset + choicesWidth);
+      expect(inlineFrame).toHaveLength(initialHeight);
+      expect(inlineFrame.every((line) => visibleWidth(line) <= columns)).toBe(true);
+      input("\x1b"); input("p"); await Promise.resolve();
       const callsBefore = run.mock.calls.length;
       for (const key of [" ", "s", "\r", "\x1b[6~", "\x1b[5~", "\x1b", "s", "\x13", "\x1b[13;3u"]) {
         input(key); tui.renderNow();

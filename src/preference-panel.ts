@@ -5,6 +5,7 @@ import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from ".
 import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
+import { renderPreferenceRow } from "./preference-row.js";
 import { composeRevision, preferenceContentKey, preferenceKey, preferenceValidation, searchPreferences, selectPreference, PREFERENCE_SELECTION_LIMIT,
   type PreferenceLibrary, type PreferenceMetadata, type PreferenceRepository, type PreferenceScope, type PreferenceValue, type RevisionPreference, type SelectedPreference } from "./revision-preferences.js";
 
@@ -488,12 +489,6 @@ export class PreferencePanel {
       this.viewport = available;
       const split = room && w >= 76;
       const leftWidth = split ? Math.floor(w * 0.43) : w;
-      // 28 columns leave 12 for names even with the 8-column warning prefix,
-      // one gap and the 7-column source. Decide once for the actual list pane.
-      const fullSource = leftWidth >= 28;
-      const sourceWidth = fullSource ? 7 : 1;
-      const sourceGap = leftWidth >= sourceWidth + 2 ? 1 : 0;
-      const contentWidth = leftWidth - sourceWidth - sourceGap;
       const groupTitle = (entry: RevisionPreference) => entry.metadata?.kind === "task" ? "Task requirements"
         : entry.metadata?.kind === "rewrite" ? "Prompt rewriting" : "Unclassified";
       const window = selectionWindow(entries.length, this.index, available, this.top,
@@ -513,31 +508,8 @@ export class PreferencePanel {
           JSON.stringify(local.metadata) !== JSON.stringify(source.metadata));
         const warning = unavailable ? "unavailable" : !source ? "deleted" : changed ? "snapshot kept" : "";
         const cursor = active ? "›" : current ? "·" : " ";
-        const checkbox = local ? "[x]" : "[ ]";
-        let prefix: string;
-        if (contentWidth >= (warning ? 8 : 6) + 1) {
-          prefix = this.theme.fg("muted", `${cursor} ${checkbox} `)
-            + (warning ? this.theme.fg("warning", "! ") : "");
-        } else if (contentWidth >= (warning ? 5 : 4) + 1) {
-          prefix = this.theme.fg("muted", `${cursor}${checkbox}`)
-            + (warning ? this.theme.fg("warning", "!") : "");
-        } else {
-          // Drop checkbox/spacing first, then cursor; keep a warning whenever
-          // a column remains beside the source, even if no name can fit.
-          prefix = contentWidth >= (warning ? 3 : 2) ? this.theme.fg("muted", cursor) : "";
-          if (warning && contentWidth > 0) prefix += this.theme.fg("warning", "!");
-        }
-        const name = clean(entry.name).replace(/\n/g, " ");
-        const status = warning ? ` · ${warning}` : "";
-        const nameWidth = Math.max(0, contentWidth - visibleWidth(prefix));
-        const showStatus = visibleWidth(name + status) <= nameWidth;
-        const label = truncateToWidth(name, nameWidth, "…");
-        const content = prefix + this.theme.fg("text", active ? this.theme.bold(label) : label)
-          + (showStatus ? this.theme.fg("muted", status) : "");
-        const sourceLabel = fullSource ? entry.scope === "project" ? "Project" : "Global" : entry.scope === "project" ? "P" : "G";
-        const cell = content + " ".repeat(Math.max(0, contentWidth - visibleWidth(content)) + sourceGap)
-          + this.theme.fg("muted", sourceLabel.padStart(sourceWidth));
-        return active ? this.theme.bg("selectedBg", cell) : cell;
+        return renderPreferenceRow({ width: leftWidth, name: entry.name, scope: entry.scope,
+          selected: !!local, focused: active, cursor, warning }, this.theme);
       });
       if (!entries.length) list.push(...wrap(status, leftWidth).map((line) => this.theme.fg(errors.length ? "error" : "muted", line)));
       if (!room) {

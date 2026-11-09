@@ -8,7 +8,7 @@ import { RefineWorkspace } from "../src/workspace.js";
 import { PreviewPanel } from "../src/preview.js";
 import { composeRevision, selectPreference, type PreferenceLibrary, type PreferenceRepository, type RevisionPreference, type SelectedPreference } from "../src/revision-preferences.js";
 import * as preferences from "../src/revision-preferences.js";
-import { workspaceHeight } from "../src/workspace-overlay.js";
+import { workspaceHeight, workspaceLayout, workspaceViewport } from "../src/workspace-overlay.js";
 import * as presentation from "../src/presentation.js";
 import { panelLayout } from "../src/panel-layout.js";
 import { formatKeyHint, type KeyHint } from "../src/key-hints.js";
@@ -1032,7 +1032,7 @@ describe("Unsent preference selection", () => {
     const styled = w.render(100).join("\n");
     expect(styled).toContain(f.theme.fg("text", f.theme.bold(b.name)));
     expect(styled).toContain(formatKeyHint(["Space", "Toggle"], f.theme));
-    expect(styled).toContain(f.theme.fg("muted", " · P"));
+    expect(styled).toContain(f.theme.fg("muted", "Project"));
     w.handleInput("o"); expect(text(w)).toContain(b.body);
     for (const key of [" ", "i", "f", "n", ctrlS, bringBack, enter]) w.handleInput(key);
     expect(f.run).not.toHaveBeenCalled(); expect(f.complete).not.toHaveBeenCalled();
@@ -1044,6 +1044,45 @@ describe("Unsent preference selection", () => {
     expect(f.run).toHaveBeenCalledExactlyOnceWith(f.originals[0]!.id);
     expect(f.complete.mock.calls[0]![0]).toMatchObject({ editingInstruction: composeRevision([selectPreference(a), selectPreference(b)], "") });
     await Promise.resolve(); w.dispose();
+  });
+
+  it.each(["dark", "light"])("aligns source columns in both Tab's inline list and p's child without merging their save boundaries (%s)", async (theme) => {
+    const f = unsentWorkspaceSetup(null, false, theme); const w = f.workspace;
+    f.library.entries[0]!.name = "Long 中文😀\x1b[31m " + "名称".repeat(30);
+    f.library.entries[1]!.name = "Short 中文😀";
+    text(w); await vi.waitFor(() => expect(text(w)).toContain("Short 中文😀"));
+    w.handleInput(tab);
+    for (const width of [24, 40, 100, 160, 40]) {
+      const layout = workspaceLayout(width, f.terminal.rows);
+      const shell = workspaceViewport(width, f.terminal.rows).framed ? 1 : 0;
+      for (const child of [false, true]) {
+        if (child) { w.handleInput("p"); await loaded(w); }
+        const paneWidth = child ? layout.innerWidth >= 76 ? Math.floor(layout.innerWidth * 0.43) : layout.innerWidth
+          : layout.innerWidth >= 72 ? Math.min(36, Math.floor(layout.innerWidth / 3)) : layout.innerWidth;
+        const labels = paneWidth >= 28 ? [" Global", "Project"] : ["G", "P"];
+        const frame = w.render(width);
+        const rows = frame.filter((line) => labels.some((label) => line.includes(f.theme.fg("muted", label))));
+        expect(rows, JSON.stringify({ width, child, paneWidth })).toHaveLength(2);
+        for (const [index, row] of rows.entries()) {
+          const label = labels[index]!;
+          const source = f.theme.fg("muted", label);
+          expect(visibleWidth(row.slice(0, row.indexOf(source))) + visibleWidth(label)).toBe(shell + layout.inset + paneWidth);
+          expect(row).not.toContain("\x1b[31m");
+        }
+        expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
+        expect(w.render(width)).toEqual(frame);
+        if (child) {
+          w.handleInput(" ");
+          expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences ?? []).toEqual([]);
+          w.handleInput(esc);
+          await vi.waitFor(() => expect(text(w)).toContain("Short 中文😀"));
+        }
+      }
+    }
+    w.handleInput(" ");
+    expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toHaveLength(1);
+    expect(f.run).not.toHaveBeenCalled(); expect(f.complete).not.toHaveBeenCalled();
+    expect(f.repo.save).not.toHaveBeenCalled(); w.dispose();
   });
 
   it.each([{ name: "Esc", key: esc }, { name: "Tab", key: tab }, { name: "Shift+Tab", key: backTab }])("returns to tasks with $name without toggling, submitting or discarding selections", async ({ key }) => {

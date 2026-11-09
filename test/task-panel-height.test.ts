@@ -54,7 +54,11 @@ describe("original and checklist geometry", () => {
           expect(next).toHaveLength(frame.length);
           expect(next.every((line) => visibleWidth(line) <= width)).toBe(true);
           if (selecting) {
-            expect(plain(next).some((line) => line.split(" │ ")[0]?.includes("Preferences ·"))).toBe(true);
+            const back = plain(next).findIndex((line) => line.includes("Esc Back to tasks"));
+            const choices = plain(next).findIndex((line) => line.split(" │ ")[0]?.includes("Preferences ·"));
+            expect(back).toBeGreaterThanOrEqual(0);
+            expect(choices).toBeGreaterThan(back);
+            expect(next[back]).toContain(formatKeyHint(["Esc", "Back to tasks"], theme));
             expect(plain(next).some((line) => line.split(" │ ")[1]?.includes("Original 中文😀"))).toBe(true);
             expect(plain(next).some((line) => line.split(" │ ")[1]?.includes("Selected · 0"))).toBe(true);
           } else expect(checklistRow(next)).toBe(preferences);

@@ -157,12 +157,27 @@ describe("typed preferences", () => {
     expect(discussion[0]!.body).toContain("Do not add tool-use or delegation authority");
     const structure = library.entries.filter((entry) => ["prompt-bullet-structure", "prompt-step-structure"].includes(entry.id));
     expect(structure.map((entry) => [entry.id, entry.version])).toEqual([
-      ["prompt-bullet-structure", 4], ["prompt-step-structure", 4],
+      ["prompt-bullet-structure", 5], ["prompt-step-structure", 5],
     ]);
+    const bullet = structure.find((entry) => entry.id === "prompt-bullet-structure")!;
+    expect(bullet.body.startsWith("Prefer a list-based structure when separating distinct requirements, questions, constraints, or other points would improve clarity and readability.")).toBe(true);
+    expect(bullet.body).toContain("Do not force every prompt into a list");
+    expect(bullet.body).toContain("Preserve the original order by default");
+    expect(bullet.body).toContain("without introducing ambiguity");
+    expect(bullet.body).toContain("conditions, exceptions, negation, sequencing");
+    expect(bullet.body).toContain("mandatory, optional, or alternatives");
+    expect(bullet.body).toContain("authorization boundaries");
+    expect(bullet.body).toContain("Leave the structure unchanged");
+    expect(bullet.body).toContain("do not add an instruction to answer in bullets");
+    const step = structure.find((entry) => entry.id === "prompt-step-structure")!;
+    expect(step.body).toContain("Use numbered steps only when the user's requirements explicitly establish an order or dependencies");
+    expect(step.body).toContain("Do not infer executable steps from background processes, quotations, examples, priorities, assumptions, or questions unless the user's requirements explicitly establish them as such");
+    expect(step.body).toContain("Leave the structure unchanged");
+    expect(step.body).toContain("authorization boundaries");
+    expect(step.body).toContain("Do not introduce additional steps, checks, tools, or deliverables");
+    expect(step.body).toContain("Preserve any existing response-format requirements; do not add an instruction to respond step by step");
     for (const entry of structure) {
       expect(entry.body).not.toContain("用户手动选择");
-      expect(entry.body).toContain("Leave the draft unchanged");
-      expect(entry.body).toContain("authorization scope");
       expect(entry.body).not.toContain("本地匹配");
     }
     expect(library.entries.every((entry) => entry.metadata?.description && ["rewrite", "task"].includes(entry.metadata.kind))).toBe(true);

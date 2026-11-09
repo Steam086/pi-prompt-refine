@@ -1,8 +1,9 @@
 import { isDeepStrictEqual } from "node:util";
-import { Input, parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager } from "@earendil-works/pi-tui";
+import { Input, parseKey, truncateToWidth, wrapTextWithAnsi, type KeybindingsManager } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
+import { renderPreferenceRow } from "./preference-row.js";
 import { preferenceContentKey, preferenceKey, searchPreferences, selectPreference, PREFERENCE_SELECTION_LIMIT,
   type PreferenceLibrary, type PreferenceRepository, type RevisionPreference, type SelectedPreference } from "./revision-preferences.js";
 
@@ -244,12 +245,9 @@ export class InlinePreferences {
       const local = target.selected.find((selected) => preferenceKey(selected) === preferenceKey(item));
       const active = this.active && preferenceKey(item) === position.key;
       const warning = local && this.snapshotWarning(local);
-      const prefix = this.theme.fg("text", `${active ? "›" : " "} [${local ? "x" : " "}] `) + (warning ? this.theme.fg("warning", "! ") : "");
-      const label = clean(local?.name ?? item.name);
-      const source = muted(` · ${item.scope === "project" ? "P" : "G"}`);
-      const name = this.theme.fg("text", active ? this.theme.bold(label) : label);
-      const line = truncateToWidth(prefix + name + (visibleWidth(prefix + name + source) <= width ? source : ""), width, "…");
-      result.push(active ? this.theme.bg("selectedBg", line + " ".repeat(Math.max(0, width - visibleWidth(line)))) : line);
+      result.push(renderPreferenceRow({ width, name: local?.name ?? item.name, scope: item.scope,
+        selected: !!local, focused: active, cursor: active ? "›" : " ", warning: warning || undefined,
+        showStatus: false, prefixColor: "text" }, this.theme));
     }
     result.push(...description);
     return result.slice(0, height);

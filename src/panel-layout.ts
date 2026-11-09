@@ -47,14 +47,21 @@ export function panelTabs(layout: PanelLayout, labels: string[], active: number,
   return layout.bodyHeight >= 8 ? ["", line, ""] : [line];
 }
 
-export function panelFrame(layout: PanelLayout, header: string[], body: string[], footer: string[], border: (text: string) => string): string[] {
+/** Optionally lift action hints above content, after the body's leading tab rows. */
+export function panelFrame(layout: PanelLayout, header: string[], body: string[], footer: string[], border: (text: string) => string,
+  options: { footerAfterBodyRows?: number } = {}): string[] {
   const reserve = (lines: string[], count: number) => Array.from({ length: count }, (_, i) => lines[i] ?? "");
+  const content = reserve(body, layout.bodyHeight);
+  const hints = reserve(footer, layout.footerHeight);
+  const separator = layout.separatorHeight ? [border("─".repeat(layout.innerWidth))] : [];
+  const split = Math.max(0, Math.min(content.length, options.footerAfterBodyRows ?? content.length));
+  const middle = options.footerAfterBodyRows === undefined
+    ? [...content, ...separator, ...hints]
+    : [...content.slice(0, split), ...hints, ...separator, ...content.slice(split)];
   return [
     ...(layout.topSeparatorHeight ? [border("─".repeat(layout.innerWidth))] : []),
     ...reserve(header, layout.headerHeight),
-    ...reserve(body, layout.bodyHeight),
-    ...(layout.separatorHeight ? [border("─".repeat(layout.innerWidth))] : []),
-    ...reserve(footer, layout.footerHeight),
+    ...middle,
   ].map((line) => " ".repeat(layout.inset) + truncateToWidth(line, layout.innerWidth, ""));
 }
 

@@ -4,7 +4,7 @@ import { getKeybindings, Text, visibleWidth } from "@earendil-works/pi-tui";
 import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { selectHistory } from "../src/context.js";
 import type { RefineRecord } from "../src/history.js";
-import { panelLayout } from "../src/panel-layout.js";
+import { panelLayout, workspaceTabs } from "../src/panel-layout.js";
 import { TaskPanel, type TaskPanelPosition } from "../src/task-panel.js";
 import { sanitizeTerminalText } from "../src/presentation.js";
 import { formatKeyHint } from "../src/key-hints.js";
@@ -286,7 +286,7 @@ describe("prompt tree and inspection", () => {
       const lines = panel.render(width);
       expect(lines).toHaveLength(panelLayout(width, rows).height);
       expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
-      expect(lines.at(-1)).toContain(heading("Esc") + " " + muted("Back"));
+      expect(lines.some((line) => line.includes(heading("Esc") + " " + muted("Back")))).toBe(true);
     }
     size.rows = 40;
     panel.handleInput("d");
@@ -885,7 +885,7 @@ describe("short and narrow feedback", () => {
     for (let i = 0; i < 40; i++) {
       // At eight terminal rows the document viewport is one line, so assemble
       // that viewport rather than inserting repeated frame chrome into the text.
-      all += stripVTControlCharacters(panel.render(40)[2]!).trim() + " ";
+      all += stripVTControlCharacters(panel.render(40).at(-1)!).trim() + " ";
       panel.handleInput("\x1b[B");
     }
     expect(all).toContain("Press i to copy into current round");
@@ -979,19 +979,46 @@ describe("history storage details", () => {
   });
 });
 
-describe("stable Read/Select footer", () => {
+describe("top action hints", () => {
+  it.each(["dark", "light"])("places empty Preview and Usage hints below tabs and above content in %s", (name) => {
+    for (const usage of [false, true]) {
+      const { panel, theme, size } = create(name, usage, []);
+      for (const [width, rows] of [[100, 40], [40, 24], [20, 12], [40, 8], [100, 40]] as const) {
+        size.rows = rows;
+        const frame = panel.render(width);
+        const lines = frame.map(stripVTControlCharacters);
+        const layout = panelLayout(width, rows);
+        const tabs = lines.findIndex((line) => line.includes(usage ? "Usage" : "Preview"));
+        const back = lines.findIndex((line) => line.includes("Esc Back"));
+        const content = lines.findIndex((line) => line.includes(usage ? "No records" : "No current"));
+        expect(back).toBeGreaterThanOrEqual(0);
+        expect(content).toBeGreaterThan(back);
+        if (workspaceTabs(layout, usage ? "Usage" : "Preview", theme).length) {
+          expect(back).toBeGreaterThan(tabs);
+          expect(tabs).toBeGreaterThanOrEqual(0);
+        }
+        expect(frame[back]).toContain(formatKeyHint(["Esc", "Back"], theme));
+        expect(frame).toHaveLength(layout.height);
+        expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
+        expect(lines.slice(content).join("\n")).not.toContain("Esc Back");
+      }
+    }
+  });
   it.each(["dark", "light"])("keeps hint columns and visibility fixed across Tab toggles in %s", (name) => {
-    const { panel } = create(name);
+    const { panel, theme, size } = create(name);
     for (let width = 20; width <= 140; width++) {
-      const footer = () => panel.render(width).slice(-2).map(stripVTControlCharacters);
-      const before = footer();
+      const layout = panelLayout(width, size.rows);
+      const start = layout.topSeparatorHeight + layout.headerHeight + workspaceTabs(layout, "Preview", theme).length;
+      const hints = () => panel.render(width).slice(start, start + layout.footerHeight).map(stripVTControlCharacters);
+      const before = hints();
+      expect(before.join("\n")).toContain("Esc Back");
       panel.handleInput("\t");
-      const after = footer();
-      expect(after[0], `primary footer at width ${width}`).toBe(before[0]);
-      expect(after[1]?.replace("Tab Select", "Tab Read  ").trimEnd(), `secondary footer at width ${width}`)
+      const after = hints();
+      expect(after[0], `primary hints at width ${width}`).toBe(before[0]);
+      expect(after[1]?.replace("Tab Select", "Tab Read  ").trimEnd(), `secondary hints at width ${width}`)
         .toBe(before[1]?.trimEnd());
       panel.handleInput("\t");
-      expect(footer()).toEqual(before);
+      expect(hints()).toEqual(before);
     }
   });
 });

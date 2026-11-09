@@ -187,6 +187,62 @@ describe("inline Unsent preferences", () => {
     f.picker.dispose();
   });
 
+  it.each(["dark", "light"])("reserves right-aligned source columns through focus, scrolling and resize (%s)", async (themeName) => {
+    const entries = [
+      { ...second, name: "Long 中文😀\x1b[31m " + "名称".repeat(30) },
+      { ...first, name: "Short 中文😀" },
+    ];
+    const f = fixture(entries, [], themeName); await Promise.resolve();
+    for (const active of [true, false, true]) {
+      f.picker.setTarget(1, active);
+      for (const width of [1, 2, 3, 8, 12, 24, 27, 28, 36, 60, 24]) {
+        const lines = f.render(width, 16);
+        const labels = width >= 28 ? [" Global", "Project"] : ["G", "P"];
+        const rows = lines.filter((line) => labels.some((label) => line.includes(f.theme.fg("muted", label))));
+        expect(rows).toHaveLength(2);
+        for (const [index, row] of rows.entries()) {
+          const label = labels[index]!;
+          const source = f.theme.fg("muted", label);
+          expect(visibleWidth(row.slice(0, row.indexOf(source))) + visibleWidth(label)).toBe(width);
+          expect(visibleWidth(row)).toBe(width);
+          expect(row.slice(row.indexOf(source))).not.toContain("\x1b[1m");
+          expect(row).not.toContain("\x1b[31m");
+        }
+        if (width >= 12) expect(stripVTControlCharacters(rows[0]!)).toContain("…");
+        expect(f.render(width, 16)).toEqual(lines);
+      }
+    }
+    f.picker.handleInput("\x1b[B"); f.picker.handleInput(" ");
+    for (const width of [24, 60, 24]) {
+      const row = f.render(width, 3).find((line) => line.includes(f.theme.fg("muted", width >= 28 ? "Project" : "P")))!;
+      expect(row).toBeDefined();
+      expect(visibleWidth(row)).toBe(width);
+      expect(row).toContain(f.theme.bg("selectedBg", "").split("\x1b[49m")[0]);
+    }
+    expect(f.state.selected).toEqual([selectPreference(entries[1]!)]);
+    expect(f.save).toHaveBeenCalledOnce(); expect(f.load).toHaveBeenCalledOnce();
+    f.picker.dispose();
+  });
+
+  it.each(["dark", "light"])("keeps snapshot warning markers independent of the source column down to one cell (%s)", async (themeName) => {
+    for (const state of ["deleted", "changed", "unavailable"]) {
+      const entry = { ...first, name: "Retained 中文😀 " + "长".repeat(30) };
+      const f = fixture(state === "deleted" ? [] : [{ ...entry, version: state === "changed" ? 2 : 1 }], [selectPreference(entry)], themeName);
+      if (state === "unavailable") f.library({ entries: [], errors: { project: "Offline" } });
+      await f.picker.refresh();
+      for (const width of [1, 2, 3, 8, 12, 24, 28, 36]) {
+        const source = f.theme.fg("muted", width >= 28 ? "Project" : "P");
+        const row = f.render(width, 16).find((line) => line.includes(source))!;
+        expect(row).toBeDefined(); expect(visibleWidth(row)).toBe(width);
+        expect(visibleWidth(row.slice(0, row.indexOf(source))) + visibleWidth(width >= 28 ? "Project" : "P")).toBe(width);
+        if (width > 1) expect(row).toContain(f.theme.fg("warning", width >= 12 ? "! " : "!"));
+        if (width <= 3) expect(stripVTControlCharacters(row)).toBe(width === 1 ? "P" : width === 2 ? "!P" : "! P");
+      }
+      expect(f.state.selected).toEqual([selectPreference(entry)]);
+      expect(f.save).not.toHaveBeenCalled(); f.picker.dispose();
+    }
+  });
+
   it("does not refilter or reload on focus changes and scrolling", async () => {
     const f = fixture(); await Promise.resolve();
     const search = vi.spyOn(String.prototype, "toLowerCase");

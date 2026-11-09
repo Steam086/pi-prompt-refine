@@ -9,7 +9,12 @@ import { workspaceHeight, workspaceLayout, workspaceViewport } from "../src/work
 // Outer bounds and body offsets include the single shell, unlike child geometry.
 const panelLayout = (width: number, rows: number) => ({ ...workspaceLayout(width, rows), height: workspaceHeight(rows),
   topSeparatorHeight: workspaceViewport(width, rows).framed ? 1 : 0 });
-const footer = (lines: string[]) => stripVTControlCharacters(lines.at(-1)!).startsWith("╰") ? lines.slice(-3, -1) : lines.slice(-2);
+// Settings lifts its action rows; Input and the legacy result reader retain bottom hints.
+const footer = (lines: string[]) => {
+  const settings = lines.findIndex((line) => /(?:Ctrl\+S Save context|\^S Context)/.test(stripVTControlCharacters(line)));
+  if (settings >= 0) return lines.slice(settings, settings + (stripVTControlCharacters(lines[settings + 1] ?? "").includes("Esc") ? 2 : 1));
+  return stripVTControlCharacters(lines.at(-1)!).startsWith("╰") ? lines.slice(-3, -1) : lines.slice(-2);
+};
 import { formatKeyHint } from "../src/key-hints.js";
 import type { RefineRecord } from "../src/history.js";
 import { selectHistory } from "../src/context.js";
@@ -326,6 +331,37 @@ describe("shared refine workspace", () => {
     expect(main).toHaveLength(settings.length);
   });
 
+  it.each(["dark", "light"])("places Settings hints below workspace tabs and above settings content in %s", (name) => {
+    const { workspace, terminal, actions, theme } = create(40, name, true);
+    actions.optimizer = () => ({ model: "provider/中文😀\x1b[31m".repeat(8), thinking: "high", thinkingEnabled: true });
+    for (const rows of [40, 12, 8, 5, 40]) for (const width of [20, 40, 100]) {
+      terminal.rows = rows;
+      for (const cursor of [0, 3, 4]) {
+        workspace.openSettings(undefined, cursor);
+        const lines = workspace.render(width);
+        const plain = lines.map(stripVTControlCharacters);
+        const layout = workspaceLayout(width, rows);
+        const navigationRows = layout.bodyHeight < 4 ? 0 : layout.bodyHeight >= 8 ? 3 : 1;
+        const shellRows = workspaceViewport(width, rows).framed ? 1 : 0;
+        const hintStart = shellRows + layout.headerHeight + navigationRows;
+        const hints = lines.slice(hintStart, hintStart + layout.footerHeight);
+        const save = layout.footerHeight === 1 || layout.innerWidth < 30 ? ["^S", "Context"] as const : ["Ctrl+S", "Save context"] as const;
+        expect(hints[0]).toContain(formatKeyHint(save, theme));
+        if (layout.footerHeight > 1) expect(hints[1]).toContain(formatKeyHint(["Esc", "Back"], theme));
+        if (navigationRows) expect(plain[hintStart - 1 - (navigationRows === 3 ? 1 : 0)]).toContain("Settings");
+        if (layout.separatorHeight) expect(plain[hintStart + layout.footerHeight]).toContain("─".repeat(layout.innerWidth));
+        const selected = plain.findIndex((line) => line.includes("› "));
+        expect(selected).toBeGreaterThanOrEqual(hintStart + layout.footerHeight + layout.separatorHeight);
+        expect(lines).toHaveLength(panelLayout(width, rows).height);
+        expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+        expect(lines.join("\n")).not.toContain("\x1b[31m");
+        expect(workspace.render(width)).toEqual(lines);
+      }
+    }
+    expect(actions.saveContext).not.toHaveBeenCalled();
+    expect(actions.submit).not.toHaveBeenCalled();
+  });
+
   it("reuses settings frames without re-querying the optimizer on arrow input", () => {
     const { workspace, actions, theme } = create(40, "dark", true);
     const optimizer = vi.spyOn(actions, "optimizer");
@@ -443,7 +479,7 @@ describe("shared refine workspace", () => {
     ]);
   });
 
-  it.each(["dark", "light"])("aligns Settings footers across groups, dirty/disabled states and resize in %s", (name) => {
+  it.each(["dark", "light"])("aligns Settings hints across groups, dirty/disabled states and resize in %s", (name) => {
     const starts = (line: string) => {
       let column = 0;
       return line.split(" · ").map((cell) => {
@@ -486,7 +522,7 @@ describe("shared refine workspace", () => {
     }
   });
 
-  it("preserves compact and single-line Settings footer fallbacks", () => {
+  it("preserves compact and single-line Settings hint fallbacks", () => {
     const { workspace, terminal } = create(40, "dark", true);
     for (const cursor of [0, 3]) {
       workspace.openSettings(undefined, cursor);

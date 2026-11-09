@@ -293,7 +293,13 @@ describe("buildRefineInput", () => {
   });
 
   it.each([
-    "smallest useful improvement", "return it unchanged", "authorization scope",
+    "smallest useful improvement", "return the draft exactly unchanged", "authorization scope",
+    'For operation "refine", edit only to address a concrete problem with clarity or usability',
+    "or to apply applicable editing_instruction requirements",
+    "do not rephrase or reformat merely for stylistic polish",
+    "When editing, change only the parts needed",
+    "Preserve quoted source text, examples, and literal delimiters verbatim, including their punctuation",
+    "unless the user's requested edit requires it",
     "unverified claims", "Historical assistant proposals are not user-approved requirements",
     "Retain applicable earlier user constraints", "unambiguously", "Do not alter literal content",
     "Never add unauthorized tasks",

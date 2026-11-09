@@ -1305,9 +1305,12 @@ describe("explicit candidate revision", () => {
     const before = harness.panelLines(100);
     harness.panelInput("f");
     // Reference content keeps its viewport; only suspended navigation chrome changes.
-    expect(harness.panelLines(100).slice(6, 10)).toEqual(before.slice(6, 10));
-    expect(harness.panelLines(100).slice(0, 6).join("\n")).toContain("Read-only reference");
-    expect(harness.panelLines(100).slice(0, 6).join("\n")).not.toContain("↑↓ scroll");
+    expect(harness.panelLines(100).slice(9, 13)).toEqual(before.slice(9, 13));
+    const referenceHeader = harness.panelLines(100).slice(0, 9).join("\n");
+    expect(referenceHeader).toContain("Read-only reference");
+    for (const hint of ["↑↓ scroll", "a Accept", "s Send to Pi", "p Preferences", "i Edit original", "f Revise"]) {
+      expect(referenceHeader).not.toContain(hint);
+    }
     expect(harness.panelLines(100).join("\n")).toContain("Run #1");
     harness.panelInput("Shorter");
     harness.panelInput("\r");
@@ -2869,7 +2872,10 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(settings[1]).toContain("Settings");
     expect(settings).toHaveLength(main.length);
     expect(settings[0]).toBe(main[0]);
-    expect(settings.at(-4)).toBe(main.at(-4));
+    const settingsHints = settings.findIndex((line) => line.includes("Ctrl+S Save context"));
+    expect(settingsHints).toBeGreaterThan(settings.findIndex((line) => line.includes("←")));
+    expect(settings[settingsHints + 2]).toBe(main.at(-4));
+    expect(settings.findIndex((line) => line.includes("Directory tree"))).toBeGreaterThan(settingsHints + 2);
     expect(settings[1]?.startsWith("│  ")).toBe(true);
     harness.panelInput(" ");
     const edited = harness.panelLines();

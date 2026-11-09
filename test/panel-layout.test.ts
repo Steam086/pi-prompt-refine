@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { alignedHints } from "../src/panel-layout.js";
+import { alignedHints, panelFrame, panelGeometry } from "../src/panel-layout.js";
 import { workspaceHeight, workspaceLayout, workspaceViewport } from "../src/workspace-overlay.js";
 
 describe("overlay geometry", () => {
@@ -25,6 +25,23 @@ describe("overlay geometry", () => {
     expect(workspaceLayout(240, 80).inset).toBeGreaterThan(20);
     expect(workspaceViewport(7, 40).framed).toBe(false);
     expect(workspaceViewport(100, 5).framed).toBe(false);
+  });
+});
+
+describe("frame action placement", () => {
+  it("lifts hints after tabs without changing content capacity or default footer placement", () => {
+    const layout = panelGeometry(40, 12, 40, false, false, 0);
+    const header = ["Title", "Status"];
+    const body = ["Tabs", "", "Original 中文😀", "Result", "Last line"];
+    const hints = ["Enter Inspect", "Esc Back"];
+    const bottom = panelFrame(layout, header, body, hints, (text) => text);
+    const top = panelFrame(layout, header, body, hints, (text) => text, { footerAfterBodyRows: 2 });
+    expect(bottom.slice(-2)).toEqual(hints);
+    expect(top.slice(0, 7)).toEqual([...header, ...body.slice(0, 2), ...hints, "─".repeat(40)]);
+    expect(top.slice(7)).toEqual(bottom.slice(4, -3));
+    expect(top).toHaveLength(layout.height);
+    expect(top.join("\n")).toContain("Original 中文😀");
+    expect(top.join("\n")).toContain("Last line");
   });
 });
 

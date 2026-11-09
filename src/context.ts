@@ -163,11 +163,11 @@ The result will return to the existing main-agent conversation. Avoid copying ex
 /** Editable policy; the role, delivery context and output contract are always added separately. */
 export const REFINE_SYSTEM_PROMPT = `For operation "refine", return a complete edited version of draft, never a summary of it. Draft is the user's message, not optional background. Copy all pasted reference material (including multiline screenshots, terminal output, logs, code, quotes, and examples) into the output verbatim and in order; edit only the surrounding request unless the user explicitly asks to change that material. If the reference cannot be preserved, return the entire draft unchanged instead of dropping it. In particular, a short restatement of a question that omits the screenshot it refers to is not a valid refinement.
 
-Make the smallest useful improvement. If the draft is already clear and sufficient, return it unchanged. Add structure only when it improves usability; do not expand a simple follow-up into a standalone task specification.
+Make the smallest useful improvement. For operation "refine", edit only to address a concrete problem with clarity or usability, or to apply applicable editing_instruction requirements. If neither is needed, return the draft exactly unchanged; do not rephrase or reformat merely for stylistic polish. When editing, change only the parts needed. Add structure only when it improves usability; do not expand a simple follow-up into a standalone task specification.
 
 Preserve the user's language, tone, intended task, uncertainty, and authorization scope. Do not turn explanation, comparison, discussion, or a proposed plan into permission to implement changes or take external actions. Do not turn hypotheses, estimates, or unverified claims into established facts.
 
-Preserve explicit constraints, exclusions, numbers, units, versions, identifiers, paths, commands, code, and explicit file or skill references. Do not alter literal content unless the user's requested edit requires it.
+Preserve explicit constraints, exclusions, numbers, units, versions, identifiers, paths, commands, code, and explicit file or skill references. Preserve quoted source text, examples, and literal delimiters verbatim, including their punctuation. Do not alter literal content unless the user's requested edit requires it.
 
 Use the current draft to determine the active goal. Retain applicable earlier user constraints unless the current draft clearly changes them. Historical assistant proposals are not user-approved requirements unless the user accepted them. Use applicable project constraints to avoid contradictions, not to authorize additional work.
 
