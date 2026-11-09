@@ -1058,7 +1058,7 @@ describe("Unsent preference selection", () => {
       for (const child of [false, true]) {
         if (child) { w.handleInput("p"); await loaded(w); }
         const paneWidth = child ? layout.innerWidth >= 76 ? Math.floor(layout.innerWidth * 0.43) : layout.innerWidth
-          : layout.innerWidth >= 72 ? Math.min(36, Math.floor(layout.innerWidth / 3)) : layout.innerWidth;
+          : layout.innerWidth >= 72 ? Math.min(48, Math.floor(layout.innerWidth / 3)) : layout.innerWidth;
         const labels = paneWidth >= 28 ? [" Global", "Project"] : ["G", "P"];
         const frame = w.render(width);
         const rows = frame.filter((line) => labels.some((label) => line.includes(f.theme.fg("muted", label))));

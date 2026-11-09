@@ -7,6 +7,8 @@ import { RefineController } from "../src/controller.js";
 import { selectHistory } from "../src/context.js";
 import * as preferences from "../src/revision-preferences.js";
 import { sanitizeTerminalText } from "../src/presentation.js";
+import * as presentation from "../src/presentation.js";
+import { formatKeyHint } from "../src/key-hints.js";
 import { selectPreference, type PreferenceLibrary, type PreferenceRepository, type RevisionPreference, type SelectedPreference } from "../src/revision-preferences.js";
 
 afterEach(() => vi.restoreAllMocks());
@@ -184,6 +186,83 @@ describe("inline Unsent preferences", () => {
     expect(f.save).not.toHaveBeenCalled(); expect(f.load).toHaveBeenCalledTimes(1);
     f.picker.handleInput("/"); f.picker.handleInput("no matches");
     expect(f.picker.renderDescription(60, 6)).toEqual([]);
+    f.picker.dispose();
+  });
+
+  it.each(["dark", "light"])("previews literal instructions with distinct heading and description styles (%s)", async (themeName) => {
+    const entry = { ...first, body: "# Literal **instructions** 中文😀\n\x1b[1mDo not render Markdown\x1b[22m\n".repeat(10),
+      metadata: { ...first.metadata!, description: "Description 中文😀\x1b[2J\nSecond line\nThird line\nFourth line" } };
+    const f = fixture([entry, second], [], themeName); await Promise.resolve();
+    vi.spyOn(f.theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
+    f.picker.handleInput("\x1b[F");
+    const preview = f.picker.renderPreview(60, 14);
+    expect(preview[0]).toBe(f.theme.fg("text", f.theme.bold(entry.name)));
+    expect(preview[1]).toBe(f.theme.fg("muted", sanitizeTerminalText(entry.metadata.description.split("\n")[0]!)));
+    const literal = preview.find((line) => stripVTControlCharacters(line).startsWith("# Literal"));
+    expect(literal).toBe(f.theme.fg("text", "# Literal **instructions** 中文😀"));
+    expect(literal).not.toContain("\x1b[1m");
+    expect(preview.join("\n")).toContain(sanitizeTerminalText("\x1b[1mDo not render Markdown\x1b[22m"));
+    expect(preview.at(-1)).toBe(f.theme.fg("muted", "… · ") + formatKeyHint(["o", "Read full"], f.theme));
+    for (const [width, height] of [[60, 14], [24, 8], [3, 6], [2, 2], [1, 8], [1, 2], [60, 14], [60, 0], [0, 10]]) {
+      const lines = f.picker.renderPreview(width!, height!);
+      expect(lines.length).toBeLessThanOrEqual(height!);
+      expect(lines.every((line) => visibleWidth(line) <= width!)).toBe(true);
+      expect(lines.join("\n")).not.toContain("\x1b[2J");
+    }
+    // A legacy entry without metadata still has useful instructions to preview.
+    f.library({ entries: [{ ...entry, metadata: undefined, body: "Legacy **literal** body" }], errors: {} });
+    await f.picker.refresh();
+    expect(f.picker.renderPreview(60, 8)).toEqual([
+      f.theme.fg("text", f.theme.bold(entry.name)), f.theme.fg("text", "Legacy **literal** body"),
+    ]);
+    expect(f.state.selected).toEqual([]);
+    expect(f.save).not.toHaveBeenCalled();
+    f.picker.handleInput("/"); f.picker.handleInput("no matches");
+    expect(f.picker.renderPreview(60, 8)).toEqual([]);
+    f.picker.dispose();
+    expect(f.picker.renderPreview(60, 8)).toEqual([]);
+  });
+
+  it.each(["dark", "light"])("previews the checked snapshot when its source changes or disappears (%s)", async (themeName) => {
+    const f = fixture([first], [selectPreference(first)], themeName); await Promise.resolve();
+    f.library({ entries: [{ ...first, version: 2, name: "New library name", body: "New library body" }], errors: {} });
+    await f.picker.refresh();
+    let preview = f.picker.renderPreview(100, 10).join("\n");
+    expect(preview).toContain("Original body");
+    expect(preview).not.toContain("New library body");
+    expect(preview).toContain(f.theme.fg("warning", "⚠ Source changed; selected snapshot retained. Deselect and reselect to use the current entry."));
+    for (const errors of [{}, { project: "Unavailable" }]) {
+      f.library({ entries: [], errors }); await f.picker.refresh();
+      preview = f.picker.renderPreview(100, 10).join("\n");
+      expect(preview).toContain("Original body");
+      expect(preview).toContain(f.theme.fg("warning", "⚠").split("⚠")[0] + "⚠");
+    }
+    expect(f.state.selected).toEqual([selectPreference(first)]);
+    expect(f.save).not.toHaveBeenCalled();
+    f.picker.dispose();
+  });
+
+  it("reuses instruction wrapping across focus and height changes, and refreshes changed content", async () => {
+    const f = fixture([first], [selectPreference(first)]); await Promise.resolve();
+    const clean = vi.spyOn(presentation, "sanitizeTerminalText");
+    const preparations = () => clean.mock.calls.filter(([text]) => text === first.body).length;
+    f.picker.renderPreview(60, 10);
+    const count = preparations();
+    expect(count).toBeGreaterThan(0);
+    for (let i = 0; i < 10; i++) {
+      f.picker.focused = i % 2 === 0;
+      f.picker.setTarget(1, i % 2 === 0);
+      f.picker.renderPreview(60, i % 2 === 0 ? 12 : 8);
+    }
+    f.picker.setTarget(1, true);
+    expect(preparations()).toBe(count);
+    f.state.selected[0]!.body = "Updated snapshot **literal**";
+    expect(stripVTControlCharacters(f.picker.renderPreview(60, 10).join("\n"))).toContain("Updated snapshot **literal**");
+    expect(clean).toHaveBeenCalledWith("Updated snapshot **literal**");
+    f.picker.invalidate();
+    f.picker.renderPreview(24, 10);
+    expect(f.load).toHaveBeenCalledTimes(1);
+    expect(f.save).not.toHaveBeenCalled();
     f.picker.dispose();
   });
 

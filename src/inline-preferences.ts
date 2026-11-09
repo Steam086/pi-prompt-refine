@@ -4,6 +4,7 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
 import { renderPreferenceRow } from "./preference-row.js";
+import { formatKeyHint } from "./key-hints.js";
 import { preferenceContentKey, preferenceKey, searchPreferences, selectPreference, PREFERENCE_SELECTION_LIMIT,
   type PreferenceLibrary, type PreferenceRepository, type RevisionPreference, type SelectedPreference } from "./revision-preferences.js";
 
@@ -36,6 +37,7 @@ export class InlinePreferences {
   }
   private viewport = 1;
   private cache?: { selected: SelectedPreference[]; query: string; library: PreferenceLibrary; entries: RevisionPreference[] };
+  private previewCache?: { width: number; body: string; description: string; bodyLines: string[]; descriptionLines: string[] };
 
   constructor(private readonly repository: PreferenceRepository,
     private readonly target: (id: number) => InlinePreferenceTarget | undefined,
@@ -68,6 +70,7 @@ export class InlinePreferences {
   }
   dispose(): void { this.disposed = true; this.focused = false; this.epoch++; }
   invalidate(): void {
+    this.previewCache = undefined;
     for (const position of this.positions.values()) {
       position.search.invalidate();
       if (position.document) position.document.lines = undefined;
@@ -199,6 +202,40 @@ export class InlinePreferences {
     const body = lines.slice(0, room);
     if (lines.length > room) body[room - 1] = truncateToWidth(body[room - 1]! + " …", width, "…");
     return [...heading, ...body.map((line) => this.theme.fg("muted", line))];
+  }
+  /** Wide selection previews the literal instructions; browsing never changes checks. */
+  renderPreview(width: number, height: number): string[] {
+    if (this.disposed || !this.active || width < 1 || height < 1 || this.id === undefined) return [];
+    const target = this.target(this.id), position = this.positions.get(this.id);
+    const entry = target && position && this.highlighted(target.selected, position);
+    if (!entry) return [];
+    const description = entry.metadata?.description ?? "";
+    if (!this.previewCache || this.previewCache.width !== width || this.previewCache.body !== entry.body || this.previewCache.description !== description) {
+      this.previewCache = { width, body: entry.body, description,
+        bodyLines: wrapTextWithAnsi(sanitizeTerminalText(entry.body), width),
+        descriptionLines: description ? wrapTextWithAnsi(sanitizeTerminalText(description), width) : [] };
+    }
+    const { bodyLines, descriptionLines } = this.previewCache;
+    const result = [truncateToWidth(this.theme.fg("text", this.theme.bold(sanitizeTerminalText(entry.name))), width, "…")];
+    const local = target.selected.find((item) => preferenceKey(item) === preferenceKey(entry));
+    const warning = local && this.snapshotWarning(local);
+    if (warning && result.length < height) result.push(truncateToWidth(this.theme.fg("warning", `⚠ ${sanitizeTerminalText(warning)}`), width, "…"));
+    // Keep description secondary and reserve readable instruction rows in short panes.
+    const descriptionHeight = Math.min(3, Math.max(0, height - result.length - 4));
+    const summary = descriptionLines.slice(0, descriptionHeight);
+    const clipped = (line: string) => truncateToWidth(line, Math.max(0, width - 2), "") + (width > 1 ? " …" : "…");
+    if (summary.length) {
+      if (descriptionLines.length > summary.length) summary[summary.length - 1] = clipped(summary[summary.length - 1]!);
+      result.push(...summary.map((line) => this.theme.fg("muted", line)), "");
+    }
+    const room = height - result.length;
+    const truncated = bodyLines.length > room;
+    const count = Math.max(0, room - (truncated && room > 1 ? 1 : 0));
+    const body = bodyLines.slice(0, count);
+    if (truncated && room === 1) body[0] = clipped(body[0]!);
+    result.push(...body.map((line) => this.theme.fg("text", line)));
+    if (truncated && room > 1) result.push(truncateToWidth(this.theme.fg("muted", "… · ") + formatKeyHint(["o", "Read full"], this.theme), width, "…"));
+    return result;
   }
   /** A wide host owns the description; narrow selection keeps it below the choices. */
   render(width: number, height: number, showWarning = true, showDescription = true): string[] {
