@@ -53,7 +53,7 @@ export class PreferencePanel {
   private allView: { index: number; top: number; direction: number; key?: string } = { index: 0, top: 0, direction: 1 };
   private contentVersion = 0;
   private entriesCache?: { query: string; version: number; entries: RevisionPreference[] };
-  private descriptionCache?: { entry: RevisionPreference; version: number; document: PreferenceDocument };
+  private descriptionCache?: { entry: RevisionPreference; version: number; compact: boolean; document: PreferenceDocument };
   private documents: { document: PreferenceDocument; width: number; lines: string[] }[] = [];
   private notice = "";
   private noticeColor: "muted" | "warning" | "error" = "muted";
@@ -183,8 +183,9 @@ export class PreferencePanel {
   private source(entry: RevisionPreference): RevisionPreference | undefined {
     return this.library.entries.find((item) => preferenceKey(item) === preferenceKey(entry));
   }
-  private description(entry: RevisionPreference): PreferenceDocument {
-    if (this.descriptionCache?.entry === entry && this.descriptionCache.version === this.contentVersion) return this.descriptionCache.document;
+  private description(entry: RevisionPreference, compact = false): PreferenceDocument {
+    if (this.descriptionCache?.entry === entry && this.descriptionCache.version === this.contentVersion &&
+      this.descriptionCache.compact === compact) return this.descriptionCache.document;
     const local = this.local(entry);
     const source = this.source(entry);
     const changed = local && source && (source.version !== local.version || source.body !== local.sourceBody || source.name !== local.name ||
@@ -194,10 +195,10 @@ export class PreferencePanel {
       unavailable ? "Library unavailable" : !source ? "Source deleted" : changed ? "Library changed; snapshot kept" : ""].filter(Boolean).join(" · ") : "Library entry";
     const details = (value: RevisionPreference, state: PreferenceDocument): PreferenceDocument => [
       { text: value.name, color: "text", heading: true },
-      { text: `${value.scope} · ${value.id}`, color: "muted" },
+      ...(!compact ? [{ text: `${value.scope} · ${value.id}`, color: "muted" as const }] : []),
       ...state,
       ...(value.metadata ? [
-        { text: `${value.metadata.kind === "rewrite" ? "Prompt rewriting" : "Task requirements"} · manual`, color: "muted" as const },
+        { text: `${value.metadata.kind === "rewrite" ? "Prompt rewriting" : "Task requirements"}${compact ? "" : " · manual"}`, color: "muted" as const },
         { text: value.metadata.description, color: "muted" as const },
       ] : []),
       { text: "", color: "text" }, { text: value.body, color: "text" },
@@ -207,19 +208,22 @@ export class PreferencePanel {
     if (this.selectedOnly && local && this.page.kind !== "delete") {
       document = [{ text: "Selected snapshot", color: "text", heading: true }, ...details(local, [
         { text: status, color: unavailable || !source || changed ? "warning" : "muted" },
-        { text: "Manually selected", color: "muted" },
+        ...(!compact ? [{ text: "Manually selected", color: "muted" as const }] : []),
       ])];
       if (source && !unavailable && (changed || source.body !== local.body)) document.push(
         { text: "", color: "text" }, { text: "Current library entry", color: "text", heading: true }, ...details(source, []));
     } else {
-      document = details(entry, [{ text: unavailable ? "Library unavailable" : source ? "Library entry" : "Deleted source",
+      document = details(entry, compact && source && !unavailable ? [] : [{ text: unavailable ? "Library unavailable" : source ? "Library entry" : "Deleted source",
         color: unavailable || !source ? "warning" : "muted" }]);
       if (local) document.push({ text: "", color: "text" }, { text: "Selected snapshot", color: "text", heading: true },
         { text: status, color: unavailable || !source || changed ? "warning" : "muted" },
-        ...(local.metadata ? [{ text: `${local.metadata.kind} · Manually selected · ${local.metadata.description}`, color: "muted" as const }] : []),
+        ...(local.metadata ? compact ? [
+          { text: local.metadata.kind === "rewrite" ? "Prompt rewriting" : "Task requirements", color: "muted" as const },
+          { text: local.metadata.description, color: "muted" as const },
+        ] : [{ text: `${local.metadata.kind} · Manually selected · ${local.metadata.description}`, color: "muted" as const }] : []),
         { text: local.body, color: "text" });
     }
-    this.descriptionCache = { entry, version: this.contentVersion, document };
+    this.descriptionCache = { entry, version: this.contentVersion, compact, document };
     return document;
   }
   private read(title: string, document: PreferenceDocument): void { this.page = { kind: "read", title, document, scroll: 0 }; }
@@ -541,7 +545,7 @@ export class PreferencePanel {
           ? toolbar.slice(Math.min(Math.floor(this.actionIndex / columns), Math.max(0, toolbar.length - h))) : list;
       } else {
         const rightWidth = split ? w - leftWidth - 3 : w;
-        const detail = split && entries[this.index] ? this.document(this.description(entries[this.index]!), rightWidth) : [];
+        const detail = split && entries[this.index] ? this.document(this.description(entries[this.index]!, true), rightWidth) : [];
         const headingText = this.theme.fg("text", this.theme.bold(`${this.selectedOnly ? "Selected" : "Library"} ${entries.length ? this.index + 1 : 0}/${entries.length}`));
         const count = this.theme.fg("muted", ` · ${this.working.length} selected`);
         const viewHint = this.focus !== 0 ? formatKeyHint(["s", this.selectedOnly ? "All" : "Selected"], this.theme) : "";
