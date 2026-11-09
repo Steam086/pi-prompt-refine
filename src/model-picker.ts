@@ -85,7 +85,7 @@ export function renderModelPicker(options: ModelPickerOptions, width: number, ro
     (text) => theme.fg("borderMuted", text));
 }
 
-/** Model selection replaces the workspace modal, using the identical shell. */
+/** Model selection shares the workspace shell, including when embedded as a child page. */
 export function renderOverlayModelPicker(options: ModelPickerOptions, width: number, rows: number, theme: Theme): string[] {
   if (width < 1) return [];
   return workspaceFrame(width, rows, renderModelPicker(options, workspaceViewport(width, rows).width, rows, theme,
