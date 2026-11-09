@@ -36,6 +36,42 @@ function setup(complete: (request: RefineRequest, signal: AbortSignal) => Promis
   return { controller, onState, onAccepted, scheduler };
 }
 
+describe("runtime settings", () => {
+  it("uses new limits for new work and queued starts without changing active timers or output guards", async () => {
+    const limits = { timeoutMs: 100, maxDraftChars: 100, maxOutputChars: 200 };
+    const scheduler = new FakeScheduler();
+    const jobs: Array<{ request: RefineRequest; pending: ReturnType<typeof deferred<RefineCompletion>>; signal: AbortSignal }> = [];
+    const controller = new RefineController({
+      get timeoutMs() { return limits.timeoutMs; },
+      get maxDraftChars() { return limits.maxDraftChars; },
+      get maxOutputChars() { return limits.maxOutputChars; },
+      maxConcurrent: 1, scheduler, onState() {},
+      complete: (request, signal) => { const pending = deferred<RefineCompletion>(); jobs.push({ request, signal, pending }); return pending.promise; },
+    }, model);
+    controller.trigger(input("A"));
+    controller.trigger(input("B"));
+    expect(jobs).toHaveLength(1);
+    limits.timeoutMs = 300;
+    limits.maxDraftChars = 1;
+    limits.maxOutputChars = 5;
+    expect(controller.trigger(input("Too long"))).toEqual({ kind: "too-long" });
+    jobs[0]!.pending.resolve(success("Longer than the new output guard"));
+    await flushPromises();
+    expect(controller.getRecord(jobs[0]!.request.recordId)?.status).toBe("generated");
+    expect(jobs).toHaveLength(2);
+    scheduler.advance(100);
+    expect(jobs[1]!.signal.aborted).toBe(false);
+    scheduler.advance(200);
+    expect(jobs[1]!.signal.aborted).toBe(true);
+    expect(controller.getRecord(jobs[1]!.request.recordId)?.error).toBe("timeout");
+    limits.timeoutMs = 500;
+    controller.trigger(input("C"));
+    limits.timeoutMs = 1000;
+    scheduler.advance(500);
+    expect(jobs[2]!.signal.aborted).toBe(true); // Existing timer keeps its 500 ms deadline.
+  });
+});
+
 describe("request budget diagnostics", () => {
   const report: BudgetReport = { status: "trimmed", inputTokens: 200, outputTokens: 1000, safetyTokens: 4096,
     contextWindow: 8000, outputLimit: 1000, removedMessages: 1, removedProjectParts: [], message: "Background reduced" };

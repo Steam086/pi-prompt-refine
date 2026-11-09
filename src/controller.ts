@@ -93,6 +93,7 @@ export type TriggerResult =
 interface ActiveRequest {
   previousCandidate?: Candidate;
   startedAt?: number;
+  maxOutputChars?: number;
   request: RefineRequest;
   controller: AbortController;
   timeout?: unknown;
@@ -472,6 +473,7 @@ export class RefineController {
       if (active.startedAt !== undefined) continue;
       running++;
       active.startedAt = Date.now();
+      active.maxOutputChars = this.options.maxOutputChars ?? 1_000_000;
       this.journal.update(active.request.recordId, { status: "generating" });
       active.timeout = this.scheduler.setTimeout(() => this.finishError(active, "timeout"), this.options.timeoutMs);
       void this.run(active);
@@ -607,7 +609,7 @@ export class RefineController {
       this.journal.update(active.request.recordId, { usage: result.usage });
       const error = result.stopReason !== "stop" ? (result.stopReason === "budget" ? "budget" : result.stopReason === "length" ? "truncated" : result.stopReason === "toolUse" ? "tool-call" : "failed")
         : result.invalidOutput ? "invalid-output" : !result.text.trim() ? "empty"
-          : result.text.length > (this.options.maxOutputChars ?? 1_000_000) ? "truncated" : undefined;
+          : result.text.length > active.maxOutputChars! ? "truncated" : undefined;
       if (error) { this.finishError(active, error); return; }
       this.release(active);
       const candidate: Candidate = { ...structuredClone(active.request), text: result.text, version: ++this.candidateSequence,

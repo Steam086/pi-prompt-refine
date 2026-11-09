@@ -142,7 +142,7 @@ pi --extension git:github.com/Steam086/pi-prompt-refine
 
 **模型失败了怎么办？** 原稿和已有结果保留。选中原稿或运行记录，按 `m` 重新选模型并启动；从磁盘恢复的记录先按 `i` 复制到当前 round。扩展不会自动重试或切换 Provider。
 
-**在哪里配置？** 常用选项在 Settings 中。默认模型也可通过 `/refine model` 修改；配置文件为 `<agent-dir>/prompt-refine.json`。快捷键、上下文开关与预算见[配置参考](docs/configuration.md)。
+**在哪里配置？** Settings 的 Context / Optimizer / Advanced 提供上下文开关、历史预算、输出 token 上限、请求超时和原稿长度上限；数值支持常用档位与自定义，返回设置列表后 Ctrl+S 统一保存。默认模型也可通过 `/refine model` 修改；配置文件为 `<agent-dir>/prompt-refine.json`。操作与生效范围见[配置参考](docs/configuration.md)。
 
 仅支持 TUI 文本。完整按键、发送确认、恢复行为及兼容 `/refine view` 结果页见[使用说明](docs/usage.md)。
 

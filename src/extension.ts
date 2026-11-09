@@ -161,9 +161,9 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   const openHint = config.shortcuts.view ?? config.shortcuts.optimize ?? "/refine view";
 
   const controller = new RefineController({
-    timeoutMs: config.timeoutMs,
-    maxDraftChars: config.maxDraftChars,
-    maxOutputChars: Math.max(config.maxDraftChars, config.maxOutputTokens * 32),
+    get timeoutMs() { return config.timeoutMs; },
+    get maxDraftChars() { return config.maxDraftChars; },
+    get maxOutputChars() { return Math.max(config.maxDraftChars, config.maxOutputTokens * 32); },
     onState: (state) => {
       if (config.historyPersistence && historyStore && historyStore.sessionId === controller.getSessionId()) historyStore.save(controller.getHistory());
       updatePresentation(state);
@@ -178,6 +178,9 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       if (!available) throw new Error(`Model is not currently available: ${displayModel(request.model)}`);
 
       const systemPrompt = request.systemPrompt;
+      // Freeze runtime limits before asynchronous directory collection. Settings
+      // changes must not alter a request that has already started.
+      const outputLimit = config.maxOutputTokens;
       let projectText = "";
       let diagnostics = request.projectDiagnostics;
       const projectConfig = structuredClone(request.project?.config ?? config.projectContext);
@@ -218,7 +221,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       const preparedInput = request.preparedInput ?? buildRefineInput(request.draft, request.history, projectText, request.revision, request.editingInstruction, request.preferences);
       if (signal.aborted) throw new Error("Request cancelled");
       controller.capturePreparedInput(request.requestId, request.generation, preparedInput, diagnostics);
-      const budget = budgetRequest(systemPrompt, preparedInput, model, config.maxOutputTokens, request.thinkingLevel);
+      const budget = budgetRequest(systemPrompt, preparedInput, model, outputLimit, request.thinkingLevel);
       const blocked = budget.report.status === "blocked";
       controller.captureBudget(request.requestId, request.generation, budget.report, blocked ? undefined : budget.input);
       if (budget.report.message && controller.getSessionId() === request.sessionId && !signal.aborted) {
@@ -1007,7 +1010,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           if (result.kind !== "started") notify(ctx, `Request not started (${result.kind}); existing work kept.`, "info");
         };
         const workspace = new RefineWorkspace(panel, tui, theme, keybindings, {
-          preferences: { repository: preferenceRepository(ctx), key: config.preferencesKey, maxChars: config.maxDraftChars },
+          preferences: { repository: preferenceRepository(ctx), key: config.preferencesKey, get maxChars() { return config.maxDraftChars; } },
           draftPreferences: (id, original) => {
             if (closed || ctx.sessionManager.getSessionId() !== sessionId || controller.getSessionId() !== sessionId) return undefined;
             const source = id === undefined ? undefined : original ? controller.getOriginalRecord(id) : controller.getRecord(id);
@@ -1096,6 +1099,13 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             instructions: !config.projectContext.instructionsEnabled ? "off" : config.projectContext.instructionsOnFollowUp ? "always" : "first",
             tree: config.projectContext.tree.enabled,
             skills: config.projectContext.skillsEnabled,
+            enabled: config.projectContext.enabled,
+            referencedDirectories: config.projectContext.referencedDirectories.enabled,
+            maxMessages: config.context.maxMessages,
+            historyMaxChars: config.context.maxChars,
+            maxOutputTokens: config.maxOutputTokens,
+            timeoutMs: config.timeoutMs,
+            maxDraftChars: config.maxDraftChars,
           }),
           contextEnabled: () => config.projectContext.enabled,
           optimizer: () => {
@@ -1132,8 +1142,16 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             if (selected.instructions !== "off") config.projectContext.instructionsOnFollowUp = selected.instructions === "always";
             config.projectContext.tree.enabled = selected.tree;
             config.projectContext.skillsEnabled = selected.skills;
+            config.projectContext.enabled = selected.enabled ?? config.projectContext.enabled;
+            config.projectContext.referencedDirectories.enabled = selected.referencedDirectories ?? config.projectContext.referencedDirectories.enabled;
+            config.context.maxMessages = selected.maxMessages ?? config.context.maxMessages;
+            config.context.maxChars = selected.historyMaxChars ?? config.context.maxChars;
+            config.maxOutputTokens = selected.maxOutputTokens ?? config.maxOutputTokens;
+            config.timeoutMs = selected.timeoutMs ?? config.timeoutMs;
+            config.maxDraftChars = selected.maxDraftChars ?? config.maxDraftChars;
             const persisted = await persistConfig(ctx);
-            return { message: persisted ? "Context saved · Applies to next round" : "Context applied · Not persisted; check configuration", persisted };
+            return { message: persisted ? "Settings saved · Context applies to next round; limits apply to new work"
+              : "Settings applied · Not persisted; check configuration", persisted };
           },
           revisionDrafts,
           revision: (id) => {
