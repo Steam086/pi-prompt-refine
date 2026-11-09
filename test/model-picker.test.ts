@@ -38,6 +38,52 @@ describe("model picker layout", () => {
     }
   });
 
+  it.each(["dark", "light"])("fills the wide picker with complete models instead of unused three-row reservations (%s)", (name) => {
+    const theme = getThemeByName(name)!;
+    const options: ModelPickerOptions = { items: items.slice(0, 10), selectedKey: items[0]!.value, query: "",
+      title: "Run original with another model", subtitle: "Same original and conversation context · Default model unchanged",
+      thinkingKeys: "Shift+Tab", thinkingStatus: "Thinking level: off · Last used for this model", run: true };
+    for (const [width, rows] of [[100, 40], [24, 40], [180, 80], [100, 40]] as const) {
+      for (const selected of [0, 5, 9]) {
+        options.selectedKey = items[selected]!.value;
+        const lines = renderModelPicker(options, width, rows, theme);
+        const plain = lines.map(stripVTControlCharacters);
+        // Wide entries use two rows; narrow entries keep their badges on a third row.
+        expect(plain.filter((line) => line.includes("模型 Model"))).toHaveLength(width >= 100 ? 7 : 4);
+        expect(plain.join("\n")).toContain(`模型 Model ${selected}`);
+        const more = plain.findIndex((line) => line.includes("More models"));
+        const thinking = plain.findIndex((line) => line.includes("Thinking level:"));
+        if (width >= 100) {
+          expect(thinking - more).toBe(2); // Only the intentional one-row gap remains.
+          expect(lines[thinking]).toContain(theme.fg("muted", options.thinkingStatus));
+        }
+        expect(lines.join("\n")).toContain(formatKeyHint([width < 34 ? "↵" : "Enter", "Run"], theme));
+        expect(lines.join("\n")).toContain(formatKeyHint(["Esc", "Cancel"], theme));
+      }
+    }
+  });
+
+  it.each(["dark", "light"])("fits mixed entry heights and only reserves scrolling when needed (%s)", (name) => {
+    const theme = getThemeByName(name)!;
+    const mixed = [
+      { value: "p/0", label: "short", description: "Short 中文😀" },
+      { value: "p/1", label: "long [thinking]", description: "Long model 中文😀" },
+      { value: "p/2", label: "short", description: "Short model" },
+      { value: "p/3", label: "long [thinking]", description: "Long model 中文😀" },
+    ];
+    const lines = renderModelChoices(mixed, "p/1", 30, 8, theme);
+    expect(lines).toHaveLength(8); // 2 + 3 + 2 rows, then the scroll indicator.
+    const plain = lines.map((line) => stripVTControlCharacters(line).trimEnd());
+    for (const id of ["p/0", "p/1", "p/2"]) expect(plain).toContain(`  ${id}`);
+    expect(plain.at(-1)).toContain("2/4 · ↑↓ More models");
+    expect(lines.every((line) => visibleWidth(line) <= 30)).toBe(true);
+
+    const all = renderModelChoices(mixed.slice(0, 3), "p/1", 30, 7, theme);
+    expect(all).toHaveLength(7);
+    expect(all.join("\n")).not.toContain("More models");
+    expect(all.map(stripVTControlCharacters).at(-1)).toBe("  p/2");
+  });
+
   it.each(["dark", "light"])("fits terminal widths and keeps selection visible (%s)", (name) => {
     const theme = getThemeByName(name)!;
     for (const width of [1, 2, 12, 30, 60, 100, 160]) {

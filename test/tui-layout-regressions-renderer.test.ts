@@ -65,6 +65,12 @@ describe.each(["regular", "fullscreen"] as const)("TUI layout regressions (%s)",
         Object.assign(terminal, { columns, rows });
         let output = render();
         if (columns >= 40) expect(strip(output)).toContain("Model 12 中文😀");
+        if (columns >= 100) {
+          const lines = strip(output).split("\n");
+          expect(lines.filter((line) => line.includes("provider/model-"))).toHaveLength(7);
+          expect(lines.findIndex((line) => line.includes("Thinking level:")) -
+            lines.findIndex((line) => line.includes("More models"))).toBe(2);
+        }
         expect(output).toContain(formatKeyHint(["Esc", "Cancel"], theme));
         options.selectedKey = "provider/model-13"; options.thinkingStatus = "Thinking level: medium";
         output = render();

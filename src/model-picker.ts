@@ -11,13 +11,12 @@ export function renderModelChoices(
   if (width < 1 || height < 1) return [];
   if (!items.length) return [truncateToWidth(theme.fg("warning", "No matching models"), width)];
   const selected = Math.max(0, items.findIndex((item) => item.value === selectedKey));
-  const moreHeight = items.length > 1 && height >= 2 ? 1 : 0;
-  const count = Math.min(items.length, Math.max(1, Math.min(10, Math.floor((height - moreHeight) / 3))));
-  const start = Math.max(0, Math.min(selected - Math.floor(count / 2), items.length - count));
-  const lines: string[] = [];
-  for (let i = start; i < start + count; i++) {
-    const item = items[i]!;
-    const active = i === selected;
+  const entries = new Map<number, string[]>();
+  const entryAt = (index: number): string[] => {
+    const cached = entries.get(index);
+    if (cached) return cached;
+    const item = items[index]!;
+    const active = index === selected;
     const prefix = active ? "› " : "  ";
     const badges = `${item.label?.includes(" [thinking]") ? " · Thinking capable" : ""}${item.label?.endsWith(" (current)") ? " · Current" : ""}`;
     // On narrow terminals keep badges separate so they never consume the model name's space.
@@ -27,13 +26,27 @@ export function renderModelChoices(
     const entry = [compact ? primary : primary + theme.fg("muted", badges),
       theme.fg("muted", sanitizeTerminalText(`  ${item.value}`))];
     if (compact && badges) entry.push(theme.fg("muted", `  ${badges.slice(3)}`));
-    for (const line of entry) {
+    const lines = entry.map((line) => {
       const fitted = truncateToWidth(line, width);
-      lines.push(active ? theme.bg("selectedBg", fitted + " ".repeat(Math.max(0, width - visibleWidth(fitted)))) : fitted);
-    }
+      return active ? theme.bg("selectedBg", fitted + " ".repeat(Math.max(0, width - visibleWidth(fitted)))) : fitted;
+    });
+    entries.set(index, lines);
+    return lines;
+  };
+  // Fit actual two-/three-row entries, not a three-row reservation for every model.
+  // Keep the selection centered and never cut a model unless even one cannot fit.
+  let count = Math.min(items.length, 10, Math.max(1, Math.floor(height / 2)));
+  let lines: string[];
+  let moreHeight: number;
+  while (true) {
+    const start = Math.max(0, Math.min(selected - Math.floor(count / 2), items.length - count));
+    lines = Array.from({ length: count }, (_, i) => entryAt(start + i)).flat();
+    moreHeight = items.length > count && height >= 2 ? 1 : 0;
+    if (lines.length <= height - moreHeight || count === 1) break;
+    count--;
   }
-  const body = lines.slice(0, height - (items.length > count ? moreHeight : 0));
-  if (items.length > count && moreHeight) body.push(truncateToWidth(theme.fg("muted", `  ${selected + 1}/${items.length} · ↑↓ More models`), width));
+  const body = lines.slice(0, height - moreHeight);
+  if (moreHeight) body.push(truncateToWidth(theme.fg("muted", `  ${selected + 1}/${items.length} · ↑↓ More models`), width));
   return body;
 }
 
