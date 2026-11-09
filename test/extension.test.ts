@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import { matchesKey, visibleWidth } from "@earendil-works/pi-tui";
+import { matchesKey, TuiAltScreen, TuiMainScreen, visibleWidth, type OverlayHandle, type OverlayOptions, type Terminal } from "@earendil-works/pi-tui";
+import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import promptRefineExtension, { modelPickerItems } from "../src/extension.js";
 import { DEFAULT_CONFIG, type RefineConfig } from "../src/config.js";
@@ -21,6 +22,7 @@ const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 afterEach(async () => {
   for (const harness of activeHarnesses.splice(0)) {
     await harness.handlers.get("session_shutdown")?.[0]?.({ type: "session_shutdown" }, harness.context);
+    harness.renderer?.tui.stop();
   }
   vi.useRealTimers();
   await Promise.all(agentDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
@@ -60,9 +62,19 @@ interface Harness {
   resize(rows: number): void;
   customCalls(): number;
   customOptions: Array<{ overlay?: boolean; overlayOptions?: unknown }>;
+  renderer?: { tui: RecordingMainScreen | RecordingAltScreen; writes: string[]; terminal: Terminal; input(key: string): void };
 }
 
-async function makeHarness(options: { persistHistory?: boolean; freshInstall?: boolean; sessionName?: string; mode?: "tui" | "rpc" | "print"; busy?: boolean; configureModel?: boolean; noAvailableModels?: boolean; reasoning?: boolean; thinkingLevel?: ModelThinkingLevel; config?: Partial<RefineConfig>; useDefaultShortcuts?: boolean } = {}): Promise<Harness> {
+class RecordingMainScreen extends TuiMainScreen {
+  readonly overlayFrames: boolean[] = [];
+  protected override doRender(): void { this.overlayFrames.push(this.hasOverlay()); super.doRender(); }
+}
+class RecordingAltScreen extends TuiAltScreen {
+  readonly overlayFrames: boolean[] = [];
+  protected override doRender(): void { this.overlayFrames.push(this.hasOverlay()); super.doRender(); }
+}
+
+async function makeHarness(options: { renderer?: { mode: "regular" | "fullscreen"; theme: "dark" | "light" }; persistHistory?: boolean; freshInstall?: boolean; sessionName?: string; mode?: "tui" | "rpc" | "print"; busy?: boolean; configureModel?: boolean; noAvailableModels?: boolean; reasoning?: boolean; thinkingLevel?: ModelThinkingLevel; config?: Partial<RefineConfig>; useDefaultShortcuts?: boolean } = {}): Promise<Harness> {
   const agentDir = await mkdtemp(join(tmpdir(), "pi-prompt-refine-agent-"));
   agentDirs.push(agentDir);
   process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -131,8 +143,20 @@ async function makeHarness(options: { persistHistory?: boolean; freshInstall?: b
   let holdPanel = false;
   let customCalls = 0;
   const customOptions: Harness["customOptions"] = [];
-  const terminal = { rows: 40 };
-  const theme = {
+  const writes: string[] = [];
+  let nativeInput = (_data: string) => {};
+  const terminal = { rows: 40, columns: 100, kittyProtocolActive: true,
+    start: (onInput) => { nativeInput = onInput; }, stop() {}, write: (data) => { writes.push(data); },
+    async drainInput() {}, moveBy() {}, hideCursor() {}, showCursor() {}, clearLine() {}, clearFromCursor() {},
+    clearScreen() {}, setTitle() {}, setProgress() {}, setProgramStatus() {},
+  } satisfies Terminal;
+  const renderer = !options.renderer ? undefined : options.renderer.mode === "regular"
+    ? new RecordingMainScreen(terminal) : new RecordingAltScreen(terminal);
+  if (renderer) {
+    renderer.addChild({ render: () => ["Underlying Pi conversation"], invalidate() {} });
+    renderer.start();
+  }
+  const theme = options.renderer ? getThemeByName(options.renderer.theme)! : {
     fg: (_color: string, text: string) => text, bg: (_color: string, text: string) => text, bold: (text: string) => text,
     italic: (text: string) => text, underline: (text: string) => text, strikethrough: (text: string) => text,
   };
@@ -163,8 +187,10 @@ async function makeHarness(options: { persistHistory?: boolean; freshInstall?: b
       customCalls += 1;
       customOptions.push(options);
       return await new Promise<T>((resolve) => {
+        let overlay: OverlayHandle | undefined;
+        let closed = false;
         const component = factory(
-          { requestRender: vi.fn(), terminal },
+          renderer ?? { requestRender: vi.fn(), terminal },
           theme,
           {
             getKeys: (action: string) => action === "app.thinking.cycle" ? ["shift+tab"] : [],
@@ -174,13 +200,28 @@ async function makeHarness(options: { persistHistory?: boolean; freshInstall?: b
                 "tui.select.cancel": "escape", "tui.select.confirm": "return", "tui.input.submit": "return",
                 "tui.select.up": "up", "tui.select.down": "down", "app.thinking.cycle": "shift+tab",
                 "tui.editor.cursorUp": "up", "tui.editor.cursorDown": "down",
-                "tui.editor.pageUp": "pageUp", "tui.editor.pageDown": "pageDown",
+                "tui.editor.pageUp": "pageUp", "tui.editor.pageDown": "pageDown", "tui.editor.deleteCharBackward": "backspace",
               };
               return keys[action] ? matchesKey(data, keys[action] as any) : false;
             },
           },
-          resolve,
+          (value) => {
+            if (closed) return;
+            closed = true;
+            overlay?.hide();
+            resolve(value);
+            component?.dispose?.();
+          },
         );
+        if (renderer) {
+          // Match Pi's asynchronous custom-factory mounting and immediate input redraw.
+          Promise.resolve(component).then((mounted) => {
+            if (closed) return;
+            panel = mounted;
+            overlay = renderer.showOverlay(mounted, options.overlayOptions as OverlayOptions);
+          });
+          return;
+        }
         panel = component;
         component.focused = true;
         for (const width of [20, 40, 80]) {
@@ -278,6 +319,7 @@ async function makeHarness(options: { persistHistory?: boolean; freshInstall?: b
     agentDir,
     renderedWidths,
     customOptions,
+    renderer: renderer ? { tui: renderer, writes, terminal, input: (key) => nativeInput(key) } : undefined,
     widgetLines: (width = 80) => widget?.render(width) ?? [],
     holdPanel: () => { holdPanel = true; },
     panelInput: (key) => panel?.handleInput?.(key),
@@ -761,14 +803,130 @@ describe("native overlay workspace", () => {
     expect(h.customOptions).toEqual([expected]);
     const initial = h.panelLines();
     h.panelInput("m");
-    await vi.waitFor(() => expect(h.customCalls()).toBe(2));
+    expect(h.panelLines().join("\n")).toContain("Choose optimizer model");
+    expect(h.customCalls()).toBe(1);
     expect(h.panelLines()).toHaveLength(initial.length);
     expect(h.panelLines()[0]).toBe(initial[0]);
     h.panelInput("\x1b");
-    await vi.waitFor(() => expect(h.customCalls()).toBe(3));
-    expect(h.customOptions).toEqual([expected, expected, expected]);
+    await vi.waitFor(() => expect(h.panelLines().join("\n")).not.toContain("Choose optimizer model"));
+    expect(h.customOptions).toEqual([expected]);
     h.panelInput("q"); await view;
     expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
+  });
+
+  describe.each(["regular", "fullscreen"] as const)("model transitions with the native %s renderer", (mode) => {
+    it.each(["dark", "light"] as const)("keeps one overlay across open, cancel, resize and confirm (%s)", async (themeName) => {
+      for (const origin of ["main", "settings", "original", "usage"] as const) {
+        const h = await makeHarness({ renderer: { mode, theme: themeName }, reasoning: true,
+          configureModel: origin === "original" || origin === "usage" });
+        const original = h.context.modelRegistry.getAvailable()[0]!;
+        const others = Array.from({ length: 24 }, (_, index) => ({ ...original,
+          id: `other-model-${index}`, name: `Other ${index} 中文😀\x1b[31m` }));
+        const models = [original, ...others];
+        vi.mocked(h.context.modelRegistry.getAvailable).mockReturnValue(models);
+        vi.mocked(h.context.modelRegistry.find).mockImplementation((provider, id) =>
+          models.find((model) => model.provider === provider && model.id === id));
+        if (origin === "original" || origin === "usage") await trigger(h);
+        h.holdPanel();
+        const view = h.command(origin === "usage" ? "history" : origin === "original" ? "" : "view", h.context);
+        const r = h.renderer!;
+        // Use an I/O turn, not just Promise microtasks: Pi redraws on nextTick
+        // before an awaited custom() can mount a replacement overlay.
+        const input = async (...keys: string[]) => {
+          await new Promise<void>((resolve) => setImmediate(() => { keys.forEach(r.input); resolve(); }));
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          r.tui.renderNow();
+        };
+        try {
+          await vi.waitFor(() => expect(r.tui.hasOverlay()).toBe(true));
+          if (origin === "settings") { await input("\x1b[D", " ", "\t"); }
+          const before = await readFile(join(h.agentDir, "prompt-refine.json"), "utf8");
+          const requests = h.complete.mock.calls.length;
+          const focusOwner = r.tui.getFocusedComponent();
+          r.tui.overlayFrames.length = 0;
+          const open = origin === "settings" ? "\r" : "m";
+          await input(open);
+          const title = origin === "original" || origin === "usage" ? "Run original with another model" : "Choose optimizer model";
+          const theme = getThemeByName(themeName)!;
+          expect(h.panelLines(98).join("\n")).toContain(theme.fg("text", theme.bold(title)));
+          expect(h.customCalls()).toBe(1);
+          expect(r.tui.getFocusedComponent()).toBe(focusOwner);
+          await input(...Array.from({ length: 12 }, () => "\x1b[B"));
+          expect(h.panelLines(98).join("\n")).toContain("13/25");
+          await input("\x1b[Z", "q"); // Thinking/search must not reach the retained workspace.
+          expect(h.panelLines(98).join("\n")).toContain("No matching models");
+          for (const [columns, rows] of [[28, 12], [160, 60], [100, 40]] as const) {
+            Object.assign(r.terminal, { columns, rows });
+            r.tui.renderNow();
+            const width = Math.floor(columns * 0.98);
+            const lines = h.panelLines(width);
+            expect(lines).toHaveLength(workspaceHeight(rows));
+            expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+            expect(lines.join("\n")).not.toContain("\x1b[31m");
+          }
+          const redraws = r.tui.fullRedraws;
+          r.writes.length = 0;
+          await input("\x1b");
+          expect(h.panelLines(98).join("\n")).not.toContain(title);
+          expect(h.complete).toHaveBeenCalledTimes(requests);
+          expect(await readFile(join(h.agentDir, "prompt-refine.json"), "utf8")).toBe(before);
+          if (origin === "settings") expect(h.panelLines(98).join("\n")).toContain("Unsaved context changes");
+          if (origin === "usage") expect(h.panelLines(98).join("\n")).toContain("Usage · All rounds");
+          await input(open);
+          expect(h.panelLines(98).join("\n")).toContain(title);
+          await input("\r", "\r"); // Confirm once; consume input while persistence is pending.
+          await vi.waitFor(() => expect(h.panelLines(98).join("\n")).not.toContain(title));
+          r.tui.renderNow();
+          expect(h.customCalls()).toBe(1);
+          expect(r.tui.overlayFrames.length).toBeGreaterThan(0);
+          expect(r.tui.overlayFrames.every(Boolean)).toBe(true);
+          expect(r.tui.getFocusedComponent()).toBe(focusOwner);
+          expect(r.tui.fullRedraws).toBe(redraws);
+          expect(r.writes.join("")).not.toMatch(/\x1b\[(?:2J|3J)/);
+          expect(h.complete).toHaveBeenCalledTimes(requests + (origin === "original" || origin === "usage" ? 1 : 0));
+          expect(h.editorWrites).toEqual([]);
+          expect(h.sent).toEqual([]);
+          if (origin === "settings") {
+            expect(h.panelLines(98).join("\n")).toContain("Unsaved context changes");
+            const saved = JSON.parse(await readFile(join(h.agentDir, "prompt-refine.json"), "utf8"));
+            expect(saved.projectContext.instructionsEnabled).toBe(false);
+          }
+        } finally {
+          await h.handlers.get("session_shutdown")?.[0]?.({ type: "session_shutdown" }, h.context);
+          await view;
+          r.tui.stop();
+        }
+      }
+    });
+  });
+
+  it.each(["session_before_tree", "session_before_switch", "session_before_fork", "session_shutdown"])(
+    "closes an embedded picker on %s without applying local edits or reopening", async (event) => {
+      const h = await makeHarness({ configureModel: false, reasoning: true }); h.holdPanel();
+      const before = await readFile(join(h.agentDir, "prompt-refine.json"), "utf8");
+      const view = h.command("view", h.context);
+      h.panelInput("m"); h.panelInput("\x1b[Z");
+      expect(h.panelLines().join("\n")).toContain("Choose optimizer model");
+      await h.handlers.get(event)?.[0]?.({ type: event }, h.context);
+      await view;
+      h.panelInput("\r"); h.panelInput("m");
+      await flushPromises();
+      expect(h.customCalls()).toBe(1);
+      expect(await readFile(join(h.agentDir, "prompt-refine.json"), "utf8")).toBe(before);
+      expect(h.complete).not.toHaveBeenCalled();
+      expect(h.editorWrites).toEqual([]);
+    });
+
+  it("keeps Settings and its unsaved context when no models are available", async () => {
+    const h = await makeHarness({ noAvailableModels: true }); h.holdPanel();
+    const view = h.command("view", h.context);
+    h.panelInput("\x1b[D"); h.panelInput(" "); h.panelInput("\t"); h.panelInput("\r");
+    await flushPromises();
+    expect(h.panelLines().join("\n")).toContain("Unsaved context changes");
+    expect(h.notifications.at(-1)).toContain("No authorized text-generation models");
+    expect(h.customCalls()).toBe(1);
+    h.panelInput("\x1b"); h.panelInput("q"); await view;
+    expect(h.complete).not.toHaveBeenCalled();
   });
 
   it("restores an unsubmitted revision after leaving for the main session", async () => {
@@ -3337,7 +3495,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     }
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Choose optimizer model"));
     harness.panelInput("\r");
-    await vi.waitFor(() => expect(harness.customCalls()).toBe(3));
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).not.toContain("Choose optimizer model"));
+    expect(harness.customCalls()).toBe(1);
     const lines = harness.panelLines().join("\n");
     expect(lines).not.toContain("Choose optimizer model");
     expect(lines).toContain(origin === "settings" ? "Unsaved context changes" : "m Model");

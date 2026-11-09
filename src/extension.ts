@@ -1,6 +1,6 @@
-import { parseKey, SelectList, truncateToWidth, type KeyId, type SelectItem } from "@earendil-works/pi-tui";
+import { parseKey, SelectList, truncateToWidth, type Component, type KeybindingsManager, type KeyId, type SelectItem, type TUI } from "@earendil-works/pi-tui";
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model, type ModelThinkingLevel, type UserMessage } from "@earendil-works/pi-ai";
-import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExtensionAPI, type ExtensionContext, type Theme } from "@earendil-works/pi-coding-agent";
 import {
   configPath,
   modelKey,
@@ -31,7 +31,10 @@ import { assembleProjectContext, captureProjectContext, collectDirectoryContext,
 const STATUS_KEY = "prompt-refine";
 const RESTORED_CONTEXT_HINT = "Background was not saved. Press i in the task list to copy the original into the current round before running.";
 
-type PreviewAction = "accept" | "edit" | "send" | "dismiss" | "restore" | "close" | "optimize" | "model" | "run-model" | "cycle" | "system-prompt";
+type PreviewAction = "accept" | "edit" | "send" | "dismiss" | "restore" | "close" | "optimize" | "model" | "cycle" | "system-prompt";
+type ModelSelection = { modelKey: string; thinkingLevel?: ModelThinkingLevel } | undefined;
+type ModelPickerPresenter = (factory: (tui: TUI, theme: Theme, keybindings: KeybindingsManager,
+  done: (selection: ModelSelection) => void) => Component) => Promise<ModelSelection>;
 
 function sameModel(model: ModelRef, ref: ModelRef): boolean {
   return model.provider === ref.provider && model.id === ref.id;
@@ -113,7 +116,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   let generatingRequestId: number | undefined;
   let progressTimer: ReturnType<typeof setInterval> | undefined;
   let refreshPreview: (() => void) | undefined;
-  let closePreview: (() => void) | undefined;
+  let closePreview: ((reason?: "idle") => void) | undefined;
   let interacting = false;
   function preferenceRepository(ctx: ExtensionContext): PreferenceStore {
     return new PreferenceStore(getAgentDir(), ctx.cwd);
@@ -323,7 +326,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       projectLabel = "";
       projectWarnings = [];
       if (controller.hasWorkspaceContent()) refreshPreview?.();
-      else closePreview?.();
+      else closePreview?.("idle");
     } else refreshPreview?.();
   }
 
@@ -382,7 +385,8 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     return ctx.modelRegistry.getAvailable();
   }
 
-  async function selectModel(ctx: ExtensionContext, runId?: number, runUsage = false): Promise<void> {
+  async function selectModel(ctx: ExtensionContext, runId?: number, runUsage = false,
+    present: ModelPickerPresenter = (factory) => ctx.ui.custom(factory, { overlay: true, overlayOptions: REFINE_OVERLAY_OPTIONS })): Promise<void> {
     useContext(ctx);
     if (ctx.mode !== "tui") {
       notify(ctx, "Optimizer model selection is only available in TUI mode.", "warning");
@@ -412,7 +416,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const startGeneration = controller.getGeneration();
     const startSessionId = ctx.sessionManager.getSessionId();
     const startBranch = ctx.sessionManager.getLeafId();
-    const selection = await ctx.ui.custom<{ modelKey: string; thinkingLevel?: ModelThinkingLevel } | undefined>((tui, theme, keybindings, done) => {
+    const selection = await present((tui, theme, keybindings, done) => {
       let query = "";
       let list: SelectList;
       let items: SelectItem[] = [];
@@ -514,7 +518,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           }
         },
       };
-    }, { overlay: true, overlayOptions: REFINE_OVERLAY_OPTIONS });
+    });
 
     if (!selection) return;
     if ((!source && controller.getGeneration() !== startGeneration) || controller.getSessionId() !== startSessionId ||
@@ -542,7 +546,12 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         if (result.kind === "duplicate") {
           const existing = controller.getHistory().find((record) => record.taskId === source.taskId && sameModel(model, record.input.model) &&
             record.input.thinkingLevel === thinking && !record.input.revision && ["queued", "generating"].includes(record.status));
-          if (existing) (runUsage ? usagePositions : taskPositions).set(startSessionId, { selectedId: existing.id });
+          if (existing) {
+            const positions = runUsage ? usagePositions : taskPositions;
+            const position = positions.get(startSessionId) ?? {};
+            Object.assign(position, { selectedId: existing.id, selectedTaskId: undefined, scroll: 0 });
+            positions.set(startSessionId, position);
+          }
           notify(ctx, "This model is already running for the original prompt.", "info");
         }
         if (rememberThinking(model, thinking)) await persistConfig(ctx);
@@ -904,7 +913,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     }
     if (closePreview) return; // One user-opened panel; never stack dialogs on repeated shortcuts.
     const sessionId = ctx.sessionManager.getSessionId();
-    type Selection = { action: PreviewAction; generation: number; token?: CandidateToken; recordId?: number; settingsContext?: ContextSettings; returnUsage?: boolean };
+    type Selection = { action: PreviewAction; generation: number; token?: CandidateToken; settingsContext?: ContextSettings };
     let selection: Selection | undefined;
     try {
       selection = await ctx.ui.custom<Selection | undefined>((tui, theme, keybindings, done) => {
@@ -948,6 +957,37 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         };
         const panel = new PreviewPanel(snapshot(), theme, () => tui.terminal.rows, () => tui.requestRender(), previewPositions);
         let closed = false;
+        let focused = false;
+        let choosingModel = false;
+        let modelPicker: Component | undefined;
+        let finishModelPicker: ((selection: ModelSelection) => void) | undefined;
+        const openModelPicker = (recordId?: number) => {
+          if (closed || choosingModel) return;
+          choosingModel = true;
+          // Replace only the modal's content. Calling the native done() here would
+          // expose the conversation during Pi's immediate post-input redraw.
+          void selectModel(ctx, recordId, workspace.isUsage(), (factory) => new Promise((resolve) => {
+            let completed = false;
+            finishModelPicker = (selection) => {
+              if (completed) return;
+              completed = true;
+              finishModelPicker = undefined;
+              resolve(selection);
+            };
+            modelPicker = factory(tui, theme, keybindings, finishModelPicker);
+            workspace.focused = false;
+            tui.requestRender();
+          })).catch(() => {
+            if (!closed) notify(ctx, "Could not select optimizer model; existing work kept.", "error");
+          }).finally(() => {
+            choosingModel = false;
+            modelPicker = undefined;
+            finishModelPicker = undefined;
+            if (closed) return;
+            workspace.focused = focused;
+            refreshPreview?.();
+          });
+        };
         const position = taskPositions.get(sessionId) ?? {};
         taskPositions.set(sessionId, position);
         const usagePosition = usagePositions.get(sessionId) ?? {};
@@ -1046,7 +1086,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             run: (id) => runRecord(id, true),
             stop: (id) => controller.stopRequest(id),
             deleteRecords: (ids) => !closed && ctx.sessionManager.getSessionId() === sessionId && controller.deleteRecords(ids),
-            chooseModel: (id) => finish({ action: "run-model", recordId: id, generation: controller.getGeneration() }),
+            chooseModel: (id) => openModelPicker(id),
             accept: (id) => {
               if (controller.applyResult(id)) finish({ action: "accept", generation: controller.getGeneration(), token: controller.getCandidateToken() });
               else notify(ctx, "Result unavailable or send pending; nothing accepted.", "warning");
@@ -1070,7 +1110,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
               thinkingEnabled,
             };
           },
-          chooseModel: (context) => finish({ action: "model", generation: controller.getGeneration(), settingsContext: context }),
+          chooseModel: () => openModelPicker(),
           editSystemPrompt: (context) => finish({ action: "system-prompt", generation: controller.getGeneration(), settingsContext: context }),
           cycleThinking: async () => {
             if (closed || ctx.sessionManager.getSessionId() !== sessionId) return { message: "Session changed; settings not saved.", persisted: false };
@@ -1123,16 +1163,23 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         const finish = (value?: Selection) => {
           if (closed) return;
           closed = true;
+          finishModelPicker?.(undefined);
+          modelPicker = undefined;
           panel.rememberPosition();
           workspace.dispose();
           refreshPreview = undefined;
           closePreview = undefined;
-          done(value ? { ...value, returnUsage: workspace.isUsage() } : undefined);
+          done(value);
         };
         if (settingsContext) workspace.openSettings(settingsContext, settingsCursor);
         if (initialPage) workspace.openUsage();
         else if (resultView) workspace.openResult();
-        closePreview = () => finish();
+        closePreview = (reason) => {
+          // Choosing the first/default model emits an idle state with no records.
+          // Keep this interaction open, but never suppress lifecycle invalidation.
+          if (reason === "idle" && choosingModel) refreshPreview?.();
+          else finish();
+        };
         refreshPreview = () => {
           if (closed) return;
           panel.update(snapshot());
@@ -1144,11 +1191,18 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
         ctx.ui.setStatus(STATUS_KEY, undefined);
         ctx.ui.setWidget(STATUS_KEY, undefined);
         return {
-          get focused() { return workspace.focused; },
-          set focused(value: boolean) { workspace.focused = value; },
-          render: (width) => workspace.render(width),
-          invalidate: () => workspace.invalidate(),
+          get focused() { return focused; },
+          set focused(value: boolean) { focused = value; workspace.focused = value && !choosingModel; },
+          render: (width) => modelPicker ? modelPicker.render(width) : workspace.render(width),
+          invalidate: () => { workspace.invalidate(); modelPicker?.invalidate(); },
           handleInput(data) {
+            if (closed) return;
+            if (choosingModel) {
+              // A confirmed picker remains visible while settings are persisted;
+              // consume further keys instead of confirming twice or leaking input.
+              if (finishModelPicker) modelPicker?.handleInput?.(data);
+              return;
+            }
             if (workspace.handleInput(data)) return;
             const navigationKey = parseKey(data);
             if (keybindings.matches(data, "tui.select.cancel") || navigationKey === "ctrl+\\") { finish(); return; }
@@ -1184,6 +1238,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
                 r: "optimize", m: "model", c: "cycle", q: "close",
               };
               const action = key ? keys[key] : undefined;
+              if (action === "model") { openModelPicker(); return; }
               if (action) {
                 if (["accept", "edit", "send"].includes(action) && !displayedToken) return;
                 finish({ action, generation: controller.getGeneration(), token: displayedToken });
@@ -1204,18 +1259,6 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     const { action, token } = selection;
     if (action === "dismiss") controller.cancelAndDismiss();
     else if (action === "restore") await restoreDraft(ctx);
-    else if (action === "run-model" && selection.recordId !== undefined) {
-      await selectModel(ctx, selection.recordId, selection.returnUsage);
-      if (ctx.sessionManager.getSessionId() === sessionId && controller.getSessionId() === sessionId) {
-        await showPreviewContent(ctx, undefined, 3, selection.returnUsage ? "usage" : undefined);
-      }
-    }
-    else if (action === "model") {
-      await selectModel(ctx);
-      if (ctx.sessionManager.getSessionId() === sessionId) {
-        await showPreviewContent(ctx, selection.settingsContext, 3, selection.returnUsage ? "usage" : undefined);
-      }
-    }
     else if (action === "system-prompt") {
       await editSystemPrompt(ctx);
       if (selection.settingsContext && ctx.sessionManager.getSessionId() === sessionId) {
