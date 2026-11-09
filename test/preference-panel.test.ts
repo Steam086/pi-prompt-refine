@@ -53,6 +53,28 @@ function save(panel: { handleInput(data: string): unknown }) {
 }
 
 describe("Library purpose groups", () => {
+  it.each(["dark", "light"])("keeps the right preview compact while retaining full details (%s)", async (themeName) => {
+    const entry: RevisionPreference = { ...a, id: "preview-uuid", metadata: {
+      kind: "rewrite", activation: "manual", description: "整理并列要求 😀" } };
+    const f = setup([], "", themeName, [entry]); await loaded(f.panel);
+    const lines = f.panel.render(100);
+    expect(lines.every((line) => visibleWidth(line) <= 100)).toBe(true);
+    const preview = lines.map((line) => stripVTControlCharacters(line).split(" │ ")[1] ?? "").join("\n");
+    expect(preview).toContain(entry.name);
+    expect(preview).toContain("Prompt rewriting");
+    expect(preview).toContain(entry.metadata!.description);
+    expect(preview).toContain(entry.body);
+    expect(preview.indexOf(entry.metadata!.description)).toBeLessThan(preview.indexOf(entry.body));
+    for (const redundant of [entry.id, "Library entry", "· manual"]) expect(preview).not.toContain(redundant);
+    expect(lines.join("\n")).toContain(f.theme.fg("muted", "Prompt rewriting"));
+    expect(lines.join("\n")).toContain(f.theme.fg("text", entry.body));
+    f.panel.handleInput(enter);
+    const full = text(f.panel);
+    expect(full).toContain(`global · ${entry.id}`);
+    expect(full).toContain("Library entry");
+    expect(full).toContain("Prompt rewriting · manual");
+  });
+
   const task: RevisionPreference = { ...a, id: "task", name: "Z task 中文😀", metadata: { kind: "task", description: "", activation: "manual" } };
   const rewrite: RevisionPreference = { ...b, id: "rewrite", name: "A rewrite", metadata: { kind: "rewrite", description: "", activation: "manual" } };
 
@@ -446,6 +468,9 @@ describe("selected-only preference audit", () => {
     const preview = text(f.panel);
     expect(preview.indexOf("Selected snapshot")).toBeLessThan(preview.indexOf("Current library entry"));
     expect(preview).toContain("Library changed; snapshot kept");
+    expect(preview).not.toContain(`global · ${original.id}`);
+    expect(preview).not.toContain("· manual");
+    expect(f.panel.render(100).join("\n")).toContain(f.theme.fg("warning", "Saved snapshot · Library changed; snapshot kept"));
     f.panel.handleInput(enter);
     const output = text(f.panel);
     const [snapshot, source] = output.split("Current library entry");
@@ -472,7 +497,9 @@ describe("selected-only preference audit", () => {
 
   it.each(["dark", "light"])("labels a deleted source as a retained snapshot, not a library entry (%s)", async (themeName) => {
     const f = setup([selectPreference(a)], "", themeName, []); await loaded(f.panel);
-    f.panel.handleInput("s"); f.panel.handleInput(enter);
+    f.panel.handleInput("s");
+    expect(text(f.panel)).toContain("Source deleted");
+    f.panel.handleInput(enter);
     const output = text(f.panel);
     expect(output).toContain("Selected snapshot");
     expect(output).toContain("Source deleted");
@@ -872,11 +899,12 @@ describe("preference rendering and responsiveness", () => {
     f.panel.invalidate();
     const preview = f.panel.render(100).join("\n");
     expect(preview).toContain(f.theme.fg("text", f.theme.bold(a.name)));
-    expect(preview).toContain(f.theme.fg("muted", `${a.scope} · ${a.id}`));
+    expect(preview).not.toContain(f.theme.fg("muted", `${a.scope} · ${a.id}`));
     expect(preview).toContain(f.theme.fg("text", a.body));
     expect(preview).not.toContain(f.theme.bold(a.body));
     f.panel.handleInput(enter);
     const reading = f.panel.render(100).join("\n");
+    expect(reading).toContain(f.theme.fg("muted", `${a.scope} · ${a.id}`));
     expect(reading).toContain(f.theme.fg("text", a.body));
     expect(reading).toContain(f.theme.fg("text", f.theme.bold("Selected snapshot")));
     expect(reading).toContain(f.theme.fg("muted", "Saved snapshot"));
