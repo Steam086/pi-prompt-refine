@@ -5,7 +5,7 @@ import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/
 import { PreviewPanel } from "../src/preview.js";
 import { RefineWorkspace } from "../src/workspace.js";
 import { TaskPanel } from "../src/task-panel.js";
-import { panelLayout } from "../src/panel-layout.js";
+import { workspaceHeight } from "../src/workspace-overlay.js";
 import { selectHistory } from "../src/context.js";
 import { formatKeyHint } from "../src/key-hints.js";
 import type { RefineRecord } from "../src/history.js";
@@ -49,14 +49,14 @@ describe("Revise visual hierarchy and feedback", () => {
     const before = output(w);
     expect(before).toContain(f.theme.fg("text", f.theme.bold("Revise current result")) + f.theme.fg("muted", ` · ${f.label}`));
     expect(before).not.toContain(f.theme.bold(f.label));
-    expect(before).toContain(f.theme.fg("muted", "Not sent"));
+    expect(before).toContain(f.theme.fg("muted", "Revision not submitted"));
     expect(before).not.toContain("Selected snapshots + additional requirements");
     expect(before.split("\n").find((line) => line.includes("Preferences: None"))).toContain("Review full requirements");
     expect(before).toContain(f.theme.bg("selectedBg", f.theme.fg("text", f.theme.bold("› Additional requirements:"))));
     expect(before).toContain("Read-only reference");
     expect(strip(before)).not.toMatch(/↑↓ scroll|o Reference|←.*Preview.*→/);
     const positions = strip(before).split("\n");
-    expect(positions.indexOf("  Revise current result · " + f.label) - positions.indexOf("  Read-only reference")).toBeGreaterThan(1);
+    expect(positions.findIndex((line) => line.includes("Revise current result · " + f.label)) - positions.findIndex((line) => line.includes("Read-only reference"))).toBeGreaterThan(1);
     w.handleInput("文字😀"); w.handleInput(tab);
     expect(output(w)).toContain(f.theme.bg("selectedBg", f.theme.fg("text", f.theme.bold("› Preferences: None"))));
     expect(output(w)).toContain(formatKeyHint(["Enter", "Preferences"], f.theme));
@@ -75,13 +75,13 @@ describe("Revise visual hierarchy and feedback", () => {
     for (const rows of [40, 16, 12, 8, 5]) for (const width of [20, 40, 100]) {
       f.terminal.rows = rows; f.terminal.columns = width;
       const lines = w.render(width);
-      expect(lines).toHaveLength(panelLayout(width, rows).height);
+      expect(lines).toHaveLength(workspaceHeight(rows));
       expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
       expect(lines.join("\n")).toContain(f.theme.fg("warning", "⚠ Feedback rejected 中文😀").split("⚠")[0]);
       expect(strip(lines.join("\n"))).toContain("Feedback");
       if (rows >= 8) {
         expect(lines.join("\n")).toContain(CURSOR_MARKER);
-        expect(lines.at(-1)).toContain(formatKeyHint(["Esc", "Back"], f.theme));
+        expect(lines.slice(-3).join("\n")).toContain(formatKeyHint(["Esc", "Back"], f.theme));
       }
     }
     f.terminal.rows = 40; f.terminal.columns = 100;
@@ -97,9 +97,9 @@ describe("Revise visual hierarchy and feedback", () => {
   it.each(["dark", "light"])("only advertises available layout transitions (%s)", (name) => {
     const f = setup(name); const w = f.workspace;
     w.handleInput("f");
-    expect(output(w)).toContain(formatKeyHint(["Ctrl+E", "Expand"], f.theme));
+    expect(output(w)).toContain(formatKeyHint(["Ctrl+E", "Editor only"], f.theme));
     w.handleInput(ctrlE);
-    expect(output(w)).toContain(formatKeyHint(["Ctrl+E", "Collapse"], f.theme));
+    expect(output(w)).toContain(formatKeyHint(["Ctrl+E", "Show source"], f.theme));
     expect(output(w)).not.toContain("Read-only reference");
     w.handleInput(ctrlE);
     f.terminal.rows = 12;
@@ -109,7 +109,7 @@ describe("Revise visual hierarchy and feedback", () => {
     f.terminal.columns = 20;
     expect(output(w, 20)).not.toContain("Ctrl+E"); w.handleInput(ctrlE);
     f.terminal.columns = 100;
-    expect(output(w)).toContain(formatKeyHint(["Ctrl+E", "Expand"], f.theme));
+    expect(output(w)).toContain(formatKeyHint(["Ctrl+E", "Editor only"], f.theme));
   });
 
   it.each(["dark", "light"])("keeps warning badges independent of success and archived row colors (%s)", (name) => {

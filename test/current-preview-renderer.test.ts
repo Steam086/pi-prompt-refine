@@ -6,6 +6,7 @@ import { selectHistory } from "../src/context.js";
 import type { RefineRecord } from "../src/history.js";
 import { PreviewPanel } from "../src/preview.js";
 import { RefineWorkspace } from "../src/workspace.js";
+import { workspaceHeight } from "../src/workspace-overlay.js";
 
 describe.each(["regular", "fullscreen"] as const)("current-round Preview (%s)", (mode) => {
   it.each(["dark", "light"])("keeps an archived view stable and history reachable through resize (%s)", (themeName) => {
@@ -40,7 +41,7 @@ describe.each(["regular", "fullscreen"] as const)("current-round Preview (%s)", 
     const render = () => {
       tui.requestRender(); tui.renderNow();
       const frame = workspace.render(terminal.columns);
-      expect(frame.length).toBeLessThanOrEqual(terminal.rows - 4);
+      expect(frame).toHaveLength(workspaceHeight(terminal.rows));
       expect(frame.every((line) => visibleWidth(line) <= terminal.columns)).toBe(true);
       expect(frame.join("\n")).not.toContain("\x1b[2J");
       return stripVTControlCharacters(frame.join("\n"));

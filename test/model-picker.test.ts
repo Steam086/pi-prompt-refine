@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
-import { renderModelChoices, renderModelPicker, type ModelPickerOptions } from "../src/model-picker.js";
+import { renderModelChoices, renderModelPicker, renderOverlayModelPicker, type ModelPickerOptions } from "../src/model-picker.js";
+import { workspaceHeight } from "../src/workspace-overlay.js";
 import { panelLayout } from "../src/panel-layout.js";
 import { stripVTControlCharacters } from "node:util";
 import { formatKeyHint } from "../src/key-hints.js";
@@ -13,6 +14,22 @@ const items = Array.from({ length: 20 }, (_, i) => ({
 }));
 
 describe("model picker layout", () => {
+  it.each(["dark", "light"])("uses the workspace overlay bounds and aligned frame (%s)", (name) => {
+    const theme = getThemeByName(name)!;
+    const options: ModelPickerOptions = { items, selectedKey: items[12]!.value, query: "中文😀\x1b[31m", title: "Choose optimizer model",
+      subtitle: "Optimizer only · Main session unchanged", thinkingKeys: "Shift+Tab", thinkingStatus: "Thinking level: high", run: false };
+    for (const rows of [1, 5, 8, 24, 60]) for (const width of [1, 7, 12, 20, 40, 100, 240]) {
+      const lines = renderOverlayModelPicker(options, width, rows, theme);
+      expect(lines).toHaveLength(workspaceHeight(rows));
+      expect(lines.every((line) => visibleWidth(line) === width)).toBe(true);
+      expect(lines.join("\n")).not.toContain("\x1b[31m");
+      if (width >= 8 && workspaceHeight(rows) >= 6) {
+        expect(stripVTControlCharacters(lines[0]!)).toMatch(/^╭─+╮$/);
+        expect(stripVTControlCharacters(lines.at(-1)!)).toMatch(/^╰─+╯$/);
+      }
+      if (width >= 40 && rows >= 24) expect(lines.join("\n")).toContain("模型 Model 12");
+    }
+  });
   it.each(["dark", "light"])("budgets the full picker frame across resize, search and thinking changes (%s)", (name) => {
     const theme = getThemeByName(name)!;
     const options: ModelPickerOptions = { items, selectedKey: items[12]!.value, query: "", title: "Choose optimizer model",

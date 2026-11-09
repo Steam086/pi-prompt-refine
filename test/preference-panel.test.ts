@@ -8,6 +8,7 @@ import { RefineWorkspace } from "../src/workspace.js";
 import { PreviewPanel } from "../src/preview.js";
 import { composeRevision, selectPreference, type PreferenceLibrary, type PreferenceRepository, type RevisionPreference, type SelectedPreference } from "../src/revision-preferences.js";
 import * as preferences from "../src/revision-preferences.js";
+import { workspaceHeight } from "../src/workspace-overlay.js";
 import * as presentation from "../src/presentation.js";
 import { panelLayout } from "../src/panel-layout.js";
 import { formatKeyHint, type KeyHint } from "../src/key-hints.js";
@@ -1103,8 +1104,7 @@ describe("Unsent preference selection", () => {
     for (const [width, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [100, 40]]) {
       f.terminal.rows = rows!;
       const lines = w.render(width!);
-      expect(lines.length).toBeGreaterThanOrEqual(Math.min(18, panelLayout(width!, rows!).height));
-      expect(lines.length).toBeLessThanOrEqual(panelLayout(width!, rows!).height);
+      expect(lines).toHaveLength(workspaceHeight(rows!));
       expect(w.render(width!)).toHaveLength(lines.length);
       expect(lines.every((line) => visibleWidth(line) <= width!)).toBe(true);
       expect(lines.join("\n")).toContain(f.theme.fg("warning", "⚠").split("⚠")[0] + "⚠");
@@ -1264,8 +1264,7 @@ describe("Unsent preference selection", () => {
     for (const [width, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [80, 30]]) {
       f.terminal.rows = rows!;
       const lines = w.render(width!);
-      expect(lines.length).toBeGreaterThanOrEqual(Math.min(18, panelLayout(width!, rows!).height));
-      expect(lines.length).toBeLessThanOrEqual(panelLayout(width!, rows!).height);
+      expect(lines).toHaveLength(workspaceHeight(rows!));
       expect(w.render(width!)).toHaveLength(lines.length);
       for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width!);
     }
@@ -1345,8 +1344,7 @@ describe("workspace preference integration", () => {
     for (const [width, rows] of [[100, 40], [36, 16], [12, 8], [80, 30]]) {
       f.terminal.rows = rows!;
       const lines = w.render(width!);
-      expect(lines.length).toBeGreaterThanOrEqual(Math.min(18, panelLayout(width!, rows!).height));
-      expect(lines.length).toBeLessThanOrEqual(panelLayout(width!, rows!).height);
+      expect(lines).toHaveLength(workspaceHeight(rows!));
       expect(w.render(width!)).toHaveLength(lines.length);
       for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width!);
       expect(lines.join("\n")).not.toContain("\x1b[2J");

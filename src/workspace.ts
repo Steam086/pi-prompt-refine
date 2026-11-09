@@ -2,7 +2,8 @@ import { stripVTControlCharacters } from "node:util";
 import { matchesKey, parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type Focusable, type KeybindingsManager, type KeyId, type TUI } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { PreviewPanel } from "./preview.js";
-import { panelFrame, panelTabs, workspaceTabs, WorkspaceHeight, WORKSPACE_PAGES, type WorkspacePage } from "./panel-layout.js";
+import { panelFrame, panelTabs, workspaceTabs, WORKSPACE_PAGES, type WorkspacePage } from "./panel-layout.js";
+import { workspaceFrame, workspaceLayout, workspaceViewport } from "./workspace-overlay.js";
 import { alignedKeyHints, fittingKeyHints, type KeyHint } from "./key-hints.js";
 import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
@@ -55,6 +56,8 @@ interface WorkspaceActions {
   submit(text: string): string | undefined;
   /** Captures one actionable candidate; the callback rejects stale targets. */
   revision?(id?: number): { key: string; label?: string; submit(text: string): string | undefined } | undefined;
+  /** Bounded in-memory drafts survive closing the overlay, never persisted to history. */
+  revisionDrafts?: Map<string, RevisionDraft>;
 }
 
 /** One custom UI lifetime: internal navigation never restores the host editor/card. */
@@ -87,7 +90,7 @@ export class RefineWorkspace implements Component, Focusable {
   private originalTarget?: ReturnType<NonNullable<WorkspaceActions["original"]>>;
   private inputKind: "draft" | "revision" | "original" = "draft";
   private revisionTarget?: ReturnType<NonNullable<WorkspaceActions["revision"]>>;
-  private readonly revisionDrafts = new Map<string, RevisionDraft>();
+  private readonly revisionDrafts: Map<string, RevisionDraft>;
   private revisionSelected: SelectedPreference[] = [];
   private preferencePanel?: PreferencePanel;
   private inlinePreferences?: InlinePreferences;
@@ -99,14 +102,9 @@ export class RefineWorkspace implements Component, Focusable {
   private revisionSource?: { render(width: number): string[] };
   private preferencesKey?: KeyId | null;
   private preferencesKeyNotice = "";
-  private readonly height = new WorkspaceHeight();
-  private expandKey?: KeyId;
   private lastWidth?: number;
-  private readonly expansionHint = (): KeyHint | undefined => this.expandKey && this.height.canToggle(this.tui.terminal.rows)
-    ? [this.expandKey === "ctrl+e" ? "Ctrl+E" : this.expandKey, this.height.isExpanded ? "Collapse" : "Expand"] : undefined;
-  private readonly layout = (width: number) => this.height.layout(width, this.tui.terminal.rows,
-    (columns) => (this.mode === "result" ? this.panel : this.mode === "usage" ? this.historyPanel : this.taskPanel)
-      ?.preferredBodyHeight(columns) ?? this.panel.preferredBodyHeight(columns));
+  private outerWidth?: number;
+  private readonly layout = (width: number) => workspaceLayout(this.outerWidth ?? width + 2, this.tui.terminal.rows);
 
   private get activeInput(): PromptInput { return this.inputKind === "original" ? this.originalInput : this.inputKind === "revision" ? this.revisionInput : this.input; }
 
@@ -117,15 +115,8 @@ export class RefineWorkspace implements Component, Focusable {
     private readonly keys: KeybindingsManager,
     private readonly actions: WorkspaceActions,
   ) {
-    this.panel.setLayoutProvider(this.layout, this.expansionHint);
-    // Editor-only bindings do not conflict in a read-only view. Never intercept
-    // this key in inputs/search, or steal a remapped application/select action.
-    const readingBindings = Object.entries(keys.getResolvedBindings()).filter(([id]) =>
-      !id.startsWith("tui.editor.") && !id.startsWith("tui.input."));
-    this.expandKey = (["ctrl+e", "=", "+"] as const).find((candidate) =>
-      canonicalShortcut(candidate) !== canonicalShortcut(actions.preferences?.key ?? "") &&
-      !readingBindings.some(([, binding]) => (Array.isArray(binding) ? binding : [binding]).some((key) =>
-        key && canonicalShortcut(key) === canonicalShortcut(candidate))));
+    this.revisionDrafts = actions.revisionDrafts ?? new Map();
+    this.panel.setLayoutProvider(this.layout);
     this.preferencesKey = actions.preferences?.key;
     if (this.preferencesKey && Object.values(keys.getResolvedBindings()).some((binding) =>
       (Array.isArray(binding) ? binding : [binding]).some((key) => key && canonicalShortcut(key) === canonicalShortcut(this.preferencesKey!)))) {
@@ -147,7 +138,7 @@ export class RefineWorkspace implements Component, Focusable {
         if (applied) this.showApplied(id);
         return applied;
       } };
-      this.taskPanel = new TaskPanel(taskActions, theme, () => tui.terminal.rows, keys, false, actions.taskPosition, this.layout, this.expansionHint);
+      this.taskPanel = new TaskPanel(taskActions, theme, () => tui.terminal.rows, keys, false, actions.taskPosition, this.layout);
     }
     this.input = this.makeInput();
     this.input.editor.setText(actions.inputDraft?.text ?? "");
@@ -335,7 +326,7 @@ export class RefineWorkspace implements Component, Focusable {
       revise: (id) => this.openRevision(id),
       preferences: this.actions.preferences ? (id, original) => this.openDraftPreferences(id, original) : undefined,
       preferencesKey: this.preferencesKey,
-    }, this.theme, () => this.tui.terminal.rows, this.keys, true, position, this.layout, this.expansionHint);
+    }, this.theme, () => this.tui.terminal.rows, this.keys, true, position, this.layout);
     this.switchMode("usage");
   }
 
@@ -469,14 +460,6 @@ export class RefineWorkspace implements Component, Focusable {
       return true;
     }
     const activeTasks = this.mode === "main" ? this.taskPanel : this.mode === "usage" ? this.historyPanel : undefined;
-    const readingCanExpand = activeTasks ? activeTasks.canExpand()
-      : (this.mode === "main" || this.mode === "result") && this.panel.canExpand();
-    if (readingCanExpand && this.expandKey && matchesKey(data, this.expandKey)) {
-      this.layout(this.lastWidth ?? this.tui.terminal.columns);
-      this.height.toggle(this.tui.terminal.rows);
-      this.tui.requestRender();
-      return true;
-    }
     if (activeTasks?.ownsInput()) {
       activeTasks.handleInput(data);
       this.tui.requestRender();
@@ -605,11 +588,11 @@ export class RefineWorkspace implements Component, Focusable {
     const { theme } = this;
     const canInline = this.canInlineRevision(width);
     const inline = !this.revisionExpanded && canInline;
-    const editorHeight = inline ? Math.min(5, Math.max(3, this.revisionInput.editor.getText().split("\n").length)) : layout.bodyHeight;
+    const editorHeight = inline ? Math.min(10, Math.max(5, Math.floor(layout.bodyHeight * 0.3))) : layout.bodyHeight;
     const title = layout.innerWidth < 64 ? "Revise" : "Revise current result";
     const identity = this.revisionTarget?.label ? theme.fg("muted", sanitizeTerminalText(` · ${this.revisionTarget.label}`)) : "";
     const selected = this.revisionSelected.length ? `${this.revisionSelected.length} · ${this.revisionSelected.map((item) => item.name + (item.body !== item.sourceBody ? "*" : "")).join(", ")}` : "None";
-    const status = this.inputError || this.preferencesKeyNotice.trim() || `Not sent${this.revisionSelected.some((item) => item.body !== item.sourceBody) ? " · * Edited for this revision only" : ""}`;
+    const status = this.inputError || this.preferencesKeyNotice.trim() || `Revision not submitted${this.revisionSelected.some((item) => item.body !== item.sourceBody) ? " · * Edited for this revision only" : ""}`;
     const warning = !!(this.inputError || this.preferencesKeyNotice);
     const feedback = theme.fg(warning ? "warning" : "muted", sanitizeTerminalText(`${warning ? "⚠ " : ""}${status}`));
     const control = (label: string, active: boolean) => active ? theme.bg("selectedBg", theme.fg("text", theme.bold(`› ${label}`))) : theme.fg("muted", label);
@@ -624,7 +607,7 @@ export class RefineWorkspace implements Component, Focusable {
     if (layout.headerHeight === 1 && warning) header[0] = feedback;
     const footer = alignedKeyHints([
       [["Ctrl+S", "Revise"], ["Enter", "Newline"], ...(this.preferencesKey ? [[this.preferencesKey.toUpperCase(), "Preferences"] as const] : [])],
-      [["Esc", "Back"], ["Tab", "Focus"], ...(canInline ? [["Ctrl+E", inline ? "Expand" : "Collapse"] as const] : [])],
+      [["Esc", "Back"], ["Tab", "Focus"], ...(canInline ? [["Ctrl+E", inline ? "Editor only" : "Show source"] as const] : [])],
     ], layout.innerWidth, theme);
     if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["Esc", "Back"], ["^S", "Revise"], ["Tab", "Focus"]], layout.innerWidth, theme);
     if (this.revisionFocus !== "input") footer[0] = fittingKeyHints([
@@ -646,6 +629,12 @@ export class RefineWorkspace implements Component, Focusable {
 
   render(width: number): string[] {
     if (width < 1) return [];
+    this.outerWidth = width;
+    const viewport = workspaceViewport(width, this.tui.terminal.rows);
+    return workspaceFrame(width, this.tui.terminal.rows, this.renderContent(viewport.width), this.theme);
+  }
+
+  private renderContent(width: number): string[] {
     this.lastWidth = width;
     if (this.preferencePanel) return this.preferencePanel.render(width);
     if (this.mode === "input" && this.inputKind === "revision") return this.reviewingRequirements ? this.renderRequirements(width) : this.renderRevision(width);
@@ -701,7 +690,7 @@ export class RefineWorkspace implements Component, Focusable {
       let focusEnd = 0;
       let focusedDetail = "";
       const columns = innerWidth >= 56;
-      const descriptions = innerWidth >= 76;
+      const descriptions = innerWidth >= 72;
       const labelWidth = 22;
       const valueWidth = descriptions ? Math.min(32, Math.floor(innerWidth * 0.32)) : innerWidth - labelWidth - 4;
       // Clip plain text before styling: ANSI resets from truncation would break the row background.

@@ -1,7 +1,8 @@
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi, type SelectItem } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { sanitizeTerminalText } from "./presentation.js";
-import { panelFrame, panelLayout } from "./panel-layout.js";
+import { panelFrame, panelLayout, type PanelLayout } from "./panel-layout.js";
+import { workspaceFrame, workspaceLayout, workspaceViewport } from "./workspace-overlay.js";
 import { fittingKeyHints, type KeyHint } from "./key-hints.js";
 
 /** Render independently of SelectList's fixed label/description columns; keep its input behavior. */
@@ -62,9 +63,9 @@ export interface ModelPickerOptions {
 }
 
 /** Budget actual content rows inside the same bounded frame as the workspace. */
-export function renderModelPicker(options: ModelPickerOptions, width: number, rows: number, theme: Theme): string[] {
+export function renderModelPicker(options: ModelPickerOptions, width: number, rows: number, theme: Theme,
+  layout: PanelLayout = panelLayout(width, rows)): string[] {
   if (width < 1) return [];
-  const layout = panelLayout(width, rows);
   const w = layout.innerWidth, h = layout.bodyHeight;
   const search = h >= 4 ? [theme.fg("muted", "Search: ") + theme.fg(options.query ? "text" : "muted",
     truncateToWidth(sanitizeTerminalText(options.query || "provider/model, name, or thinking"), Math.max(1, w - 8), "…"))] : [];
@@ -82,4 +83,11 @@ export function renderModelPicker(options: ModelPickerOptions, width: number, ro
   return panelFrame(layout, [theme.fg("text", theme.bold(sanitizeTerminalText(options.title))), theme.fg("muted", sanitizeTerminalText(options.subtitle))],
     [...search, ...Array.from({ length: listHeight }, (_, i) => list[i] ?? ""), ...(gap ? [""] : []), ...detail], footer,
     (text) => theme.fg("borderMuted", text));
+}
+
+/** Model selection replaces the workspace modal, using the identical shell. */
+export function renderOverlayModelPicker(options: ModelPickerOptions, width: number, rows: number, theme: Theme): string[] {
+  if (width < 1) return [];
+  return workspaceFrame(width, rows, renderModelPicker(options, workspaceViewport(width, rows).width, rows, theme,
+    workspaceLayout(width, rows)), theme);
 }

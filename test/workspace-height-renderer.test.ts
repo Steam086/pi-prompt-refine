@@ -1,22 +1,20 @@
-import { stripVTControlCharacters } from "node:util";
+import { stripVTControlCharacters as strip } from "node:util";
 import { describe, expect, it, vi } from "vitest";
-import { getKeybindings, Text, TuiAltScreen, TuiMainScreen, visibleWidth, type Terminal } from "@earendil-works/pi-tui";
+import { CURSOR_MARKER, getKeybindings, Input, Text, TuiAltScreen, TuiMainScreen, visibleWidth, type Terminal } from "@earendil-works/pi-tui";
 import { getThemeByName } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { PreviewPanel } from "../src/preview.js";
 import { RefineWorkspace } from "../src/workspace.js";
+import { REFINE_OVERLAY_OPTIONS, workspaceHeight } from "../src/workspace-overlay.js";
 import { selectHistory } from "../src/context.js";
 import type { RefineRecord } from "../src/history.js";
 import type { TaskPanelPosition } from "../src/task-panel.js";
 
-// Actual Pi renderers with a transcript above the workspace. Captured I/O does
-// not establish physical-terminal appearance, latency or IME behavior.
-describe.each(["regular", "fullscreen"] as const)("adaptive height rendering (%s)", (mode) => {
-  it.each(["dark", "light"])("keeps bounded styled chrome through expansion, resize and confirmation (%s)", (name) => {
+// Real overlay compositing in both Pi renderers. This is not human IME validation.
+describe.each(["regular", "fullscreen"] as const)("native Refine overlay (%s)", (mode) => {
+  it.each(["dark", "light"])("keeps a complete aligned shell, isolated focus and the host draft (%s)", (name) => {
     vi.useFakeTimers();
-    let input = (_data: string) => {};
-    const writes: string[] = [];
-    const terminal: Terminal = {
-      rows: 60, columns: 100, kittyProtocolActive: true,
+    let input = (_data: string) => {}; const writes: string[] = [];
+    const terminal: Terminal = { rows: 60, columns: 120, kittyProtocolActive: true,
       start: (handler) => { input = handler; }, stop() {}, write: (data) => { writes.push(data); },
       async drainInput() {}, moveBy() {}, hideCursor() {}, showCursor() {}, clearLine() {}, clearFromCursor() {},
       clearScreen: vi.fn(), setTitle() {}, setProgress() {}, setProgramStatus() {},
@@ -27,8 +25,8 @@ describe.each(["regular", "fullscreen"] as const)("adaptive height rendering (%s
     const request = { draft: "Original 中文😀\x1b[2J", model: { provider: "p", id: "m" }, sessionId: "s", branchLeafId: null,
       systemPrompt: "Policy", history: selectHistory([], 0, 0) };
     const records: RefineRecord[] = [{ id: 1, taskId: 1, kind: "refine", status: "generated", createdAt: 1, input: request,
-      candidate: { ...request, requestId: 1, version: 1, generation: 0, text: Array.from({ length: 90 }, (_, i) => `Result ${i} 中文😀`).join("\n") } }];
-    const position: TaskPanelPosition = { selectedTaskId: 1 };
+      candidate: { ...request, requestId: 1, version: 1, generation: 0, text: "Result 中文😀\n".repeat(100) } }];
+    const position: TaskPanelPosition = { selectedId: 1 };
     const accept = vi.fn();
     const panel = new PreviewPanel({ state: { phase: "idle", requestId: 0, pendingSend: false }, contextLabel: "None",
       elapsedSeconds: 0, canRestore: false, openHint: "ctrl+\\" }, theme, () => terminal.rows, () => tui.requestRender());
@@ -37,50 +35,50 @@ describe.each(["regular", "fullscreen"] as const)("adaptive height rendering (%s
       taskPosition: position, history: () => records,
       context: () => ({ instructions: "always", tree: false, skills: false }), contextEnabled: () => true,
       saveContext: async () => ({ message: "Saved", persisted: true }), submit: () => undefined,
+      revision: () => ({ key: "s:1", label: "Run #1 · p/m", submit: () => "Rejected 中文😀" }),
+      preferences: { key: "alt+p", maxChars: 16000, repository: { load: async () => ({ errors: {}, entries: [] }), save: vi.fn(), remove: vi.fn() } },
     });
-    tui.addChild(new Text("Earlier transcript 中文😀\n".repeat(5), 0, 0));
-    tui.addChild(workspace); tui.setFocus(workspace);
+    const hostEditor = new Input(); hostEditor.setValue("Host draft 中文😀");
+    tui.addChild(new Text("Earlier transcript 中文😀\n".repeat(65), 0, 0));
+    tui.addChild(hostEditor); tui.setFocus(hostEditor);
+    const overlay = tui.showOverlay(workspace, REFINE_OVERLAY_OPTIONS);
     const render = () => {
       tui.renderNow();
-      const lines = workspace.render(terminal.columns);
-      expect(lines.length).toBeLessThanOrEqual(Math.max(1, terminal.rows - 4));
-      expect(lines.every((line) => visibleWidth(line) <= terminal.columns)).toBe(true);
+      const bounds = overlay.getBounds()!;
+      expect(bounds.width).toBe(Math.max(1, Math.floor(terminal.columns * 0.98)));
+      expect(bounds.height).toBe(workspaceHeight(terminal.rows));
+      const lines = workspace.render(bounds.width);
+      expect(lines.every((line) => visibleWidth(line) === bounds.width)).toBe(true);
       expect(lines.join("\n")).not.toContain("\x1b[2J");
-      expect(stripVTControlCharacters(lines.slice(-2).join("\n"))).toMatch(/Esc|Back/);
+      if (bounds.width >= 8 && bounds.height >= 6) {
+        expect(strip(lines[0]!)).toMatch(/^╭─+╮$/);
+        expect(strip(lines.at(-1)!)).toMatch(/^╰─+╯$/);
+      }
       return lines;
     };
     try {
-      tui.start();
-      const compact = render();
-      expect(compact).toHaveLength(18);
-      expect(compact.join("\n")).toContain(theme.fg("text", theme.bold("Ctrl+E")) + " " + theme.fg("muted", "Expand"));
-      const initialRedraws = tui.fullRedraws;
-      const initialClears = vi.mocked(terminal.clearScreen).mock.calls.length;
+      tui.start(); render();
+      expect(overlay.isFocused()).toBe(true);
+      expect(hostEditor.focused).toBe(false);
+      const redraws = tui.fullRedraws; const clears = vi.mocked(terminal.clearScreen).mock.calls.length;
       writes.length = 0;
-      // Selection alone never expands, even when the selected result is long.
-      input("\x1b[B"); input("\r"); render();
-      for (let i = 0; i < 15; i++) { input("\x1b[6~"); render(); }
-      const before = render();
-      input("\x05"); expect(render()).toHaveLength(51);
-      expect(position.selectedId).toBe(1);
-      input("\x05"); expect(render()).toEqual(before);
-      expect(tui.fullRedraws).toBe(initialRedraws);
-      expect(vi.mocked(terminal.clearScreen).mock.calls.length).toBe(initialClears);
-      expect(writes.join("")).not.toMatch(/\x1b\[(?:2J|3J|\?1049[hl])/);
-      input("a"); expect(accept).toHaveBeenCalledExactlyOnceWith(1);
-      input("\x05"); render();
-      for (const [columns, rows] of [[40, 24], [20, 12], [100, 60], [180, 80]] as const) {
-        Object.assign(terminal, { columns, rows }); workspace.invalidate();
-        const height = render().length;
-        for (const key of ["o", "\x1b[5~", "\x1b[C", "\x1b[C", "\x1b[C", "d", "\x05", "\x1b"]) {
-          input(key); expect(render()).toHaveLength(height);
-        }
+      for (const key of ["\r", "\x1b[6~", "o", "\x1b[6~", "f", "Keep 中文😀", "\x05", "\x05", "\x13", "\x1b", "d", "\x1b"]) {
+        input(key); render();
       }
-      Object.assign(terminal, { columns: 100, rows: 60 }); workspace.openTasks(); render();
-      input("\x05"); expect(render().length).toBeLessThanOrEqual(24);
-      expect(render().join("\n")).toContain(theme.fg("text", theme.bold("Ctrl+E")) + " " + theme.fg("muted", "Expand"));
-    } finally {
-      workspace.dispose(); tui.stop(); vi.restoreAllMocks(); vi.useRealTimers();
-    }
+      expect(hostEditor.getValue()).toBe("Host draft 中文😀");
+      expect(tui.fullRedraws).toBe(redraws);
+      expect(terminal.clearScreen).toHaveBeenCalledTimes(clears);
+      expect(writes.join("" )).not.toMatch(/\x1b\[(?:2J|3J|\?1049[hl])/);
+      for (const [columns, rows] of [[40, 24], [20, 12], [8, 5], [180, 80], [120, 60]] as const) {
+        Object.assign(terminal, { columns, rows }); workspace.invalidate(); render();
+        input("f"); input("more");
+        expect(render().join("\n")).toContain(CURSOR_MARKER);
+        input("\x1b"); render();
+      }
+      overlay.hide(); tui.renderNow();
+      expect(hostEditor.focused).toBe(true);
+      input("!"); tui.renderNow();
+      expect(hostEditor.getValue()).toBe("!Host draft 中文😀");
+    } finally { workspace.dispose(); tui.stop(); vi.restoreAllMocks(); vi.useRealTimers(); }
   });
 });

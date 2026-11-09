@@ -6,6 +6,7 @@ import { renderModelPicker, type ModelPickerOptions } from "../src/model-picker.
 import { panelLayout } from "../src/panel-layout.js";
 import { PreviewPanel } from "../src/preview.js";
 import { RefineWorkspace } from "../src/workspace.js";
+import { workspaceHeight } from "../src/workspace-overlay.js";
 import { TaskPanel, type TaskPanelPosition } from "../src/task-panel.js";
 import { selectHistory } from "../src/context.js";
 import { formatKeyHint } from "../src/key-hints.js";
@@ -54,8 +55,8 @@ describe.each(["regular", "fullscreen"] as const)("TUI layout regressions (%s)",
       tui.requestRender(); tui.renderNow();
       const lines = component.render(terminal.columns);
       expect(lines.length).toBeGreaterThan(0);
-      expect(lines.length).toBeLessThanOrEqual(panelLayout(terminal.columns, terminal.rows).height);
-      expect(lines.every((line) => visibleWidth(line) <= Math.min(terminal.columns, 100))).toBe(true);
+      expect(lines.length).toBeLessThanOrEqual(view === workspace ? workspaceHeight(terminal.rows) : panelLayout(terminal.columns, terminal.rows).height);
+      expect(lines.every((line) => visibleWidth(line) <= (view === workspace ? terminal.columns : Math.min(terminal.columns, 100)))).toBe(true);
       expect(lines.join("\n")).not.toContain("\x1b[31m");
       return lines.join("\n");
     };

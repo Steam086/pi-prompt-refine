@@ -14,10 +14,12 @@ import { buildRefineInput, buildRefineSystemPrompt, parseRefineOutput, selectHis
 import { preserveDroppedTuiReference } from "./reference-preservation.js";
 import { budgetRequest } from "./budget.js";
 import { BackgroundStatus, renderBackgroundStatus } from "./background-status.js";
-import { renderModelPicker } from "./model-picker.js";
+import { renderOverlayModelPicker } from "./model-picker.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { RefineWorkspace, type ContextSettings } from "./workspace.js";
+import { REFINE_OVERLAY_OPTIONS } from "./workspace-overlay.js";
 import { PreferenceStore } from "./preference-store.js";
+import type { RevisionDraft } from "./revision-preferences.js";
 import { PreviewPanel, type PreviewOptions } from "./preview.js";
 import { RefineController, type Candidate, type CandidateToken, type ControllerState, type RefineRequest, type RefineRequestInput, type TriggerResult } from "./controller.js";
 import type { TaskPanelPosition } from "./task-panel.js";
@@ -124,6 +126,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   const previewPositions = new Map<string, number>();
   // Extension-runtime memory only; never coupled to candidate/request invalidation.
   const inputDrafts = new Map<string, string>();
+  const revisionDrafts = new Map<string, RevisionDraft>();
   const taskPositions = new Map<string, TaskPanelPosition>();
   const recentRunModels = new Map<string, string[]>();
   const usagePositions = new Map<string, TaskPanelPosition>();
@@ -459,7 +462,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
       return {
         render: (width) => {
           const retained = source ? controller.getHistory().filter((record) => record.taskId === source.taskId && record.status !== "unsent") : [];
-          return renderModelPicker({
+          return renderOverlayModelPicker({
             items: items.map((item) => {
               if (!source) return item;
               const runs = retained.filter((record) => displayModel(record.input.model) === item.value);
@@ -511,7 +514,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
           }
         },
       };
-    });
+    }, { overlay: true, overlayOptions: REFINE_OVERLAY_OPTIONS });
 
     if (!selection) return;
     if ((!source && controller.getGeneration() !== startGeneration) || controller.getSessionId() !== startSessionId ||
@@ -1092,6 +1095,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             const persisted = await persistConfig(ctx);
             return { message: persisted ? "Context saved · Applies to next round" : "Context applied · Not persisted; check configuration", persisted };
           },
+          revisionDrafts,
           revision: (id) => {
             const source = id === undefined ? controller.getCandidate() : controller.getRecord(id)?.candidate;
             if (source?.contextUnavailable) { notify(ctx, RESTORED_CONTEXT_HINT, "info"); return undefined; }
@@ -1189,7 +1193,7 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
             tui.requestRender();
           },
         };
-      });
+      }, { overlay: true, overlayOptions: REFINE_OVERLAY_OPTIONS });
     } finally {
       refreshPreview = undefined;
       closePreview = undefined;
