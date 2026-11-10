@@ -33,6 +33,51 @@ function fixture(entries = [first, second], selected: SelectedPreference[] = [],
 }
 
 describe("inline Unsent preferences", () => {
+  it.each(["dark", "light"])("uses spare rows for preference cells, retaining compact layouts when crowded (%s)", async (themeName) => {
+    const entry = { ...second, metadata: { ...second.metadata!, description: "Summary 中文😀\x1b[2J **literal**" } };
+    const f = fixture([first, entry], [], themeName); await Promise.resolve();
+    vi.spyOn(f.theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
+    const bg = f.theme.bg("selectedBg", "probe").split("probe")[0]!;
+    try {
+      for (const active of [false, true]) {
+        f.picker.setTarget(1, active);
+        for (const [width, height, spacious] of [[60, 40, true], [24, 10, false], [60, 10, false], [60, 40, true]] as const) {
+          const frame = f.render(width, height);
+          const plain = frame.map(stripVTControlCharacters);
+          const index = plain.findIndex((line) => line.includes("[ ] Rewrite"));
+          expect(index).toBeGreaterThan(0);
+          if (spacious) {
+            expect(plain[index + 1]).toContain(sanitizeTerminalText(entry.metadata.description));
+            expect(frame[index + 1]).toContain(f.theme.fg("muted", sanitizeTerminalText(entry.metadata.description)));
+            expect(frame[index + 1]).not.toContain("\x1b[1m");
+            if (active) expect(frame[index + 1]).toContain(bg);
+          } else expect(plain[index + 1]).toBe("Task requirements");
+          expect(frame.length).toBeLessThanOrEqual(height);
+          expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
+          expect(frame.join("\n")).not.toContain("\x1b[2J");
+          expect(f.render(width, height)).toEqual(frame);
+        }
+      }
+      const choices = f.picker.render(48, 40, true, false);
+      const index = choices.findIndex((line) => stripVTControlCharacters(line).includes("[ ] Rewrite"));
+      expect(stripVTControlCharacters(choices[index + 1]!).trim()).toBe("");
+      expect(choices.join("\n")).not.toContain("Summary"); // Wide reference owns descriptions.
+      f.picker.handleInput(" ");
+      expect(f.state.selected.map((item) => item.id)).toEqual([entry.id]);
+      expect(f.save).toHaveBeenCalledTimes(1);
+      expect(f.load).toHaveBeenCalledTimes(1);
+    } finally { f.picker.dispose(); }
+
+    const dense = fixture(Array.from({ length: 30 }, (_, index) => ({ ...second, id: `dense-${index}`, name: `Choice ${index}` })), [], themeName);
+    await Promise.resolve();
+    try {
+      const plain = dense.render(60, 40).map(stripVTControlCharacters);
+      const firstAt = plain.findIndex((line) => line.includes("[ ] Choice 0"));
+      expect(plain[firstAt + 1]).toContain("[ ] Choice 1");
+      expect(plain.join("\n")).toContain("[ ] Choice 29");
+      expect(dense.save).not.toHaveBeenCalled();
+    } finally { dense.picker.dispose(); }
+  });
   it.each(["dark", "light"])("puts rewriting before task and legacy entries without reordering selections (%s)", async (themeName) => {
     const legacy = { ...first, id: "legacy", name: "Legacy", metadata: undefined };
     const f = fixture([first, legacy, second], [], themeName); await Promise.resolve();

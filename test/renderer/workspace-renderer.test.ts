@@ -85,7 +85,7 @@ describe("workspace terminal rendering", () => {
         const save = settings.findIndex((line) => /(?:Ctrl\+S Save settings|\^S Save)/.test(line));
         const back = settings.findIndex((line) => line.includes("Esc Back"));
         const selected = settings.findIndex((line) => line.includes("› "));
-        expect(save).toBeGreaterThan(settings.findIndex((line) => line.includes("←") && line.includes("Settings")));
+        expect(save).toBeGreaterThan(settings.findIndex((line) => line.includes(" Settings ")));
         expect(back).toBeGreaterThanOrEqual(save);
         expect(selected).toBeGreaterThan(back);
         expect(frame).toHaveLength(initialHeight);

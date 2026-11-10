@@ -88,7 +88,7 @@ export class TaskPanel {
     const row = rows.find((item) => this.isSelected(item)) ?? rows.find((item) =>
       !item.original && item.record.id === this.actions.appliedId()) ?? rows[0];
     if (!row) return 3;
-    const rightWidth = innerWidth >= 72 ? innerWidth - Math.min(36, Math.floor(innerWidth / 3)) - 3 : innerWidth;
+    const rightWidth = innerWidth >= 72 ? innerWidth - Math.min(innerWidth >= 120 ? 48 : 36, Math.floor(innerWidth / 3)) - 3 : innerWidth;
     const inline = this.inline(row);
     const summary = row.original ? this.originalHeight(row, rightWidth) + (inline ? 1 + inline.preferredHeight(row.record.id) : 0)
       : this.paneHeader(row, rightWidth).length + 3 + this.content.wrapped(sanitizeTerminalText(row.record.candidate?.text ?? row.record.input.draft), rightWidth).length;
@@ -424,7 +424,7 @@ export class TaskPanel {
         body, [fittingKeyHints([["Esc / n", "Cancel"], ["y", "Delete"]], layout.innerWidth, this.theme)],
         (text) => this.content.muted(text), { footerAfterBodyRows: 0 });
     }
-    const tabs = workspaceTabs(layout, this.usage ? "Usage" : "Preview", this.theme, !this.referenceOnly && !this.preferenceFocus);
+    const tabs = workspaceTabs(layout, this.usage ? "Usage" : "Preview", this.theme);
     const height = Math.max(1, layout.bodyHeight - tabs.length);
     const rows = this.entries();
     const selected = this.selected(rows);
@@ -433,19 +433,24 @@ export class TaskPanel {
     if (inline && this.preferenceFocus && selected) return renderTaskPreferences(selected, inline, layout, tabs, this.theme, this.content,
       (columns, rows) => this.pane(selected, columns, rows, true, false, false), this.canExpand() ? this.expansionHint?.() : undefined);
     const split = !!selected && !this.inspecting && !this.retainedEarlier && layout.innerWidth >= 72;
-    const leftWidth = split ? Math.min(36, Math.floor(layout.innerWidth / 3)) : layout.innerWidth;
+    const leftWidth = split ? Math.min(layout.innerWidth >= 120 ? 48 : 36, Math.floor(layout.innerWidth / 3)) : layout.innerWidth;
     const rightWidth = split ? layout.innerWidth - leftWidth - 3 : layout.innerWidth;
     const selectedIndex = Math.max(0, rows.findIndex((row) => this.isSelected(row)));
-    this.top = selectionWindow(rows.length, selectedIndex, height, this.top, undefined, 0, this.navigationDirection).start;
-    const list = rows.slice(this.top, this.top + height).map((row) => {
+    // Larger canvases give each identity a readable secondary line and a gap.
+    // Scroll in identities, not physical lines, so resize never changes the target.
+    const rowHeight = split && layout.innerWidth >= 100 && height >= 24 ? 3 : 1;
+    const capacity = Math.max(1, Math.floor(height / rowHeight));
+    this.top = selectionWindow(rows.length, selectedIndex, capacity, this.top, undefined, 0, this.navigationDirection).start;
+    const list = rows.slice(this.top, this.top + capacity).flatMap((row) => {
       const { record } = row;
       const old = record.archivedAt !== undefined;
       const active = this.isSelected(row);
       const prefix = `${active ? "›" : " "} ${record.id === Math.min(...row.records.filter((r) => r.status !== "unsent").map((r) => r.id)) ? "└" : "├"} `;
       const badge = this.content.badge(record);
       const model = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(record.input.model.id), Math.max(1, leftWidth - visibleWidth(prefix + badge) - 1), "…"));
+      const draft = record.input.draft.replace(/\s+/g, " ") || "Empty prompt";
       const label = row.original
-        ? `${active ? "›" : " "} ${record.status === "unsent" ? `○ Unsent ·${record.input.preferences?.length ? ` P:${record.input.preferences.length} ·` : ""}` : "▾"} ${old ? "Earlier · " : ""}${record.input.draft.replace(/\s+/g, " ") || "Empty prompt"}`
+        ? `${active ? "›" : " "} ${record.status === "unsent" ? `○ Unsent ·${record.input.preferences?.length ? ` P:${record.input.preferences.length} ·` : ""}` : "▾"} ${old ? "Earlier · " : ""}${rowHeight > 1 ? "Original prompt" : draft}`
         : `${prefix}${model}${" ".repeat(Math.max(1, leftWidth - visibleWidth(prefix + model + badge)))}${badge}`;
       const clean = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(label), leftWidth, "…"));
       let text: string;
@@ -460,7 +465,13 @@ export class TaskPanel {
           + (status.startsWith("⚠") ? this.theme.fg("warning", "⚠") + this.theme.fg(this.content.color(record), status.slice(1))
             : this.theme.fg(this.content.color(record), status));
       }
-      return active ? this.theme.bg("selectedBg", text + " ".repeat(Math.max(0, leftWidth - visibleWidth(text)))) : text;
+      const highlight = (line: string) => active
+        ? this.theme.bg("selectedBg", line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line)))) : line;
+      if (rowHeight === 1) return [highlight(text)];
+      const detail = row.original ? this.theme.fg("text", sanitizeTerminalText(draft))
+        : this.content.muted(`Run #${record.id} · ${record.input.model.provider}${record.elapsedSeconds !== undefined ? ` · ${record.elapsedSeconds}s` : ""}`);
+      return [highlight(active ? this.theme.bold(text) : text),
+        highlight(truncateToWidth(`    ${detail}`, leftWidth, "…")), ""];
     });
     const previewDetails = this.inspecting && !this.usage && this.compareId === undefined && !!selected && !selected.original && !!selected.record.candidate;
     let body: string[];

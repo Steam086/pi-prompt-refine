@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { Input, parseKey, truncateToWidth, wrapTextWithAnsi, type KeybindingsManager } from "@earendil-works/pi-tui";
+import { Input, parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
@@ -268,11 +268,15 @@ export class InlinePreferences {
     }
     const group = (item: RevisionPreference) => item.metadata?.kind === "task" ? "Task requirements" : item.metadata?.kind === "rewrite" ? "Prompt rewriting" : "Unclassified";
     const available = height - result.length;
-    // Preserve adjacent choices even across a group boundary; grow the summary only
-    // when the list has room, rather than forcing every description into one line.
-    const description = showDescription
+    // Use spare rows for larger cells only when every choice still fits. Dense
+    // libraries and short panes keep the compact, neighbour-preserving window.
+    const groups = new Set(entries.map(group)).size;
+    const spacious = width >= 36 && height >= 24 && entries.length * 2 + groups <= available;
+    // A wide host already owns descriptions in its reference column. Its larger
+    // cells use whitespace instead of duplicating that reference content.
+    const description = showDescription && !spacious
       ? this.renderDescription(width, Math.max(0, Math.min(4, Math.floor(available / 2), available - 4)), false) : [];
-    const count = Math.max(0, available - description.length);
+    const count = Math.max(0, available - description.length - (spacious ? entries.length : 0));
     const window = selectionWindow(entries.length, position.index, count, position.top, (index) => group(entries[index]!), 0, position.direction);
     position.top = window.start;
     this.viewport = Math.max(1, window.end - window.start);
@@ -286,6 +290,11 @@ export class InlinePreferences {
       result.push(renderPreferenceRow({ width, name: local?.name ?? item.name, scope: item.scope,
         selected: !!local, focused: active, cursor: active ? "›" : " ", warning: warning || undefined,
         showStatus: false, prefixColor: "text" }, this.theme));
+      if (spacious) {
+        const summary = showDescription ? (local ?? item).metadata?.description : undefined;
+        const detail = summary ? truncateToWidth(`      ${muted(summary.replace(/\s+/gu, " "))}`, width, "…") : "";
+        result.push(active ? this.theme.bg("selectedBg", detail + " ".repeat(Math.max(0, width - visibleWidth(detail)))) : detail);
+      }
     }
     result.push(...description);
     return result.slice(0, height);

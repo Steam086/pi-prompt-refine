@@ -1,6 +1,8 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
+import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
-import { alignedHints, panelFrame, panelGeometry } from "../../src/panel-layout.js";
+import { alignedHints, panelFrame, panelGeometry, workspaceTabs, WORKSPACE_PAGES } from "../../src/panel-layout.js";
+import { getThemeByName } from "../support/pi-theme.js";
 import { workspaceHeight, workspaceLayout, workspaceViewport } from "../../src/workspace-overlay.js";
 
 describe("overlay geometry", () => {
@@ -25,6 +27,22 @@ describe("overlay geometry", () => {
     expect(workspaceLayout(240, 80).inset).toBeGreaterThan(20);
     expect(workspaceViewport(7, 40).framed).toBe(false);
     expect(workspaceViewport(100, 5).framed).toBe(false);
+  });
+});
+
+describe("workspace tabs", () => {
+  it.each(["dark", "light"])("uses arrow-free page identities and all available columns (%s)", (name) => {
+    const theme = getThemeByName(name)!;
+    for (const width of [12, 24, 30, 40, 100, 160]) for (const active of WORKSPACE_PAGES) {
+      const layout = panelGeometry(width, 40, width, false, false, 0);
+      const tabs = workspaceTabs(layout, active, theme);
+      const plain = stripVTControlCharacters(tabs.join("\n"));
+      expect(plain).not.toMatch(/[←→]/);
+      expect(tabs.join("\n")).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(` ${active} `))));
+      expect(tabs.every((line) => visibleWidth(line) <= width)).toBe(true);
+      if (width >= 30) for (const label of WORKSPACE_PAGES) expect(plain).toContain(label);
+      else expect(plain.trim()).toBe(active);
+    }
   });
 });
 
