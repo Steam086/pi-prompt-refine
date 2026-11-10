@@ -60,12 +60,15 @@ export function renderTaskDocument(
       if (row.record.error) body.push(theme.fg("error", sanitizeTerminalText(`Error: ${row.record.error}`)));
       if (row.record.error === "truncated") body.push(theme.fg("warning", truncatedOutputHint(row.record.usage)));
     }
-    body.push(content.muted(`Focus: ${options.inspecting || options.reading ? "Reading · ↑↓ scroll" : "List · ↑↓ select"}`), "");
+    if (row) body.push(content.muted(`Focus: ${options.inspecting || options.reading ? "Reading · ↑↓ scroll" : "List · ↑↓ select"}`), "");
     const hints: KeyHint[] = [["Esc", "Back"], ["?", "Available actions and full feedback"]];
     const expansion = options.expansion;
     if (expansion) hints.push(expansion);
     const inline = options.inline;
-    if (!options.inspecting) hints.push(["Enter", row?.original && row.record.status === "unsent" && (options.usage || row.record.archivedAt === undefined) ? "Optimize from original focus" : "Inspect"], ...(!options.retainedEarlier ? [["Tab", inline ? "List / Preferences" : options.reading ? "Select" : "Read"] as KeyHint] : []), ["n", "New"]);
+    if (!options.inspecting) {
+      if (row) hints.push(["Enter", row.original && row.record.status === "unsent" && (options.usage || row.record.archivedAt === undefined) ? "Optimize from original focus" : "Inspect"], ...(!options.retainedEarlier ? [["Tab", inline ? "List / Preferences" : options.reading ? "Select" : "Read"] as KeyHint] : []));
+      hints.push(["n", "New"]);
+    }
     if (inline) hints.push(["Tab / Shift+Tab", "Enter preferences; return to tasks without changing selections"], ["Space", "Toggle at Preferences focus; saved immediately"], ["Enter", "Optimize this Unsent at Preferences focus; search/read never submit"], ["o", "Read original or full preference at its focus"], ["/", "Search at Preferences focus"]);
     if (options.preferences) hints.push(["p", inline ? "Manage / more; Alt+Enter brings back child changes" : "Preferences"]);
     if (row) {

@@ -17,7 +17,10 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const harness = await makeHarness({ useDefaultShortcuts: true, configureModel: false });
     await shortcut(harness, "ctrl+\\")(harness.context);
     expect(harness.customCalls()).toBe(1);
-    expect(harness.panelLines().join("\n")).toContain("m Model");
+    const frame = harness.panelLines().join("\n");
+    expect(frame).toContain("Run: No model");
+    expect(frame).toContain("n New");
+    expect(frame).not.toContain("m Model");
     expect(harness.complete).not.toHaveBeenCalled();
   });
 
