@@ -1,7 +1,7 @@
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
-import { getAgentDir, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { RefineConfig } from "../config.js";
-import { PreferenceStore } from "../preference-store.js";
+import type { PreferenceStore } from "../preference-store.js";
 import type { RefineController } from "../controller.js";
 import type { CandidateToken, RefineRequestInput, TriggerResult } from "../request-types.js";
 import type { HistoryStorageStatus } from "../history-store.js";
@@ -29,6 +29,7 @@ interface WorkspaceActionsDependencies {
   registeredModels(ctx: ExtensionContext): ReturnType<ExtensionContext["modelRegistry"]["getAvailable"]>;
   rememberThinking(model: RefineRequestInput["model"], level: NonNullable<RefineRequestInput["thinkingLevel"]>): boolean;
   notify: Notify;
+  preferenceRepository(ctx: ExtensionContext): PreferenceStore;
 }
 interface WorkspaceMount {
   ctx: ExtensionContext;
@@ -43,13 +44,10 @@ interface WorkspaceMount {
 
 export function createWorkspaceActions({ controller, config, setCompletionContext, persistConfig,
   historyStorage, optimizationError, draftInput, triggerOptimize, reviseCandidate,
-  registeredModels, rememberThinking, notify }: WorkspaceActionsDependencies) {
+  registeredModels, rememberThinking, notify, preferenceRepository }: WorkspaceActionsDependencies) {
   // Runtime-only drafts survive overlay mounts, but never enter history persistence.
   const inputDrafts = new Map<string, string>();
   const revisionDrafts = new Map<string, RevisionDraft>();
-  function preferenceRepository(ctx: ExtensionContext): PreferenceStore {
-    return new PreferenceStore(getAgentDir(), ctx.cwd);
-  }
   return ({ ctx, sessionId, isClosed, isUsage, position, usagePosition,
     openModelPicker, finish }: WorkspaceMount): WorkspaceOptions => {
     const runRecord = (id: number, retry = false) => {

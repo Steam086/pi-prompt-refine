@@ -6,7 +6,7 @@ import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
 import { renderPreferenceRow } from "./preference-row.js";
-import { composeRevision, preferenceContentKey, preferenceKey, preferenceValidation, searchPreferences, selectPreference, PREFERENCE_SELECTION_LIMIT,
+import { composeRevision, preferenceContentKey, preferenceKey, preferenceSelectionLabel, preferenceValidation, searchPreferences, selectPreference, PREFERENCE_SELECTION_LIMIT,
   type PreferenceLibrary, type PreferenceMetadata, type PreferenceRepository, type PreferenceScope, type PreferenceValue, type RevisionPreference, type SelectedPreference } from "./revision-preferences.js";
 
 type Form = {
@@ -102,8 +102,13 @@ export class PreferencePanel {
     if (this.entriesCache?.query === query && this.entriesCache.version === this.contentVersion) return this.entriesCache.entries;
     // Keep deleted sources visible until their snapshots are explicitly deselected.
     const keys = new Set(this.library.entries.map(preferenceKey));
+    const missingDefaults: RevisionPreference[] = (this.library.projectDefaults ?? []).filter((key) => !keys.has(key) &&
+      !this.working.some((entry) => preferenceKey(entry) === key)).map((key) => {
+        const [scope, id] = key.split(":") as [PreferenceScope, string];
+        return { scope, id, version: 1, name: `Unavailable default · ${id}`, body: "" };
+      });
     const candidates = this.selectedOnly ? this.working
-      : [...this.library.entries, ...this.working.filter((entry) => !keys.has(preferenceKey(entry)))];
+      : [...this.library.entries, ...this.working.filter((entry) => !keys.has(preferenceKey(entry))), ...missingDefaults];
     const matches = searchPreferences(candidates, query);
     // Selected snapshots are audited in composeRevision order, never search rank.
     const matchedKeys = new Set(matches.map(preferenceKey));
@@ -172,6 +177,7 @@ export class PreferencePanel {
     if (!entry) return;
     const index = this.working.findIndex((item) => preferenceKey(item) === preferenceKey(entry));
     if (index >= 0) this.working.splice(index, 1);
+    else if (!this.source(entry) || this.library.errors[entry.scope]) this.setNotice("Library entry unavailable or deleted; no selection applied.", "warning");
     else if (this.working.some((item) => preferenceContentKey(item) === preferenceContentKey(entry))) {
       this.setNotice("Same requirements already selected. Use Selected only (s) to inspect or remove them.", "warning");
     }
@@ -180,6 +186,29 @@ export class PreferencePanel {
     this.contentVersion++;
     this.requirementsChars = composeRevision(this.working, this.freeText).length;
     this.index = Math.min(this.index, Math.max(0, this.entries().length - 1));
+  }
+  private clearSelection(): void {
+    if (this.purpose === "manage") return;
+    this.working.splice(0);
+    this.requirementsChars = composeRevision([], this.freeText).length;
+    this.contentVersion++;
+    this.index = Math.min(this.index, Math.max(0, this.entries().length - 1));
+    this.setNotice("Selection cleared; project defaults unchanged.");
+  }
+  private async toggleProjectDefault(): Promise<void> {
+    const entry = this.highlighted();
+    if (!entry || !this.repository.setProjectDefault) return;
+    const enabled = !this.library.projectDefaults?.includes(preferenceKey(entry));
+    this.busy = true; this.redraw();
+    try {
+      const library = await this.repository.setProjectDefault(entry, enabled);
+      if (this.disposed) return;
+      this.library = library;
+      this.contentVersion++;
+      this.setNotice(`Project default ${enabled ? "enabled" : "disabled"}; current selection unchanged.`);
+    } catch (error) {
+      if (!this.disposed) this.setNotice(`Project default not saved: ${this.error(error)}`, "error");
+    } finally { this.busy = false; this.redraw(); }
   }
   private source(entry: RevisionPreference): RevisionPreference | undefined {
     return this.library.entries.find((item) => preferenceKey(item) === preferenceKey(entry));
@@ -197,9 +226,11 @@ export class PreferencePanel {
     const details = (value: RevisionPreference, state: PreferenceDocument): PreferenceDocument => [
       { text: value.name, color: "text", heading: true },
       ...(!compact ? [{ text: `${value.scope} · ${value.id}`, color: "muted" as const }] : []),
+      ...(this.repository.setProjectDefault ? [{ text: `Project default: ${this.library.projectDefaults?.includes(preferenceKey(value)) ? "On" : "Off"} · future drafts`, color: "muted" as const }] : []),
       ...state,
       ...(value.metadata ? [
-        { text: `${value.metadata.kind === "rewrite" ? "Prompt rewriting" : "Task requirements"}${compact ? "" : " · manual"}`, color: "muted" as const },
+        { text: `${value.metadata.kind === "rewrite" ? "Prompt rewriting" : "Task requirements"}${compact ? ""
+          : "selectionSource" in value && value.selectionSource === "project-default" ? " · project default" : " · manual"}`, color: "muted" as const },
         { text: value.metadata.description, color: "muted" as const },
       ] : []),
       { text: "", color: "text" }, { text: value.body, color: "text" },
@@ -209,7 +240,7 @@ export class PreferencePanel {
     if (this.selectedOnly && local && this.page.kind !== "delete") {
       document = [{ text: "Selected snapshot", color: "text", heading: true }, ...details(local, [
         { text: status, color: unavailable || !source || changed ? "warning" : "muted" },
-        ...(!compact ? [{ text: "Manually selected", color: "muted" as const }] : []),
+        ...(!compact ? [{ text: preferenceSelectionLabel(local), color: "muted" as const }] : []),
       ])];
       if (source && !unavailable && (changed || source.body !== local.body)) document.push(
         { text: "", color: "text" }, { text: "Current library entry", color: "text", heading: true }, ...details(source, []));
@@ -218,10 +249,11 @@ export class PreferencePanel {
         color: unavailable || !source ? "warning" : "muted" }]);
       if (local) document.push({ text: "", color: "text" }, { text: "Selected snapshot", color: "text", heading: true },
         { text: status, color: unavailable || !source || changed ? "warning" : "muted" },
+        ...(!local.metadata && !compact ? [{ text: preferenceSelectionLabel(local), color: "muted" as const }] : []),
         ...(local.metadata ? compact ? [
           { text: local.metadata.kind === "rewrite" ? "Prompt rewriting" : "Task requirements", color: "muted" as const },
           { text: local.metadata.description, color: "muted" as const },
-        ] : [{ text: `${local.metadata.kind} · Manually selected · ${local.metadata.description}`, color: "muted" as const }] : []),
+        ] : [{ text: `${local.metadata.kind} · ${preferenceSelectionLabel(local)} · ${local.metadata.description}`, color: "muted" as const }] : []),
         { text: local.body, color: "text" });
     }
     this.descriptionCache = { entry, version: this.contentVersion, compact, document };
@@ -384,6 +416,8 @@ export class PreferencePanel {
       if (enter || key === "down") this.focus = 1;
       else { this.search.handleInput(data); this.index = 0; this.top = 0; this.navigationDirection = 1; }
     } else if (key === "s") this.toggleView();
+    else if (key === "c") this.clearSelection();
+    else if (key === "g" && this.focus === 1) void this.toggleProjectDefault();
     else if (key === "/") this.focus = 0;
     else if (ACTIONS.some((action) => action.key === key)) {
       this.actionIndex = ACTIONS.findIndex((action) => action.key === key);
@@ -423,9 +457,12 @@ export class PreferencePanel {
     let subtitleColor: DocumentPart["color"] = "muted";
     let body: string[] = [];
     let hints: KeyHint[][] = [[...(!managing ? [["Alt+Enter", "Bring back"] as KeyHint] : []),
+      ...(this.focus === 1 && !managing ? [["Space", this.selectedOnly ? "Deselect" : "Select"] as KeyHint] : []),
+      ...(this.focus === 1 && this.repository.setProjectDefault ? [["g", "Project default"] as KeyHint] : []),
+      ...(this.focus !== 0 && !managing ? [["c", "Clear all"] as KeyHint] : []),
       ...(this.focus !== 0 ? [["s", this.selectedOnly ? "All" : w < 60 ? "Selected" : "Selected only"] as KeyHint] : []),
       ["Enter", this.focus === 0 ? "Browse" : this.focus === 1 ? "Read" : "Choose"],
-      ...(this.focus === 1 && !managing ? [["Space", this.selectedOnly ? "Deselect" : "Select"] as KeyHint] : this.focus === 2 ? [["←→", "Choose action"] as KeyHint] : [])],
+      ...(this.focus === 2 ? [["←→", "Choose action"] as KeyHint] : [])],
       [["Esc", managing ? "Back" : "Cancel selection"], ["Tab / Shift+Tab", "Focus"], ...(this.focus !== 0 ? [["/", "Search"] as KeyHint] : [])]];
     const page = this.page;
     if (page.kind === "read") {
@@ -509,7 +546,8 @@ export class PreferencePanel {
         const warning = unavailable ? "unavailable" : !source ? "deleted" : changed ? "snapshot kept" : "";
         const cursor = active ? "›" : current ? "·" : " ";
         return renderPreferenceRow({ width: leftWidth, name: entry.name, scope: entry.scope,
-          selected: !!local, focused: active, cursor, warning }, this.theme);
+          selected: !!local, focused: active, cursor, warning,
+          projectDefault: this.library.projectDefaults?.includes(preferenceKey(entry)) }, this.theme);
       });
       if (!entries.length) list.push(...wrap(status, leftWidth).map((line) => this.theme.fg(errors.length ? "error" : "muted", line)));
       if (!room) {

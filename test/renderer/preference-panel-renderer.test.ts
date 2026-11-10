@@ -9,6 +9,46 @@ import { createRecordingTerminal } from "../support/recording-terminal.js";
 
 // Captured renderer I/O is not human visual or IME validation.
 describe.each(["regular", "fullscreen"] as const)("preference selection terminal rendering (%s)", (mode) => {
+  it.each(["dark", "light"])("keeps project toggles separate from request selection through resize and focus (%s)", async (themeName) => {
+    vi.useFakeTimers();
+    const { terminal, writes, input } = createRecordingTerminal({ rows: 40, columns: 100 });
+    const tui = mode === "regular" ? new TuiMainScreen(terminal) : new TuiAltScreen(terminal);
+    const theme = getThemeByName(themeName)!;
+    const entry: RevisionPreference = { id: "default", scope: "global", version: 1,
+      name: "Default 中文😀\x1b]52;c;unsafe\x07", body: "Keep literal task requirements.\n".repeat(40) };
+    let enabled = false;
+    const library = () => ({ entries: [entry], errors: {}, projectDefaults: enabled ? ["global:default"] : [] });
+    const setProjectDefault = vi.fn(async (_entry, value) => { enabled = value; return library(); });
+    const close = vi.fn();
+    const panel = new PreferencePanel(tui, theme, getKeybindings(), {
+      load: async () => library(), setProjectDefault, save: vi.fn(), remove: vi.fn(),
+    }, [selectPreference(entry)], "", 16000, close);
+    const settle = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); };
+    const render = () => {
+      tui.renderNow();
+      const lines = panel.render(terminal.columns);
+      expect(lines).toHaveLength(panelLayout(terminal.columns, terminal.rows).height);
+      expect(lines.every((line) => visibleWidth(line) <= terminal.columns)).toBe(true);
+      expect(lines.join("\n")).not.toContain("\x1b]52;c;unsafe");
+      return stripVTControlCharacters(lines.join("\n"));
+    };
+    try {
+      tui.addChild(panel); tui.setFocus(panel); tui.start(); await settle(); render();
+      input("g"); await settle(); expect(render()).toContain("Project default enabled");
+      expect(panel.render(100).join("\n")).toContain(theme.fg("muted", "* "));
+      input(" "); expect(render()).toContain("[ ] * Default");
+      input("\r"); input("\x1b[6~"); render(); input("\x1b[5~"); input("\x1b");
+      for (const [columns, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [100, 40]]) {
+        Object.assign(terminal, { columns, rows }); panel.invalidate(); render();
+        input("\t"); render(); input("\x1b[Z"); render();
+      }
+      input(" "); input("c"); input("\x1b[13;3u");
+      expect(close).toHaveBeenCalledWith([]); expect(enabled).toBe(true);
+      expect(setProjectDefault).toHaveBeenCalledTimes(1);
+      expect(writes.join("")).not.toContain("\x1b]52;c;unsafe");
+    } finally { panel.dispose(); tui.stop(); vi.useRealTimers(); }
+  });
+
   it.each(["dark", "light"])("keeps external Edit names inert through failed saves, focus, resize and confirmation (%s)", async (themeName) => {
     vi.useFakeTimers();
     const { terminal, writes, input } = createRecordingTerminal({ rows: 40, columns: 100 });

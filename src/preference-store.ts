@@ -2,7 +2,8 @@ import { constants } from "node:fs";
 import { mkdir, open, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
-import { metadataValidation, preferenceValidation, type PreferenceLibrary, type PreferenceMetadata, type PreferenceRepository, type PreferenceScope, type PreferenceValue, type RevisionPreference } from "./revision-preferences.js";
+import { metadataValidation, preferenceValidation, preferenceKey, selectPreference, uniquePreferences, type SelectedPreference, type PreferenceLibrary, type PreferenceMetadata, type PreferenceRepository, type PreferenceScope, type PreferenceValue, type RevisionPreference } from "./revision-preferences.js";
+import { ProjectPreferenceDefaults } from "./project-preference-defaults.js";
 
 export const PREFERENCE_MAX_BYTES = 1024 * 1024;
 export const PREFERENCE_MAX_ENTRIES = 500;
@@ -34,6 +35,7 @@ function decode(content: string, scope: PreferenceScope): RevisionPreference[] {
 /** Libraries are independent of sessions. All cooperating writers lock and re-read. */
 export class PreferenceStore implements PreferenceRepository {
   private projectRoot?: Promise<string>;
+  private defaultPreferences: SelectedPreference[] = [];
   constructor(private readonly agentDir: string, private readonly cwd: string) {}
 
   private async path(scope: PreferenceScope): Promise<string> {
@@ -66,7 +68,33 @@ export class PreferenceStore implements PreferenceRepository {
       try { result.entries.push(...await this.read(await this.path(scope), scope)); }
       catch (error) { result.errors[scope] = `${scope}: ${message(error)}`; }
     }
+    try {
+      const keys = await new ProjectPreferenceDefaults(this.cwd).load();
+      if (keys.length) result.projectDefaults = keys;
+      const missing = keys.filter((key) => !result.entries.some((entry) => preferenceKey(entry) === key));
+      if (missing.length) result.errors.defaults = `${missing.length} project default(s) unavailable or deleted; skipped. Disable unavailable defaults with g in Preferences.`;
+      this.defaultPreferences = uniquePreferences(keys.flatMap((key) => {
+        const entry = result.entries.find((item) => preferenceKey(item) === key);
+        return entry ? [{ ...selectPreference(entry), selectionSource: "project-default" as const }] : [];
+      }));
+    } catch (error) {
+      result.errors.defaults = `Project defaults: ${message(error)}`;
+      this.defaultPreferences = [];
+    }
     return result;
+  }
+
+  /** Loaded on session start and library refresh; callers receive detached snapshots. */
+  getDefaultPreferences(): SelectedPreference[] { return structuredClone(this.defaultPreferences); }
+
+  async setProjectDefault(entry: RevisionPreference, enabled: boolean): Promise<PreferenceLibrary> {
+    const key = preferenceKey(entry);
+    if (enabled) {
+      const library = await this.load();
+      if (!library.entries.some((source) => preferenceKey(source) === key)) throw new Error("Library entry unavailable or deleted; default not enabled.");
+    }
+    await new ProjectPreferenceDefaults(this.cwd).set(key, enabled);
+    return this.load();
   }
 
   private async mutate<T>(scope: PreferenceScope, change: (entries: RevisionPreference[]) => T): Promise<T> {

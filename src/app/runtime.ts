@@ -30,6 +30,12 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
   const backgroundStatus = new BackgroundStatus();
   const taskPositions = new Map<string, TaskPanelPosition>();
   const usagePositions = new Map<string, TaskPanelPosition>();
+  const preferenceStores = new Map<string, PreferenceStore>();
+  const preferenceRepository = (ctx: ExtensionContext) => {
+    let store = preferenceStores.get(ctx.cwd);
+    if (!store) { store = new PreferenceStore(getAgentDir(), ctx.cwd); preferenceStores.set(ctx.cwd, store); }
+    return store;
+  };
   const openHint = config.shortcuts.view ?? config.shortcuts.optimize ?? "/refine view";
   const setCompletionContext = (ctx: ExtensionContext) => { completionContext = ctx; };
   const presentation = () => updatePresentation(controller.getState());
@@ -59,7 +65,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     clearCompletionContext: () => { completionContext = undefined; },
     closePreview: () => host.close(), refreshPreview: () => host.refresh(),
     clearContextJobs: contextJobs.clear,
-    preferenceRepository: (ctx) => new PreferenceStore(getAgentDir(), ctx.cwd),
+    preferenceRepository,
     getSessionName: () => pi.getSessionName(), setSessionName: (name) => pi.setSessionName(name), notify,
   });
   const models = createModelSelection({
@@ -71,6 +77,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     controller, config, useContext, setCompletionContext,
     canNameSession: lifecycle.canNameSession, modelSwitchBlocked: models.modelSwitchBlocked,
     showPreview: (ctx) => host.showPreview(ctx), updatePresentation: presentation, notify, notifyCurrent,
+    defaultPreferences: (ctx) => preferenceRepository(ctx).getDefaultPreferences(),
   });
   const editor = createEditorActions({
     controller, config, useContext, sendUserMessage: (...args) => pi.sendUserMessage(...args), notify, notifyIfSameSession,
@@ -79,7 +86,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     controller, config, setCompletionContext, persistConfig, historyStorage: lifecycle.historyStorage,
     optimizationError: requests.optimizationError, draftInput: requests.draftInput,
     triggerOptimize: requests.triggerOptimize, reviseCandidate: requests.reviseCandidate,
-    registeredModels: models.registeredModels, rememberThinking: models.rememberThinking, notify,
+    registeredModels: models.registeredModels, rememberThinking: models.rememberThinking, notify, preferenceRepository,
   });
   const host = createWorkspaceHost({
     controller, config, openHint, taskPositions, usagePositions, useContext,
