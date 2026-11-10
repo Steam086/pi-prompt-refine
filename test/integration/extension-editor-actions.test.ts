@@ -131,7 +131,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.panelLines().join("\n")).toContain("Unsent");
     expect(harness.panelLines(100).join("\n")).toContain("› ○ Unsent · Draft B");
     harness.panelInput("\r"); // Explicitly start B and automatically follow its model child.
-    expect(harness.panelLines(100).join("\n")).toMatch(/›\s+└ fake-chat/);
+    expect(harness.panelLines(100).join("\n")).toMatch(/›\s+└─ fake-chat/);
     const request = (harness.complete.mock.calls[1] as any[])[1];
     expect(JSON.parse(request.messages[0].content[0].text).draft).toBe("Draft B");
     if (phase === "generating") {

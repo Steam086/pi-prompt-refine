@@ -59,6 +59,72 @@ describe("prompt tree and inspection", () => {
     expect(f.actions.activate).not.toHaveBeenCalled();
   });
 
+  it.each(["dark", "light"])("connects spacious roots and siblings but leaves separate prompts and Unsent leaves unjoined (%s)", (name) => {
+    const records = [record(1), record(2), { ...record(3, 2), archivedAt: 1 }, record(4, 3)];
+    records[0]!.input.draft = "Original 中文😀\x1b[2J";
+    records[3]!.status = "unsent"; records[3]!.candidate = undefined;
+    const f = create(name, true, records);
+    f.size.rows = 60; f.position.selectedTaskId = 1;
+    vi.spyOn(f.theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
+    const panel = new TaskPanel(f.actions, f.theme, () => f.size.rows, getKeybindings(), true, f.position,
+      (width) => workspaceLayout(width, f.size.rows));
+    const frame = panel.render(160);
+    const cells = frame.filter((line) => line.includes(f.theme.fg("muted", " │ ")))
+      .map((line) => line.split(f.theme.fg("muted", " │ "))[0]!);
+    const plain = cells.map((line) => stripVTControlCharacters(line).slice(workspaceLayout(160, f.size.rows).inset).trimEnd());
+    const root = plain.findIndex((line) => line.includes("› ▾ Original prompt"));
+    expect(root).toBeGreaterThanOrEqual(0);
+    expect(plain.slice(root + 1, root + 3)).toEqual([`  │ ${sanitizeTerminalText(records[0]!.input.draft)}`, "  │"]);
+    expect(plain[root + 3]).toContain("  ├─ model-2");
+    expect(plain.slice(root + 4, root + 6)).toEqual(["  │  Run #2 · openai-codex · 23s", "  │"]);
+    expect(plain[root + 6]).toContain("  └─ model-1");
+    expect(plain.slice(root + 7, root + 9)).toEqual(["     Run #1 · openai-codex · 23s", ""]);
+    expect(plain[root + 9]).toContain("Earlier · Original prompt");
+    expect(plain[root + 11]).toBe("  │");
+    const unsent = plain.findIndex((line) => line.includes("○ Unsent"));
+    expect(plain.slice(unsent, unsent + 3).join("\n")).not.toMatch(/[│├└]/);
+    expect(cells[root + 1]).toContain(f.theme.fg("muted", "  │"));
+    expect(cells[root + 1]).toContain(f.theme.bg("selectedBg", "probe").split("probe")[0]);
+    expect(cells[root + 3]).toContain(f.theme.fg("muted", "├─ "));
+    expect(frame.join("\n")).not.toContain("\x1b[2J");
+    expect(frame.every((line) => visibleWidth(line) <= 160)).toBe(true);
+    expect(f.position.selectedTaskId).toBe(1);
+    expect(f.actions.run).not.toHaveBeenCalled();
+    expect(f.actions.activate).not.toHaveBeenCalled();
+  });
+
+  it.each(["dark", "light"])("keeps offscreen-parent guides aligned through scrolling and compact resize (%s)", (name) => {
+    const f = create(name, true, Array.from({ length: 36 }, (_, index) => record(index + 1)));
+    f.position.selectedId = 13;
+    const panel = new TaskPanel(f.actions, f.theme, () => f.size.rows, getKeybindings(), true, f.position,
+      (width) => workspaceLayout(width, f.size.rows));
+    for (const [width, height, spacious] of [[160, 60, true], [100, 40, false], [45, 14, false], [160, 14, false], [160, 40, true]] as const) {
+      f.size.rows = height;
+      const frame = panel.render(width);
+      const plain = frame.map(stripVTControlCharacters);
+      const activeAt = plain.findIndex((line) => line.includes("› ├─ model-13"));
+      expect(activeAt).toBeGreaterThanOrEqual(0);
+      if (spacious) {
+        const left = frame.filter((line) => line.includes(f.theme.fg("muted", " │ ")))
+          .map((line) => stripVTControlCharacters(line.split(f.theme.fg("muted", " │ "))[0]!));
+        expect(left.join("\n")).not.toContain("Original prompt");
+        expect(plain[activeAt + 1]).toContain("  │  Run #13");
+        expect(plain[activeAt + 2]!.trimStart()).toMatch(/^│\s+│/);
+        expect(frame[activeAt]).toContain(f.theme.fg("muted", "├─ "));
+      } else expect(plain.join("\n")).not.toContain("Run #13");
+      expect(f.position.selectedId).toBe(13);
+      expect(frame).toHaveLength(workspaceLayout(width, height).height);
+      expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
+      expect(panel.render(width)).toEqual(frame);
+    }
+    panel.handleInput("\x1b[B");
+    expect(f.position.selectedId).toBe(12);
+    panel.handleInput("\x1b[A");
+    expect(f.position.selectedId).toBe(13);
+    expect(f.actions.run).not.toHaveBeenCalled();
+    expect(f.actions.activate).not.toHaveBeenCalled();
+  });
+
   it.each(["dark", "light"])("keeps model identities neutral and archived statuses semantic (%s)", (name) => {
     const records = [record(1), record(2), record(3), record(4)];
     records[1]!.status = "error"; records[1]!.error = "timeout";
@@ -71,8 +137,9 @@ describe("prompt tree and inspection", () => {
     for (const record of records) {
       const row = lines.find((line) => /[├└]/.test(stripVTControlCharacters(line)) && stripVTControlCharacters(line).includes(record.input.model.id))!;
       expect(row).toBeDefined();
-      expect(fg.mock.calls.some(([color, value]) => color === "text" && value.includes(record.input.model.id) && /[├└]/.test(value))).toBe(true);
-      expect(fg.mock.calls.some(([color, value]) => color !== "text" && value.includes(record.input.model.id) && /[├└]/.test(value))).toBe(false);
+      expect(fg.mock.calls.some(([color, value]) => color === "text" && value.includes(record.input.model.id))).toBe(true);
+      expect(fg.mock.calls.some(([color, value]) => color !== "text" && value.includes(record.input.model.id))).toBe(false);
+      expect(row).toContain(theme.fg("muted", record.id === 1 ? "└─ " : "├─ "));
     }
     for (const [color, badge] of [["success", "✓ Done"], ["error", "! Timed out"], ["accent", "◌ Running"], ["warning", "× Cancelled"]] as const) {
       expect(lines.join("\n")).toContain(theme.fg(color, badge));
@@ -127,7 +194,7 @@ describe("prompt tree and inspection", () => {
         expect(lines.length).toBeLessThanOrEqual(rows!);
         for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width!);
         const selected = lines.find((line) => stripVTControlCharacters(line).includes("›"))!;
-        expect(stripVTControlCharacters(selected)).toContain("└ model-2");
+        expect(stripVTControlCharacters(selected)).toContain("└─ model-2");
         const selectionStyle = f.theme.bg("selectedBg", "probe").split("probe")[0]!;
         expect(selectionStyle).toMatch(/\x1b\[/);
         expect(selected).toContain(selectionStyle);
@@ -389,7 +456,7 @@ describe("prompt tree and inspection", () => {
     records[0]!.status = "generating";
     records[0]!.candidate = undefined;
     const output = text(80);
-    const child = output.split("\n").find((line) => line.includes("› └"))!;
+    const child = output.split("\n").find((line) => line.includes("› └─"))!;
     expect(child.split(" │ ")[0]).toContain("Running");
     expect(output).not.toContain("�");
     expect(output).not.toContain("[0m");
