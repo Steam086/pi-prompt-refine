@@ -94,7 +94,7 @@
 复测命令（默认测试跳过该测量，显式启用时运行）：
 
 ```bash
-REFINE_BENCHMARK=1 REFINE_BENCHMARK_OUTPUT=/tmp/refine-settings-performance.json npm test -- test/settings-performance.test.ts
+REFINE_BENCHMARK=1 REFINE_BENCHMARK_OUTPUT=/tmp/refine-settings-performance.json npm test -- test/benchmarks/settings-performance.test.ts
 cat /tmp/refine-settings-performance.json
 ```
 

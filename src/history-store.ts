@@ -3,7 +3,7 @@ import { lstat, mkdir, open, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { RefineRecord } from "./history.js";
-import type { RefineRequestInput } from "./controller.js";
+import type { RefineRequestInput } from "./request-types.js";
 import { selectHistory } from "./context.js";
 import { readRunUsage, type TokenUsage } from "./usage.js";
 

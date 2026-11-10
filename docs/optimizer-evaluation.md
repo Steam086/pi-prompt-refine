@@ -36,11 +36,11 @@ printf '%s\n' '--- END CURRENT DRAFT ---'
 
 ### 保守策略的显式编辑防退化检查
 
-`test/refine-policy.live.test.ts` 默认跳过，仅在显式开启时通过本地 Pi 凭据调用模型。六项合成样例检查清楚请求原样返回、条件式结构偏好不强制改写、翻译 prompt 不改变回答语言、明确修改引用字面量、整合兼容的任务要求，以及 Revise 的明确格式修改。它们不执行原任务，也不是 IFEval 下游分数；应结合保存的输出审查，不能据此宣称普遍保真。
+`test/live/refine-policy.live.test.ts` 默认跳过，仅在显式开启时通过本地 Pi 凭据调用模型。六项合成样例检查清楚请求原样返回、条件式结构偏好不强制改写、翻译 prompt 不改变回答语言、明确修改引用字面量、整合兼容的任务要求，以及 Revise 的明确格式修改。它们不执行原任务，也不是 IFEval 下游分数；应结合保存的输出审查，不能据此宣称普遍保真。
 
 ```sh
 REFINE_POLICY_LIVE=1 REFINE_POLICY_OUTPUT=/tmp/refine-policy.jsonl \
-  npm test -- test/refine-policy.live.test.ts
+  npm test -- test/live/refine-policy.live.test.ts
 ```
 
 默认模型为 `openai-codex/gpt-6-luna`、thinking `high`；可用 `REFINE_POLICY_PROVIDER` 和 `REFINE_POLICY_MODEL` 指定本地已配置模型。输出追加到指定 JSONL，不重试失败断言；复测时使用新文件，避免混淆独立实验。

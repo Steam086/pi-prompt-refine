@@ -25,4 +25,4 @@
 
 ## 复跑
 
-- live 用例默认跳过：`LUNA_REFERENCE_LIVE=1 LUNA_REFERENCE_OUTPUT=/tmp/luna-reference.jsonl npm test -- test/reference-preservation.live.test.ts`；`LUNA_REFERENCE_REPEATS=2` 可重复。输出文件包含完整样例文本，请在受控位置保存；普通 `npm test` 不调用 Provider。不要把偶发服务过载当成模板行为。
+- live 用例默认跳过：`LUNA_REFERENCE_LIVE=1 LUNA_REFERENCE_OUTPUT=/tmp/luna-reference.jsonl npm test -- test/live/reference-preservation.live.test.ts`；`LUNA_REFERENCE_REPEATS=2` 可重复。输出文件包含完整样例文本，请在受控位置保存；普通 `npm test` 不调用 Provider。不要把偶发服务过载当成模板行为。
