@@ -4,12 +4,71 @@ import { describe, expect, it, vi } from "vitest";
 import { selectHistory } from "../../src/context.js";
 import type { RefineRecord } from "../../src/history.js";
 import { PreviewPanel } from "../../src/preview.js";
+import { sanitizeTerminalText } from "../../src/presentation.js";
 import { workspaceHeight } from "../../src/workspace-overlay.js";
 import { RefineWorkspace } from "../../src/workspace.js";
 import { getThemeByName } from "../support/pi-theme.js";
 import { createRecordingTerminal } from "../support/recording-terminal.js";
 
 describe.each(["regular", "fullscreen"] as const)("current-round Preview (%s)", (mode) => {
+  it.each(["dark", "light"])("keeps empty Preview chrome concise through history navigation and resize (%s)", (themeName) => {
+    vi.useFakeTimers();
+    const { terminal, writes, input } = createRecordingTerminal({ rows: 40, columns: 120 });
+    const tui = mode === "regular" ? new TuiMainScreen(terminal) : new TuiAltScreen(terminal);
+    const theme = getThemeByName(themeName)!;
+    const request = { draft: "Earlier 中文😀\x1b[2J", sessionId: "s", branchLeafId: null, roundId: 1,
+      model: { provider: "p", id: "model" }, systemPrompt: "Policy", history: selectHistory([], 0, 0) };
+    const source: RefineRecord = { id: 1, taskId: 1, kind: "refine", status: "generated", createdAt: 1, archivedAt: 1, input: request,
+      candidate: { ...request, requestId: 1, recordId: 1, generation: 0, version: 1, text: "Earlier result 中文😀" } };
+    const run = vi.fn();
+    const panel = new PreviewPanel({ state: { phase: "ready", requestId: 1, pendingSend: false },
+      contextLabel: "Draft only", elapsedSeconds: 0, openHint: "ctrl+\\", canRestore: false }, theme, () => terminal.rows, () => tui.requestRender());
+    const workspace = new RefineWorkspace(panel, tui, theme, getKeybindings(), {
+      tasks: { records: () => [source], appliedId: () => undefined, activate: () => false, run, stop() {},
+        launchModel: () => "provider/模型😀\x1b[2J" },
+      history: () => [source], context: () => ({ instructions: "always", tree: false, skills: false }), contextEnabled: () => true,
+      saveContext: async () => ({ message: "Saved", persisted: true }), submit: () => undefined,
+    });
+    tui.addChild(workspace); tui.setFocus(workspace);
+    const render = () => {
+      tui.requestRender(); tui.renderNow();
+      const frame = workspace.render(terminal.columns);
+      expect(frame).toHaveLength(workspaceHeight(terminal.rows));
+      expect(frame.every((line) => visibleWidth(line) <= terminal.columns)).toBe(true);
+      expect(frame.join("\n")).not.toContain("\x1b[2J");
+      return frame;
+    };
+    try {
+      tui.start();
+      for (const [columns, rows] of [[120, 40], [40, 24], [20, 12], [120, 40]] as const) {
+        Object.assign(terminal, { columns, rows }); workspace.invalidate();
+        const frame = render();
+        const text = stripVTControlCharacters(frame.join("\n"));
+        expect(text.replace(/│/g, "").replace(/\s+/g, " ")).toContain("No current prompts.");
+        for (const unavailable of ["0 prompts", "0 runs", "Inspect", "Edit original", "Tab Read", "↑↓ select", "Earlier result"]) {
+          expect(text).not.toContain(unavailable);
+        }
+        expect(text).toContain("Usage");
+        expect(text).toContain("n New");
+        expect(text).toContain("Esc Back");
+        if (columns === 120) {
+          expect(frame.join("\n")).toContain(theme.fg("muted", "History → Usage · 1 earlier prompt"));
+          expect(frame.join("\n")).toContain(theme.fg("muted", `Run: ${sanitizeTerminalText("provider/模型😀\x1b[2J")}`));
+          const empty = frame.find((line) => line.includes("No current prompts."))!;
+          expect(stripVTControlCharacters(empty).match(/│/g)).toHaveLength(2); // Outer shell only, no empty tree split.
+        }
+        input("\t"); input("\r"); render();
+        expect(run).not.toHaveBeenCalled();
+        input("\x1b[C"); expect(stripVTControlCharacters(render().join("\n"))).toContain("Usage");
+        input("\x1b[D"); expect(stripVTControlCharacters(render().join("\n")).replace(/│/g, "").replace(/\s+/g, " ")).toContain("No current prompts.");
+      }
+      const settled = tui.fullRedraws;
+      writes.length = 0;
+      input("\x1b[C"); render(); input("\x1b[D"); render();
+      expect(tui.fullRedraws).toBe(settled);
+      expect(writes.join("")).not.toMatch(/\x1b\[(?:2J|3J)/);
+    } finally { workspace.dispose(); tui.stop(); vi.useRealTimers(); }
+  });
   it.each(["dark", "light"])("keeps an archived view stable and history reachable through resize (%s)", (themeName) => {
     vi.useFakeTimers();
     const { terminal, writes, input } = createRecordingTerminal({ rows: 40, columns: 100 });

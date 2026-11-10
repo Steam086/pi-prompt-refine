@@ -145,6 +145,45 @@ describe("history storage details", () => {
 });
 
 describe("top action hints", () => {
+  it.each(["dark", "light"])("keeps empty pages full-width and advertises only usable actions in %s", (name) => {
+    for (const usage of [false, true]) for (const archived of [false, true]) {
+      if (usage && archived) continue;
+      const f = create(name, usage, archived ? [{ ...record(), archivedAt: 1 }] : []);
+      f.actions.launchModel = () => "provider/模型😀\x1b[2J";
+      for (const [width, rows] of [[120, 40], [40, 24], [20, 12], [40, 8], [120, 40]] as const) {
+        f.size.rows = rows;
+        for (const key of ["\t", "\x1b[B", "\x1b[6~", "\t"]) f.panel.handleInput(key);
+        const frame = f.panel.render(width);
+        const plain = frame.map(stripVTControlCharacters);
+        const text = plain.join("\n");
+        const layout = panelLayout(width, rows);
+        const empty = frame.find((line) => line.includes(usage ? "No records" : "No current"))!;
+        expect(stripVTControlCharacters(empty).startsWith(" ".repeat(layout.inset) + "No ")).toBe(true);
+        if (width === 120) expect(empty).toContain(f.theme.fg("muted", usage ? "No records yet. Return to Preview to create a prompt." : "No current prompts."));
+        expect(text).not.toContain("│");
+        for (const unavailable of ["0 prompts", "0 runs", "↑↓ select", "↑↓ scroll", "Inspect", "i Edit", "m Model", "Tab Read"]) {
+          expect(text).not.toContain(unavailable);
+        }
+        expect(text).toContain("n New");
+        expect(text).toContain("Esc Back");
+        if (width >= 40 && rows >= 24) expect(frame.join("\n")).toContain(formatKeyHint(["p", "Preferences"], f.theme));
+        if (!usage && width === 120) expect(text).toContain("Run: provider/模型😀");
+        expect(frame.join("\n")).not.toContain("\x1b[2J");
+        expect(frame).toHaveLength(layout.height);
+        expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
+      }
+      f.panel.handleInput("?");
+      const help = f.text(120);
+      for (const unavailable of ["Focus:", "Enter Inspect", "Tab Read", "i Edit original", "m Run model"]) expect(help).not.toContain(unavailable);
+      expect(help).toContain("n New");
+      expect(help).toContain("p Preferences");
+      f.panel.handleInput("\x1b");
+      f.panel.handleInput("n");
+      expect(f.actions.editOriginal).toHaveBeenCalledExactlyOnceWith();
+      expect(f.actions.run).not.toHaveBeenCalled();
+      expect(f.actions.chooseModel).not.toHaveBeenCalled();
+    }
+  });
   it.each(["dark", "light"])("places empty Preview and Usage hints below tabs and above content in %s", (name) => {
     for (const usage of [false, true]) {
       const { panel, theme, size } = create(name, usage, []);
