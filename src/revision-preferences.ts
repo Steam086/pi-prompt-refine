@@ -20,6 +20,7 @@ export interface RevisionPreference {
 export interface SelectedPreference extends RevisionPreference {
   /** Immutable source body, for detecting edits local to this revision. */
   sourceBody: string;
+  selectionSource?: "project-default";
 }
 export interface RevisionDraft {
   freeText: string;
@@ -27,12 +28,14 @@ export interface RevisionDraft {
 }
 export interface PreferenceLibrary {
   entries: RevisionPreference[];
-  errors: Partial<Record<PreferenceScope, string>>;
+  errors: Partial<Record<PreferenceScope | "defaults", string>>;
+  projectDefaults?: string[];
 }
 export interface PreferenceRepository {
   load(): Promise<PreferenceLibrary>;
   save(scope: PreferenceScope, value: PreferenceValue, expected?: RevisionPreference): Promise<RevisionPreference>;
   remove(expected: RevisionPreference): Promise<void>;
+  setProjectDefault?(entry: RevisionPreference, enabled: boolean): Promise<PreferenceLibrary>;
 }
 export const PREFERENCE_NAME_LIMIT = 120;
 export const PREFERENCE_BODY_LIMIT = 16_000;
@@ -46,6 +49,9 @@ export function preferenceContentKey(entry: Pick<RevisionPreference, "body" | "m
 }
 export function selectPreference(entry: RevisionPreference): SelectedPreference {
   return { ...structuredClone(entry), sourceBody: entry.body };
+}
+export function preferenceSelectionLabel(entry: SelectedPreference): string {
+  return entry.selectionSource === "project-default" ? "Project default" : "Manually selected";
 }
 /** Deduplicate literal content, not names, retaining the user's selection order. */
 export function uniquePreferences(selected: readonly SelectedPreference[]): SelectedPreference[] {
@@ -63,7 +69,7 @@ export function composeRevision(selected: readonly SelectedPreference[], freeTex
   const blocks = entries.map((entry) => {
     const purpose = !entry.metadata ? "Saved editing requirements"
       : entry.metadata.kind === "rewrite" ? "Prompt rewriting instructions" : "Main-agent task requirements";
-    return `${purpose} (manually selected):\n${entry.body}`;
+    return `${purpose} (${preferenceSelectionLabel(entry).toLowerCase()}):\n${entry.body}`;
   });
   if (freeText.trim()) blocks.push(entries.length ? `Current user instructions:\n${freeText}` : freeText);
   return blocks.join("\n\n");

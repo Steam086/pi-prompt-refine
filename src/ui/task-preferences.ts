@@ -69,7 +69,7 @@ export function renderTaskPreferences(
   const primary: KeyHint[] = mode === "select" ? [back, submit]
     : mode === "search" ? [back, ["Enter", "Results"]] : [back, ["↑↓", "Scroll"]];
   const secondary: KeyHint[] = mode === "select"
-    ? [["Space", "Toggle"], ["Tab", "Back"], ["o", "Read"], ["↑↓", "Choose"], ["/", "Search"], ["p", "Manage"]] : [];
+    ? [["Space", "Toggle"], ["c", "Clear all"], ["Tab", "Back"], ["o", "Read"], ["↑↓", "Choose"], ["/", "Search"], ["p", "Manage"]] : [];
   if (expansion) secondary.push(expansion);
   const pairFits = visibleWidth(formatKeyHint(primary[0]!, theme) + " · " + formatKeyHint(primary[1]!, theme)) <= width;
   const header = [content.heading("Choose preferences"), content.muted(`Focus: Preferences${mode === "search" ? " · Search" : mode === "read" ? " · Read-only" : ""}`)];

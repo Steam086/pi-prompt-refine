@@ -98,6 +98,6 @@ test/
 | Settings 或 Revise | 对应 ui 页面，workspace 只协调 |
 | 任务树选中、归档后保留阅读 | task-panel |
 | 结果、参考、Usage 正文 | ui task-content |
-| Preferences 库与快照 | revision-preferences、preference-store、preference-panel |
+| Preferences 库、项目默认与快照 | revision-preferences、preference-store、project-preference-defaults、preference-panel |
 
 验证层次与必须保持的行为见 [测试与重构验收](testing.md)。

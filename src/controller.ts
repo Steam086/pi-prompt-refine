@@ -235,10 +235,10 @@ export class RefineController {
     this.state = { phase: "idle", requestId: this.requestSequence, pendingSend: false };
     this.emitState();
   }
-  private validate(input: RefineRequestInput): TriggerResult | undefined {
+  private validate(input: RefineRequestInput, captureOnly = false): TriggerResult | undefined {
     if (input.contextUnavailable) return { kind: "stale-source" };
     if (!input.draft.trim() || (input.revision && !input.revision.instruction.trim())) return { kind: "empty" };
-    if ((input.preferences?.length ?? 0) > PREFERENCE_SELECTION_LIMIT || input.draft.length > this.options.maxDraftChars || (input.editingInstruction?.length ?? 0) > this.options.maxDraftChars || (input.revision &&
+    if ((input.preferences?.length ?? 0) > PREFERENCE_SELECTION_LIMIT || input.draft.length > this.options.maxDraftChars || (!captureOnly && (input.editingInstruction?.length ?? 0) > this.options.maxDraftChars) || (input.revision &&
       (input.revision.instruction.length > this.options.maxDraftChars || (input.revision.previousInstruction?.length ?? 0) > this.options.maxDraftChars || input.revision.previousCandidate.length > (this.options.maxOutputChars ?? 1_000_000)))) return { kind: "too-long" };
     if (!input.model.provider || !input.model.id) return { kind: "no-model" };
     return undefined;
@@ -251,7 +251,9 @@ export class RefineController {
   }
   /** Capture is a zero-call operation and never changes the applied preview. */
   capture(input: RefineRequestInput): TriggerResult {
-    const invalid = this.validate(input);
+    // Keep inherited requirements editable even if a later limit change makes
+    // them too long to submit. Starting the request still validates the limit.
+    const invalid = this.validate(input, true);
     if (invalid) return invalid;
     this.ensureSession(input.sessionId);
     if (this.hasCapturedDraft(input.draft)) return { kind: "duplicate" };
@@ -264,7 +266,7 @@ export class RefineController {
   }
   /** Explicit creation is independent of shortcut deduplication, model selection and submission. */
   createDraft(input: RefineRequestInput): TriggerResult {
-    if ((input.preferences?.length ?? 0) > PREFERENCE_SELECTION_LIMIT || input.draft.length > this.options.maxDraftChars || (input.editingInstruction?.length ?? 0) > this.options.maxDraftChars) return { kind: "too-long" };
+    if ((input.preferences?.length ?? 0) > PREFERENCE_SELECTION_LIMIT || input.draft.length > this.options.maxDraftChars) return { kind: "too-long" };
     this.ensureSession(input.sessionId);
     if (!this.journal.canStart()) return { kind: "busy" };
     const recordId = this.journal.start(++this.taskSequence, this.freezeRound(input), undefined, "refine", "unsent");

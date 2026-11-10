@@ -152,6 +152,7 @@ export class InlinePreferences {
     else if (key === "p") return "manage";
     else if (this.keys.matches(data, "tui.input.submit")) return "submit";
     else if (key === "/") position.searching = true;
+    else if (key === "c") this.notice = target.save([]) ?? "";
     else {
       const entry = this.highlighted(target.selected, position);
       const entries = this.entries(target.selected, position);

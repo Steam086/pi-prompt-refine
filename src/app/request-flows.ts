@@ -6,6 +6,7 @@ import type { RefineController } from "../controller.js";
 import type { CandidateToken, RefineRequest, RefineRequestInput, TriggerResult } from "../request-types.js";
 import { displayModel, effectiveThinkingLevel, sameModel } from "./model-selection.js";
 import { RESTORED_CONTEXT_HINT, type Notify, type NotifyCurrent } from "./contracts.js";
+import { composeRevision, type SelectedPreference } from "../revision-preferences.js";
 
 interface RequestFlowDependencies {
   controller: Pick<RefineController,
@@ -20,10 +21,11 @@ interface RequestFlowDependencies {
   updatePresentation(): void;
   notify: Notify;
   notifyCurrent: NotifyCurrent;
+  defaultPreferences(ctx: ExtensionContext): SelectedPreference[];
 }
 
 export function createRequestFlows({ controller, config, useContext, setCompletionContext,
-  canNameSession, modelSwitchBlocked, showPreview, updatePresentation, notify, notifyCurrent }: RequestFlowDependencies) {
+  canNameSession, modelSwitchBlocked, showPreview, updatePresentation, notify, notifyCurrent, defaultPreferences }: RequestFlowDependencies) {
   let historySnapshot: HistorySnapshot | undefined;
   let projectLabel = "";
   let projectWarnings: string[] = [];
@@ -62,11 +64,17 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
     const generateTitle = canNameSession(ctx);
     return {
       draft, model: controller.getModel() ?? { provider: "", id: "" },
+      ...defaultSelection(ctx),
       generateTitle, systemPrompt: buildRefineSystemPrompt(generateTitle, config.systemPrompt),
       sessionId: ctx.sessionManager.getSessionId(), branchLeafId: ctx.sessionManager.getLeafId(), history,
       ...(project ? { project: { cwd: ctx.cwd, snapshot: project,
         revisionSnapshot: captureProjectContext(ctx, config.projectContext, draft, true), config: structuredClone(config.projectContext) } } : {}),
     };
+  }
+
+  function defaultSelection(ctx: ExtensionContext): Pick<RefineRequestInput, "preferences" | "editingInstruction"> {
+    const preferences = defaultPreferences(ctx);
+    return preferences.length ? { preferences, editingInstruction: composeRevision(preferences, "") } : {};
   }
 
   function triggerOptimize(ctx: ExtensionContext, force = false, suppliedDraft?: string, keepEditor = false, captureOnly = false): TriggerResult | undefined {
@@ -102,6 +110,7 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
     const generateTitle = canNameSession(ctx);
     const input = {
       draft,
+      ...defaultSelection(ctx),
       model: selected,
       thinkingLevel: effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel),
       generateTitle,
@@ -117,11 +126,14 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
       ({ historySnapshot, projectLabel, projectWarnings } = previousContext);
     }
     if (result.kind === "empty") notify(ctx, "The editor is empty; no refinement request was sent.", "info");
-    else if (result.kind === "too-long") notify(ctx, `The draft exceeds ${config.maxDraftChars} characters; no request was sent. Shorten it and try again.`, "warning");
+    else if (result.kind === "too-long") notify(ctx, `The draft or editing requirements exceed ${config.maxDraftChars} characters; no request was sent. Reduce the text or selection and try again.`, "warning");
     else if (result.kind === "duplicate" || result.kind === "ready") {
       void showPreview(ctx).catch(() => notifyCurrent("Could not open the refinement panel; the main draft was not changed.", "warning"));
     }
     else if (result.kind === "busy") notify(ctx, "Work is pending or the 100-entry journal is full. Existing work kept.", "warning");
+    if (result.kind === "captured" && (input.editingInstruction?.length ?? 0) > config.maxDraftChars) {
+      notify(ctx, `Project defaults exceed ${config.maxDraftChars} characters. Reduce the selection or use c to clear all in Preferences before optimizing.`, "warning");
+    }
     return result;
   }
 

@@ -13,6 +13,7 @@ interface PreferenceRow {
   warning?: string;
   showStatus?: boolean;
   prefixColor?: "text" | "muted";
+  projectDefault?: boolean;
 }
 
 /** Shared list cell, independent of inline saves or the child panel's pending selection. */
@@ -38,6 +39,8 @@ export function renderPreferenceRow(row: PreferenceRow, theme: Pick<Theme, "fg" 
     prefix = contentWidth >= (warning ? 3 : 2) ? theme.fg(prefixColor, row.cursor) : "";
     if (warning && contentWidth > 0) prefix += theme.fg("warning", "!");
   }
+  // A default marker describes future drafts independently of this row's checkbox.
+  if (row.projectDefault && contentWidth - visibleWidth(prefix) >= 3) prefix += theme.fg("muted", "* ");
   const name = sanitizeTerminalText(row.name).replace(/\n/g, " ");
   const status = warning && row.showStatus !== false ? ` · ${sanitizeTerminalText(warning)}` : "";
   const nameWidth = Math.max(0, contentWidth - visibleWidth(prefix));
