@@ -12,9 +12,77 @@ import { TaskPanel } from "../../src/task-panel.js";
 import { workspaceLayout } from "../../src/workspace-overlay.js";
 import { getThemeByName } from "../support/pi-theme.js";
 import { createRecordingTerminal } from "../support/recording-terminal.js";
+import { record } from "../support/task-panel.js";
 
 // Actual Pi renderers, not a substitute for human visual/IME verification.
 describe.each(["regular", "fullscreen"] as const)("inline preference rendering (%s)", (mode) => {
+  it.each(["dark", "light"])("renders spacious current items and returns to compact cells on resize (%s)", async (themeName) => {
+    vi.useFakeTimers();
+    const { terminal, writes, input } = createRecordingTerminal({ rows: 60, columns: 160 });
+    const tui = mode === "regular" ? new TuiMainScreen(terminal) : new TuiAltScreen(terminal);
+    const theme = getThemeByName(themeName)!;
+    vi.spyOn(theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
+    const source = record(); source.status = "unsent"; source.candidate = undefined;
+    source.input.draft = "Current 中文😀\x1b[2J";
+    const entries: RevisionPreference[] = Array.from({ length: 8 }, (_, i) => ({
+      id: `choice-${i}`, version: 1, scope: "project", name: `Choice ${i} 中文😀`, body: `Literal requirement ${i}`,
+      metadata: { kind: "rewrite", activation: "manual", description: `Summary ${i} 中文😀\x1b[2J` },
+    }));
+    const load = vi.fn(async () => ({ entries, errors: {} }));
+    const save = vi.fn((selected) => { source.input.preferences = selected; return undefined; });
+    const picker = new InlinePreferences({ load, save: vi.fn(), remove: vi.fn() },
+      () => ({ selected: source.input.preferences ?? [], save }), theme, getKeybindings(), () => tui.requestRender());
+    const run = vi.fn();
+    const panel = new TaskPanel({ records: () => [source], appliedId: () => undefined, activate: () => false,
+      run, stop() {}, preferences() {}, inlinePreferences: picker }, theme, () => terminal.rows, getKeybindings(),
+      false, { selectedTaskId: 1 }, (width) => workspaceLayout(width, terminal.rows));
+    const view = { render: (width: number) => panel.render(width),
+      set focused(value: boolean) { picker.focused = value; },
+      handleInput: (data: string) => { panel.handleInput(data); tui.requestRender(); },
+      invalidate: () => { panel.invalidate(); picker.invalidate(); } };
+    const render = () => {
+      tui.renderNow();
+      const frame = panel.render(terminal.columns);
+      expect(frame).toHaveLength(workspaceLayout(terminal.columns, terminal.rows).height);
+      expect(frame.every((line) => visibleWidth(line) <= terminal.columns)).toBe(true);
+      expect(frame.join("\n")).not.toContain("\x1b[2J");
+      return frame;
+    };
+    tui.addChild(view); tui.setFocus(view);
+    try {
+      tui.start(); render(); await Promise.resolve();
+      const initial = render();
+      const plain = initial.map(stripVTControlCharacters);
+      const selectedAt = plain.findIndex((line) => line.includes("› ○ Unsent"));
+      expect(plain[selectedAt]).toContain("Original prompt");
+      expect(plain[selectedAt + 1]).toContain("Current 中文😀");
+      expect(initial.join("\n")).toContain(theme.fg("muted", sanitizeTerminalText(entries[0]!.metadata!.description!)));
+      const tabs = initial.find((line) => line.includes(" Preview "))!;
+      expect(stripVTControlCharacters(tabs)).not.toMatch(/[←→]/);
+      const redraws = tui.fullRedraws;
+      writes.length = 0; // Exclude the renderer's initial fullscreen clear.
+      input("\t"); input(" ");
+      const selecting = render();
+      expect(selecting.find((line) => line.includes(" Preview "))).toBe(tabs);
+      for (const key of ["\x1b[D", "\x1b[C"]) {
+        input(key);
+        expect(render().find((line) => line.includes(" Preview "))).toBe(tabs);
+      }
+      expect(stripVTControlCharacters(selecting.join("\n"))).toContain("› [x] Choice 0");
+      expect(stripVTControlCharacters(selecting.join("\n"))).toContain("Literal requirement 0");
+      input("\x1b");
+      expect(render().find((line) => line.includes(" Preview "))).toBe(tabs);
+      expect(tui.fullRedraws).toBe(redraws);
+      expect(writes.join("")).not.toContain("\x1b[2J");
+      for (const [columns, rows] of [[45, 14], [160, 14], [160, 60]]) {
+        Object.assign(terminal, { columns, rows }); view.invalidate(); render();
+      }
+      expect(stripVTControlCharacters(render().join("\n"))).toContain("Preferences · 1 selected");
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(run).not.toHaveBeenCalled();
+    } finally { picker.dispose(); tui.stop(); vi.restoreAllMocks(); vi.useRealTimers(); }
+  });
   it.each(["dark", "light"])("keeps selection, scrolling, focus and warning output bounded through resize (%s)", async (themeName) => {
     vi.useFakeTimers();
     const { terminal, writes, input } = createRecordingTerminal({ rows: 40, columns: 100 });

@@ -422,8 +422,8 @@ describe("result reading panel", () => {
     expect(next).toContain("f Revise");
     expect(next).toContain("i Input");
     expect(next).toContain("Settings");
-    expect(next).toContain("←");
-    expect(next).toContain("→");
+    expect(next).not.toContain("←");
+    expect(next).not.toContain("→");
     expect(next).not.toContain("t Context");
     panel.scrollBy(10000);
     expect(panel.render(80).join("\n")).toContain("内容 79");

@@ -329,7 +329,7 @@ export class PreviewPanel implements Component {
     const { theme, options } = this;
     const layout = this.layout(width);
     const { innerWidth } = layout;
-    const navigation = workspaceTabs(layout, "Preview", theme, !this.referenceOnly);
+    const navigation = workspaceTabs(layout, "Preview", theme);
     if (options.navigation && layout.bodyHeight - navigation.length >= 4) {
       const position = options.navigation;
       navigation.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(

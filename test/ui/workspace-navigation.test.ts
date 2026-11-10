@@ -21,8 +21,8 @@ describe("shared refine workspace", () => {
         expect(lines).toHaveLength(height);
         const strip = lines[4]!;
         expect(strip).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(` ${page} `))));
-        for (const label of ["Preview", "Usage", "Settings", "←", "→"]) expect(strip).toContain(label);
-        expect(strip).not.toMatch(/h History|u Usage|→ Settings/);
+        for (const label of ["Preview", "Usage", "Settings"]) expect(strip).toContain(label);
+        expect(strip).not.toMatch(/h History|u Usage|←|→/);
         expect(stripVTControlCharacters(lines[1]!)).toContain(page === "Preview" ? "Prompt refine" : page);
         for (const obsolete of ["h", "u"]) {
           workspace.handleInput(obsolete);
@@ -93,7 +93,7 @@ describe("shared refine workspace", () => {
           expect(lines).toHaveLength(openingHeight);
           for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
           if (width >= 20 && rows >= 16) {
-            const strip = lines.map(stripVTControlCharacters).find((line) => line.includes("←") && line.includes(page));
+            const strip = lines.find((line) => line.includes(` ${page} `));
             expect(strip).toBeDefined();
           }
         }

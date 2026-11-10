@@ -1,14 +1,63 @@
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { getKeybindings, visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RefineRecord } from "../../src/history.js";
 import { panelLayout } from "../../src/panel-layout.js";
 import { sanitizeTerminalText } from "../../src/presentation.js";
+import { TaskPanel } from "../../src/task-panel.js";
+import { workspaceLayout } from "../../src/workspace-overlay.js";
 import { getThemeByName } from "../support/pi-theme.js";
 import { create, record } from "../support/task-panel.js";
 
 afterEach(() => vi.restoreAllMocks());
 describe("prompt tree and inspection", () => {
+  it.each(["dark", "light"])("scales current tree cells without filling Preview with earlier tasks (%s)", (name) => {
+    const records = Array.from({ length: 24 }, (_, index) => record(index + 1));
+    records[0]!.input.draft = "Original 中文😀\x1b[2J";
+    records.push({ ...record(90, 9), archivedAt: 1 });
+    const f = create(name, false, records);
+    vi.spyOn(f.theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
+    const panel = new TaskPanel(f.actions, f.theme, () => f.size.rows, getKeybindings(), false, f.position,
+      (width) => workspaceLayout(width, f.size.rows));
+    const left = (frame: string[]) => frame.filter((line) => stripVTControlCharacters(line).includes(" │ "))
+      .map((line) => line.split(f.theme.fg("muted", " │ "))[0]!);
+    const selectedBg = f.theme.bg("selectedBg", "probe").split("probe")[0]!;
+    for (const [width, height, spacious] of [[160, 60, true], [100, 40, false], [160, 14, false], [160, 60, true]] as const) {
+      f.size.rows = height;
+      const frame = panel.render(width);
+      const cells = left(frame);
+      const plain = cells.map(stripVTControlCharacters);
+      const selectedAt = plain.findIndex((line) => line.includes("›"));
+      expect(plain[selectedAt]).toContain("model-1");
+      expect(cells[selectedAt]).toContain(selectedBg);
+      if (spacious) {
+        expect(plain[selectedAt + 1]).toContain("Run #1 · openai-codex · 23s");
+        expect(cells[selectedAt + 1]).toContain(selectedBg);
+        expect(plain[selectedAt + 2]!.trim()).toBe("");
+        expect(visibleWidth(cells[0]!)).toBeGreaterThan(36);
+      } else expect(plain.join("\n")).not.toContain("Run #1");
+      expect(stripVTControlCharacters(frame.join("\n"))).not.toContain("model-90");
+      expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
+      expect(frame).toHaveLength(workspaceLayout(width, height).height);
+      expect(panel.render(width)).toEqual(frame);
+      expect(f.position.selectedId).toBe(1);
+    }
+    // Larger cells still show neighbouring identities while scrolling a long tree.
+    for (let id = 1; id <= 24; id++) {
+      const plain = left(panel.render(160)).map(stripVTControlCharacters).join("\n");
+      expect(plain).toMatch(new RegExp(`model-${id}(?!\\d)`));
+      if (id < 24) expect(plain).toMatch(new RegExp(`model-${id + 1}(?!\\d)`));
+      panel.handleInput("\x1b[A");
+    }
+    const original = left(panel.render(160));
+    const titleAt = original.findIndex((line) => stripVTControlCharacters(line).includes("›"));
+    expect(stripVTControlCharacters(original[titleAt]!)).toContain("Original prompt");
+    expect(original[titleAt + 1]).toContain(f.theme.fg("text", sanitizeTerminalText(records[0]!.input.draft)));
+    expect(original.join("\n")).not.toContain("\x1b[2J");
+    expect(f.position.selectedTaskId).toBe(1);
+    expect(f.actions.run).not.toHaveBeenCalled();
+    expect(f.actions.activate).not.toHaveBeenCalled();
+  });
 
   it.each(["dark", "light"])("keeps model identities neutral and archived statuses semantic (%s)", (name) => {
     const records = [record(1), record(2), record(3), record(4)];
