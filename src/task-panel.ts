@@ -445,7 +445,10 @@ export class TaskPanel {
       const { record } = row;
       const old = record.archivedAt !== undefined;
       const active = this.isSelected(row);
-      const prefix = `${active ? "›" : " "} ${record.id === Math.min(...row.records.filter((r) => r.status !== "unsent").map((r) => r.id)) ? "└" : "├"} `;
+      const children = row.records.filter((record) => record.status !== "unsent");
+      const lastChild = record.id === Math.min(...children.map((record) => record.id));
+      const continuation = children.length > 0 && (row.original || !lastChild) ? "  │" : "   ";
+      const prefix = `${active ? "›" : " "} ${lastChild ? "└─" : "├─"} `;
       const badge = this.content.badge(record);
       const model = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(record.input.model.id), Math.max(1, leftWidth - visibleWidth(prefix + badge) - 1), "…"));
       const draft = record.input.draft.replace(/\s+/g, " ") || "Empty prompt";
@@ -453,16 +456,19 @@ export class TaskPanel {
         ? `${active ? "›" : " "} ${record.status === "unsent" ? `○ Unsent ·${record.input.preferences?.length ? ` P:${record.input.preferences.length} ·` : ""}` : "▾"} ${old ? "Earlier · " : ""}${rowHeight > 1 ? "Original prompt" : draft}`
         : `${prefix}${model}${" ".repeat(Math.max(1, leftWidth - visibleWidth(prefix + model + badge)))}${badge}`;
       const clean = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(label), leftWidth, "…"));
+      const emphasize = (text: string) => active && rowHeight > 1 ? this.theme.bold(text) : text;
+      const primary = (text: string) => this.theme.fg("text", emphasize(text));
       let text: string;
       if (row.original) {
         const earlierAt = old ? clean.indexOf("Earlier · ") : -1;
-        text = earlierAt < 0 ? this.theme.fg("text", clean)
-          : this.theme.fg("text", clean.slice(0, earlierAt)) + this.content.muted("Earlier · ") + this.theme.fg("text", clean.slice(earlierAt + 10));
+        text = earlierAt < 0 ? primary(clean)
+          : primary(clean.slice(0, earlierAt)) + this.content.muted("Earlier · ") + primary(clean.slice(earlierAt + 10));
       } else {
         const badgeAt = Math.min(clean.length, label.length - badge.length);
+        const gutterEnd = Math.min(visibleWidth(prefix), badgeAt);
         const status = clean.slice(badgeAt);
-        text = this.theme.fg("text", clean.slice(0, badgeAt))
-          + (status.startsWith("⚠") ? this.theme.fg("warning", "⚠") + this.theme.fg(this.content.color(record), status.slice(1))
+        text = primary(clean.slice(0, 2)) + this.content.muted(clean.slice(2, gutterEnd)) + primary(clean.slice(gutterEnd, badgeAt))
+          + emphasize(status.startsWith("⚠") ? this.theme.fg("warning", "⚠") + this.theme.fg(this.content.color(record), status.slice(1))
             : this.theme.fg(this.content.color(record), status));
       }
       const highlight = (line: string) => active
@@ -470,8 +476,11 @@ export class TaskPanel {
       if (rowHeight === 1) return [highlight(text)];
       const detail = row.original ? this.theme.fg("text", sanitizeTerminalText(draft))
         : this.content.muted(`Run #${record.id} · ${record.input.model.provider}${record.elapsedSeconds !== undefined ? ` · ${record.elapsedSeconds}s` : ""}`);
-      return [highlight(active ? this.theme.bold(text) : text),
-        highlight(truncateToWidth(`    ${detail}`, leftWidth, "…")), ""];
+      // Keep the parent/sibling spine through secondary lines and spacing,
+      // but stop after the final child so separate prompts never join together.
+      return [highlight(text),
+        highlight(truncateToWidth(this.content.muted(continuation) + (row.original ? " " : "  ") + detail, leftWidth, "…")),
+        this.content.muted(continuation.trimEnd())];
     });
     const previewDetails = this.inspecting && !this.usage && this.compareId === undefined && !!selected && !selected.original && !!selected.record.candidate;
     let body: string[];

@@ -103,7 +103,7 @@ describe("round workspace integration", () => {
     expect(h.panelLines(100).join("\n")).toContain("Draft A edited 中文😀");
     expect(h.complete).not.toHaveBeenCalled();
     h.panelInput("\r");
-    expect(h.panelLines(100).join("\n")).toMatch(/›\s+└ fake-chat/);
+    expect(h.panelLines(100).join("\n")).toMatch(/›\s+└─ fake-chat/);
     await flushPromises();
     expect(h.complete).toHaveBeenCalledTimes(1);
     expect(JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text).draft).toBe("Draft A edited 中文😀");
