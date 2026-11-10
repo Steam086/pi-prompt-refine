@@ -1,0 +1,251 @@
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { canonicalShortcut, configPath, DEFAULT_CONFIG, DEFAULT_SHORTCUTS, loadConfig, parseConfig, saveConfig } from "../../src/config.js";
+
+const tempDirs: string[] = [];
+async function tempDirectory(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "pi-prompt-refine-"));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+describe("Prompt Refine configuration", () => {
+  it("validates the local Preferences key separately from global shortcuts", () => {
+    expect(parseConfig({ version: 1, preferencesKey: null }).config.preferencesKey).toBeNull();
+    expect(parseConfig({ version: 1, preferencesKey: "alt+p" }).config.preferencesKey).toBe("alt+p");
+    for (const key of ["p", "tab", "shift+tab", "ctrl+s", "ctrl+e", "ctrl+\\", "ctrl+c", "invalid", "f1", "f3", "alt+f2", "ctrl+shift+f12"]) {
+      const parsed = parseConfig({ version: 1, preferencesKey: key });
+      expect(parsed.warnings.join(" ")).toContain("preferencesKey");
+      expect(parsed.config.preferencesKey).toBe("alt+p");
+    }
+    const migrated = parseConfig({ version: 1, preferencesKey: "f2" });
+    expect(migrated.config.preferencesKey).toBe("alt+p");
+    expect(migrated.warnings).toEqual([]); // The previous default must not block later settings saves.
+    const conflict = parseConfig({ version: 1, shortcuts: { view: "alt+p" } });
+    expect(conflict.config.preferencesKey).toBeNull();
+    expect(conflict.warnings.join(" ")).toContain("conflicts");
+  });
+  it("uses documented defaults and leaves the model unconfigured", () => {
+    const result = parseConfig({ version: 1 });
+    expect(result.warnings).toEqual([]);
+    expect(result.config).toEqual(DEFAULT_CONFIG);
+    expect(result.config.model).toBeUndefined();
+    expect(result.config.timeoutMs).toBe(60_000);
+    expect(result.config.context).toEqual({ maxMessages: 12, maxChars: 16_000 });
+  });
+
+  it("reports validation warnings in English", () => {
+    const result = parseConfig({
+      version: 1,
+      shortcuts: false,
+      projectContext: { tree: [] },
+      model: { provider: "", id: "" },
+      thinkingLevel: "turbo",
+      favorites: [null],
+      context: [],
+    });
+    const warnings = result.warnings.join(" ");
+    expect(warnings).toContain("shortcuts must be an object");
+    expect(warnings).toContain("projectContext.tree must be an object");
+    expect(warnings).not.toMatch(/\p{Script=Han}/u);
+  });
+
+  it("accepts an optional thinking override and leaves it unset for session inheritance", () => {
+    expect(parseConfig({ version: 1 }).config.thinkingLevel).toBeUndefined();
+    expect(parseConfig({ version: 1, thinkingLevel: "high" }).config.thinkingLevel).toBe("high");
+    expect(parseConfig({ version: 1, thinkingLevel: "off" }).config.thinkingLevel).toBe("off");
+    const invalid = parseConfig({ version: 1, thinkingLevel: "turbo" });
+    expect(invalid.config.thinkingLevel).toBeUndefined();
+    expect(invalid.warnings.join(" ")).toContain("thinkingLevel");
+  });
+
+  it("validates per-model thinking memory without requiring a default model", async () => {
+    const levels = { "provider/model": "high", "other/model": "off", "provider/nested/model": "max" };
+    const parsed = parseConfig({ version: 1, modelThinkingLevels: levels });
+    expect(parsed.warnings).toEqual([]);
+    expect(parsed.config.modelThinkingLevels).toEqual(levels);
+    expect(parsed.config.model).toBeUndefined();
+    const path = configPath(await tempDirectory());
+    await saveConfig(path, parsed.config);
+    expect((await loadConfig(path)).config.modelThinkingLevels).toEqual(levels);
+    expect(parseConfig({ version: 1 }).config.modelThinkingLevels).toEqual({});
+
+    const invalid = parseConfig({ version: 1, modelThinkingLevels: {
+      ...levels, bad: "low", "/model": "low", "provider/": "low", "provider/bad": "turbo", "provider/null": null,
+    } });
+    expect(invalid.config.modelThinkingLevels).toEqual(levels);
+    expect(invalid.warnings).toHaveLength(5);
+    for (const value of [null, [], "high"]) {
+      expect(parseConfig({ version: 1, modelThinkingLevels: value }).warnings).toHaveLength(1);
+    }
+  });
+
+  it("defaults minimal history persistence on and respects explicit privacy opt-out", () => {
+    expect(parseConfig({ version: 1 }).config.historyPersistence).toBe(true);
+    expect(parseConfig({ version: 1, historyPersistence: false }).config.historyPersistence).toBe(false);
+    expect(parseConfig({ version: 1, historyPersistence: "false" }).warnings.join(" ")).toContain("historyPersistence");
+  });
+
+  it("defaults instructions, tree and skills off, preserving explicit opt-ins", () => {
+    expect(parseConfig({ version: 1 }).config.projectContext).toMatchObject({ instructionsEnabled: false, skillsEnabled: false, tree: { enabled: false } });
+    const custom = parseConfig({ version: 1, projectContext: { instructionsEnabled: true, skillsEnabled: true, tree: { enabled: true } } });
+    expect(custom.config.projectContext).toMatchObject({ instructionsEnabled: true, skillsEnabled: true, tree: { enabled: true } });
+    expect(custom.warnings).toEqual([]);
+    const invalid = parseConfig({ version: 1, projectContext: { instructionsEnabled: "no", skillsEnabled: 1 } });
+    expect(invalid.config.projectContext).toMatchObject({ instructionsEnabled: false, skillsEnabled: false });
+    expect(invalid.warnings).toHaveLength(2);
+  });
+
+  it("defaults follow-up instructions on and preserves explicit opt-outs", () => {
+    expect(parseConfig({ version: 1 }).config.projectContext.instructionsOnFollowUp).toBe(true);
+    expect(parseConfig({ version: 1, projectContext: { instructionsOnFollowUp: false } }).config.projectContext.instructionsOnFollowUp).toBe(false);
+    const invalid = parseConfig({ version: 1, projectContext: { instructionsOnFollowUp: "yes" } });
+    expect(invalid.config.projectContext.instructionsOnFollowUp).toBe(true);
+    expect(invalid.warnings.join(" ")).toContain("instructionsOnFollowUp");
+  });
+
+  it("enables bounded project context by default and validates independent opt-outs and limits", () => {
+    expect(DEFAULT_CONFIG.projectContext.enabled).toBe(true);
+    expect(DEFAULT_CONFIG.projectContext.tree).toMatchObject({ maxDepth: 2, maxEntriesPerDirectory: 20, maxEntries: 120, maxChars: 4000 });
+    const disabled = parseConfig({ version: 1, projectContext: { enabled: false, tree: { enabled: false } } });
+    expect(disabled.warnings).toEqual([]);
+    expect(disabled.config.projectContext.enabled).toBe(false);
+    const invalid = parseConfig({ version: 1, projectContext: { maxChars: 0, skillsMaxChars: -1, enabled: "yes", tree: { maxDepth: 99, timeoutMs: 0, exclude: ["../escape"] } } });
+    expect(invalid.config.projectContext).toEqual(DEFAULT_CONFIG.projectContext);
+    expect(invalid.warnings).toHaveLength(6);
+    const custom = parseConfig({ version: 1, projectContext: { maxChars: 4096, tree: { maxDepth: 3, exclude: ["vendor", "vendor"] } } });
+    expect(custom.warnings).toEqual([]);
+    expect(custom.config.projectContext.maxChars).toBe(4096);
+    expect(custom.config.projectContext.tree.exclude).toEqual(["vendor"]);
+  });
+
+  it("validates directory references independently while sharing existing tree budgets", () => {
+    const defaults = parseConfig({ version: 1, projectContext: { tree: { enabled: false } } });
+    expect(defaults.config.projectContext.referencedDirectories).toEqual({ enabled: true, maxReferences: 8 });
+    const custom = parseConfig({ version: 1, projectContext: { referencedDirectories: { enabled: false, maxReferences: 2 } } });
+    expect(custom.warnings).toEqual([]);
+    expect(custom.config.projectContext.referencedDirectories).toEqual({ enabled: false, maxReferences: 2 });
+    expect(custom.config.projectContext.tree).toEqual(DEFAULT_CONFIG.projectContext.tree);
+    const invalid = parseConfig({ version: 1, projectContext: { referencedDirectories: { enabled: "yes", maxReferences: 100 } } });
+    expect(invalid.warnings).toHaveLength(2);
+    expect(invalid.config.projectContext.referencedDirectories).toEqual(DEFAULT_CONFIG.projectContext.referencedDirectories);
+    expect(parseConfig({ version: 1, projectContext: { referencedDirectories: false } }).warnings).toHaveLength(1);
+  });
+
+  it("migrates only complete legacy default maps and preserves explicit custom bindings", () => {
+    const actions = ["optimize", "view", "dismiss", "selectModel", "cycleModel", "restore"];
+    for (const keys of [
+      ["f2", "f3", "f4", "f5", "f6", "f7"],
+      ["alt+shift+r", "alt+shift+v", "alt+shift+x", "alt+shift+m", "alt+shift+c", "alt+shift+z"],
+    ]) {
+      const shortcuts = Object.fromEntries(actions.map((action, index) => [action, keys[index]]));
+      const result = parseConfig({ version: 1, shortcuts, model: { provider: "p", id: "m" } });
+      expect(result.shortcutsMigrated).toBe(true);
+      expect(result.warnings).toEqual([]);
+      expect(result.config.shortcuts).toEqual(DEFAULT_SHORTCUTS);
+      expect(result.config.model).toEqual({ provider: "p", id: "m" });
+    }
+    const custom = parseConfig({ version: 1, shortcuts: { optimize: "f2", view: "f3", dismiss: "f4", selectModel: "f5", cycleModel: "f6", restore: "f8" } });
+    expect(custom.shortcutsMigrated).toBeUndefined();
+    expect(custom.config.shortcuts).toEqual(DEFAULT_SHORTCUTS);
+    expect(custom.warnings.every((warning) => warning.includes("cannot use function keys"))).toBe(true);
+    const modified = parseConfig({ version: 1, shortcuts: { view: "ctrl+f3", restore: "alt+shift+f12", optimize: "alt+r" } });
+    expect(modified.config.shortcuts.view).toBeNull();
+    expect(modified.config.shortcuts.restore).toBeNull();
+    expect(modified.config.shortcuts.optimize).toBe("alt+r");
+    const disabled = parseConfig({ version: 1, shortcuts: { optimize: null } });
+    expect(disabled.warnings).toEqual([]);
+    expect(Object.values(disabled.config.shortcuts)).toEqual([null, null, null, null, null, null]);
+  });
+
+  it("raises the default output allowance without overriding explicit older limits", () => {
+    expect(parseConfig({ version: 1 }).config.maxOutputTokens).toBe(8192);
+    for (const maxOutputTokens of [2048, 8192, 65_536]) {
+      const parsed = parseConfig({ version: 1, maxOutputTokens });
+      expect(parsed.config.maxOutputTokens).toBe(maxOutputTokens);
+      expect(parsed.warnings).toEqual([]);
+    }
+    expect(parseConfig({ version: 1, maxOutputTokens: 65_537 }).warnings).not.toEqual([]);
+  });
+
+  it("keeps the checked-in example valid", async () => {
+    const example = JSON.parse(await readFile(new URL("../../examples/prompt-refine.json", import.meta.url), "utf8")) as unknown;
+    const result = parseConfig(example);
+    expect(result.warnings).toEqual([]);
+    expect(result.config.model).toEqual({ provider: "openai", id: "gpt-4.1-mini" });
+  });
+
+  it("validates bounds and resets duplicate or invalid shortcuts without crashing", () => {
+    const result = parseConfig({
+      version: 1,
+      timeoutMs: 10,
+      maxDraftChars: -1,
+      maxOutputTokens: 100_000,
+      shortcuts: { optimize: "alt+shift+v", view: "alt+shift+v", dismiss: "escape" },
+      favorites: [{ provider: "openai", id: "gpt-chat" }, { provider: "openai", id: "gpt-chat" }, { provider: "", id: "bad" }],
+    });
+    expect(result.config.timeoutMs).toBe(DEFAULT_CONFIG.timeoutMs);
+    expect(result.config.maxDraftChars).toBe(DEFAULT_CONFIG.maxDraftChars);
+    expect(result.config.maxOutputTokens).toBe(DEFAULT_CONFIG.maxOutputTokens);
+    expect(result.config.shortcuts).toEqual(DEFAULT_SHORTCUTS);
+    expect(result.config.favorites).toEqual([{ provider: "openai", id: "gpt-chat" }]);
+    expect(result.warnings.length).toBeGreaterThanOrEqual(5);
+    expect(canonicalShortcut("ctrl+alt+z")).toBe(canonicalShortcut("alt+ctrl+z"));
+    expect(canonicalShortcut("escape")).toBe(canonicalShortcut("esc"));
+    expect(canonicalShortcut("enter")).toBe(canonicalShortcut("return"));
+    expect(canonicalShortcut("ctrl+ctrl+a")).toBeUndefined();
+    expect(canonicalShortcut("ctrl+not-a-key")).toBeUndefined();
+  });
+
+  it("does not overwrite malformed or unsupported configuration files", async () => {
+    const dir = await tempDirectory();
+    const path = configPath(dir);
+    const original = "{not json";
+    await writeFile(path, original, "utf8");
+    const loaded = await loadConfig(path);
+    expect(loaded.config.model).toBeUndefined();
+    expect(loaded.warnings).toHaveLength(1);
+    expect(await readFile(path, "utf8")).toBe(original);
+
+    const wrongVersion = parseConfig({ version: 2, model: { provider: "x", id: "y" } });
+    expect(wrongVersion.warnings).toHaveLength(1);
+    expect(wrongVersion.config.model).toBeUndefined();
+  });
+
+  it("atomically persists validated settings under the supplied agent directory", async () => {
+    const dir = await tempDirectory();
+    const path = configPath(join(dir, "agent"));
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.model = { provider: "openai", id: "gpt-chat" };
+    config.favorites = [config.model];
+    config.shortcuts.view = "alt+shift+w";
+    await saveConfig(path, config);
+
+    const written = JSON.parse(await readFile(path, "utf8")) as typeof config;
+    expect(written).toEqual(config);
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+  });
+
+  it("removes the temporary file when atomic persistence fails", async () => {
+    const dir = await tempDirectory();
+    const target = join(dir, "prompt-refine.json");
+    await mkdir(target);
+    await expect(saveConfig(target, structuredClone(DEFAULT_CONFIG))).rejects.toBeDefined();
+    expect(await readdir(dir)).toEqual(["prompt-refine.json"]);
+  });
+
+  it("keeps missing configuration optional and reports unreadable paths", async () => {
+    const dir = await tempDirectory();
+    const missing = await loadConfig(join(dir, "not-created.json"));
+    expect(missing.warnings).toEqual([]);
+    expect(missing.config.model).toBeUndefined();
+    const unreadable = await loadConfig(dir);
+    expect(unreadable.warnings).toHaveLength(1);
+  });
+});

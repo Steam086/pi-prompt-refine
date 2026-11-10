@@ -1,4 +1,4 @@
-import type { Candidate, RefineRequestInput } from "./controller.js";
+import type { Candidate, RefineRequestInput } from "./request-types.js";
 import type { TokenUsage } from "./usage.js";
 import type { BudgetReport } from "./budget.js";
 import type { SelectedPreference } from "./revision-preferences.js";

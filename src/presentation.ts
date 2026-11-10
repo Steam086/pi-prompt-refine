@@ -1,5 +1,5 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import type { ControllerState } from "./controller.js";
+import type { ControllerState } from "./request-types.js";
 
 /** Keep prose readable on wide terminals; widths are terminal columns, not characters. */
 export const READING_WIDTH = 100;
