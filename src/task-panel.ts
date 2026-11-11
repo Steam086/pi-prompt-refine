@@ -2,6 +2,7 @@ import { stripVTControlCharacters } from "node:util";
 import { matchesKey, parseKey, truncateToWidth, visibleWidth, type KeybindingsManager, type KeyId } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { RefineRecord } from "./history.js";
+import { taskGroups } from "./app/queries.js";
 import type { HistoryStorageStatus } from "./history-store.js";
 import { panelFrame, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
 import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
@@ -116,18 +117,7 @@ export class TaskPanel {
     return panel;
   }
   private entries(allRounds = false): Row[] {
-    const groups = new Map<number, RefineRecord[]>();
-    for (const record of this.actions.records()) {
-      if (!allRounds && !this.usage && record.archivedAt !== undefined) continue;
-      const group = groups.get(record.taskId) ?? [];
-      group.push(record);
-      groups.set(record.taskId, group);
-    }
-    return [...groups.values()].sort((a, b) =>
-      Number(a[0]!.archivedAt !== undefined) - Number(b[0]!.archivedAt !== undefined) ||
-      (b[0]!.input.roundId ?? 0) - (a[0]!.input.roundId ?? 0) ||
-      Math.max(...b.map((r) => r.id)) - Math.max(...a.map((r) => r.id)),
-    ).flatMap((records) => {
+    return taskGroups(this.actions.records(), allRounds || this.usage).flatMap((records) => {
       const source = records.find((r) => !r.input.revision) ?? records[0]!;
       const children = records.filter((r) => r.status !== "unsent").sort((a, b) => b.id - a.id);
       return [{ record: source, original: true, records },

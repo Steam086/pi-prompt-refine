@@ -4,7 +4,7 @@ import { buildRefineSystemPrompt, selectHistory, type HistorySnapshot } from "..
 import { captureProjectContext } from "../project-context.js";
 import type { RefineController } from "../controller.js";
 import type { CandidateToken, RefineRequest, RefineRequestInput, TriggerResult } from "../request-types.js";
-import { displayModel, effectiveThinkingLevel, sameModel } from "./model-selection.js";
+import { displayModel, effectiveThinkingLevel, sameModel } from "./model-utils.js";
 import { RESTORED_CONTEXT_HINT, type Notify, type NotifyCurrent } from "./contracts.js";
 import { composeRevision, type SelectedPreference } from "../revision-preferences.js";
 

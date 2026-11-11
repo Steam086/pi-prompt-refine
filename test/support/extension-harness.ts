@@ -2,6 +2,8 @@ import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, TuiAltScreen, TuiMainScreen, type OverlayHandle, type OverlayOptions, type Terminal } from "@earendil-works/pi-tui";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { EventEmitter } from "node:events";
+import type { SessionBus } from "../../src/adapters/session-events.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, vi } from "vitest";
@@ -17,6 +19,8 @@ export interface Harness {
   handlers: Map<string, Array<(event: any, ctx: ExtensionContext) => unknown>>;
   shortcuts: Map<string, (ctx: ExtensionContext) => unknown>;
   command: (args: string, ctx: ExtensionContext) => unknown;
+  commands: Map<string, (args: string, ctx: ExtensionContext) => unknown>;
+  events: SessionBus;
   complete: ReturnType<typeof vi.fn>;
   notifications: string[];
   statuses: Array<string | undefined>;
@@ -258,7 +262,14 @@ export function extensionHarnessEnvironment() {
     const handlers = new Map<string, Array<(event: any, ctx: ExtensionContext) => unknown>>();
     const shortcuts = new Map<string, (ctx: ExtensionContext) => unknown>();
     let command: (args: string, ctx: ExtensionContext) => unknown = (_args, _ctx) => undefined;
+    const commands = new Map<string, (args: string, ctx: ExtensionContext) => unknown>();
+    const emitter = new EventEmitter();
+    const events: SessionBus = {
+      on: (name, listener) => { emitter.on(name, listener); return () => { emitter.off(name, listener); }; },
+      emit: (name, data) => { emitter.emit(name, data); },
+    };
     const pi = {
+      events,
       on: (name: string, handler: (event: any, ctx: ExtensionContext) => unknown) => {
         const registered = handlers.get(name) ?? [];
         registered.push(handler);
@@ -268,9 +279,12 @@ export function extensionHarnessEnvironment() {
       registerShortcut: (shortcut: string, definition: { handler: (ctx: ExtensionContext) => unknown }) => {
         shortcuts.set(shortcut, definition.handler);
       },
-      registerCommand: (_name: string, definition: { handler: (args: string, ctx: ExtensionContext) => unknown }) => {
-        command = definition.handler;
+      registerCommand: (name: string, definition: { handler: (args: string, ctx: ExtensionContext) => unknown }) => {
+        if (commands.has(name)) throw new Error(`Duplicate command: ${name}`);
+        commands.set(name, definition.handler);
+        if (name === "refine") command = definition.handler;
       },
+      getCommands: () => [...commands.keys()].map((name) => ({ name, source: "extension", sourceInfo: {} })),
       sendUserMessage,
       getSessionName: () => sessionName,
       setSessionName,
@@ -293,6 +307,8 @@ export function extensionHarnessEnvironment() {
       handlers,
       shortcuts,
       command,
+      commands,
+      events,
       complete,
       notifications,
       statuses,
@@ -307,6 +323,7 @@ export function extensionHarnessEnvironment() {
         await handlers.get("session_shutdown")?.[0]?.({ type: "session_shutdown" }, context);
         handlers.clear();
         shortcuts.clear();
+        commands.clear();
         await promptRefineExtension(pi);
         harness.command = command;
         await handlers.get("session_start")?.[0]?.({ type: "session_start", reason }, context);

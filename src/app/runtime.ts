@@ -15,6 +15,11 @@ import { createRequestFlows } from "./request-flows.js";
 import { createWorkspaceHost } from "./workspace-host.js";
 import { createWorkspaceActions } from "./workspace-actions.js";
 import { createCommands } from "./commands.js";
+import { createApplication } from "./application.js";
+import { createApplicationEvents } from "./events.js";
+import { createModelService } from "./model-service.js";
+import { createTuiOperations } from "../adapters/tui-operations.js";
+import type { ModelIdentity, Thinking } from "./api.js";
 
 /** Composes bounded services; request execution, UI hosting and session state have separate owners. */
 export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMessage" | "getSessionName" | "setSessionName">) {
@@ -24,6 +29,8 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
   const configWritable = loaded.warnings.length === 0;
   let currentUiContext: ExtensionContext | undefined;
   let completionContext: ExtensionContext | undefined;
+  let lifecycleSequence = 0;
+  const events = createApplicationEvents();
   let saveQueue: Promise<void> = Promise.resolve();
   let generatingRequestId: number | undefined;
   let progressTimer: ReturnType<typeof setInterval> | undefined;
@@ -45,7 +52,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     get maxOutputChars() { return Math.max(config.maxDraftChars, config.maxOutputTokens * 32); },
     onState: (state) => {
       lifecycle.saveHistory();
-      updatePresentation(state);
+      events.changed(true);
     },
     onAccepted: (candidate) => lifecycle.applySessionTitle(candidate),
     complete: (request, signal) => complete(request, signal),
@@ -61,15 +68,17 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
   });
   const lifecycle = createLifecycle({
     controller, config, loaded, getUiContext: () => currentUiContext,
-    setUiContext: (ctx) => { currentUiContext = ctx; },
+    setUiContext: (ctx) => { currentUiContext = ctx; completionContext = ctx; },
     clearCompletionContext: () => { completionContext = undefined; },
-    closePreview: () => host.close(), refreshPreview: () => host.refresh(),
+    closePreview: () => host.close(), refreshPreview: () => { events.changed(); host.refresh(); },
     clearContextJobs: contextJobs.clear,
     preferenceRepository,
     getSessionName: () => pi.getSessionName(), setSessionName: (name) => pi.setSessionName(name), notify,
   });
   const models = createModelSelection({
-    controller, config, useContext, setCompletionContext, persistConfig,
+    controller, config, useContext, setCompletionContext, persistConfig, saveOptimizer,
+    startOriginal: (id, model, thinking, version) => operations.start(id, model, thinking, version),
+    taskVersion: (id) => operations.version(id), optimizerVersion: () => modelService.optimizer().version,
     optimizationError: (...args) => requests.optimizationError(...args),
     taskPositions, usagePositions, notify, notifyCurrent, notifyIfSameSession,
   });
@@ -79,14 +88,41 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     showPreview: (ctx) => host.showPreview(ctx), updatePresentation: presentation, notify, notifyCurrent,
     defaultPreferences: (ctx) => preferenceRepository(ctx).getDefaultPreferences(),
   });
+  function executionContext(): ExtensionContext {
+    if (!completionContext || completionContext.sessionManager.getSessionId() !== controller.getSessionId()) {
+      throw new Error("No current execution binding");
+    }
+    return completionContext;
+  }
+  const modelService = createModelService({
+    controller, config, writable: configWritable,
+    available: () => executionContext().modelRegistry.getAvailable(),
+    sessionThinking: () => executionContext().thinkingLevel,
+    persist: () => persistConfig(executionContext()), changed: () => events.changed(),
+  });
+  const application = createApplication({
+    controller, events, models: modelService, maxDraftChars: () => config.maxDraftChars,
+    input: { capture: (text) => requests.draftInput(executionContext(), text) },
+    storage: { summary: () => {
+      const status = lifecycle.historyStorage(executionContext(), controller.getSessionId()!);
+      return { state: status.state, savedCount: status.savedIds.length, omittedCount: status.omittedIds.length,
+        memoryOnlyCount: status.memoryOnlyIds.length };
+    } },
+  });
+  const operations = createTuiOperations(application.local, controller);
+  async function saveOptimizer(model: ModelIdentity, thinking: Thinking | "inherit", expectedVersion = modelService.optimizer().version): Promise<boolean> {
+    const result = application.local({ method: "setDefaultOptimizer", expectedVersion, model, thinking });
+    if (result.kind !== "ok") { notifyCurrent(`Optimizer not changed (${result.code}).`, "warning"); return false; }
+    return modelService.settled();
+  }
   const editor = createEditorActions({
     controller, config, useContext, sendUserMessage: (...args) => pi.sendUserMessage(...args), notify, notifyIfSameSession,
   });
   const workspaceActions = createWorkspaceActions({
     controller, config, setCompletionContext, persistConfig, historyStorage: lifecycle.historyStorage,
-    optimizationError: requests.optimizationError, draftInput: requests.draftInput,
+    optimizationError: requests.optimizationError, operations, saveOptimizer,
     triggerOptimize: requests.triggerOptimize, reviseCandidate: requests.reviseCandidate,
-    registeredModels: models.registeredModels, rememberThinking: models.rememberThinking, notify, preferenceRepository,
+    registeredModels: models.registeredModels, notify, preferenceRepository,
   });
   const host = createWorkspaceHost({
     controller, config, openHint, taskPositions, usagePositions, useContext,
@@ -99,6 +135,8 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     controller, taskPositions, useContext, host, requests, models, editor,
     clearHistory: lifecycle.clearHistory, notify,
   });
+
+  events.subscribe(() => updatePresentation(controller.getState()), true);
 
   function updatePresentation(state: ControllerState): void {
     if (!state.runningCount && !state.queuedCount) {
@@ -145,6 +183,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
   }
 
   async function persistConfig(ctx: ExtensionContext): Promise<boolean> {
+    events.changed();
     if (!configWritable) {
       notify(ctx, "The configuration file contains errors and was not overwritten. This setting is only effective for the current process. Fix the configuration and /reload.", "warning");
       return false;
@@ -154,8 +193,10 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     saveQueue = write.catch(() => undefined);
     try {
       await write;
+      events.changed();
       return true;
     } catch {
+      events.changed();
       notifyCurrent("This setting is effective now, but writing prompt-refine.json failed; it was not persisted.", "warning");
       return false;
     }
@@ -173,7 +214,35 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
       const text = userMessageText(message);
       if (typeof message === "object" && message !== null && "role" in message && message.role === "user") controller.onMessageStarted(text);
     },
-    lifecycle,
+    api: application.api,
+    lifecycle: {
+      ...lifecycle,
+      async start(event: { reason: string }, ctx: ExtensionContext) {
+        const sequence = ++lifecycleSequence;
+        application.invalidate();
+        await lifecycle.start(event, ctx);
+        if (sequence === lifecycleSequence) application.bind(ctx.sessionManager.getSessionId());
+      },
+      beforeTransition(ctx: ExtensionContext) {
+        lifecycleSequence++;
+        application.invalidate();
+        lifecycle.beforeTransition(ctx);
+      },
+      tree(ctx: ExtensionContext) {
+        lifecycleSequence++;
+        application.invalidate();
+        lifecycle.tree(ctx);
+        application.bind(ctx.sessionManager.getSessionId());
+      },
+      async shutdown(ctx: ExtensionContext) {
+        lifecycleSequence++;
+        application.invalidate();
+        await lifecycle.shutdown(ctx);
+        if (progressTimer) clearInterval(progressTimer);
+        progressTimer = undefined;
+        events.clear();
+      },
+    },
   };
 }
 

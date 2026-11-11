@@ -38,6 +38,7 @@ export class RefineController {
   private readonly scheduler: Scheduler;
   private readonly journal = new RefineHistory();
   private readonly active = new Map<number, ActiveRequest>();
+  private readonly submissions = new WeakMap<TriggerResult, { recordId: number; queued: boolean }>();
   private round?: { id: number; input: RefineRequestInput };
   private roundSequence = 0;
   private taskSequence = 0;
@@ -75,6 +76,20 @@ export class RefineController {
   getGeneration(): number { return this.generation; }
   getSessionId(): string | undefined { return this.sessionId; }
   getRoundId(): number | undefined { return this.round?.id; }
+  getTaskVersion(taskId: number): number { return this.journal.taskVersion(taskId); }
+  getRunVersion(recordId: number): number { return this.journal.runVersion(recordId); }
+  getRunElapsed(recordId: number): number | undefined {
+    const active = [...this.active.values()].find((run) => run.request.recordId === recordId);
+    return active ? elapsed(active) : this.getRecord(recordId)?.elapsedSeconds;
+  }
+  getSubmission(result: TriggerResult): { recordId: number; queued: boolean } | undefined {
+    const receipt = this.submissions.get(result);
+    return receipt ? { ...receipt } : undefined;
+  }
+  findOriginalRun(taskId: number, model: ModelRef, thinkingLevel?: ModelThinkingLevel): number | undefined {
+    return [...this.active.values()].find((run) => this.getRecord(run.request.recordId)?.taskId === taskId &&
+      !run.request.revision && sameModel(run.request.model, model) && run.request.thinkingLevel === thinkingLevel)?.request.recordId;
+  }
   getCandidate(): Candidate | undefined { return this.candidate ? structuredClone(this.candidate) : undefined; }
   getAppliedRecordId(): number | undefined { return (this.candidate ?? this.viewedAccepted)?.recordId; }
   getAccepted(): Candidate | undefined { return this.accepted ? structuredClone(this.accepted) : undefined; }
@@ -389,8 +404,11 @@ export class RefineController {
     this.active.set(requestId, { request, controller: new AbortController(), previousCandidate });
     this.journal.update(recordId, { status: "queued" });
     this.pump();
+    const result: TriggerResult = { kind: "started", requestId };
+    const active = this.active.get(requestId);
+    this.submissions.set(result, { recordId, queued: !!active && active.startedAt === undefined });
     this.emitState();
-    return { kind: "started", requestId };
+    return result;
   }
   private pump(): void {
     let running = [...this.active.values()].filter((item) => item.startedAt !== undefined).length;

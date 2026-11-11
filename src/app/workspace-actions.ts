@@ -5,6 +5,7 @@ import type { PreferenceStore } from "../preference-store.js";
 import type { RefineController } from "../controller.js";
 import type { CandidateToken, RefineRequestInput, TriggerResult } from "../request-types.js";
 import type { HistoryStorageStatus } from "../history-store.js";
+import type { TuiOperations } from "../adapters/tui-operations.js";
 import type { RefineWorkspace } from "../workspace.js";
 import type { RevisionDraft } from "../revision-preferences.js";
 import type { TaskPanelPosition } from "../task-panel.js";
@@ -14,20 +15,19 @@ import { RESTORED_CONTEXT_HINT, type Notify, type WorkspaceSelection } from "./c
 type WorkspaceOptions = ConstructorParameters<typeof RefineWorkspace>[4];
 interface WorkspaceActionsDependencies {
   controller: Pick<RefineController,
-    "applyResult" | "createDraft" | "deleteRecords" | "getAppliedRecordId" | "getCandidate" |
+    "applyResult" | "deleteRecords" | "getAppliedRecordId" | "getCandidate" |
     "getCandidateToken" | "getGeneration" | "getHistory" | "getModel" | "getOriginalRecord" | "getRecord" |
-    "getSessionId" | "getState" | "hasWorkspaceContent" | "removeDraft" | "runOriginal" | "startRecord" |
-    "stopRequest" | "updateDraft" | "updateDraftPreferences">;
+    "getSessionId" | "getState" | "hasWorkspaceContent" | "updateDraftPreferences">;
   config: Pick<RefineConfig, "preferencesKey" | "maxDraftChars" | "projectContext" | "context" | "maxOutputTokens" | "timeoutMs" | "thinkingLevel">;
   setCompletionContext(ctx: ExtensionContext): void;
   persistConfig(ctx: ExtensionContext): Promise<boolean>;
+  saveOptimizer(model: RefineRequestInput["model"], thinking: NonNullable<RefineRequestInput["thinkingLevel"]> | "inherit"): Promise<boolean>;
   historyStorage(ctx: ExtensionContext, sessionId: string): HistoryStorageStatus;
   optimizationError(ctx: ExtensionContext, draft: string): string | undefined;
-  draftInput(ctx: ExtensionContext, draft: string): RefineRequestInput;
+  operations: TuiOperations;
   triggerOptimize(ctx: ExtensionContext, force: boolean, draft: string, keepEditor: boolean, captureOnly: boolean): TriggerResult | undefined;
   reviseCandidate(ctx: ExtensionContext, token: CandidateToken, instruction: string): string | undefined;
   registeredModels(ctx: ExtensionContext): ReturnType<ExtensionContext["modelRegistry"]["getAvailable"]>;
-  rememberThinking(model: RefineRequestInput["model"], level: NonNullable<RefineRequestInput["thinkingLevel"]>): boolean;
   notify: Notify;
   preferenceRepository(ctx: ExtensionContext): PreferenceStore;
 }
@@ -43,14 +43,14 @@ interface WorkspaceMount {
 }
 
 export function createWorkspaceActions({ controller, config, setCompletionContext, persistConfig,
-  historyStorage, optimizationError, draftInput, triggerOptimize, reviseCandidate,
-  registeredModels, rememberThinking, notify, preferenceRepository }: WorkspaceActionsDependencies) {
+  historyStorage, optimizationError, operations, triggerOptimize, reviseCandidate,
+  registeredModels, notify, preferenceRepository, saveOptimizer }: WorkspaceActionsDependencies) {
   // Runtime-only drafts survive overlay mounts, but never enter history persistence.
   const inputDrafts = new Map<string, string>();
   const revisionDrafts = new Map<string, RevisionDraft>();
   return ({ ctx, sessionId, isClosed, isUsage, position, usagePosition,
     openModelPicker, finish }: WorkspaceMount): WorkspaceOptions => {
-    const runRecord = (id: number, retry = false) => {
+    const runRecord = (id: number) => {
       if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId) return;
       const record = controller.getRecord(id);
       if (!record) return;
@@ -61,7 +61,7 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
       const model = ctx.modelRegistry.find(selected.provider, selected.id)!;
       setCompletionContext(ctx);
       const thinking = effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel);
-      const result = retry && record.status !== "unsent" ? controller.runOriginal(id, selected, thinking) : controller.startRecord(id, selected, thinking);
+      const result = operations.start(id, selected, thinking);
       if (result.kind !== "started") notify(ctx, `Request not started (${result.kind}); existing work kept.`, "info");
     };
     return {
@@ -87,13 +87,14 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
         if (id !== undefined && !source) return undefined;
         const inPlace = source?.status === "unsent" && source.archivedAt === undefined;
         const text = source?.input.draft ?? "";
-        const created = inPlace ? undefined : controller.createDraft(draftInput(ctx, text));
+        const created = inPlace ? undefined : operations.create(text);
         if (!inPlace && created?.kind !== "captured") {
           notify(ctx, `Could not create draft (${created?.kind}); existing work kept.`, "warning");
           return undefined;
         }
         const targetId = inPlace ? source.id : (created as Extract<TriggerResult, { kind: "captured" }>).recordId;
         const target = controller.getRecord(targetId)!;
+        const targetVersion = operations.version(targetId);
         const targetPosition = isUsage() ? usagePosition : position;
         const previousPosition = { ...targetPosition };
         Object.assign(targetPosition, { selectedId: targetId, selectedTaskId: target.taskId, scroll: 0 });
@@ -102,10 +103,10 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
           save: (value) => {
             if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId || controller.getSessionId() !== sessionId) return "Session changed; draft not saved.";
             if (value.length > config.maxDraftChars) return `The draft exceeds ${config.maxDraftChars} characters.`;
-            return controller.updateDraft(targetId, text, value) ? undefined : "The draft or conversation context changed; cancel and reopen to edit a new copy.";
+            return operations.update(targetId, targetVersion, value) ? undefined : "The draft or conversation context changed; cancel and reopen to edit a new copy.";
           },
           cancel: () => {
-            if (!inPlace && controller.getSessionId() === sessionId) controller.removeDraft(targetId);
+            if (!inPlace && controller.getSessionId() === sessionId) operations.discard(targetId, targetVersion);
             Object.assign(targetPosition, previousPosition);
             targetPosition.selectedTaskId = previousPosition.selectedTaskId;
             targetPosition.selectedId = previousPosition.selectedId;
@@ -134,8 +135,8 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
           if (record?.status === "unsent") { runRecord(id); return false; }
           return controller.applyResult(id);
         },
-        run: (id) => runRecord(id, true),
-        stop: (id) => controller.stopRequest(id),
+        run: (id) => runRecord(id),
+        stop: (id) => { operations.stop(id); },
         deleteRecords: (ids) => !isClosed() && ctx.sessionManager.getSessionId() === sessionId && controller.deleteRecords(ids),
         chooseModel: (id) => openModelPicker(id),
         accept: (id) => {
@@ -178,9 +179,8 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
         const levels = getSupportedThinkingLevels(model);
         if (levels.length <= 1) return { message: "Thinking level is fixed for this model.", persisted: false };
         const current = effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel);
-        config.thinkingLevel = levels[(levels.indexOf(current) + 1) % levels.length];
-        rememberThinking(model, config.thinkingLevel!);
-        const persisted = await persistConfig(ctx);
+        const next = levels[(levels.indexOf(current) + 1) % levels.length]!;
+        const persisted = await saveOptimizer(ref!, next);
         return { message: persisted ? "Thinking level saved" : "Thinking applied · Not persisted; check configuration", persisted };
       },
       saveContext: async (selected) => {

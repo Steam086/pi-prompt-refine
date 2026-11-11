@@ -1,5 +1,5 @@
 import { parseKey, SelectList, type SelectItem } from "@earendil-works/pi-tui";
-import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model, type ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { getSupportedThinkingLevels, type Api, type Model, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { modelKey, type ModelRef, type RefineConfig } from "../config.js";
 import { REFINE_SYSTEM_PROMPT } from "../context.js";
@@ -9,26 +9,8 @@ import type { RefineController } from "../controller.js";
 import type { TaskPanelPosition } from "../task-panel.js";
 import { RESTORED_CONTEXT_HINT, type ModelPickerPresenter, type Notify, type NotifyCurrent, type NotifyIfSameSession } from "./contracts.js";
 
-export function sameModel(model: ModelRef, ref: ModelRef): boolean {
-  return model.provider === ref.provider && model.id === ref.id;
-}
-
-export function modelRef(model: Model<Api>): ModelRef {
-  return { provider: model.provider, id: model.id };
-}
-
-export function displayModel(model: ModelRef): string {
-  return `${model.provider}/${model.id}`;
-}
-
-export function effectiveThinkingLevel(model: Model<Api>, override: ModelThinkingLevel | undefined, sessionLevel: ModelThinkingLevel | undefined): ModelThinkingLevel {
-  return clampThinkingLevel(model, override ?? sessionLevel ?? "medium");
-}
-
-export function thinkingSource(override: ModelThinkingLevel | undefined, sessionLevel: ModelThinkingLevel | undefined): string {
-  if (override !== undefined) return "Extension setting";
-  return sessionLevel === undefined ? "Default (medium)" : "Inherited from current session";
-}
+import { sameModel, modelRef, displayModel, effectiveThinkingLevel, thinkingSource } from "./model-utils.js";
+export { sameModel, modelRef, displayModel, effectiveThinkingLevel, thinkingSource } from "./model-utils.js";
 
 /** Availability/authentication is owned by Pi; this only searches and labels its chat models. */
 export function modelPickerItems(models: Model<Api>[], query: string, selected?: ModelRef): SelectItem[] {
@@ -52,9 +34,13 @@ export function modelPickerItems(models: Model<Api>[], query: string, selected?:
 
 
 interface ModelSelectionDependencies {
+  saveOptimizer(model: ModelRef, thinking: ModelThinkingLevel | "inherit", expectedVersion?: number): Promise<boolean>;
+  optimizerVersion(): number;
+  taskVersion(id: number): number;
+  startOriginal(id: number, model: ModelRef, thinking: ModelThinkingLevel, expectedVersion: number): { kind: string };
   controller: Pick<RefineController,
     "getGeneration" | "getHistory" | "getModel" | "getOriginalRecord" | "getRecord" | "getSessionId" |
-    "getState" | "getTaskModels" | "runOriginal" | "setModel">;
+    "getState" | "getTaskModels">;
   config: Pick<RefineConfig, "model" | "modelThinkingLevels" | "thinkingLevel" | "favorites" | "systemPrompt">;
   useContext(ctx: ExtensionContext): void;
   setCompletionContext(ctx: ExtensionContext): void;
@@ -69,22 +55,13 @@ interface ModelSelectionDependencies {
 
 export function createModelSelection({ controller, config, useContext, setCompletionContext,
   persistConfig, optimizationError, taskPositions, usagePositions, notify, notifyCurrent,
-  notifyIfSameSession }: ModelSelectionDependencies) {
+  notifyIfSameSession, saveOptimizer, startOriginal, optimizerVersion, taskVersion }: ModelSelectionDependencies) {
   const recentRunModels = new Map<string, string[]>();
   function rememberThinking(model: ModelRef, level: ModelThinkingLevel): boolean {
     const key = modelKey(model);
     if (config.modelThinkingLevels[key] === level) return false;
     config.modelThinkingLevels[key] = level;
     return true;
-  }
-
-  // Preserve legacy/default-model settings before switching away for the first time.
-  function rememberCurrentThinking(ctx: ExtensionContext): void {
-    const current = controller.getModel();
-    const model = current && ctx.modelRegistry.find(current.provider, current.id);
-    if (model && config.modelThinkingLevels[modelKey(model)] === undefined) {
-      rememberThinking(model, effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel));
-    }
   }
 
   function registeredModels(ctx: ExtensionContext): Model<Api>[] {
@@ -119,6 +96,7 @@ export function createModelSelection({ controller, config, useContext, setComple
       return;
     }
 
+    const sourceVersion = source ? taskVersion(source.id) : optimizerVersion();
     const startGeneration = controller.getGeneration();
     const startSessionId = ctx.sessionManager.getSessionId();
     const startBranch = ctx.sessionManager.getLeafId();
@@ -246,7 +224,7 @@ export function createModelSelection({ controller, config, useContext, setComple
       if (error) { notify(ctx, error, "warning"); return; }
       setCompletionContext(ctx);
       const thinking = effectiveThinkingLevel(model, selection.thinkingLevel, ctx.thinkingLevel);
-      const result = controller.runOriginal(runId!, modelRef(model), thinking);
+      const result = startOriginal(runId!, modelRef(model), thinking, sourceVersion);
       if (result.kind === "started" || result.kind === "duplicate") {
         recentRunModels.set(startSessionId, [selection.modelKey, ...recent.filter((key) => key !== selection.modelKey)].slice(0, 12));
         if (result.kind === "duplicate") {
@@ -264,22 +242,22 @@ export function createModelSelection({ controller, config, useContext, setComple
       } else notify(ctx, `Request not started (${result.kind}); existing work kept.`, "warning");
       return;
     }
+    if (optimizerVersion() !== sourceVersion) {
+      notify(ctx, "Optimizer settings changed; reopen the model picker.", "warning");
+      return;
+    }
     const firstSelection = !controller.getModel();
     const selected = modelRef(model);
-    if (!config.model || !sameModel(config.model, selected)) rememberCurrentThinking(ctx);
-    let changed = controller.setModel(selected);
-    if (changed) config.model = selected;
-    if (selection.thinkingLevel !== undefined && selection.thinkingLevel !== config.thinkingLevel) {
-      config.thinkingLevel = selection.thinkingLevel;
-      changed = true;
-    }
-    changed = rememberThinking(model, effectiveThinkingLevel(model, selection.thinkingLevel, ctx.thinkingLevel)) || changed;
+    const currentModel = controller.getModel();
+    const changed = !currentModel || !sameModel(currentModel, selected) ||
+      (selection.thinkingLevel !== undefined && selection.thinkingLevel !== config.thinkingLevel) ||
+      config.modelThinkingLevels[modelKey(model)] !== effectiveThinkingLevel(model, selection.thinkingLevel, ctx.thinkingLevel);
     if (!changed) {
       const level = effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel);
       notify(ctx, `${displayModel(selected)} is already the current optimizer model; thinking level: ${level} (${thinkingSource(config.thinkingLevel, ctx.thinkingLevel)}).`, "info");
       return;
     }
-    const persisted = await persistConfig(ctx);
+    const persisted = await saveOptimizer(selected, selection.thinkingLevel ?? config.thinkingLevel ?? "inherit", sourceVersion);
     const level = effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel);
     const levelSource = thinkingSource(config.thinkingLevel, ctx.thinkingLevel);
     const thinking = getSupportedThinkingLevels(model).length === 1 ? "not supported by this model" : `${level} (${levelSource})`;
@@ -335,14 +313,8 @@ export function createModelSelection({ controller, config, useContext, setComple
     const currentIndex = usable.findIndex((favorite) => modelKey(favorite) === (current ? modelKey(current) : ""));
     const next = usable[(currentIndex + 1) % usable.length];
     if (!next) return;
-    rememberCurrentThinking(ctx);
-    if (!controller.setModel(next)) {
-      notify(ctx, `Favorites contain only the current model ${displayModel(next)}.`, "info");
-      return;
-    }
-    config.model = { ...next };
-    config.thinkingLevel = config.modelThinkingLevels[modelKey(next)] ?? config.thinkingLevel;
-    await persistConfig(ctx);
+    await saveOptimizer(next, config.modelThinkingLevels[modelKey(next)] ?? config.thinkingLevel ?? "inherit");
+    if (controller.getModel() && !sameModel(controller.getModel()!, next)) return;
     notifyCurrent(`Optimizer model switched to ${displayModel(next)}; the main session model is unchanged.`, "info");
   }
 
