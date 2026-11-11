@@ -24,6 +24,21 @@ npm test -- --sequence.shuffle --sequence.seed=20261109
 
 可选的离线性能实验：`REFINE_BENCHMARK=1 npm test -- test/benchmarks/settings-performance.test.ts`。真实模型实验位于 `test/live/`，启用方法和费用边界见对应实验文档；普通验收不启用它们。
 
+## 多入口第一切片检查
+
+根检查仍只需根依赖，默认不启用真实 Provider/benchmark，也不导入 Web 子包：
+
+```sh
+npm run typecheck
+npm test
+```
+
+新增 `application-idempotency`、`application-contract`、`session-events`、`slash-api` 测试覆盖不可变白名单、原生/远端版本冲突、稳定 started/queued/duplicate ID、丢回执重放、生命周期失效、RPC/print 无编辑器/主会话写入、Unicode 分块、原生输出样式与清理。
+
+Web 子包在 `packages/pi-web/` 单独 `npm ci --ignore-scripts --omit=optional` 后运行 `npm run typecheck` 和 `npm test`。其 Node 测试使用实际 browser client/server peer/core events adapter + fake public capability/application，并审计 emitted import graph；不需要启动服务，也不等同真实浏览器或实际 host capability 加载。
+
+真实部署、双浏览器、外部认证、IME 和 live Provider 的待验收项见 [子包说明](../packages/pi-web/README.md)。未授权时不得为验收重启承载当前会话的 daemon。
+
 ## 测试设施约束
 
 - 每个 harness 拥有独立的临时目录、事件处理器、编辑器、provider 和销毁流程；不得导出跨测试共享的可变实例。

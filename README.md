@@ -8,6 +8,10 @@ Pi Prompt Refine 是 Pi Coding Agent 的提示词改写扩展。它结合当前�
 
 优化在后台进行，你可以继续输入；关闭面板不会停止请求，完成时也不会抢走焦点。
 
+## 多入口（实验性）
+
+新增 [`/refine-api`](docs/application-api.md)，支持模型配置、草稿保存、显式运行/停止及状态/结果查询，不改变旧 `/refine` 或快捷键。可选 [PI WEB 独立子包](packages/pi-web/README.md) 已有离线契约/构建测试，尚未完成真实宿主与浏览器验收，也未部署。
+
 ## 常用工作流
 
 选中模型结果即可操作，按 Enter 查看详情。
