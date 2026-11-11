@@ -131,6 +131,7 @@ export function createApplication(deps: {
     }
   }
   const api: ApplicationApi = {
+    isCurrentBinding: (value) => guard(value) === undefined,
     hello(clientId: string, resumeLease?: string): Reply<Hello> {
       if (!identity(clientId) || (resumeLease !== undefined && !identity(resumeLease))) return reject("invalid-input");
       if (!current) return reject("not-ready");
@@ -151,7 +152,8 @@ export function createApplication(deps: {
           return records.length ? ok(taskDetail(records, controller.getTaskVersion(records[0]!.taskId), controller.getState().pendingSend, modelUnavailable())) : reject("not-found");
         }
         case "run": {
-          const record = controller.getHistory().find((record) => record.id === localId(query.runId, "run"));
+          const id = localId(query.runId, "run");
+          const record = id === undefined ? undefined : controller.getRecord(id);
           return record && record.status !== "unsent" ? ok(runDetail(record, controller.getRunVersion(record.id), controller.getRunElapsed(record.id))) : reject("not-found");
         }
         case "snapshot": {

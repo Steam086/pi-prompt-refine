@@ -33,7 +33,7 @@ npm run typecheck
 npm test
 ```
 
-新增 `application-idempotency`、`application-contract`、`session-events`、`slash-api` 测试覆盖不可变白名单、原生/远端版本冲突、稳定 started/queued/duplicate ID、丢回执重放、生命周期失效、RPC/print 无编辑器/主会话写入、Unicode 分块、原生输出样式与清理。
+新增 `application-idempotency`、`application-contract`、`session-events`、`slash-api` 测试覆盖不可变白名单、原生/远端版本冲突、稳定 started/queued/duplicate ID、丢回执重放、生命周期失效、RPC/print 无编辑器/主会话写入、Unicode 分块、原生输出样式与清理。`json-output` 与 `output-paging` 进一步验证惰性编码、surrogate/转义等价性、单页回放、Binding/连接/顺序守卫和配额释放。
 
 Web 子包在 `packages/pi-web/` 单独 `npm ci --ignore-scripts --omit=optional` 后运行 `npm run typecheck` 和 `npm test`。其 Node 测试使用实际 browser client/server peer/core events adapter + fake public capability/application，并审计 emitted import graph；不需要启动服务，也不等同真实浏览器或实际 host capability 加载。
 

@@ -72,12 +72,16 @@ TUI 结果在只读 overlay 中滚动阅读，Esc/Enter 关闭；不会 sendMess
 `src/adapters/session-events.ts` 不依赖 pi-web，注册以下 session-local Pi 事件：
 
 - `prompt-refine:v1:request`：`{connectionId, requestId, call}`。
-- `prompt-refine:v1:response`：同一关联 ID + result，或有序 base64 part。
+- `prompt-refine:v1:response`：同一关联 ID + result；大回复先返回 output token，再按需读取单页。
 - `prompt-refine:v1:invalidation`：connectionId + Binding/revision。
 
-call 为 hello/query/mutate/subscribe/close，或 stage/commit 临时文本传输。直接 frame 最大 60 KiB，结果块最大 48 KiB；长文本将完整 JSON 的 UTF-8 字节 base64 化，按序 stage 后 commit。单传输 2 MiB 编码文本、最多 128 块、60 秒固定 TTL、每连接最多两份、runtime 最多 16 份/16 MiB；缺失/乱序/冲突/过期拒绝，重复相同块可重传。commit 丢失回执仍按 operation 查询恢复，不自动换 nonce。
+call 为 hello/query/mutate/subscribe/close、stage/commit 临时输入传输，或 readOutput/releaseOutput 按需输出读取。直接 frame 最大 60 KiB，结果块最大 48 KiB；长文本将完整 JSON 的 UTF-8 字节 base64 化，按序 stage 后 commit。单传输 2 MiB 编码文本、最多 128 块、60 秒固定 TTL、每连接最多两份、runtime 最多 16 份/16 MiB；缺失/乱序/冲突/过期拒绝，重复相同块可重传。commit 丢失回执仍按 operation 查询恢复，不自动换 nonce。
 
-每 runtime 最多 16 个连接、64 个待响应调用；连接空闲 5 分钟释放。连接结束仅释放传输/订阅，不取消 controller 任务。回复全文最多 16 MiB；超限明确拒绝，不截断有效正文。实际 Web 子包进一步分页回复，避免宿主 request/channel 限制降低应用允许的 100,000 UTF-16 code units 原稿上限。
+每 runtime 最多 16 个连接、64 个待响应调用；连接空闲 5 分钟释放。连接结束仅释放传输/订阅，不取消 controller 任务。
+
+大回复只保留白名单 DTO 和有界编码迭代器，不先构造完整 JSON/base64 副本。每连接最多四份输出、16 MiB 保守内存计量（UTF-16 字符、结构和 scratch），runtime 最多 16 份/64 MiB；输出空闲 60 秒过期，最长存活 5 分钟。每次 readOutput 只返回一份最多 48 KiB 的 base64 part（index/done/text），检查原 Binding，并可重放最后一页；读取不会改变领域 revision 或请求模型。release、断开、过期回收资源。Web server 不再暂存整份输出，也不一次性推送大量帧；浏览器解码上限 64 MiB base64/2048 页。超配额明确拒绝，不截断。
+
+离线回归覆盖 2,097,152 字符的结果 + 同等长度前结果 + 三份各 100,000 字符的原稿/要求，使用最坏 JSON 转义数据验证完整往返及单 frame 边界；这没有降低应用文本/输出字符限制，也不代替真实宿主或性能验收。
 
 事件总线不是认证边界。只允许可信宿主 adapter 接入；不可将这些事件直接裸露为未鉴权公网 API。
 
@@ -85,4 +89,4 @@ call 为 hello/query/mutate/subscribe/close，或 stage/commit 临时文本传�
 
 独立集成包见 [`packages/pi-web`](../packages/pi-web/README.md)。根包不依赖 pi-web，根 typecheck/test 不要求安装该子包。
 
-当前仅完成离线应用/适配器契约、构建图及模拟 public capability 连接验证。已知缺口：Web 的 16 MiB 配额按 base64 计量，极大/转义密集结果及参考即使符合核心输出字符限制，也可能被 resource-limit 拒绝；全部配置范围的长结果尚未对齐，需要核心边界的按需输出分页/流式传输及真实宿主验证。实际宿主插件加载、真实多浏览器、外部认证、浏览器视觉/IME 与真实 Provider 的 S6 验收另行进行；离线通过不等于已经部署或上线可用。
+当前完成离线应用/适配器契约、构建图及模拟 public capability 连接验证；已修复最初整份 base64 暂存导致的长结果配额缺口，改为 core 按需分页。实际宿主插件加载、真实多浏览器、外部认证、浏览器视觉/IME 与真实 Provider 的 S6 验收另行进行；离线通过不等于已经部署或上线可用。

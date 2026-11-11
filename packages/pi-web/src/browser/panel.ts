@@ -18,6 +18,8 @@ export class RefinePanel extends HTMLElement {
   private busy = false;
   private dirty = false;
   private draft?: { id: string; version: number; binding: string };
+  private editorBinding = "";
+  private loadedText?: { literal: string; display: string };
   private optimizerVersion = 0;
   private optimizerBinding = "";
   private optimizerDirty = false;
@@ -45,11 +47,14 @@ export class RefinePanel extends HTMLElement {
     style.textContent = `:host{display:block;color:inherit;font:inherit;min-width:0}*{box-sizing:border-box}section{min-width:0}label{display:grid;gap:.35rem;margin:.6rem 0}textarea,select,button{font:inherit;color:inherit;background:inherit;border:1px solid currentColor;border-radius:.25rem;padding:.4rem}textarea{width:100%;min-height:12rem;resize:vertical}button{margin:.2rem}button:disabled{opacity:.5}select{max-width:100%;width:100%}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr));gap:1rem}pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere;max-height:60vh;overflow:auto}h2,h3{font-size:1em}p{overflow-wrap:anywhere}[role=alert]{font-weight:bold} :focus-visible{outline:2px solid currentColor;outline-offset:2px}`;
     this.notice.setAttribute("role", "status"); this.notice.setAttribute("aria-live", "polite");
     this.original.spellcheck = false; this.original.maxLength = 100_000;
-    this.original.addEventListener("input", () => { this.dirty = true; this.paint(); });
+    this.original.addEventListener("input", () => {
+      if (!this.editorBinding) this.editorBinding = scopeKey(this.client?.hello?.binding) || "unbound";
+      this.dirty = true; this.paint();
+    });
     this.connectButton = this.button("Connect / reconnect", async () => { await this.client?.connect(true); });
     this.retryButton = this.button("Check / retry operation", async () => {
-      const client = this.client, receipt = await client?.retry();
-      if (client === this.client && receipt) await this.receipt(receipt);
+      const client = this.client, pending = client?.pending, receipt = await client?.retry();
+      if (client === this.client && receipt) await this.receipt(receipt, pending);
     });
     this.forgetButton = this.button("Forget retry", async () => {
       if (confirm("Forget only the retry receipt? A committed request may still be running; this does not cancel it.")) this.client?.forgetRetry();
@@ -69,12 +74,13 @@ export class RefinePanel extends HTMLElement {
     const draftSection = element("section");
     this.tasks.addEventListener("change", () => { void this.perform(() => this.loadTask(this.tasks.value)); });
     this.saveButton = this.button("Save draft", async () => {
-      const client = this.client!, text = this.original.value;
+      const client = this.client!, display = this.original.value, text = this.draftText();
       this.guardDraft();
       const receipt = await client.execute(this.draft ? { method: "updateDraft", taskId: this.draft.id, expectedVersion: this.draft.version, text } : { method: "createDraft", text });
       if (client !== this.client) return;
       if ("taskId" in receipt && receipt.taskId && "version" in receipt) this.draft = { id: receipt.taskId, version: receipt.version, binding: scopeKey(client.hello?.binding) };
-      if (this.original.value === text) this.dirty = false;
+      this.editorBinding = scopeKey(client.hello?.binding); this.loadedText = { literal: text, display };
+      if (this.original.value === display) this.dirty = false;
       this.paint();
     });
     this.startButton = this.button("Optimize saved draft", async () => {
@@ -85,7 +91,8 @@ export class RefinePanel extends HTMLElement {
     });
     draftSection.append(element("h3", "Drafts"), labelled("Saved task", this.tasks), this.button("New draft", async () => {
       if (this.dirty && !confirm("Discard unsaved local text?")) return;
-      this.original.value = ""; this.draft = undefined; this.dirty = false; this.tasks.value = "";
+      this.original.value = ""; this.draft = undefined; this.loadedText = undefined;
+      this.editorBinding = scopeKey(this.client?.hello?.binding); this.dirty = false; this.tasks.value = "";
     }), labelled("Original", this.original), this.saveButton, this.startButton);
     const runSection = element("section");
     this.runs.addEventListener("change", () => { void this.perform(() => this.loadRun(this.runs.value)); });
@@ -101,7 +108,8 @@ export class RefinePanel extends HTMLElement {
     const key = JSON.stringify([context.machine.id, context.workspace.projectId, context.workspace.id, session?.id]);
     if (key === this.key) return;
     this.client?.disconnect(); this.key = key;
-    this.draft = undefined; this.optimizerDirty = false; this.observedModels = undefined; this.taskSignature = ""; this.runSignature = "";
+    // Retain the original's identity with its text. Never silently turn an old edit into a new-session create.
+    this.optimizerDirty = false; this.observedModels = undefined; this.taskSignature = ""; this.runSignature = "";
     this.tasks.replaceChildren(); this.runs.replaceChildren(); this.output.textContent = "";
     const peer = context.backend?.forScope({ kind: "workspace", projectId: context.workspace.projectId, workspaceId: context.workspace.id }) ?? context.peer;
     this.client = peer && session && !session.archived && !session.pending ? this.clients.get(key) : undefined;
@@ -132,8 +140,15 @@ export class RefinePanel extends HTMLElement {
     }
     finally { this.busy = false; this.paint(); }
   }
+  private draftText() {
+    // textarea.value normalizes CRLF; an unchanged loaded draft must retain its literal text.
+    return this.loadedText?.display === this.original.value ? this.loadedText.literal : this.original.value;
+  }
   private guardDraft() {
-    if (this.draft && this.draft.binding !== scopeKey(this.client?.hello?.binding)) throw new Error("Draft binding changed. Reopen a task or explicitly create a new draft.");
+    const binding = scopeKey(this.client?.hello?.binding);
+    if ((this.editorBinding && this.editorBinding !== binding) || (this.draft && this.draft.binding !== binding)) {
+      throw new Error("Draft binding changed. Reopen a task or explicitly create a new draft.");
+    }
   }
   private async loadTask(id: string) {
     if (!id || !this.client) return;
@@ -147,6 +162,7 @@ export class RefinePanel extends HTMLElement {
     }
     this.original.value = task.text; this.dirty = false;
     this.draft = { id: task.id, version: task.version, binding: scopeKey(client.hello?.binding) };
+    this.editorBinding = this.draft.binding; this.loadedText = { literal: task.text, display: this.original.value };
   }
   private async loadRun(id: string) {
     if (!id || !this.client) return;
@@ -158,7 +174,21 @@ export class RefinePanel extends HTMLElement {
       (run.revisionInstruction ? `\n\nRevision requirements\n${run.revisionInstruction}` : "") +
       (run.previousResult ? `\n\nPrevious result\n${run.previousResult}` : "");
   }
-  private async receipt(receipt: Receipt) {
+  private async receipt(receipt: Receipt, pending?: RefineClient["pending"]) {
+    const mutation = pending?.mutation;
+    if (pending && (mutation?.method === "createDraft" || mutation?.method === "updateDraft") && "taskId" in receipt && "version" in receipt) {
+      const binding = scopeKey(pending.meta.binding);
+      if (binding !== scopeKey(this.client?.hello?.binding)) return;
+      this.client!.notice = `${receipt.outcome}: ${receipt.taskId}`;
+      const sameForm = (!this.editorBinding || this.editorBinding === binding) &&
+        (mutation.method === "updateDraft" ? this.draft?.id === mutation.taskId : !this.draft);
+      if (sameForm) {
+        const unchanged = this.draftText() === mutation.text;
+        this.draft = { id: receipt.taskId, version: receipt.version, binding }; this.editorBinding = binding;
+        this.loadedText = { literal: mutation.text, display: mutation.text.replace(/\r\n?/g, "\n") };
+        this.dirty = !unchanged;
+      }
+    }
     if ("runId" in receipt && receipt.runId) { this.runs.value = receipt.runId; await this.loadRun(receipt.runId); }
   }
   private updateThinking() {
@@ -207,8 +237,15 @@ export class RefinePanel extends HTMLElement {
     if (JSON.stringify(tasks) !== this.taskSignature) { this.taskSignature = JSON.stringify(tasks); this.options(this.tasks, tasks); }
     const runs = [["", "Choose run"], ...snapshot.runs.map((run) => [run.id, `${run.id} · ${run.status} · ${run.model.provider}/${run.model.id}`])] as Array<[string, string]>;
     if (JSON.stringify(runs) !== this.runSignature) { this.runSignature = JSON.stringify(runs); this.options(this.runs, runs); }
+    const staleDraft = !!this.editorBinding && this.editorBinding !== scopeKey(client.hello?.binding);
+    if (staleDraft) {
+      this.notice.textContent += " · Original belongs to another session/epoch; choose New draft or a saved task.";
+      this.notice.setAttribute("role", "alert");
+    }
     const task = snapshot.tasks.find((task) => task.id === this.draft?.id);
-    this.saveButton.disabled ||= !!task && !task.actions.edit.enabled;
+    if (!staleDraft && task) this.tasks.value = task.id;
+    this.saveButton.disabled ||= staleDraft || (!!this.draft && !this.dirty) || (!!task && !task.actions.edit.enabled);
+    this.startButton.disabled ||= staleDraft;
     this.startButton.disabled ||= !this.draft || this.dirty || !task?.actions.start.enabled;
     this.stopButton.disabled ||= !snapshot.runs.find((run) => run.id === this.runs.value)?.actions.stop.enabled;
   }

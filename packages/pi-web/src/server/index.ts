@@ -25,6 +25,9 @@ function validCall(call: unknown, sessionId: string, clientId: string): call is 
     call.binding.sessionId === sessionId && !!parseQuery(call.query);
   if (call.action === "mutate") return keysOnly(call, ["action", "meta", "mutation"]) && mutationMeta(call.meta) &&
     call.meta.binding.sessionId === sessionId && !!parseMutation(call.mutation);
+  if (call.action === "readOutput") return keysOnly(call, ["action", "outputId", "index"]) && identity(call.outputId) &&
+    Number.isSafeInteger(call.index) && (call.index as number) >= 0;
+  if (call.action === "releaseOutput") return keysOnly(call, ["action", "outputId"]) && identity(call.outputId);
   if (call.action === "stage") return keysOnly(call, ["action", "transferId", "index", "total", "text"]) && identity(call.transferId) &&
     Number.isSafeInteger(call.index) && Number.isSafeInteger(call.total) && typeof call.text === "string" && call.text.length <= 48 * 1024;
   return call.action === "commit" && keysOnly(call, ["action", "transferId"]) && identity(call.transferId);
@@ -41,14 +44,10 @@ const plugin: PiWebServerPluginV5 = {
           try {
             const selected = selection(scope, input);
             if (!pool || !isRecord(input)) return { kind: "rejected", code: "not-ready" };
-            if (!keysOnly(input, ["sessionId", "clientId", "call", "transferId", "index"])) throw new Error("invalid-input");
-            if (operation !== "call" && operation !== "read" && operation !== "release") throw new Error("invalid-input");
-            if (operation === "call" && !validCall(input.call, selected.sessionId, input.clientId as string)) throw new Error("invalid-input");
-            if (operation !== "call" && (!identity(input.transferId) || (operation === "read" && !Number.isSafeInteger(input.index)))) throw new Error("invalid-input");
+            if (!keysOnly(input, ["sessionId", "clientId", "call"]) || operation !== "call" ||
+              !validCall(input.call, selected.sessionId, input.clientId as string)) throw new Error("invalid-input");
             const connection = await pool.get(selected, input.clientId as string);
             if (signal.aborted) throw new Error("outcome-unknown");
-            if (operation === "read") return connection.read(input.transferId as string, input.index as number);
-            if (operation === "release") { connection.release(input.transferId as string); return { kind: "ok" }; }
             return await connection.call(input.call as Record<string, unknown>, signal);
           } catch (error) {
             const code = error instanceof Error && ["invalid-input", "invalid-scope", "resource-limit", "connection-closed", "transfer-expired", "outcome-unknown"].includes(error.message)
