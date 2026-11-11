@@ -8,7 +8,7 @@ import { preserveDroppedTuiReference } from "../reference-preservation.js";
 import { budgetRequest } from "../budget.js";
 import { assembleProjectContext, collectDirectoryContext, type TreeSnapshot } from "../project-context.js";
 import { readRunUsage } from "../usage.js";
-import { displayModel, sameModel } from "./model-selection.js";
+import { displayModel, sameModel } from "./model-utils.js";
 import type { Notify, NotifyIfSameSession } from "./contracts.js";
 import type { createContextJobs } from "./context-jobs.js";
 
@@ -28,7 +28,9 @@ export function createCompletion({ config, getContext, getSessionId, directorySn
   capturePreparedInput, captureBudget, reportProject, notify, notifyIfSameSession }: CompletionDependencies) {
   return async (request: RefineRequest, signal: AbortSignal): Promise<RefineCompletion> => {
     const ctx = getContext();
-    if (!ctx || ctx.mode !== "tui") throw new Error("TUI context unavailable");
+    if (!ctx || ctx.sessionManager.getSessionId() !== request.sessionId || getSessionId() !== request.sessionId) {
+      throw new Error("Execution context unavailable or stale");
+    }
     const model = ctx.modelRegistry.find(request.model.provider, request.model.id);
     if (!model) throw new Error(`Unknown model ${displayModel(request.model)}`);
     const available = ctx.modelRegistry.getAvailable().some((candidate) => sameModel(candidate, request.model));

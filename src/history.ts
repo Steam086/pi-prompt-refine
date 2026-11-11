@@ -27,10 +27,24 @@ export interface RefineRecord {
 export class RefineHistory {
   private sequence = 0;
   private records: RefineRecord[] = [];
+  private taskVersions = new Map<number, number>();
+  private runVersions = new Map<number, number>();
+  taskVersion(id: number): number { return this.taskVersions.get(id) ?? 1; }
+  runVersion(id: number): number { return this.runVersions.get(id) ?? 1; }
+  private touchTask(id: number): void { this.taskVersions.set(id, this.taskVersion(id) + 1); }
+  private touchRun(id: number): void { this.runVersions.set(id, this.runVersion(id) + 1); }
+  private pruneVersions(): void {
+    const tasks = new Set(this.records.map((record) => record.taskId));
+    const runs = new Set(this.records.map((record) => record.id));
+    for (const id of this.taskVersions.keys()) if (!tasks.has(id)) this.taskVersions.delete(id);
+    for (const id of this.runVersions.keys()) if (!runs.has(id)) this.runVersions.delete(id);
+  }
   constructor(private readonly limit = 100) {}
 
   restore(records: RefineRecord[]): void {
     this.records = structuredClone(records.slice(-this.limit));
+    this.taskVersions.clear();
+    this.runVersions.clear();
     this.sequence = Math.max(this.sequence, ...this.records.map((record) => record.id));
   }
 
@@ -53,6 +67,7 @@ export class RefineHistory {
       delete freshInput.sentInput;
     }
     this.records.push({ id, taskId, input: freshInput, originalInput, parentId, kind, createdAt: Date.now(), status });
+    this.pruneVersions();
     return id;
   }
 
@@ -64,9 +79,15 @@ export class RefineHistory {
   }
 
   archive(sessionId: string, roundId: number): void {
+    const changedTasks = new Set<number>();
     for (const record of this.records) {
-      if (record.input.sessionId === sessionId && record.input.roundId === roundId && record.archivedAt === undefined) record.archivedAt = Date.now();
+      if (record.input.sessionId === sessionId && record.input.roundId === roundId && record.archivedAt === undefined) {
+        record.archivedAt = Date.now();
+        changedTasks.add(record.taskId);
+        this.touchRun(record.id);
+      }
     }
+    for (const id of changedTasks) this.touchTask(id);
   }
 
   setModel(id: number, model: RefineRequestInput["model"], thinkingLevel: RefineRequestInput["thinkingLevel"]): void {
@@ -77,6 +98,8 @@ export class RefineHistory {
   editDraft(id: number, draft: string): void {
     const record = this.records.find((item) => item.id === id);
     if (record?.status !== "unsent") return;
+    this.touchTask(record.taskId);
+    this.touchRun(record.id);
     record.input.draft = draft;
     record.originalInput = { ...structuredClone(record.input), draft };
     delete record.input.preparedInput;
@@ -88,6 +111,8 @@ export class RefineHistory {
   setDraftPreferences(id: number, selected: readonly SelectedPreference[], instruction: string): void {
     const record = this.records.find((item) => item.id === id);
     if (record?.status !== "unsent") return;
+    this.touchTask(record.taskId);
+    this.touchRun(record.id);
     record.input.preferences = structuredClone([...selected]);
     record.input.editingInstruction = instruction || undefined;
     delete record.input.preparedInput;
@@ -99,15 +124,22 @@ export class RefineHistory {
 
   remove(ids: ReadonlySet<number>, sessionId: string): void {
     this.records = this.records.filter((record) => record.input.sessionId !== sessionId || !ids.has(record.id));
+    this.pruneVersions();
   }
 
   removeDraft(id: number): void {
     this.records = this.records.filter((record) => record.id !== id || record.status !== "unsent");
+    this.pruneVersions();
   }
 
   update(id: number, patch: Partial<Pick<RefineRecord, "status" | "error" | "candidate" | "usage" | "elapsedSeconds" | "acceptedAt" | "sentAt" | "archivedAt" | "appliedAt">>): void {
     const record = this.records.find((item) => item.id === id);
-    if (record) Object.assign(record, structuredClone(patch));
+    if (record) {
+      if ((record.status === "unsent" && patch.status !== undefined && patch.status !== "unsent") ||
+        (patch.archivedAt !== undefined && patch.archivedAt !== record.archivedAt)) this.touchTask(record.taskId);
+      this.touchRun(id);
+      Object.assign(record, structuredClone(patch));
+    }
   }
 
   captureInput(id: number, preparedInput: string, diagnostics?: RefineRequestInput["projectDiagnostics"]): void {
@@ -130,6 +162,7 @@ export class RefineHistory {
   captureBudget(id: number, budget: BudgetReport, sentInput?: string): void {
     const record = this.records.find((item) => item.id === id);
     if (!record) return;
+    this.touchRun(id);
     record.input.budget = structuredClone(budget);
     record.input.sentInput = sentInput;
   }
