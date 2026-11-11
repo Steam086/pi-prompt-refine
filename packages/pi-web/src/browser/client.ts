@@ -31,40 +31,45 @@ export class RefineClient {
   private refreshAgain = false;
   private attempt = 0;
   constructor(private peer: PluginPeer, readonly sessionId: string, readonly changed: () => void) {}
-  private async request(operation: string, body: object): Promise<JsonValue> {
+  private async request(operation: string, body: object, signal = this.lifetime.signal): Promise<JsonValue> {
+    if (signal.aborted) throw new Error("connection-closed");
     if (!this.peer.request) throw new Error("Backend requests unavailable");
-    return this.peer.request(operation, json({ sessionId: this.sessionId, clientId: this.clientId, ...body }), { signal: this.lifetime.signal });
+    return this.peer.request(operation, json({ sessionId: this.sessionId, clientId: this.clientId, ...body }), { signal });
   }
   private async call(call: object): Promise<unknown> {
+    const signal = this.lifetime.signal;
     const serialized = JSON.stringify(call);
     let response: unknown;
-    if (new TextEncoder().encode(serialized).length <= 48 * 1024) response = await this.request("call", { call });
+    if (new TextEncoder().encode(serialized).length <= 48 * 1024) response = await this.request("call", { call }, signal);
     else {
       const encoded = encode(serialized), chunkSize = 32_000;
       const transferId = crypto.randomUUID(), total = Math.ceil(encoded.length / chunkSize);
       if (encoded.length > 2 * 1024 * 1024 || total > 128) throw new Error("resource-limit");
       for (let index = 0; index < total; index++) {
-        const reply = await this.request("call", { call: { action: "stage", transferId, index, total, text: encoded.slice(index * chunkSize, (index + 1) * chunkSize) } });
+        const reply = await this.request("call", { call: { action: "stage", transferId, index, total, text: encoded.slice(index * chunkSize, (index + 1) * chunkSize) } }, signal);
         if (!isRecord(reply) || reply.kind !== "ok") throw new Error("text-transfer-failed");
       }
-      response = await this.request("call", { call: { action: "commit", transferId } });
+      response = await this.request("call", { call: { action: "commit", transferId } }, signal);
     }
-    if (isRecord(response) && isRecord(response.transfer)) {
-      const { id, total } = response.transfer;
-      if (typeof id !== "string" || !Number.isSafeInteger(total) || (total as number) < 1 || (total as number) > 512) throw new Error("invalid-response");
+    if (isRecord(response) && isRecord(response.output)) {
+      const { id } = response.output;
+      if (typeof id !== "string") throw new Error("invalid-response");
       const parts: string[] = [];
-      let size = 0;
+      let size = 0, done = false;
       try {
-        for (let index = 0; index < (total as number); index++) {
-          const reply = await this.request("read", { transferId: id, index });
-          if (!isRecord(reply) || !isRecord(reply.part) || reply.part.index !== index || reply.part.total !== total ||
+        for (let index = 0; index < 2048; index++) {
+          const reply = await this.request("call", { call: { action: "readOutput", outputId: id, index } }, signal);
+          if (isRecord(reply) && typeof reply.code === "string") throw new Error(reply.code);
+          if (!isRecord(reply) || !isRecord(reply.part) || reply.part.index !== index || typeof reply.part.done !== "boolean" ||
             reply.part.encoding !== "base64" || typeof reply.part.text !== "string" || reply.part.text.length > 48 * 1024) throw new Error("invalid-response");
           parts.push(reply.part.text); size += reply.part.text.length;
-          if (size > 16 * 1024 * 1024) throw new Error("resource-limit");
+          if (size > 64 * 1024 * 1024) throw new Error("resource-limit");
+          if (reply.part.done) { done = true; break; }
         }
+        if (!done) throw new Error("resource-limit");
         const bytes = Uint8Array.from(atob(parts.join("")), (char) => char.charCodeAt(0));
         response = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-      } finally { void this.request("release", { transferId: id }).catch(() => {}); }
+      } finally { void this.request("call", { call: { action: "releaseOutput", outputId: id } }, signal).catch(() => {}); }
     }
     return response;
   }
@@ -100,9 +105,9 @@ export class RefineClient {
   }
   async query<T extends QueryValue>(query: Query): Promise<T> {
     if (!this.hello) throw new Error("not-ready");
-    const binding = this.hello.binding;
+    const binding = this.hello.binding, signal = this.lifetime.signal;
     const result = await this.call({ action: "query", binding, query });
-    if (!this.hello || !sameBinding(binding, this.hello.binding)) throw new Error("binding-stale");
+    if (signal.aborted || !this.hello || !sameBinding(binding, this.hello.binding)) throw new Error("binding-stale");
     return unwrap<T>(result);
   }
   async refresh(): Promise<void> {

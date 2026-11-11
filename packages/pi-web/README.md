@@ -16,7 +16,7 @@ npm test
 
 Pinned development tools: TypeScript 5.9.3, Node types 22.20.5, pi-web public declarations 1.202611.1. No framework, bundler, root workspace migration, root dependency upgrade or publishing change. The two `tsc` graphs emit to separate `dist/browser` and `dist/server` trees. Common API/wire sources are compiled from the root, not copied or separately maintained. Browser assets contain only browser code and the pure contract/validator graph. All host imports are type-only, including on the server; the capability uses its public identity and a structural parser.
 
-The offline suite connects two `RefineClient`s through the real server peer and real core events adapter, with a fake capability/application behind it. It checks scope rejection, Unicode staging/paged output, lost acknowledgments and same-lease reconnect, plus emitted import graphs. Root tests separately exercise the real controller and SDK-facing extension in native/RPC/print harnesses. These are not browser E2E or a real plugin load test.
+The offline suite connects two `RefineClient`s through the real server peer and real core events adapter, with a fake capability/application behind it. It checks scope rejection, Unicode/full-limit paged output, lost acknowledgments and same-lease reconnect, plus emitted import graphs. Lightweight state/registry doubles also check source-bound forms, recovered draft receipts, unchanged CRLF and fresh element registration on module reload. Root tests separately exercise the real controller and SDK-facing extension in native/RPC/print harnesses. These are not browser E2E or a real plugin load test.
 
 ## Supported panel workflow
 
@@ -26,7 +26,7 @@ The offline suite connects two `RefineClient`s through the real server peer and 
 4. **New draft → Save draft → Optimize saved draft**. Saving/typing does not run a model.
 5. Select a run, **Read result**, or **Stop selected run**. Close/disconnect never cancels committed work.
 
-Local edited text is not replaced by background snapshots. Optimistic versions reject stale saves. Lifecycle changes require an explicit fresh binding; pending operations retain the original Binding/lease/nonce. **Check / retry operation** first queries its ledger status; **Forget retry** explicitly drops only local retry metadata, not the task. Up to eight conversation clients are retained in panel memory, so switching views does not automatically replay unknown writes.
+Local edited text is not replaced by background snapshots. Scope switches retain its source Binding and require explicit New draft/task selection before saving elsewhere. Recovered save receipts attach only to the original form without overwriting later edits; unchanged loaded textarea text retains its literal CRLF. Optimistic versions reject stale saves. Lifecycle changes require an explicit fresh binding; pending operations retain the original Binding/lease/nonce. **Check / retry operation** first queries its ledger status; **Forget retry** explicitly drops only local retry metadata, not the task. Up to eight conversation clients are retained in panel memory, so switching views does not automatically replay unknown writes.
 
 The panel uses DOM textContent, not HTML/Markdown injection. It has no composer accept/send/restore action and does not manage the full Preferences/Settings UI. Advanced native TUI features remain native. Native slash has no browser caller identity: RPC slash only emits a short notice; the panel's tasks/runs expose the full saved data through bound queries, not private caller-targeted slash notifications.
 
@@ -34,13 +34,14 @@ The panel uses DOM textContent, not HTML/Markdown injection. It has no composer 
 
 - Host-authoritative project/workspace IDs plus exact session ID; browser-supplied paths/unknown fields are rejected. The public host capability validates session ownership.
 - Up to 32 server connections; 16 pending calls/connection; 8-second local request deadline below the host's 10-second request callback limit.
-- Pending/paged responses: 16 MiB encoded memory/connection, 64 MiB globally; four paged outputs/connection, 60-second TTL. Each page is at most 48 KiB. Read/release tokens remain connection-scoped.
+- The server retains only bounded in-flight frames, never a whole encoded response. The core retains at most four detached output DTOs/connection, 16 MiB conservative data/scratch accounting per connection, 16 outputs/64 MiB per runtime; outputs have a 60-second idle TTL and 5-minute absolute lifetime. Read/release tokens remain connection-scoped and every page checks the original Binding.
+- Each output request pulls exactly one at-most-48-KiB base64 page; the last page can be replayed. The browser decoder admits at most 64 MiB encoded data/2048 pages. It never treats a partial document as a result.
 - Input staging uses the core adapter's bounds (see [application protocol](../../docs/application-api.md)). Output paging keeps long valid results under host envelope limits without truncation.
 - Channel invalidations trigger snapshots; 60-second heartbeats renew the core subscription. Disconnect triggers bounded-backoff reconnect without replaying writes. Expired binding/lease requires explicit reconnection and reconciliation.
 
 These are admission limits, not throughput or exact process-memory guarantees. Provider work is not tied to transport AbortSignals.
 
-**Known acceptance gap:** the server's 16 MiB budget counts base64, while the core output limit counts JSON bytes. Very large/escape-heavy run results and references can exceed that budget even within core output-character limits. They fail explicitly with `resource-limit` (no truncation); the offline quota test demonstrates cleanup. The full configured output range is therefore **not yet aligned**. Demand-driven output streaming/paging at the core boundary is needed before claiming full-range S6 acceptance; merely raising every queue limit is not a substitute for real host validation.
+The initial whole-base64 staging gap was fixed with demand-driven core output paging, not by enlarging every server queue. The offline regression round-trips a 2,097,152-character result and equally large previous result, plus three 100,000-character original/requirement fields, using worst-case JSON escapes. It checks one frame per request, bounded frames, over-quota rejection and continued usability. Real host/browser limits and performance remain S6 acceptance work.
 
 ## Installation / S6 authorization boundary
 

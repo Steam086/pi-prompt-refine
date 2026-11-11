@@ -71,6 +71,8 @@ export type OperationStatus = { status: "not-seen" | "expired" | "pending" } |
 export type QueryValue = Snapshot | TaskDetail | RunDetail | ModelOption[] | OperationStatus;
 export interface Invalidation { binding: Binding; revision: number }
 export interface ApplicationApi {
+  /** Read-only adapter guard, not a wire command. Also guards every paged output read. */
+  isCurrentBinding(binding: Binding): boolean;
   hello(clientId: string, resumeLease?: string): Reply<Hello>;
   query(binding: Binding, query: Query): Reply<QueryValue>;
   execute(meta: MutationMeta, mutation: Mutation): Promise<Reply<Receipt>>;

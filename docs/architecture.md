@@ -39,6 +39,7 @@ src/
   adapters/
     wire.ts                    纯 JSON 白名单校验；浏览器可编译
     session-events.ts          Pi session-local 事件传输与有界临时文本
+    json-output.ts             白名单 DTO 的惰性 JSON 编码，按需输出单页
     slash.ts                   /refine-api 解析与非 transcript 输出
     tui-operations.ts          原生同步 UI 到共享用例的受限适配
   ui/
