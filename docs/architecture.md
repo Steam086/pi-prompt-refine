@@ -4,7 +4,7 @@
 
 ## 结构原则
 
-- 一个 package，不引入框架、容器、全局事件总线或新的运行时依赖。
+- 核心保持一个独立 package，不引入框架、容器、全局事件总线或新的运行时依赖。可选 `packages/pi-web/` 单独构建并锁定开发依赖，核心不依赖该子包或 pi-web。
 - 按可独立理解和验证的职责拆分，不为了行数机械分割函数，也不把入口的大闭包原样搬到另一文件。
 - 已经内聚的小模块和既有导入路径尽量保留；本次不对所有文件做纯目录迁移。根目录的 controller、工作区和任务面板是稳定协调入口，不是导出所有内部能力的 barrel。
 - 模型请求、编辑器副作用、session 生命周期与页面实现有明确所有者。新模块接收受限能力，不传递整个 ExtensionAPI 或无限扩展的可变状态袋。
@@ -19,6 +19,12 @@ src/
   request-types.ts             请求、结果和身份类型（无运行时依赖）
   controller.ts                轮次、调度、候选与接受/发送状态的唯一协调者
   app/
+    api.ts / ports.ts          无宿主依赖的公开 DTO 与受限内部能力
+    application.ts            可信 Binding、查询与第一切片用例；不持有第二套任务状态
+    queries.ts / events.ts     白名单投影、共享排序、合并 invalidation
+    idempotency.ts             有界 lease/操作回执账本；不持久化任务
+    model-service.ts           默认优化模型、thinking、配置版本与保存状态
+    model-utils.ts             模型身份与 thinking 纯辅助，不依赖 picker
     contracts.ts               应用边界使用的受限能力和状态契约
     runtime.ts                 依赖组装、配置写队列、后台状态与当前宿主 context
     commands.ts                slash command 和快捷键动作路由
@@ -30,6 +36,11 @@ src/
     lifecycle.ts               session 恢复、切换与关闭
     workspace-host.ts          唯一工作台的挂载、刷新、关闭与结果动作分发
     workspace-actions.ts       向工作区提供受限操作和数据快照
+  adapters/
+    wire.ts                    纯 JSON 白名单校验；浏览器可编译
+    session-events.ts          Pi session-local 事件传输与有界临时文本
+    slash.ts                   /refine-api 解析与非 transcript 输出
+    tui-operations.ts          原生同步 UI 到共享用例的受限适配
   ui/
     settings-page.ts           Settings 与数值编辑、保存反馈
     revise-page.ts             修订输入、要求阅读与来源布局
@@ -79,6 +90,10 @@ test/
 | 当前 UI/请求宿主 context、配置写队列、后台计时器 | app runtime |
 | 共享目录采集任务及 AbortController | app context-jobs |
 | sidecar writer、恢复 epoch、已命名 session | app lifecycle |
+| runtime Binding/lifecycleEpoch、应用 revision、lease/回执 | app application / events / idempotency |
+| task/run 领域版本 | history；不写入 sidecar |
+| optimizer 版本与持久化状态 | app model-service |
+| Web 本地表单/连接、传输暂存 | 独立 Web 子包；不拥有业务运行队列 |
 | 模型最近使用记录 | app model-selection |
 | 输入/修订草稿（运行期内存） | app workspace-actions；修订页通过受限 Map 访问 |
 | overlay 打开/刷新/关闭和结果阅读位置缓存 | app workspace-host |
@@ -100,4 +115,4 @@ test/
 | 结果、参考、Usage 正文 | ui task-content |
 | Preferences 库、项目默认与快照 | revision-preferences、preference-store、project-preference-defaults、preference-panel |
 
-验证层次与必须保持的行为见 [测试与重构验收](testing.md)。
+验证层次与必须保持的行为见 [测试与重构验收](testing.md)。新增应用契约、TUI 兼容迁移边界和未完成的真实宿主验收见 [多入口应用接口](application-api.md)。

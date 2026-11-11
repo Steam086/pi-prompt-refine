@@ -1,0 +1,27 @@
+{
+  "name": "pi-prompt-refine-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.browser.json && tsc -p tsconfig.server.json",
+    "typecheck": "tsc -p tsconfig.browser.json --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@jmfederico/pi-web": "1.202611.1",
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3"
+  },
+  "piWeb": {
+    "plugins": [
+      {
+        "id": "prompt-refine",
+        "browserRoot": "dist/browser",
+        "module": "dist/browser/packages/pi-web/src/browser/index.js",
+        "serverModule": "dist/server/packages/pi-web/src/server/index.js",
+        "machineSpecific": true
+      }
+    ]
+  }
+}
