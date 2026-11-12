@@ -46,6 +46,8 @@ describe("native slash output and retry boundary", () => {
     h.commands.set("refine-api:2", () => undefined);
     await h.handlers.get("session_start")![0]!({ type: "session_start", reason: "reload" }, h.context);
     await command("drafts create -- not committed", h.context);
+    const input = await h.handlers.get("input")![0]!({ type: "input", source: "interactive", text: "/refine-api optimize -- never execute as an agent task" }, h.context);
+    expect(input).toEqual({ action: "handled" });
     expect(h.notifications.at(-1)).toContain("registered more than once");
     const hello = requireValue(await wireRequest<Hello>(h.events, { action: "hello", clientId: "reader" }));
     const snapshot = requireValue(await wireRequest<Snapshot>(h.events, { action: "query", binding: hello.binding, query: { method: "snapshot", scope: "all" } }));

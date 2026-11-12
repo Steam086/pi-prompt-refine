@@ -89,4 +89,4 @@ call 为 hello/query/mutate/subscribe/close、stage/commit 临时输入传输，
 
 独立集成包见 [`packages/pi-web`](../packages/pi-web/README.md)。根包不依赖 pi-web，根 typecheck/test 不要求安装该子包。
 
-当前完成离线应用/适配器契约、构建图及模拟 public capability 连接验证；已修复最初整份 base64 暂存导致的长结果配额缺口，改为 core 按需分页。实际宿主插件加载、真实多浏览器、外部认证、浏览器视觉/IME 与真实 Provider 的 S6 验收另行进行；离线通过不等于已经部署或上线可用。
+当前完成离线应用/适配器契约、构建图与[授权的隔离宿主/浏览器自动化验收](multi-surface-acceptance.md)，包含真实 public capability、配对检查、双客户端、重载及最大长度结果。已修复整份 base64 暂存缺口及回执早于下拉选项的运行目标丢失问题。人工视觉/IME、生产外部认证与真实 Provider 仍未验收；不代表已部署到生产或全量上线可用。

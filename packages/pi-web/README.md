@@ -1,6 +1,6 @@
 # Prompt Refine · PI WEB integration (experimental)
 
-A private, independently built browser/server plugin for the first Refine application slice. It is **not deployed or host/browser-acceptance-tested** by the offline suite.
+A private, independently built browser/server plugin for the first Refine application slice. The offline suite is not deployment evidence. A separate authorized [isolated host/browser acceptance run](../../docs/multi-surface-acceptance.md) now covers the real bridge and browser workflow; **production deployment, human IME and external authentication remain unverified**.
 
 The browser and native `/refine-api` use the same hosted Pi session's application. The server uses only the public `pi-web.host / pi-session-events / v1` capability. It never creates a controller, calls a model, reads history sidecars, or imports the Refine runtime. The core extension remains independent of pi-web.
 
@@ -41,7 +41,7 @@ The panel uses DOM textContent, not HTML/Markdown injection. It has no composer 
 
 These are admission limits, not throughput or exact process-memory guarantees. Provider work is not tied to transport AbortSignals.
 
-The initial whole-base64 staging gap was fixed with demand-driven core output paging, not by enlarging every server queue. The offline regression round-trips a 2,097,152-character result and equally large previous result, plus three 100,000-character original/requirement fields, using worst-case JSON escapes. It checks one frame per request, bounded frames, over-quota rejection and continued usability. Real host/browser limits and performance remain S6 acceptance work.
+The initial whole-base64 staging gap was fixed with demand-driven core output paging, not by enlarging every server queue. The offline regression round-trips a 2,097,152-character result and equally large previous result, plus three 100,000-character original/requirement fields, using worst-case JSON escapes. It checks one frame per request, bounded frames, over-quota rejection and continued usability. The isolated host also round-tripped the full 2,097,152-character escape-heavy result. This is a functional limit check, not a throughput guarantee.
 
 ## Installation / S6 authorization boundary
 
@@ -51,12 +51,6 @@ Build first. Both the root Pi extension and this subpackage must be installed on
 
 For an isolated acceptance run, first agree on a separate `PI_WEB_DATA_DIR`, session-daemon socket/port, web port, and isolated Pi agent directory. Never inherit the hosting session's live state paths. Use no copied credentials; actual Provider calls need separate explicit approval. Production deployment also requires a verified external authentication boundary: Host/Origin checks alone are **not authentication**.
 
-Outstanding S6 checks:
+The [isolated acceptance record](../../docs/multi-surface-acceptance.md) covers actual manifest/capability loading and strict pairing, two Chrome pages, draft conflicts, queue/stop, lost acknowledgments, reconnect, native slash, reload Binding guards, long text, and wide/narrow light/dark screenshots. It found a select-option timing bug, now fixed: run identity is retained independently of options and never migrated to a new Binding. The offline suite includes its regression.
 
-- Real installed-host manifest loading, public capability resolution and paired browser/server revision handshake.
-- Two real browsers sharing one hosted runtime: draft save conflicts, queue/stop, reconnect and long Unicode text.
-- Session switch/tree/reload, expired lease, malformed/oversize transport, and cleanup under real host limits.
-- Narrow/wide layouts, both themes, keyboard/focus, IME and unsaved-text confirmation; automated native terminal captures are not browser visual validation.
-- External authentication/proxy policy and any separately authorized live Provider call.
-
-No production readiness claim until those checks and their evidence are recorded.
+Still outstanding: human visual/accessibility/IME checks, full tree/session-switch interaction review, other browser engines, production external authentication/TLS/Fleet, and any separately authorized live Provider call. No production readiness or complete three-surface acceptance claim.
