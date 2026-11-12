@@ -1,6 +1,6 @@
 # 维护架构
 
-本文确定本次行为保持型重构的目标结构和依赖边界。用户操作、配置格式和持久化格式不变；不涉及发布、CI、依赖升级或其他开源准备。历史设计取舍见 [DESIGN](../DESIGN.md)，行为说明见 [使用说明](usage.md)。
+本文说明行为保持型重构和多入口第一切片落实后的维护结构与依赖边界。新增 application、`/refine-api` 与独立 Web 子包，保留原有 TUI 行为、根配置及 sidecar 格式；不以此进行根依赖升级或发布配置迁移。历史设计取舍见 [DESIGN](../DESIGN.md)，行为说明见 [使用说明](usage.md)。
 
 ## 结构原则
 
@@ -9,9 +9,9 @@
 - 已经内聚的小模块和既有导入路径尽量保留；本次不对所有文件做纯目录迁移。根目录的 controller、工作区和任务面板是稳定协调入口，不是导出所有内部能力的 barrel。
 - 模型请求、编辑器副作用、session 生命周期与页面实现有明确所有者。新模块接收受限能力，不传递整个 ExtensionAPI 或无限扩展的可变状态袋。
 
-## 目标结构
+## 当前结构
 
-以下为本次落实后的结构；已有内聚小模块仍保留在 `src/` 根目录。
+已有内聚小模块仍保留在 `src/` 根目录；多入口只迁移首片用例，高级原生流程保留兼容边界。
 
 ```text
 src/
@@ -58,6 +58,13 @@ src/
   preference-panel.ts / inline-preferences.ts
   ...                          共享布局、提示、模型展示、用量和文本安全小模块
 
+packages/pi-web/
+  src/browser/                 面板、scope 绑定的表单/运行目标与重试客户端
+  src/server/                  公开宿主 capability 适配；不持有业务任务
+  tsconfig.browser.json        独立浏览器构建，不引入 Node
+  tsconfig.server.json         独立服务端构建
+  test/                        core wire + browser/server 契约与构建图检查
+
 test/
   support/                     每测试独立的 extension harness、终端设施与异步辅助
   fixtures/                    测试数据，不承担流程
@@ -94,7 +101,9 @@ test/
 | runtime Binding/lifecycleEpoch、应用 revision、lease/回执 | app application / events / idempotency |
 | task/run 领域版本 | history；不写入 sidecar |
 | optimizer 版本与持久化状态 | app model-service |
-| Web 本地表单/连接、传输暂存 | 独立 Web 子包；不拥有业务运行队列 |
+| 输入分块、输出 DTO/惰性编码器、订阅与传输配额 | core adapters/session-events；按 Binding/connection 清理 |
+| Web 本地表单、选中 run、连接与待恢复操作 | Web browser；始终保留原作用域，不拥有业务运行队列 |
+| 宿主 capability 连接、请求截止与 in-flight frame | Web server；不缓存整份编码输出、不按客户端路径路由 |
 | 模型最近使用记录 | app model-selection |
 | 输入/修订草稿（运行期内存） | app workspace-actions；修订页通过受限 Map 访问 |
 | overlay 打开/刷新/关闭和结果阅读位置缓存 | app workspace-host |
@@ -105,7 +114,12 @@ test/
 
 | 要修改的行为 | 首先查看 |
 | --- | --- |
-| 命令和快捷键路由 | extension / app commands |
+| 旧 `/refine` 和快捷键路由 | extension / app commands |
+| `/refine-api` 解析、命名冲突与输出 | extension / adapters slash |
+| 共享用例、Binding、版本与重试 | app application、history、idempotency、model-service |
+| 查询 DTO、排序与通知 | app queries / events；原生同步、远端合并 |
+| 临时输入、长结果分页与配额 | adapters wire / session-events / json-output |
+| Web 表单/连接/选中目标或宿主桥接 | packages/pi-web 的 browser 或 server |
 | 请求捕获、启动与修订 | app request-flows |
 | 请求结构、预算、输出校验 | app completion、context、budget |
 | 并发、取消、轮次、候选身份 | controller、request-types、history |
@@ -116,4 +130,4 @@ test/
 | 结果、参考、Usage 正文 | ui task-content |
 | Preferences 库、项目默认与快照 | revision-preferences、preference-store、project-preference-defaults、preference-panel |
 
-验证层次与必须保持的行为见 [测试与重构验收](testing.md)。新增应用契约、TUI 兼容迁移边界和未完成的真实宿主验收见 [多入口应用接口](application-api.md)。
+验证层次与必须保持的行为见 [测试与重构验收](testing.md)，详细界面规则见 [界面维护约束](ui-conventions.md)。应用契约与 TUI 兼容迁移边界见 [多入口应用接口](application-api.md)；已完成的隔离宿主检查及未验收项见 [隔离验收记录](multi-surface-acceptance.md)，不要把历史验证状态视为当前生产部署状态。

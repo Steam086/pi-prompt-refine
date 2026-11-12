@@ -37,7 +37,7 @@ npm test
 
 Web 子包在 `packages/pi-web/` 单独 `npm ci --ignore-scripts --omit=optional` 后运行 `npm run typecheck` 和 `npm test`。其 Node 测试使用实际 browser client/server peer/core events adapter + fake public capability/application，并审计 emitted import graph；不需要启动服务，也不等同真实浏览器或实际 host capability 加载。
 
-真实部署、双浏览器、外部认证、IME 和 live Provider 的待验收项见 [子包说明](../packages/pi-web/README.md)。未授权时不得为验收重启承载当前会话的 daemon。
+已完成的隔离宿主/双客户端自动化及其边界见 [隔离验收记录](multi-surface-acceptance.md)；部署要求与仍待验收的人工视觉/IME、生产认证及真实 Provider 项见 [子包说明](../packages/pi-web/README.md)。未授权时不得为验收重启承载当前会话的 daemon。
 
 ## 测试设施约束
 
@@ -69,6 +69,8 @@ Web 子包在 `packages/pi-web/` 单独 `npm ci --ignore-scripts --omit=optional
 - sidecar 格式、权限、白名单、容量、保存暂停和错误反馈不变，不新增完整背景落盘。
 
 ### TUI 与偏好
+
+修改视图前阅读 [界面维护约束](ui-conventions.md)；以下是测试侧的核心不变量，不替代完整样式与输入规则。
 
 - 唯一 overlay、稳定终端几何、焦点和来源快照保持不变。
 - 原稿/内联 Preferences 的显式 Enter 与 Revise 的 Ctrl+S 才提交；浏览、Space 勾选、库保存和带回不自动提交。
