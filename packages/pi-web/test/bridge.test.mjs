@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID, webcrypto } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { readFile, readdir } from "node:fs/promises";
 import { test } from "node:test";
@@ -35,7 +36,7 @@ async function environment() {
   const api = {
     isCurrentBinding: (value) => JSON.stringify(value) === JSON.stringify(binding),
     hello(clientId, resume) {
-      if (!leases.has(clientId)) leases.set(clientId, crypto.randomUUID());
+      if (!leases.has(clientId)) leases.set(clientId, randomUUID());
       if (resume && resume !== leases.get(clientId)) return { kind: "rejected", code: "lease-expired" };
       return ok({ protocolVersion: 1, binding, revision, lease: { id: leases.get(clientId), expiresAt: Date.now() + 60000 } });
     },
@@ -106,7 +107,8 @@ async function environment() {
   };
 }
 
-test("browser and server use the actual core wire, preserve long Unicode and recover lost acknowledgments", async () => {
+test("browser and server preserve long Unicode and recover lost acknowledgments over HTTP", async (t) => {
+  t.mock.getter(globalThis, "crypto", () => ({ getRandomValues: webcrypto.getRandomValues.bind(webcrypto) }));
   const env = await environment();
   const a = new RefineClient(env.peer, env.binding.sessionId, () => {});
   const b = new RefineClient(env.peer, env.binding.sessionId, () => {});
@@ -178,7 +180,8 @@ test("scope/unknown-field failures cannot route by a supplied path or leak host 
   } finally { await env.dispose(); }
 });
 
-test("a fresh browser module does not reuse an old revision's custom element class", async () => {
+test("over HTTP a fresh browser module registers a distinct custom element class", async (t) => {
+  t.mock.getter(globalThis, "crypto", () => ({ getRandomValues: webcrypto.getRandomValues.bind(webcrypto) }));
   const names = ["HTMLElement", "customElements", "document"];
   const saved = new Map(names.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
   const registry = new Map();
