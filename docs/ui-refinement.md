@@ -1,5 +1,7 @@
 # TUI 局部优化说明
 
+> 本文保留多个时期的设计与测量，包含已经被替代的内容测量高度、外框展开和文字强调方案。当前维护约束以 [界面维护约束](ui-conventions.md) 为准，当前操作以 [使用说明](usage.md) 为准；不要仅依据下文“当前结构”的旧描述恢复过时行为。
+
 ## 当前结构
 
 顶层页面为 **Preview / Usage / Settings**。`task-panel.ts` 实现原稿／运行两层树、固定摘要、详情与结果比较；`workspace.ts` 管理原稿编辑、兼容 Input / Revise 及 Settings；`preview.ts` 保留兼容结果阅读页。
