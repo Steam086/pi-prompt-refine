@@ -1,6 +1,7 @@
 import type { JsonValue, PluginPeer, PluginPeerChannel } from "@jmfederico/pi-web/plugin-api";
 import type { Binding, Hello, ModelOption, Mutation, MutationMeta, OperationStatus, Query, QueryValue, Receipt, Snapshot } from "../../../../src/app/api.js";
 import { isRecord } from "../../../../src/adapters/wire.js";
+import { randomId } from "./random-id.js";
 
 const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue;
 const sameBinding = (a: Binding, b: Binding) => a.runtimeId === b.runtimeId && a.sessionId === b.sessionId && a.lifecycleEpoch === b.lifecycleEpoch;
@@ -16,7 +17,7 @@ function unwrap<T>(value: unknown): T {
 }
 
 export class RefineClient {
-  readonly clientId = crypto.randomUUID();
+  readonly clientId = randomId();
   hello?: Hello;
   snapshot?: Snapshot;
   models: ModelOption[] = [];
@@ -43,7 +44,7 @@ export class RefineClient {
     if (new TextEncoder().encode(serialized).length <= 48 * 1024) response = await this.request("call", { call }, signal);
     else {
       const encoded = encode(serialized), chunkSize = 32_000;
-      const transferId = crypto.randomUUID(), total = Math.ceil(encoded.length / chunkSize);
+      const transferId = randomId(), total = Math.ceil(encoded.length / chunkSize);
       if (encoded.length > 2 * 1024 * 1024 || total > 128) throw new Error("resource-limit");
       for (let index = 0; index < total; index++) {
         const reply = await this.request("call", { call: { action: "stage", transferId, index, total, text: encoded.slice(index * chunkSize, (index + 1) * chunkSize) } }, signal);
@@ -124,7 +125,7 @@ export class RefineClient {
   async execute(mutation: Mutation): Promise<Receipt> {
     if (!this.hello || !this.connected) throw new Error("not-ready");
     if (this.pending) throw new Error("Resolve or explicitly forget the previous operation first.");
-    this.pending = { meta: { binding: { ...this.hello.binding }, clientLeaseId: this.hello.lease.id, operationId: crypto.randomUUID() }, mutation: structuredClone(mutation) };
+    this.pending = { meta: { binding: { ...this.hello.binding }, clientLeaseId: this.hello.lease.id, operationId: randomId() }, mutation: structuredClone(mutation) };
     this.changed();
     return this.submitPending();
   }

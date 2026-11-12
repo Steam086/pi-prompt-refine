@@ -1,8 +1,9 @@
 import type { PiWebPluginV5 } from "@jmfederico/pi-web/plugin-api";
 import { RefinePanel } from "./panel.js";
+import { randomId } from "./random-id.js";
 
 // A reloaded module must not silently reuse the previous revision's element class.
-const moduleTag = crypto.randomUUID();
+const moduleTag = randomId();
 const plugin: PiWebPluginV5 = {
   apiVersion: 5, name: "Prompt Refine",
   activate({ html, runtimePluginId, lifetimeSignal }) {
