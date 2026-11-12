@@ -26,6 +26,8 @@ export class RefinePanel extends HTMLElement {
   private observedModels?: RefineClient["models"];
   private taskSignature = "";
   private runSignature = "";
+  private selectedRunId = "";
+  private selectedRunBinding = "";
   private output = element("pre");
   private notice = element("p");
   private optimizerStatus = element("p");
@@ -97,7 +99,7 @@ export class RefinePanel extends HTMLElement {
     const runSection = element("section");
     this.runs.addEventListener("change", () => { void this.perform(() => this.loadRun(this.runs.value)); });
     this.stopButton = this.button("Stop selected run", async () => { if (this.runs.value) await this.client!.execute({ method: "stopRun", runId: this.runs.value }); });
-    runSection.append(element("h3", "Runs and results"), labelled("Run", this.runs), this.button("Read result", async () => this.loadRun(this.runs.value)), this.stopButton, this.output);
+    runSection.append(element("h3", "Runs and results"), labelled("Run", this.runs), this.button("Read result", async () => this.loadRun(this.runs.value || this.selectedRunId)), this.stopButton, this.output);
     const grid = element("div"); grid.className = "grid"; grid.append(modelSection, draftSection, runSection);
     this.root.append(style, element("h2", "Refine"), this.notice, this.connectButton, this.retryButton, this.forgetButton, grid);
     this.paint();
@@ -111,6 +113,7 @@ export class RefinePanel extends HTMLElement {
     // Retain the original's identity with its text. Never silently turn an old edit into a new-session create.
     this.optimizerDirty = false; this.observedModels = undefined; this.taskSignature = ""; this.runSignature = "";
     this.tasks.replaceChildren(); this.runs.replaceChildren(); this.output.textContent = "";
+    this.selectedRunId = ""; this.selectedRunBinding = "";
     const peer = context.backend?.forScope({ kind: "workspace", projectId: context.workspace.projectId, workspaceId: context.workspace.id }) ?? context.peer;
     this.client = peer && session && !session.archived && !session.pending ? this.clients.get(key) : undefined;
     if (!this.client && peer && session && !session.archived && !session.pending) {
@@ -167,6 +170,7 @@ export class RefinePanel extends HTMLElement {
   private async loadRun(id: string) {
     if (!id || !this.client) return;
     const client = this.client;
+    this.selectedRunId = id; this.selectedRunBinding = scopeKey(client.hello?.binding);
     const run = await client.query<RunDetail>({ method: "run", runId: id });
     if (client !== this.client) return;
     this.output.textContent = `${run.id} · ${run.model.provider}/${run.model.id} · ${run.status}\n\n${run.text ?? run.diagnostic ?? "No result yet."}\n\nOriginal\n${run.original}` +
@@ -190,6 +194,13 @@ export class RefinePanel extends HTMLElement {
       }
     }
     if ("runId" in receipt && receipt.runId) { this.runs.value = receipt.runId; await this.loadRun(receipt.runId); }
+  }
+  private restoreRunSelection() {
+    const binding = scopeKey(this.client?.hello?.binding);
+    if (binding && this.selectedRunBinding && binding !== this.selectedRunBinding) {
+      this.selectedRunId = ""; this.selectedRunBinding = ""; this.runs.value = ""; this.output.textContent = "";
+    }
+    if (this.selectedRunId && [...this.runs.options].some((option) => option.value === this.selectedRunId)) this.runs.value = this.selectedRunId;
   }
   private updateThinking() {
     const model = this.client?.models[Number(this.models.value)];
@@ -237,6 +248,7 @@ export class RefinePanel extends HTMLElement {
     if (JSON.stringify(tasks) !== this.taskSignature) { this.taskSignature = JSON.stringify(tasks); this.options(this.tasks, tasks); }
     const runs = [["", "Choose run"], ...snapshot.runs.map((run) => [run.id, `${run.id} · ${run.status} · ${run.model.provider}/${run.model.id}`])] as Array<[string, string]>;
     if (JSON.stringify(runs) !== this.runSignature) { this.runSignature = JSON.stringify(runs); this.options(this.runs, runs); }
+    this.restoreRunSelection();
     const staleDraft = !!this.editorBinding && this.editorBinding !== scopeKey(client.hello?.binding);
     if (staleDraft) {
       this.notice.textContent += " · Original belongs to another session/epoch; choose New draft or a saved task.";

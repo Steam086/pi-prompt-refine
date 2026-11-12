@@ -6,7 +6,7 @@
 
 新增独立命令 `/refine-api`：模型配置、草稿保存、显式运行/停止及状态/结果查询。语法、版本冲突和安全重试见 [应用接口](application-api.md)。旧 `/refine` 的保留词与其余原稿文本规则不变。
 
-可选 [PI WEB 子包](../packages/pi-web/README.md) 与 slash 共享同一 hosted runtime；尚未完成真实部署/浏览器验收，不代表已安装。Web 当前没有接受/发送/恢复到 Pi 编辑器的能力。
+可选 [PI WEB 子包](../packages/pi-web/README.md) 与 slash 共享同一 hosted runtime；已完成[隔离宿主/浏览器自动化验收](multi-surface-acceptance.md)，不代表已安装到生产或通过人工 IME/外网认证验收。Web 当前没有接受/发送/恢复到 Pi 编辑器的能力。
 
 ## 快捷键：打开与捕获，不覆盖
 

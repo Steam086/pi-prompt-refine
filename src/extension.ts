@@ -31,7 +31,14 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
     },
   });
   const bridge = createSessionEventsBridge(app.api, pi.events);
-  pi.on("input", (event, ctx) => app.input(ctx, event.text, event.source, event.streamingBehavior));
+  pi.on("input", (event, ctx) => {
+    // An unresolved command name must not fall through to ordinary agent execution.
+    if (!apiCommandAvailable && /^\/refine-api(?:\s|$)/.test(event.text)) {
+      ctx.ui.notify(collisionNotice, "warning");
+      return { action: "handled" as const };
+    }
+    return app.input(ctx, event.text, event.source, event.streamingBehavior);
+  });
   // Only user message_start commits a round boundary; input is preflight.
   pi.on("message_start", (event, ctx) => app.messageStarted(event.message, ctx));
   pi.on("session_start", async (event, ctx) => {

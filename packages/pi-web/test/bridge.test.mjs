@@ -235,6 +235,30 @@ test("form identity survives scope switches and recovered draft receipts preserv
   }
 });
 
+test("run receipts retain their target before options arrive and never migrate it to another Binding", async () => {
+  const saved = Object.getOwnPropertyDescriptor(globalThis, "HTMLElement");
+  try {
+    Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: class {} });
+    const { RefinePanel } = await import("../dist/browser/packages/pi-web/src/browser/panel.js");
+    const binding = { runtimeId: "runtime", sessionId: "session", lifecycleEpoch: 1 };
+    const options = []; let value = "";
+    const runs = { options };
+    Object.defineProperty(runs, "value", { get: () => value, set: (next) => { value = options.some((o) => o.value === next) ? next : ""; } });
+    const panel = Object.assign(Object.create(RefinePanel.prototype), {
+      client: { hello: { binding }, query: async () => ({ id: "run-1", model: { provider: "mock", id: "model" }, status: "generating", original: "original" }) },
+      runs, output: { textContent: "" }, selectedRunId: "", selectedRunBinding: "",
+    });
+    await panel.receipt({ outcome: "started", taskId: "task-1", runId: "run-1" });
+    assert.equal(runs.value, ""); assert.equal(panel.selectedRunId, "run-1");
+    options.push({ value: "run-1" }); panel.restoreRunSelection();
+    assert.equal(runs.value, "run-1");
+    panel.client.hello = { binding: { ...binding, lifecycleEpoch: 2 } }; panel.restoreRunSelection();
+    assert.equal(panel.selectedRunId, ""); assert.equal(runs.value, ""); assert.equal(panel.output.textContent, "");
+  } finally {
+    if (saved) Object.defineProperty(globalThis, "HTMLElement", saved); else delete globalThis.HTMLElement;
+  }
+});
+
 test("browser build is a closed, Node-free graph; server has no runtime host-package resolution", async () => {
   async function files(dir) {
     const result = [];
