@@ -1,7 +1,7 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it, vi } from "vitest";
-import { formatKeyHint } from "../../src/key-hints.js";
+import { formatKeyHint, wrappedKeyHints } from "../../src/key-hints.js";
 import { workspaceLayout, workspaceViewport } from "../../src/workspace-overlay.js";
 import { type SettingsResult } from "../../src/workspace.js";
 import { create, footer, panelLayout, textOf } from "../support/workspace.js";
@@ -35,7 +35,7 @@ describe("shared refine workspace", () => {
     const before = lines.findIndex((line) => line.includes("Directory tree"));
     workspace.handleInput("\x1b[B");
     expect(workspace.render(100).findIndex((line) => line.includes("Directory tree"))).toBe(before);
-    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["Tab", "Group"], theme));
+    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["Tab", "Group"], theme, 1, "secondary"));
   });
 
   it.each(["dark", "light"])("keeps a continuous highlight around clipped Unicode values in %s", (name) => {
@@ -62,7 +62,7 @@ describe("shared refine workspace", () => {
     expect(settings[4]).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(` ${theme.underline("Settings")} `))));
     expect(textOf(settings)).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Context "))));
     expect(footer(main)[0]).toContain(formatKeyHint(["a", "Accept"], theme));
-    expect(footer(settings)[0]).toContain(formatKeyHint(["Enter", "Change"], theme));
+    expect(footer(settings)[0]).toContain(formatKeyHint(["Enter", "Change"], theme, 1, "secondary"));
     expect(main).toHaveLength(settings.length);
   });
 
@@ -76,18 +76,20 @@ describe("shared refine workspace", () => {
         const lines = workspace.render(width);
         const plain = lines.map(stripVTControlCharacters);
         const layout = workspaceLayout(width, rows);
-        const navigationRows = layout.bodyHeight < 4 ? 0 : layout.bodyHeight >= 8 ? 3 : 1;
+        const navigationRows = layout.bodyHeight < 4 ? 0 : layout.bodyHeight >= 8 ? 2 : 1;
         const shellRows = workspaceViewport(width, rows).framed ? 1 : 0;
         const hintStart = shellRows + layout.headerHeight + navigationRows;
-        const hints = lines.slice(hintStart, hintStart + layout.footerHeight);
+        const hints = footer(lines);
+        expect(lines[hintStart]).toBe(hints[0]);
+        const style = stripVTControlCharacters(hints[0]!).includes(":") ? "secondary" : "secondary-compact";
         const save = layout.footerHeight === 1 || layout.innerWidth < 30 ? ["^S", "Save"] as const : ["Ctrl+S", "Save settings"] as const;
-        if (layout.footerHeight > 1 || layout.innerWidth >= 20) expect(hints[0]).toContain(formatKeyHint(save, theme));
-        else expect(hints[0]).toContain(formatKeyHint(["Esc", "Back"], theme));
-        if (layout.footerHeight > 1) expect(hints[1]).toContain(formatKeyHint(["Esc", "Back"], theme));
-        if (navigationRows) expect(plain[hintStart - 1 - (navigationRows === 3 ? 1 : 0)]).toContain("Settings");
-        if (layout.separatorHeight) expect(plain[hintStart + layout.footerHeight]).toContain("─".repeat(layout.innerWidth));
+        if (layout.footerHeight > 1 || layout.innerWidth >= 20) expect(hints[0]).toContain(formatKeyHint(save, theme, 1, style));
+        else expect(hints[0]).toContain(formatKeyHint(["Esc", "Back"], theme, 1, style));
+        if (layout.footerHeight > 1) expect(hints.join("\n")).toContain(formatKeyHint(["Esc", "Back"], theme, 1, style));
+        if (navigationRows) expect(plain[hintStart - 1]).toContain("Settings");
+        if (layout.separatorHeight) expect(plain[hintStart + hints.length]).toContain("─".repeat(layout.innerWidth));
         const selected = plain.findIndex((line) => line.includes("› "));
-        expect(selected).toBeGreaterThanOrEqual(hintStart + layout.footerHeight + layout.separatorHeight);
+        expect(selected).toBeGreaterThanOrEqual(hintStart + hints.length + layout.separatorHeight);
         expect(lines).toHaveLength(panelLayout(width, rows).height);
         expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
         expect(lines.join("\n")).not.toContain("\x1b[31m");
@@ -138,7 +140,7 @@ describe("shared refine workspace", () => {
         const lines = workspace.render(width);
         expect(lines.slice(0, 3)).toEqual(header);
         expect(textOf(lines)).not.toMatch(/Ctrl\+S to save|Changes save on confirmation/);
-        if (width === 100) expect(textOf(lines)).toContain(formatKeyHint(["Ctrl+S", "Save settings"], theme));
+        if (width === 100) expect(textOf(lines)).toContain(formatKeyHint(["Ctrl+S", "Save settings"], theme, 1, "secondary"));
       }
     }
     workspace.handleInput(" ");
@@ -154,24 +156,12 @@ describe("shared refine workspace", () => {
   it.each([0, 3])("aligns Settings action and navigation rows at cursor %i", (cursor) => {
     const { workspace } = create(40, "dark", true);
     workspace.openSettings(undefined, cursor);
-    const [top, bottom] = footer(workspace.render(100)).map((line) => stripVTControlCharacters(line).replace(/^│|│$/g, "").trim());
-    expect(top).toBe(`Ctrl+S Save settings · Enter Change${cursor === 0 ? " · Space Change" : ""}`);
-    expect(bottom!.split(" · ")).toEqual([
-      "Esc Back".padEnd(20), "Tab Group".padEnd(12),
-      cursor === 0 ? "← Usage".padEnd(12) : "← Context",
-      cursor === 0 ? "→ Optimizer" : "→ Advanced", "↑↓ Select",
-    ]);
+    const hints = footer(workspace.render(100)).map((line) => stripVTControlCharacters(line).replace(/^│|│$/g, "").trim());
+    expect(hints.join(" · ")).toBe(`Ctrl+S: Save settings · Enter: Change${cursor === 0 ? " · Space: Change" : ""} · Esc: Back · Tab: Group · ←: ${cursor === 0 ? "Usage" : "Context"} · →: ${cursor === 0 ? "Optimizer" : "Advanced"} · ↑↓: Select`);
+    expect(hints).toHaveLength(2);
   });
 
   it.each(["dark", "light"])("aligns Settings hints across groups, dirty/disabled states and resize in %s", (name) => {
-    const starts = (line: string) => {
-      let column = 0;
-      return line.split(" · ").map((cell) => {
-        const start = column;
-        column += visibleWidth(cell) + 3;
-        return start;
-      });
-    };
     for (const optimizer of [false, true]) {
       const { workspace, actions, theme } = create(40, name, optimizer);
       if (optimizer) actions.optimizer = () => ({ model: "Not configured", thinking: "Unavailable", thinkingEnabled: false });
@@ -180,24 +170,27 @@ describe("shared refine workspace", () => {
         for (const width of [34, 40, 60, 80, 100, 160]) {
           const lines = workspace.render(width);
           const footerRows = footer(lines);
-          const [top, bottom] = footerRows.map(stripVTControlCharacters);
-          const count = Math.min(starts(top!).length, starts(bottom!).length);
-          expect(starts(top!).slice(0, count)).toEqual(starts(bottom!).slice(0, count));
-          expect(top).toContain("Ctrl+S Save settings");
-          expect(bottom).toContain(dirty ? "Esc Discard changes" : "Esc Back");
-          expect(footerRows[0]).toContain(formatKeyHint(["Ctrl+S", "Save settings"], theme));
-          expect(footerRows[1]).toContain(formatKeyHint(["Esc", dirty ? "Discard changes" : "Back"], theme));
+          const hints = footerRows.map(stripVTControlCharacters).join("\n");
+          const expected = [["Ctrl+S", "Save settings"], ["Enter", cursor === 4 ? "Unavailable" : "Change"],
+            ...(cursor < 3 ? [["Space", "Change"] as const] : []), ["Esc", dirty ? "Discard changes" : "Back"], ["Tab", "Group"],
+            ["←", optimizer && cursor >= 3 ? "Context" : "Usage"], ["→", optimizer && cursor < 3 ? "Optimizer" : "Advanced"], ["↑↓", "Select"]] as const;
+          expect(footerRows.map((line) => stripVTControlCharacters(line).replace(/^│|│$/g, "").trim()))
+            .toEqual(wrappedKeyHints([...expected], panelLayout(width, 40).innerWidth, theme).map(stripVTControlCharacters));
+          expect(hints).toContain("Ctrl+S: Save settings");
+          expect(hints).toContain(dirty ? "Esc: Discard changes" : "Esc: Back");
+          expect(footerRows[0]).toContain(formatKeyHint(["Ctrl+S", "Save settings"], theme, 1, "secondary"));
+          expect(footerRows.join("\n")).toContain(formatKeyHint(["Esc", dirty ? "Discard changes" : "Back"], theme, 1, "secondary"));
           expect(footerRows.join("\n")).not.toContain("\t");
           expect(lines).toHaveLength(panelLayout(width, 40).height);
           for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
           if (width >= 100) {
-            expect(top).toContain(`Enter ${cursor === 4 ? "Unavailable" : "Change"}`);
-            expect(top!.includes("Space Change")).toBe(cursor < 3);
-            expect(bottom).toContain("Tab Group");
-            expect(bottom).toContain(optimizer && cursor >= 3 ? "← Context" : "← Usage");
-            expect(bottom).toContain(optimizer && cursor < 3 ? "→ Optimizer" : "→ Advanced");
+            expect(hints).toContain(`Enter: ${cursor === 4 ? "Unavailable" : "Change"}`);
+            expect(hints.includes("Space: Change")).toBe(cursor < 3);
+            expect(hints).toContain("Tab: Group");
+            expect(hints).toContain(optimizer && cursor >= 3 ? "←: Context" : "←: Usage");
+            expect(hints).toContain(optimizer && cursor < 3 ? "→: Optimizer" : "→: Advanced");
           }
-          // Cache hits must retain the aligned frame unchanged.
+          // Cache hits must retain the packed frame unchanged.
           expect(workspace.render(width)).toEqual(lines);
         }
       }
@@ -212,12 +205,12 @@ describe("shared refine workspace", () => {
       workspace.openSettings(undefined, cursor);
       for (const width of [12, 20, 24, 30]) {
         const footerRows = footer(workspace.render(width)).map(stripVTControlCharacters);
-        expect(footerRows[0]).toContain("^S Save");
-        expect(footerRows[1]).toContain("Esc Back");
+        expect(footerRows[0]).toMatch(/\^S:? Save/);
+        expect(footerRows.join("\n")).toMatch(/Esc:? Back/);
         for (const line of footerRows) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       }
       workspace.openSettings({ instructions: "always", tree: false, skills: false }, cursor);
-      expect(stripVTControlCharacters(footer(workspace.render(24)).at(-1)!)).toContain("Esc Discard");
+      expect(footer(workspace.render(24)).map(stripVTControlCharacters).join("\n")).toMatch(/Esc:? Discard/);
     }
     terminal.rows = 5;
     expect(stripVTControlCharacters(footer(workspace.render(100)).at(-1)!).trim()).toBe("Esc Discard · ^S Save · ↵ Change");

@@ -82,8 +82,8 @@ describe("workspace terminal rendering", () => {
         tui.requestRender(); tui.renderNow();
         const frame = workspace.render(columns);
         const settings = frame.map(stripVTControlCharacters);
-        const save = settings.findIndex((line) => /(?:Ctrl\+S Save settings|\^S Save)/.test(line));
-        const back = settings.findIndex((line) => line.includes("Esc Back"));
+        const save = settings.findIndex((line) => /(?:Ctrl\+S:? Save settings|\^S:? Save)/.test(line));
+        const back = settings.findIndex((line) => /Esc:? Back/.test(line));
         const selected = settings.findIndex((line) => line.includes("› "));
         expect(save).toBeGreaterThan(settings.findIndex((line) => line.includes(" Settings ")));
         expect(back).toBeGreaterThanOrEqual(save);
@@ -98,7 +98,7 @@ describe("workspace terminal rendering", () => {
           const frame = workspace.render(columns);
           expect(frame).toHaveLength(initialHeight);
           expect(frame.every((line) => visibleWidth(line) <= columns)).toBe(true);
-          expect(frame.join("\n")).toContain(theme.fg("text", "Esc"));
+          expect(frame.join("\n")).toContain(theme.fg("muted", stripVTControlCharacters(frame.join("\n")).includes("Esc:") ? "Esc:" : "Esc"));
         }
       }
       input("\x1b"); tui.renderNow();

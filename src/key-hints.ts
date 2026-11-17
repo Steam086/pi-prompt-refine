@@ -4,11 +4,12 @@ import { alignedHints, fittingHints } from "./panel-layout.js";
 
 export type KeyHint = readonly [key: string, label: string];
 type HintTheme = Pick<Theme, "fg" | "bold">;
-type HintStyle = "primary" | "secondary";
+type HintStyle = "primary" | "secondary" | "secondary-compact";
 
 /** Shared chrome: emphasize keys, never their descriptions; secondary hints use punctuation instead of weight. */
 export function formatKeyHint([key, label]: KeyHint, theme: HintTheme, keyWidth = 1, style: HintStyle = "primary"): string {
-  const prefix = key ? style === "secondary" ? theme.fg("muted", key + (label ? ":" : "")) : theme.fg("text", theme.bold(key)) : "";
+  const prefix = !key ? "" : style === "primary" ? theme.fg("text", theme.bold(key))
+    : theme.fg("muted", key + (style === "secondary" && label ? ":" : ""));
   const gap = key && label ? " ".repeat(Math.max(1, keyWidth - visibleWidth(key) + 1)) : "";
   return prefix + gap + (label ? theme.fg("muted", label) : "");
 }

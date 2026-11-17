@@ -221,7 +221,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\t");
     for (let i = 0; i < 2; i++) harness.panelInput("\x1b[B");
     expect(harness.panelLines().join("\n")).toContain("› Optimization prompt");
-    expect(harness.panelLines().join("\n")).toContain("Enter Change");
+    expect(harness.panelLines().join("\n")).toContain("Enter: Change");
     harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.customCalls()).toBe(2));
     expect(harness.context.ui.editor).toHaveBeenCalledWith(expect.any(String), original);

@@ -251,7 +251,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(settings[1]).toContain("Settings");
     expect(settings).toHaveLength(main.length);
     expect(settings[0]).toBe(main[0]);
-    const settingsHints = settings.findIndex((line) => line.includes("Ctrl+S Save settings"));
+    const settingsHints = settings.findIndex((line) => line.includes("Ctrl+S: Save settings"));
     const tabs = settings.findIndex((line) => line.includes(" Settings "));
     expect(tabs).toBeGreaterThan(0);
     expect(settingsHints).toBeGreaterThan(tabs);

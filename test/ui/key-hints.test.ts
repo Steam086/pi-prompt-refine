@@ -38,6 +38,9 @@ describe("fixed-column key hints", () => {
     expect(wrappedKeyHints(pairs, 20, styled).map(stripVTControlCharacters)).toEqual(["Enter: Optimize", "Tab: Preferences", "Esc: Back"]);
     expect(fittingKeyHints(pairs, 20, styled, " · ", "secondary")).toBe(formatKeyHint(pairs[0]!, styled, 1, "secondary"));
     expect(wrappedKeyHints(pairs, 0, styled)).toEqual([]);
+    // Tight fallbacks keep the low emphasis without spending a column on punctuation.
+    expect(fittingKeyHints([["Esc", "Cancel"]], 10, styled, " · ", "secondary-compact"))
+      .toBe(styled.fg("muted", "Esc") + " " + styled.fg("muted", "Cancel"));
   });
 
   it("wraps oversized ANSI/Unicode pairs without truncating their text", () => {
