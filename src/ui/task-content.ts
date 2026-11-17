@@ -8,7 +8,11 @@ import { cacheHitRate, formatReferenceCost, formatRunUsage, totalInputTokens, tr
 export interface TaskRow { record: RefineRecord; original: boolean; records: RefineRecord[] }
 export const pending = (record: RefineRecord) => record.status === "queued" || record.status === "generating";
 
+// The Tasks summary stays a single pane; only its prose gets a shorter measure.
+const TASK_PREVIEW_READING_WIDTH = 88;
+
 interface HeaderOptions {
+  taskPreview?: boolean;
   inline: boolean;
   preferences: boolean;
   inspecting: boolean;
@@ -73,7 +77,9 @@ export class TaskContent {
   /** Measure content, never render a pane: rendering can clamp its reading position. */
   originalHeight(row: TaskRow, width: number, options: HeaderOptions): number {
     const body = row.record.input.draft || "Empty prompt · i Edit original";
-    return this.paneHeader(row, width, options).length + 1 + this.wrapped(sanitizeTerminalText(body), width).length;
+    const bodyWidth = options.taskPreview ? Math.min(width, TASK_PREVIEW_READING_WIDTH) : width;
+    return this.paneHeader(row, width, options).length + (options.taskPreview ? 2 : 1)
+      + this.wrapped(sanitizeTerminalText(body), bodyWidth).length;
   }
   paneHeader(row: TaskRow, width: number, options: HeaderOptions, previewDetails = false): string[] {
     const { record, records } = row;
@@ -95,7 +101,7 @@ export class TaskContent {
       if (!previewDetails) header.push(...this.wrapped(metadata, width));
       const metrics: string[] = [];
       if (record.status !== "unsent" && record.status !== "queued" && record.elapsedSeconds !== undefined) {
-        metrics.push(options.inspecting ? this.muted(`${record.elapsedSeconds}s`)
+        metrics.push(options.inspecting || options.taskPreview ? this.muted(`${record.elapsedSeconds}s`)
           : this.theme.fg(record.status === "generating" ? "accent" : "text", this.theme.bold(`${record.elapsedSeconds}s`)));
       }
       if (record.kind !== "edit" && record.status !== "unsent" && record.status !== "queued") metrics.push(this.muted(formatRunUsage(record.usage)));
@@ -179,10 +185,14 @@ export class TaskContent {
       if (record.sentAt !== undefined) body.push(this.muted(`Pi started send: ${new Date(record.sentAt).toLocaleTimeString()}`));
     }
     const fixed = header.slice(0, Math.max(0, height - 2));
-    if (height > fixed.length + 2 || (row.original && height === fixed.length + 2)) fixed.push("");
+    const bodyWidth = options.taskPreview ? Math.min(width, TASK_PREVIEW_READING_WIDTH) : width;
+    // Keep title + metadata compact, then separate the literal document with one
+    // muted rule and one reading gap. Short panes keep their existing body space.
+    if (options.taskPreview && height >= header.length + 5) fixed.push(this.muted("─".repeat(bodyWidth)), "");
+    else if (height > fixed.length + 2 || (row.original && height === fixed.length + 2)) fixed.push("");
     const available = Math.max(1, height - fixed.length);
     // Overflow diagnostics belong to the scrollable document, never a clipped header.
-    const lines = this.wrapped([...header.slice(Math.max(0, height - 2)), ...body].join("\n"), width);
+    const lines = this.wrapped([...header.slice(Math.max(0, height - 2)), ...body].join("\n"), bodyWidth);
     const offset = Math.min(options.scroll, Math.max(0, lines.length - available));
     return { lines: [...fixed, ...lines.slice(offset, offset + available)], viewport: available,
       offsets: [{ reference: false, offset }] };

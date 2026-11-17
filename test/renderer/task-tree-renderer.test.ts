@@ -9,6 +9,75 @@ import { record } from "../support/task-panel.js";
 
 // Exercise the connected tree through both real Pi renderer paths.
 describe.each(["regular", "fullscreen"] as const)("task tree rendering (%s)", (mode) => {
+  it.each(["dark", "light"])("keeps Tasks preview hierarchy and reading width through scroll and resize (%s)", (name) => {
+    vi.useFakeTimers();
+    const { terminal, writes, input } = createRecordingTerminal({ rows: 40, columns: 160 });
+    const tui = mode === "regular" ? new TuiMainScreen(terminal) : new TuiAltScreen(terminal);
+    const theme = getThemeByName(name)!;
+    const bold = vi.spyOn(theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
+    const source = record();
+    source.input.preferences = [
+      { id: "tone", scope: "project", version: 1, name: "Neutral Prompt Tone", body: "Neutral tone", sourceBody: "Neutral tone" },
+      { id: "structure", scope: "project", version: 1, name: "Prompt Bullet Structure", body: "Use bullets", sourceBody: "Use bullets" },
+    ];
+    source.input.draft = "Original 中文😀 **literal**\n\n" + "Long mixed 中英文 prose for reading. ".repeat(14)
+      + "\n\n```ts\n    const path = '/src/中文/path.ts';\n```\n\n" + "X".repeat(220)
+      + "\n\n" + Array.from({ length: 30 }, (_, i) => `Paragraph line ${i} 中文😀`).join("\n") + "\nPREVIEW_END";
+    const frozen = structuredClone(source);
+    const position: TaskPanelPosition = { selectedTaskId: 1 };
+    const run = vi.fn();
+    const accept = vi.fn();
+    const remove = vi.fn(() => true);
+    const panel = new TaskPanel({ records: () => [source], appliedId: () => undefined, activate: () => false,
+      run, stop() {}, accept, preferences() {}, deleteRecords: remove }, theme, () => terminal.rows, getKeybindings(), false, position,
+      (width) => workspaceLayout(width, terminal.rows));
+    const view = { render: (width: number) => panel.render(width), invalidate: () => panel.invalidate(),
+      handleInput: (data: string) => { panel.handleInput(data); tui.requestRender(); } };
+    const render = () => {
+      tui.renderNow();
+      const frame = panel.render(terminal.columns);
+      expect(frame).toHaveLength(workspaceLayout(terminal.columns, terminal.rows).height);
+      expect(frame.every((line) => visibleWidth(line) <= terminal.columns)).toBe(true);
+      expect(position.selectedTaskId).toBe(1);
+      return frame;
+    };
+    const right = (frame: string[]) => frame.filter((line) => line.includes(theme.fg("muted", " │ ")))
+      .map((line) => line.split(theme.fg("muted", " │ "))[1]!);
+    tui.addChild(view); tui.setFocus(view);
+    try {
+      tui.start();
+      const initial = right(render());
+      expect(initial[0]).toContain(theme.fg("text", theme.bold("Original prompt")));
+      expect(initial[0]).toContain(theme.fg("muted", "1 runs · 0 active"));
+      expect(initial[1]).toContain(theme.fg("muted", "Preferences: 2 · Neutral Prompt Tone, Prompt Bullet Structure"));
+      expect(initial[2]).toContain(theme.fg("muted", "─".repeat(88)));
+      expect(strip(initial[3]!).trim()).toBe("");
+      expect(initial.slice(4).every((line) => visibleWidth(strip(line).trimEnd()) <= 88)).toBe(true);
+      expect(writes.join("")).toContain(theme.fg("text", theme.bold("Original prompt")));
+      input("\t"); render(); // Read the same original without changing the task target.
+      for (const [columns, rows] of [[45, 14], [80, 24], [100, 40], [160, 14], [240, 40], [160, 40]]) {
+        Object.assign(terminal, { columns, rows }); view.invalidate(); render();
+      }
+      let read = "";
+      for (let line = 0; line < 60; line++) { read += strip(render().join("\n")); input("\x1b[B"); }
+      expect(read).toContain("PREVIEW_END");
+      for (let line = 0; line < 60; line++) { input("\x1b[A"); render(); }
+      const top = right(render());
+      expect(top).toEqual(initial);
+      const redraws = tui.fullRedraws;
+      writes.length = 0;
+      input("d");
+      expect(strip(render().join("\n"))).toContain("Delete original prompt and all 1 request(s)?");
+      input("n"); render();
+      expect(remove).not.toHaveBeenCalled();
+      expect(accept).not.toHaveBeenCalled();
+      expect(run).not.toHaveBeenCalled();
+      expect(source).toEqual(frozen);
+      expect(tui.fullRedraws).toBe(redraws);
+      expect(writes.join("")).not.toMatch(/\x1b\[(?:2J|3J)/);
+    } finally { tui.stop(); bold.mockRestore(); vi.useRealTimers(); }
+  });
+
   it.each(["dark", "light"])("retains connected guides, selection and action targets through focus and resize (%s)", (name) => {
     vi.useFakeTimers();
     const { terminal, writes, input } = createRecordingTerminal({ rows: 60, columns: 160 });
