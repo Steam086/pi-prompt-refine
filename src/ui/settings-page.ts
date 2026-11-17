@@ -331,7 +331,10 @@ export class SettingsPage {
         const name = innerWidth < 32 ? compactLabel : label;
         const compactValue = index === 0 && this.selected.instructions === "first" ? (innerWidth < 20 ? "First" : "First only") : value;
         const available = Math.max(1, innerWidth - 2 - visibleWidth(suffix));
-        content = theme.fg(disabled ? "dim" : active ? "text" : "muted", clip(`${name}: ${compactValue}`, available) + suffix);
+        const text = clip(`${name}: ${compactValue}`, available);
+        // Match wide rows: emphasize only the focused name, not its value or affordance.
+        const styled = active ? theme.bold(text.slice(0, name.length)) + text.slice(name.length) : text;
+        content = theme.fg(disabled ? "dim" : active ? "text" : "muted", styled + suffix);
       }
       const rendered = innerWidth < 2 ? (active ? "›" : " ") : theme.fg("text", active ? "› " : "  ") + content;
       if (active) {

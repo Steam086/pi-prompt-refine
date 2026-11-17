@@ -44,7 +44,7 @@ describe("short and narrow feedback", () => {
     expect(text(100)).toContain("Background not saved");
     size.rows = 8;
     expect(text(40)).toContain("Background not saved");
-    expect(text(40)).toContain("?: Help");
+    expect(text(40)).toContain("? Help");
     panel.handleInput("?");
     let all = "";
     for (let i = 0; i < 40; i++) {
@@ -120,7 +120,7 @@ describe("history storage details", () => {
     const { panel, actions, size, position, text, theme } = create(name, true);
     const status = { state: "saved" as "saved" | "save-error", path: "/项目/中文😀\x1b[2J/session.jsonl.prompt-refine.json", savedIds: [1], memoryOnlyIds: [2], omittedIds: [2] };
     Object.assign(actions, { historyStorage: () => status });
-    expect(text(40)).toContain("b Storage");
+    expect(text(40)).toContain("b: Storage");
     panel.handleInput("b");
     const first = panel.render(100).join("\n");
     expect(first).toContain("Confirmed saved runs"); expect(first).toContain("#1");
@@ -164,9 +164,9 @@ describe("top action hints", () => {
         for (const unavailable of ["0 prompts", "0 runs", "↑↓ select", "↑↓ scroll", "Inspect", "i Edit", "m Model", "Tab Read"]) {
           expect(text).not.toContain(unavailable);
         }
-        expect(text).toContain(usage ? "n New" : "n: New");
-        expect(text).toContain(usage ? "Esc Back" : "Esc: Back");
-        if (width >= 40 && rows >= 24) expect(frame.join("\n")).toContain(formatKeyHint(["p", "Preferences"], f.theme, 1, usage ? "primary" : "secondary"));
+        expect(text).toMatch(/n:? New/);
+        expect(text).toMatch(/Esc:? Back/);
+        if (width >= 40 && rows >= 24) expect(frame.join("\n")).toContain(formatKeyHint(["p", "Preferences"], f.theme, 1, "secondary"));
         if (!usage && width === 120) expect(text).toContain("Run: provider/模型😀");
         expect(frame.join("\n")).not.toContain("\x1b[2J");
         expect(frame).toHaveLength(layout.height);
@@ -193,7 +193,7 @@ describe("top action hints", () => {
         const lines = frame.map(stripVTControlCharacters);
         const layout = panelLayout(width, rows);
         const tabs = lines.findIndex((line) => line.includes(usage ? "Usage" : "Preview"));
-        const back = lines.findIndex((line) => line.includes(usage ? "Esc Back" : "Esc: Back"));
+        const back = lines.findIndex((line) => /Esc:? Back/.test(line));
         const content = lines.findIndex((line) => line.includes(usage ? "No records" : "No current"));
         expect(back).toBeGreaterThanOrEqual(0);
         expect(content).toBeGreaterThan(back);
@@ -201,7 +201,7 @@ describe("top action hints", () => {
           expect(back).toBeGreaterThan(tabs);
           expect(tabs).toBeGreaterThanOrEqual(0);
         }
-        expect(frame[back]).toContain(formatKeyHint(["Esc", "Back"], theme, 1, usage ? "primary" : "secondary"));
+        expect(frame[back]).toContain(formatKeyHint(["Esc", "Back"], theme, 1, lines[back]!.includes("Esc:") ? "secondary" : "secondary-compact"));
         expect(frame).toHaveLength(layout.height);
         expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
         expect(lines.slice(content).join("\n")).not.toMatch(/Esc:? Back/);

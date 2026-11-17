@@ -2,7 +2,7 @@ import { getKeybindings, visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters as strip } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import { InlinePreferences } from "../../src/inline-preferences.js";
-import { formatKeyHint } from "../../src/key-hints.js";
+import { formatKeyHint, wrappedKeyHints, type KeyHint } from "../../src/key-hints.js";
 import { workspaceTabs } from "../../src/panel-layout.js";
 import { TaskPanel } from "../../src/task-panel.js";
 import { workspaceLayout } from "../../src/workspace-overlay.js";
@@ -54,12 +54,83 @@ describe("Tasks shortcut hierarchy", () => {
     } finally { picker.dispose(); bold.mockRestore(); }
   });
 
-  it.each(["dark", "light"])("keeps details, Usage and confirmation hints in their existing style (%s)", (name) => {
+  it.each(["dark", "light"])("keeps Usage browsing hints passive and adjacent to its tabs through resize and focus (%s)", (name) => {
+    const f = create(name, true);
+    f.records[0]!.archivedAt = 1;
+    f.records[0]!.candidate!.text = "Literal 中文😀 **body**\x1b[2J\n".repeat(80);
+    const storage = { state: "saved" as const, savedIds: [1], memoryOnlyIds: [], omittedIds: [] };
+    const remove = vi.fn(() => true);
+    const actions = { ...f.actions, historyStorage: () => storage, deleteRecords: remove };
+    const bold = vi.spyOn(f.theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
+    const panel = new TaskPanel(actions, f.theme, () => f.size.rows, getKeybindings(), true, f.position,
+      (width) => workspaceLayout(width, f.size.rows));
+    try {
+      for (const [width, rows] of [[160, 40], [100, 40], [80, 24], [40, 24], [160, 40]]) {
+        f.size.rows = rows;
+        for (const reading of [false, true]) {
+          const frame = panel.render(width);
+          const plain = frame.map(strip);
+          const tab = plain.findIndex((line) => line.includes(" Preview "));
+          const end = plain.findIndex((line, index) => index > tab && line.trim().startsWith("─"));
+          const hints = frame.slice(tab + 1, end);
+          const expected: KeyHint[] = [["a", "Accept"], ["Enter", "Inspect"], ["p", "Preferences"], ["i", "Edit original"],
+            ["n", "New"], ["m", "Run model"], ["d", "Delete"], ["Esc", "Back"], ["?", width === 40 ? "Help" : "Actions"],
+            ["b", "Storage"], ["f", "Revise"], ["Tab", reading ? "Select" : "Read  "]];
+          expect(hints).toEqual(wrappedKeyHints(expected, workspaceLayout(width, rows).innerWidth, f.theme)
+            .map((line) => " ".repeat(workspaceLayout(width, rows).inset) + line));
+          expect(hints.join("\n")).not.toContain("\x1b[1m");
+          expect(plain[tab - 1]!.trim()).toBe(""); // Retain the gap above, never below, the tabs.
+          expect(plain[end + 1]!.trim()).not.toBe("");
+          expect(frame).toHaveLength(workspaceLayout(width, rows).height);
+          expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
+          expect(frame.join("\n")).not.toContain("\x1b[2J");
+          expect(f.position.selectedId).toBe(1);
+          panel.handleInput("\t");
+        }
+      }
+      panel.handleInput("\t"); panel.render(100); panel.handleInput("\x1b[B"); panel.render(100);
+      expect(f.position.scroll).toBeGreaterThan(0);
+      expect(f.position.selectedId).toBe(1);
+      panel.handleInput("b");
+      expect(strip(panel.render(100).join("\n"))).toContain("Confirmed saved runs");
+      panel.handleInput("\x1b");
+      panel.handleInput("d"); panel.handleInput("n");
+      expect(remove).not.toHaveBeenCalled();
+      expect(f.actions.run).not.toHaveBeenCalled();
+      expect(f.actions.accept).not.toHaveBeenCalled();
+      expect(f.actions.activate).not.toHaveBeenCalled();
+    } finally { bold.mockRestore(); }
+  });
+
+  it.each(["dark", "light"])("retains a passive Back hint in tiny Tasks and Usage canvases (%s)", (name) => {
+    for (const usage of [false, true]) {
+      const f = create(name, usage);
+      const bold = vi.spyOn(f.theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
+      const panel = new TaskPanel(f.actions, f.theme, () => f.size.rows, getKeybindings(), usage, f.position,
+        (width) => workspaceLayout(width, f.size.rows));
+      try {
+        for (const [width, rows] of [[10, 8], [12, 8], [20, 8], [40, 8], [40, 12], [10, 8]]) {
+          f.size.rows = rows;
+          const frame = panel.render(width);
+          const back = frame.find((line) => /Esc:? Back/.test(strip(line)))!;
+          expect(back).toBeDefined();
+          expect(back).not.toContain("\x1b[1m");
+          expect(frame).toHaveLength(workspaceLayout(width, rows).height);
+          expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
+          expect(f.position.selectedId).toBe(1);
+        }
+        expect(f.actions.run).not.toHaveBeenCalled();
+        expect(f.actions.accept).not.toHaveBeenCalled();
+      } finally { bold.mockRestore(); }
+    }
+  });
+
+  it.each(["dark", "light"])("keeps details and confirmation hints in their existing style (%s)", (name) => {
     for (const usage of [false, true]) {
       const f = create(name, usage);
       const bold = vi.spyOn(f.theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
       try {
-        if (!usage) f.panel.handleInput("\r");
+        f.panel.handleInput("\r");
         expect(f.panel.render(100).join("\n")).toContain(formatKeyHint(["Esc", "Back"], f.theme));
         Object.assign(f.actions, { deleteRecords: () => true });
         f.panel.handleInput("d");

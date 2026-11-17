@@ -1,6 +1,7 @@
 import { getKeybindings, TuiAltScreen, TuiMainScreen, visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters as strip } from "node:util";
 import { describe, expect, it, vi } from "vitest";
+import { formatKeyHint } from "../../src/key-hints.js";
 import { TaskPanel, type TaskPanelPosition } from "../../src/task-panel.js";
 import { workspaceLayout } from "../../src/workspace-overlay.js";
 import { getThemeByName } from "../support/pi-theme.js";
@@ -113,6 +114,15 @@ describe.each(["regular", "fullscreen"] as const)("task tree rendering (%s)", (m
       tui.start();
       const initial = render();
       expect(initial.join("\n")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(` ${theme.underline("Usage")} `))));
+      const tabs = initial.findIndex((line) => line.includes(theme.underline("Usage")));
+      const divider = initial.findIndex((line, index) => index > tabs && /^─+$/u.test(strip(line).trim()));
+      const hints = initial.slice(tabs + 1, divider);
+      expect(strip(initial[tabs - 1]!).trim()).toBe("");
+      expect(hints).toHaveLength(1); // Wide Usage no longer reserves a blank tab gap or a second hint row.
+      expect(hints[0]).toContain(formatKeyHint(["Enter", "Inspect"], theme, 1, "secondary"));
+      expect(hints[0]).not.toContain("\x1b[1m");
+      expect(strip(initial[divider + 1]!).trim()).not.toBe("");
+      expect(writes.join("")).toContain(formatKeyHint(["Esc", "Back"], theme, 1, "secondary"));
       expect(writes.join("")).toContain(theme.fg("accent", theme.bold("›")));
       expect(writes.join("")).toContain(theme.underline("Usage"));
       const root = left(initial).findIndex((line) => line.includes("› ▾ Earlier · Original prompt"));

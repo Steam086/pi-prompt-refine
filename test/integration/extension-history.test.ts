@@ -126,7 +126,7 @@ describe("persistent session-local Refine history", () => {
     const h = await makeHarness({ persistHistory, config: { historyPersistence: enabled } });
     h.holdPanel();
     const view = h.command("usage", h.context);
-    expect(h.panelLines(40).join("\n")).toContain("b Storage");
+    expect(h.panelLines(40).join("\n")).toContain("b: Storage");
     h.panelInput("b");
     expect(h.panelLines(100).join("\n")).toContain("History storage");
     expect(h.panelLines(100).join("\n")).toContain(label);

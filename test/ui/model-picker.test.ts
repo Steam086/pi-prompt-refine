@@ -1,4 +1,4 @@
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import { formatKeyHint } from "../../src/key-hints.js";
@@ -115,16 +115,31 @@ describe("model picker layout", () => {
       expect(lines.some((line) => line.startsWith(theme.bg("selectedBg", "X").split("X")[0]!))).toBe(true);
     }
   });
-  it.each(["dark", "light"])("uses normal model text and an accent selection marker in %s", (name) => {
+  it.each(["dark", "light"])("emphasizes only the selected model name through resize in %s", (name) => {
     const theme = getThemeByName(name)!;
-    const bold = vi.spyOn(theme, "bold");
-    const output = renderModelChoices(items, items[12]!.value, 100, 40, theme).join("\n");
-    const calls = [...bold.mock.calls];
-    bold.mockRestore();
-    expect(calls).toEqual([]);
-    expect(output).toContain(theme.fg("accent", "› "));
-    expect(output).toContain(theme.fg("text", "模型 Model 12"));
-    expect(output).toContain(theme.fg("muted", `  ${items[12]!.value}`));
+    const bold = vi.spyOn(theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
+    const choices = [
+      { value: "p/one", label: "one [thinking] (current)", description: "模型😀 One" },
+      { value: "p/two", label: "two [thinking]", description: "模型😀 Two" },
+    ];
+    try {
+      for (const width of [100, 30, 12, 8, 100]) for (const selected of choices) {
+        bold.mockClear();
+        const lines = renderModelChoices(choices, selected.value, width, 20, theme);
+        const output = lines.join("\n");
+        const label = stripVTControlCharacters(truncateToWidth(selected.description, width - 2));
+        expect(bold.mock.calls).toEqual([[label]]);
+        expect(output).toContain(theme.fg("accent", "› "));
+        expect(output).toContain(theme.fg("text", theme.bold(label)));
+        expect(output).toContain(theme.fg("muted", `  ${selected.value}`));
+        for (const badge of ["Thinking capable", "Current"]) expect(output).not.toContain(theme.bold(badge));
+        expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+        const active = lines.filter((line) => line.startsWith(theme.bg("selectedBg", "X").split("X")[0]!));
+        expect(active.length).toBeGreaterThanOrEqual(2);
+        expect(active.every((line) => visibleWidth(line) === width)).toBe(true);
+        expect(active[0]).not.toContain("\x1b[0m");
+      }
+    } finally { bold.mockRestore(); }
   });
 
   it("uses wide terminals for full identities without a fixed label column", () => {
@@ -136,7 +151,8 @@ describe("model picker layout", () => {
     const unsafe = "\x1b[1m\x1b[31m\x1b]52;c;payload\x07";
     const item = { value: `provider/model${unsafe}`, label: `provider/model${unsafe}`, description: `Model 中文😀${unsafe}` };
     const output = renderModelChoices([item], item.value, 100, 40, theme).join("\n");
-    expect(output).not.toContain("\x1b[1m");
+    expect(output).toContain(theme.fg("text", theme.bold("Model 中文😀�[1m�[31m�]52;c;payload�")));
+    expect(output).not.toContain(unsafe);
     expect(output).not.toContain("\x1b[31m");
     expect(output).not.toContain("\x1b]52");
     expect(output).toContain("Model 中文😀�[1m�[31m�]52;c;payload�");

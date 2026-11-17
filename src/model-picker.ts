@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from "node:util";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi, type SelectItem } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { sanitizeTerminalText } from "./presentation.js";
@@ -23,7 +24,9 @@ export function renderModelChoices(
     // On narrow terminals keep badges separate so they never consume the model name's space.
     const name = sanitizeTerminalText(item.description || item.value);
     const compact = visibleWidth(prefix + name + badges) > width;
-    const primary = theme.fg("accent", prefix) + theme.fg("text", truncateToWidth(name, Math.max(1, width - 2)));
+    // Clip before styling so truncation resets cannot interrupt emphasis or the selected surface.
+    const label = stripVTControlCharacters(truncateToWidth(name, Math.max(1, width - 2)));
+    const primary = theme.fg("accent", prefix) + theme.fg("text", active ? theme.bold(label) : label);
     const entry = [compact ? primary : primary + theme.fg("muted", badges),
       theme.fg("muted", sanitizeTerminalText(`  ${item.value}`))];
     if (compact && badges) entry.push(theme.fg("muted", `  ${badges.slice(3)}`));
