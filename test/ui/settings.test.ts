@@ -37,7 +37,7 @@ describe("Settings budgets and limits", () => {
       f.workspace.openSettings(undefined, cursor);
       const wide = f.workspace.render(100).join("\n");
       expect(wide).toContain(f.theme.fg("text", f.theme.bold(label.padEnd(22))));
-      expect(wide).toContain(formatKeyHint(["Ctrl+S", "Save settings"], f.theme));
+      expect(wide).toContain(formatKeyHint(["Ctrl+S", "Save settings"], f.theme, 1, "secondary"));
       for (const rows of [40, 12, 8, 5, 40]) for (const width of [1, 12, 20, 40, 100, 160]) {
         f.terminal.rows = rows;
         const frame = f.workspace.render(width);
@@ -124,7 +124,8 @@ describe("Settings budgets and limits", () => {
       expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
       expect(frame.join("\n")).toContain(CURSOR_MARKER);
       if (width >= 20) {
-        expect(frame.join("\n")).toContain(formatKeyHint(["Esc", "Cancel"], f.theme));
+        const style = stripVTControlCharacters(frame.join("\n")).includes("Esc: Cancel") ? "secondary" : "secondary-compact";
+        expect(frame.join("\n")).toContain(formatKeyHint(["Esc", "Cancel"], f.theme, 1, style));
         expect(frame.join("\n")).toContain(f.theme.fg("warning", "").split("\x1b[39m")[0]);
         expect(stripVTControlCharacters(frame.join("\n"))).toContain("Enter 16–65536");
       }

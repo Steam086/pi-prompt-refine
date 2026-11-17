@@ -34,7 +34,7 @@ describe("shared refine workspace", () => {
     panel.toggleHelp();
     expect(textOf(workspace.render(100))).toContain(formatKeyHint(["r", "Refine current draft in this round (model call)"], theme));
     workspace.openSettings();
-    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["Ctrl+S", "Save settings"], theme));
+    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["Ctrl+S", "Save settings"], theme, 1, "secondary"));
     workspace.handleInput("q");
     workspace.handleInput("i");
     expect(textOf(workspace.render(100))).toContain(formatKeyHint(["Enter", "Refine"], theme));
@@ -66,7 +66,7 @@ describe("shared refine workspace", () => {
         if (width >= 40 && rows >= 16) {
           expect(stripVTControlCharacters(textOf(input))).toContain("Esc Back");
           expect(stripVTControlCharacters(textOf(input))).toContain("Enter Refine");
-          expect(stripVTControlCharacters(textOf(context))).toContain("Ctrl+S Save settings");
+          expect(stripVTControlCharacters(textOf(context))).toContain("Ctrl+S: Save settings");
         }
       }
     }
