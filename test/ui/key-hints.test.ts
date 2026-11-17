@@ -1,6 +1,7 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
+import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
-import { alignedKeyHints, fittingKeyHints, formatKeyHint, keyHintGrid, type KeyHint } from "../../src/key-hints.js";
+import { alignedKeyHints, fittingKeyHints, formatKeyHint, keyHintGrid, wrappedKeyHints, type KeyHint } from "../../src/key-hints.js";
 
 const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
 const hints: KeyHint[] = [["r", "Refine"], ["m", "Model"], ["x", "Cancel"]];
@@ -22,6 +23,32 @@ describe("fixed-column key hints", () => {
     expect(alignedKeyHints([pair], 23, styled)).toEqual([joined]);
     expect(fittingKeyHints(pair, 23, styled)).toBe(joined);
     expect(fittingKeyHints(pair, 22, styled)).toBe(formatKeyHint(pair[0]!, styled));
+  });
+
+  it("packs secondary hints into one muted, regular-weight line or wraps whole pairs", () => {
+    const styled = {
+      fg: (_color: string, text: string) => `\x1b[90m${text}\x1b[39m`,
+      bold: (text: string) => `\x1b[1m${text}\x1b[22m`,
+    };
+    const pairs: KeyHint[] = [["Enter", "Optimize"], ["Tab", "Preferences"], ["Esc", "Back"]];
+    const wide = wrappedKeyHints(pairs, 60, styled);
+    expect(wide.map(stripVTControlCharacters)).toEqual(["Enter: Optimize · Tab: Preferences · Esc: Back"]);
+    expect(wide.join("")).not.toContain("\x1b[1m");
+    expect(wide[0]).toContain(styled.fg("muted", "Enter:") + " " + styled.fg("muted", "Optimize"));
+    expect(wrappedKeyHints(pairs, 20, styled).map(stripVTControlCharacters)).toEqual(["Enter: Optimize", "Tab: Preferences", "Esc: Back"]);
+    expect(fittingKeyHints(pairs, 20, styled, " · ", "secondary")).toBe(formatKeyHint(pairs[0]!, styled, 1, "secondary"));
+    expect(wrappedKeyHints(pairs, 0, styled)).toEqual([]);
+  });
+
+  it("wraps oversized ANSI/Unicode pairs without truncating their text", () => {
+    const styled = { fg: (_color: string, text: string) => `\x1b[90m${text}\x1b[39m`, bold: theme.bold };
+    const pairs: KeyHint[] = [["→", "中文😀 literal requirements"], ["Esc", "Back"]];
+    for (const width of [4, 8, 12, 20]) {
+      const lines = wrappedKeyHints(pairs, width, styled);
+      expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+      expect(lines.map(stripVTControlCharacters).join("").replace(/[\s·]/g, "")).toBe("→:中文😀literalrequirementsEsc:Back");
+      expect(lines.join("")).not.toContain("…");
+    }
   });
 
   it("wraps whole cells at fixed tab stops when resized", () => {

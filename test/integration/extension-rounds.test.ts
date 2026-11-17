@@ -185,7 +185,7 @@ describe("round workspace integration", () => {
 
     view = shortcut(harness, "ctrl+\\")(harness.context);
     expect(harness.panelLines().join("\n")).toContain("Accepted B result");
-    expect(harness.panelLines().join("\n")).toContain("a Accept");
+    expect(harness.panelLines().join("\n")).toContain("a: Accept");
     expect(harness.panelLines().join("\n")).toContain("2 prompts");
     expect(harness.complete).toHaveBeenCalledTimes(2);
     harness.panelInput("q"); await view;
@@ -224,7 +224,7 @@ describe("round workspace integration", () => {
     harness.panelInput("\r"); await flushPromises();
     expect(harness.complete).toHaveBeenCalledTimes(1);
     expect(harness.notifications.at(-1)).toContain("already running");
-    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("x Stop"));
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("x: Stop"));
     harness.panelInput("x");
     expect((harness.complete.mock.calls[0] as any[])[2].signal.aborted).toBe(true);
     harness.panelInput("q"); await view;

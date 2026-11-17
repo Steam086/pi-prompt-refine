@@ -5,7 +5,7 @@ import type { RefineRecord } from "./history.js";
 import { taskGroups } from "./app/queries.js";
 import type { HistoryStorageStatus } from "./history-store.js";
 import { panelFrame, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
-import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
+import { alignedKeyHints, fittingKeyHints, formatKeyHint, wrappedKeyHints, type KeyHint } from "./key-hints.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
 import type { InlinePreferences } from "./inline-preferences.js";
@@ -405,7 +405,7 @@ export class TaskPanel {
   }
   render(width: number, _empty?: () => string[]): string[] {
     if (width < 1) return [];
-    const layout = this.layout(width);
+    let layout = this.layout(width);
     if (this.document) return this.renderDocument(width);
     if (this.deletion) {
       const body = this.content.wrapped(this.theme.fg("warning", `Delete ${this.deletion.label}?`) +
@@ -414,14 +414,58 @@ export class TaskPanel {
         body, [fittingKeyHints([["Esc / n", "Cancel"], ["y", "Delete"]], layout.innerWidth, this.theme)],
         (text) => this.content.muted(text), { footerAfterBodyRows: 0 });
     }
-    const tabs = workspaceTabs(layout, this.usage ? "Usage" : "Preview", this.theme);
-    const height = Math.max(1, layout.bodyHeight - tabs.length);
+    let tabs = workspaceTabs(layout, this.usage ? "Usage" : "Preview", this.theme);
     const rows = this.entries();
     const selected = this.selected(rows);
     const inline = this.inline(selected);
     this.actions.inlinePreferences?.setTarget(inline ? selected!.record.id : undefined, this.preferenceFocus);
     if (inline && this.preferenceFocus && selected) return renderTaskPreferences(selected, inline, layout, tabs, this.theme, this.content,
       (columns, rows) => this.pane(selected, columns, rows, true, false, false), this.canExpand() ? this.expansionHint?.() : undefined);
+    const previewDetails = this.inspecting && !this.usage && this.compareId === undefined && !!selected && !selected.original && !!selected.record.candidate;
+    const other = this.inspecting && this.compareId !== undefined ? this.entries(this.retainedEarlier).find((row) => !row.original && row.record.id === this.compareId) : undefined;
+    const passiveHints = !this.usage && !this.inspecting && !this.retainedEarlier && !this.referenceOnly;
+    const action = !this.inspecting && selected?.original && selected.record.status === "unsent" && (this.usage || selected.record.archivedAt === undefined) ? "Optimize" : "Inspect";
+    const restored = selected?.record.input.contextUnavailable;
+    const primary: KeyHint[] = !selected ? [["n", "New"]] : this.inspecting
+      ? [["i", restored ? "Copy to current" : "Edit original"], ...(!restored ? [["m", "Run model"] as const] : [])]
+      : [["Enter", action], ["i", restored ? "Copy to current" : "Edit original"], ["n", "New"], ...(!restored ? [["m", "Run model"] as const] : [])];
+    if (inline) primary.splice(1, 0, ["Tab", passiveHints || layout.innerWidth < 56 ? "Preferences" : "Choose preferences"]);
+    if (this.canOpenPreferences()) primary.splice(this.inspecting ? 0 : inline ? 2 : 1, 0, ["p", inline ? passiveHints ? "Manage" : "Manage / more" : "Preferences"]);
+    if (selected && !selected.original && pending(selected.record)) primary.unshift(["x", "Stop"]);
+    if (selected && !selected.original && selected.record.candidate) {
+      primary.unshift(...(this.inspecting ? [["s", "Send to Pi"] as const] : []));
+      primary.unshift(["a", "Accept"]);
+    }
+    if (selected && this.actions.deleteRecords) primary.push(["d", "Delete"]);
+    // Reserve both focus labels so Tab never shifts columns or changes which hints fit.
+    const focusAction = (this.reading ? "Select" : "Read").padEnd("Select".length);
+    const secondary: KeyHint[] = [["Esc", "Back"], ["?", layout.innerWidth < 56 ? "Help" : "Actions"], ...(this.usage && this.actions.historyStorage ? [["b", "Storage"] as const] : []), ...(!this.inspecting && selected && !selected.original && selected.record.candidate && !restored && this.actions.revise ? [["f", "Revise"] as KeyHint] : []), ...(previewDetails ? [["o", this.original ? "Result" : "Reference"] as KeyHint] : []), ...(inline ? [["o", this.reading ? "Select" : "Read original"] as KeyHint] : other || (selected && !this.inspecting && !this.retainedEarlier) ? [["Tab", other ? "Switch result" : focusAction] as KeyHint] : [])];
+    if (this.inspecting && selected && !selected.original && selected.record.candidate) {
+      secondary.push(...(selected.records.some((record) => record.id !== selected.record.id && record.candidate) ? [["c", other ? "Next comparison" : "Compare"] as KeyHint] : []), ["e", "Edit result"], ...(!restored ? [["f", "Revise"] as const] : []));
+    }
+    const expansion = this.canExpand() && this.expansionHint?.();
+    if (expansion) secondary.splice(this.usage ? 3 : 2, 0, expansion);
+    const compact = (hints: KeyHint[]): KeyHint[] => hints.map(([key, label]) => [key === "Enter" ? "↵" : key, label === "Send to Pi" ? "Send" : label]);
+    let footer = layout.innerWidth < 56
+      ? [fittingKeyHints(compact(primary), layout.innerWidth, this.theme, layout.innerWidth < 30 ? " " : " · "), fittingKeyHints(secondary, layout.innerWidth, this.theme, layout.innerWidth < 30 ? " " : " · ")]
+      : alignedKeyHints([primary, secondary], layout.innerWidth, this.theme);
+    if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["Esc", "Back"], ["?", "Help"], ...compact(primary)], layout.innerWidth, this.theme, " ");
+    if (passiveHints && layout.footerHeight > 0) {
+      // Tasks alone use passive, naturally wrapping hints and no trailing tab gap.
+      if (tabs.length === 3) tabs = tabs.slice(0, -1);
+      const wrapped = wrappedKeyHints([...primary, ...secondary], layout.innerWidth, this.theme);
+      const available = layout.bodyHeight + layout.footerHeight - tabs.length - 1;
+      if (wrapped.length <= available) footer = wrapped;
+      else {
+        // Extremely small canvases retain the existing primary/back priorities.
+        const separator = layout.innerWidth < 30 ? " " : " · ";
+        footer = layout.footerHeight === 1
+          ? [fittingKeyHints([["Esc", "Back"], ["?", "Help"], ...compact(primary)], layout.innerWidth, this.theme, " ", "secondary")]
+          : [fittingKeyHints(compact(primary), layout.innerWidth, this.theme, separator, "secondary"), fittingKeyHints(secondary, layout.innerWidth, this.theme, separator, "secondary")];
+      }
+      layout = { ...layout, footerHeight: footer.length, bodyHeight: layout.bodyHeight + layout.footerHeight - footer.length };
+    }
+    const height = Math.max(1, layout.bodyHeight - tabs.length);
     const split = !!selected && !this.inspecting && !this.retainedEarlier && layout.innerWidth >= 72;
     const leftWidth = split ? Math.min(layout.innerWidth >= 120 ? 48 : 36, Math.floor(layout.innerWidth / 3)) : layout.innerWidth;
     const rightWidth = split ? layout.innerWidth - leftWidth - 3 : layout.innerWidth;
@@ -476,9 +520,7 @@ export class TaskPanel {
         highlight(truncateToWidth(this.content.muted(continuation) + (row.original ? " " : "  ") + detail, leftWidth, "…")),
         this.content.muted(continuation.trimEnd())];
     });
-    const previewDetails = this.inspecting && !this.usage && this.compareId === undefined && !!selected && !selected.original && !!selected.record.candidate;
     let body: string[];
-    const other = this.inspecting && this.compareId !== undefined ? this.entries(this.retainedEarlier).find((row) => !row.original && row.record.id === this.compareId) : undefined;
     // Exactly one layout owns the horizontal split: list + summary, Enter
     // details (result + reference), or Compare. Never nest detail columns inside
     // an existing pane, or render an unused pane that clamps its scroll offset.
@@ -517,32 +559,6 @@ export class TaskPanel {
         return line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line))) + this.content.muted(" │ ") + (right[i] ?? "");
       });
     }
-    const action = !this.inspecting && selected?.original && selected.record.status === "unsent" && (this.usage || selected.record.archivedAt === undefined) ? "Optimize" : "Inspect";
-    const restored = selected?.record.input.contextUnavailable;
-    const primary: KeyHint[] = !selected ? [["n", "New"]] : this.inspecting
-      ? [["i", restored ? "Copy to current" : "Edit original"], ...(!restored ? [["m", "Run model"] as const] : [])]
-      : [["Enter", action], ["i", restored ? "Copy to current" : "Edit original"], ["n", "New"], ...(!restored ? [["m", "Run model"] as const] : [])];
-    if (inline) primary.splice(1, 0, ["Tab", layout.innerWidth < 56 ? "Preferences" : "Choose preferences"]);
-    if (this.canOpenPreferences()) primary.splice(this.inspecting ? 0 : inline ? 2 : 1, 0, ["p", inline ? "Manage / more" : "Preferences"]);
-    if (selected && !selected.original && pending(selected.record)) primary.unshift(["x", "Stop"]);
-    if (selected && !selected.original && selected.record.candidate) {
-      primary.unshift(...(this.inspecting ? [["s", "Send to Pi"] as const] : []));
-      primary.unshift(["a", "Accept"]);
-    }
-    if (selected && this.actions.deleteRecords) primary.push(["d", "Delete"]);
-    // Reserve both focus labels so Tab never shifts columns or changes which hints fit.
-    const focusAction = (this.reading ? "Select" : "Read").padEnd("Select".length);
-    const secondary: KeyHint[] = [["Esc", "Back"], ["?", layout.innerWidth < 56 ? "Help" : "Actions"], ...(this.usage && this.actions.historyStorage ? [["b", "Storage"] as const] : []), ...(!this.inspecting && selected && !selected.original && selected.record.candidate && !restored && this.actions.revise ? [["f", "Revise"] as KeyHint] : []), ...(previewDetails ? [["o", this.original ? "Result" : "Reference"] as KeyHint] : []), ...(inline ? [["o", this.reading ? "Select" : "Read original"] as KeyHint] : other || (selected && !this.inspecting && !this.retainedEarlier) ? [["Tab", other ? "Switch result" : focusAction] as KeyHint] : [])];
-    if (this.inspecting && selected && !selected.original && selected.record.candidate) {
-      secondary.push(...(selected.records.some((record) => record.id !== selected.record.id && record.candidate) ? [["c", other ? "Next comparison" : "Compare"] as KeyHint] : []), ["e", "Edit result"], ...(!restored ? [["f", "Revise"] as const] : []));
-    }
-    const expansion = this.canExpand() && this.expansionHint?.();
-    if (expansion) secondary.splice(this.usage ? 3 : 2, 0, expansion);
-    const compact = (hints: KeyHint[]): KeyHint[] => hints.map(([key, label]) => [key === "Enter" ? "↵" : key, label === "Send to Pi" ? "Send" : label]);
-    const footer = layout.innerWidth < 56
-      ? [fittingKeyHints(compact(primary), layout.innerWidth, this.theme, layout.innerWidth < 30 ? " " : " · "), fittingKeyHints(secondary, layout.innerWidth, this.theme, layout.innerWidth < 30 ? " " : " · ")]
-      : alignedKeyHints([primary, secondary], layout.innerWidth, this.theme);
-    if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["Esc", "Back"], ["?", "Help"], ...compact(primary)], layout.innerWidth, this.theme, " ");
     const title = this.inspecting ? (other ? "Compare results" : "Prompt details") : this.usage ? "Usage · All rounds" : "Prompt refine · Tasks";
     const feedback = this.notice ? this.theme.fg(this.noticeColor, sanitizeTerminalText(this.notice)) : "";
     let inspectionSubtitle = "";

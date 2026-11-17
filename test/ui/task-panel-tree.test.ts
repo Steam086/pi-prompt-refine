@@ -442,7 +442,7 @@ describe("prompt tree and inspection", () => {
       }
     }
     const f = create("light", false, []);
-    expect(f.text()).toContain("p Preferences");
+    expect(f.text()).toContain("p: Preferences");
     f.panel.handleInput("p"); expect(f.actions.preferences).toHaveBeenCalledWith(undefined, undefined);
   });
 
@@ -453,7 +453,7 @@ describe("prompt tree and inspection", () => {
     const f = create(name, false, [source]);
     const full = f.panel.render(100).join("\n");
     expect(full).toContain(f.theme.fg("muted", sanitizeTerminalText(`Preferences: 1 · ${source.input.preferences[0]!.name}`)));
-    expect(f.text()).toContain("p Preferences");
+    expect(f.text()).toContain("p: Preferences");
     expect(full).not.toContain("\x1b[2J");
     for (const [width, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [100, 40]]) {
       f.size.rows = rows!;
