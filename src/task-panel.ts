@@ -447,17 +447,21 @@ export class TaskPanel {
         : `${prefix}${model}${" ".repeat(Math.max(1, leftWidth - visibleWidth(prefix + model + badge)))}${badge}`;
       const clean = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(label), leftWidth, "…"));
       const emphasize = (text: string) => active && rowHeight > 1 ? this.theme.bold(text) : text;
-      const primary = (text: string) => this.theme.fg("text", emphasize(text));
+      const primary = (text: string) => this.theme.fg("text", active ? this.theme.bold(text) : text);
+      // Selection survives a reading-focus change. Accent only the existing
+      // cursor, not model identities, tree guides or semantic status badges.
+      const cursor = active && clean.startsWith("›")
+        ? this.theme.fg("accent", this.theme.bold("›")) : primary(clean.slice(0, 1));
       let text: string;
       if (row.original) {
         const earlierAt = old ? clean.indexOf("Earlier · ") : -1;
-        text = earlierAt < 0 ? primary(clean)
-          : primary(clean.slice(0, earlierAt)) + this.content.muted("Earlier · ") + primary(clean.slice(earlierAt + 10));
+        text = cursor + (earlierAt < 0 ? primary(clean.slice(1))
+          : primary(clean.slice(1, earlierAt)) + this.content.muted("Earlier · ") + primary(clean.slice(earlierAt + 10)));
       } else {
         const badgeAt = Math.min(clean.length, label.length - badge.length);
         const gutterEnd = Math.min(visibleWidth(prefix), badgeAt);
         const status = clean.slice(badgeAt);
-        text = primary(clean.slice(0, 2)) + this.content.muted(clean.slice(2, gutterEnd)) + primary(clean.slice(gutterEnd, badgeAt))
+        text = cursor + primary(clean.slice(1, 2)) + this.content.muted(clean.slice(2, gutterEnd)) + primary(clean.slice(gutterEnd, badgeAt))
           + emphasize(status.startsWith("⚠") ? this.theme.fg("warning", "⚠") + this.theme.fg(this.content.color(record), status.slice(1))
             : this.theme.fg(this.content.color(record), status));
       }

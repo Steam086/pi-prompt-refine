@@ -58,8 +58,8 @@ describe("shared refine workspace", () => {
     const settings = workspace.render(100);
     expect(main[1]).toContain(theme.fg("text", theme.bold("Prompt refine")));
     expect(settings[1]).toContain(theme.fg("text", theme.bold("Settings")));
-    expect(main[4]).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Preview "))));
-    expect(settings[4]).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Settings "))));
+    expect(main[4]).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(` ${theme.underline("Preview")} `))));
+    expect(settings[4]).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(` ${theme.underline("Settings")} `))));
     expect(textOf(settings)).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Context "))));
     expect(footer(main)[0]).toContain(formatKeyHint(["a", "Accept"], theme));
     expect(footer(settings)[0]).toContain(formatKeyHint(["Enter", "Change"], theme));
@@ -392,7 +392,9 @@ describe("shared refine workspace", () => {
     workspace.openSettings();
     const bg = vi.spyOn(theme, "bg");
     workspace.render(100);
-    const focus = bg.mock.calls.filter(([color]) => color === "selectedBg");
+    const selected = bg.mock.calls.filter(([color]) => color === "selectedBg");
+    expect(selected).toHaveLength(2); // Persistent page identity + keyboard focus.
+    const focus = selected.filter(([, text]) => stripVTControlCharacters(text).startsWith("› "));
     expect(focus).toHaveLength(1);
     expect(visibleWidth(focus[0]![1])).toBe(panelLayout(100, 40).innerWidth);
     bg.mockRestore();

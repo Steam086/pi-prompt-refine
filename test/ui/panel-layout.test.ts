@@ -1,7 +1,7 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
-import { describe, expect, it } from "vitest";
-import { alignedHints, panelFrame, panelGeometry, workspaceTabs, WORKSPACE_PAGES } from "../../src/panel-layout.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { alignedHints, panelFrame, panelGeometry, panelTabs, workspaceTabs, WORKSPACE_PAGES } from "../../src/panel-layout.js";
 import { getThemeByName } from "../support/pi-theme.js";
 import { workspaceHeight, workspaceLayout, workspaceViewport } from "../../src/workspace-overlay.js";
 
@@ -31,17 +31,41 @@ describe("overlay geometry", () => {
 });
 
 describe("workspace tabs", () => {
+  afterEach(() => vi.restoreAllMocks());
+
   it.each(["dark", "light"])("uses arrow-free page identities and all available columns (%s)", (name) => {
     const theme = getThemeByName(name)!;
+    vi.spyOn(theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
+    vi.spyOn(theme, "underline").mockImplementation((text) => `\x1b[4m${text}\x1b[24m`);
     for (const width of [12, 24, 30, 40, 100, 160]) for (const active of WORKSPACE_PAGES) {
       const layout = panelGeometry(width, 40, width, false, false, 0);
       const tabs = workspaceTabs(layout, active, theme);
       const plain = stripVTControlCharacters(tabs.join("\n"));
       expect(plain).not.toMatch(/[←→]/);
-      expect(tabs.join("\n")).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(` ${active} `))));
+      expect(tabs.join("\n")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(` ${theme.underline(active)} `))));
+      expect(tabs.join("\n")).not.toContain(theme.bg("toolPendingBg", "probe").split("probe")[0]);
+      for (const label of WORKSPACE_PAGES.filter((label) => label !== active)) {
+        expect(tabs.join("\n")).not.toContain(theme.underline(label));
+        if (width >= 30) expect(tabs.join("\n")).toContain(theme.fg("muted", ` ${label} `));
+      }
       expect(tabs.every((line) => visibleWidth(line) <= width)).toBe(true);
       if (width >= 30) for (const label of WORKSPACE_PAGES) expect(plain).toContain(label);
       else expect(plain.trim()).toBe(active);
+    }
+  });
+
+  it.each(["dark", "light"])("leaves child group selection and tab geometry unchanged (%s)", (name) => {
+    const theme = getThemeByName(name)!;
+    const layout = panelGeometry(100, 40, 100, false, false, 0);
+    const groups = panelTabs(layout, ["Context", "Optimizer", "Advanced"], 0, theme);
+    expect(groups.join("\n")).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Context "))));
+    expect(workspaceTabs(layout, "Preview", theme).map(stripVTControlCharacters)).toEqual([
+      "", " Preview    Usage    Settings ", "",
+    ]);
+    for (const height of [1, 4, 8, 12, 40]) {
+      const compact = panelGeometry(12, height, 12, false, false, 0);
+      const tabs = workspaceTabs(compact, "Settings", theme);
+      expect(tabs).toHaveLength(compact.bodyHeight < 4 ? 0 : compact.bodyHeight >= 8 ? 3 : 1);
     }
   });
 });

@@ -143,7 +143,7 @@ describe("prompt tree and inspection", () => {
     for (const label of ["Prompt details", "#2 模型😀�[1m", "Revised result", "Original prompt", "Revision instruction"]) {
       expect(output).toContain(heading(label));
     }
-    expect(output).toContain(theme.bg("toolPendingBg", heading(" Preview ")));
+    expect(output).toContain(theme.bg("selectedBg", heading(` ${theme.underline("Preview")} `)));
     for (const label of ["Selected: ", " Usage ", " Settings ", "openai-codex · Thinking xhigh", "23s", "Revision of run #1", " │ ", " · "]) {
       expect(output).toContain(muted(label));
     }
