@@ -200,7 +200,7 @@ describe("main request deletion shortcut", () => {
     harness.holdPanel();
     const view = shortcut(harness, "ctrl+\\")(harness.context);
     harness.panelInput("\r");
-    expect(harness.panelLines(100).join("\n")).toContain("d Delete");
+    expect(harness.panelLines(100).join("\n")).toContain("d: Delete");
     harness.panelInput("d");
     expect(harness.panelLines().join("\n")).toContain("Confirmation required");
     harness.panelInput("n");

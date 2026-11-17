@@ -49,8 +49,8 @@ describe.each(["regular", "fullscreen"] as const)("current-round Preview (%s)", 
           expect(text).not.toContain(unavailable);
         }
         expect(text).toContain("Usage");
-        expect(text).toContain("n New");
-        expect(text).toContain("Esc Back");
+        expect(text).toContain("n: New");
+        expect(text).toContain("Esc: Back");
         if (columns === 120) {
           expect(frame.join("\n")).toContain(theme.fg("muted", "History → Usage · 1 earlier prompt"));
           expect(frame.join("\n")).toContain(theme.fg("muted", `Run: ${sanitizeTerminalText("provider/模型😀\x1b[2J")}`));

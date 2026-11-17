@@ -44,7 +44,7 @@ describe("short and narrow feedback", () => {
     expect(text(100)).toContain("Background not saved");
     size.rows = 8;
     expect(text(40)).toContain("Background not saved");
-    expect(text(40)).toContain("? Help");
+    expect(text(40)).toContain("?: Help");
     panel.handleInput("?");
     let all = "";
     for (let i = 0; i < 40; i++) {
@@ -164,9 +164,9 @@ describe("top action hints", () => {
         for (const unavailable of ["0 prompts", "0 runs", "↑↓ select", "↑↓ scroll", "Inspect", "i Edit", "m Model", "Tab Read"]) {
           expect(text).not.toContain(unavailable);
         }
-        expect(text).toContain("n New");
-        expect(text).toContain("Esc Back");
-        if (width >= 40 && rows >= 24) expect(frame.join("\n")).toContain(formatKeyHint(["p", "Preferences"], f.theme));
+        expect(text).toContain(usage ? "n New" : "n: New");
+        expect(text).toContain(usage ? "Esc Back" : "Esc: Back");
+        if (width >= 40 && rows >= 24) expect(frame.join("\n")).toContain(formatKeyHint(["p", "Preferences"], f.theme, 1, usage ? "primary" : "secondary"));
         if (!usage && width === 120) expect(text).toContain("Run: provider/模型😀");
         expect(frame.join("\n")).not.toContain("\x1b[2J");
         expect(frame).toHaveLength(layout.height);
@@ -193,7 +193,7 @@ describe("top action hints", () => {
         const lines = frame.map(stripVTControlCharacters);
         const layout = panelLayout(width, rows);
         const tabs = lines.findIndex((line) => line.includes(usage ? "Usage" : "Preview"));
-        const back = lines.findIndex((line) => line.includes("Esc Back"));
+        const back = lines.findIndex((line) => line.includes(usage ? "Esc Back" : "Esc: Back"));
         const content = lines.findIndex((line) => line.includes(usage ? "No records" : "No current"));
         expect(back).toBeGreaterThanOrEqual(0);
         expect(content).toBeGreaterThan(back);
@@ -201,10 +201,10 @@ describe("top action hints", () => {
           expect(back).toBeGreaterThan(tabs);
           expect(tabs).toBeGreaterThanOrEqual(0);
         }
-        expect(frame[back]).toContain(formatKeyHint(["Esc", "Back"], theme));
+        expect(frame[back]).toContain(formatKeyHint(["Esc", "Back"], theme, 1, usage ? "primary" : "secondary"));
         expect(frame).toHaveLength(layout.height);
         expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
-        expect(lines.slice(content).join("\n")).not.toContain("Esc Back");
+        expect(lines.slice(content).join("\n")).not.toMatch(/Esc:? Back/);
       }
     }
   });
@@ -212,15 +212,18 @@ describe("top action hints", () => {
     const { panel, theme, size } = create(name);
     for (let width = 20; width <= 140; width++) {
       const layout = panelLayout(width, size.rows);
-      const start = layout.topSeparatorHeight + layout.headerHeight + workspaceTabs(layout, "Preview", theme).length;
-      const hints = () => panel.render(width).slice(start, start + layout.footerHeight).map(stripVTControlCharacters);
+      const start = layout.topSeparatorHeight + layout.headerHeight + Math.min(2, workspaceTabs(layout, "Preview", theme).length);
+      const hints = () => {
+        const frame = panel.render(width).map(stripVTControlCharacters);
+        const end = frame.findIndex((line, index) => index >= start && line.trim().startsWith("─"));
+        return frame.slice(start, end);
+      };
       const before = hints();
-      expect(before.join("\n")).toContain("Esc Back");
+      expect(before.join("\n")).toContain("Esc: Back");
       panel.handleInput("\t");
       const after = hints();
-      expect(after[0], `primary hints at width ${width}`).toBe(before[0]);
-      expect(after[1]?.replace("Tab Select", "Tab Read  ").trimEnd(), `secondary hints at width ${width}`)
-        .toBe(before[1]?.trimEnd());
+      expect(after.map((line) => line.replace("Tab: Select", "Tab: Read  ").trimEnd()), `hints at width ${width}`)
+        .toEqual(before.map((line) => line.trimEnd()));
       panel.handleInput("\t");
       expect(hints()).toEqual(before);
     }
