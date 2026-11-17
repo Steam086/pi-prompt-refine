@@ -11,6 +11,55 @@ import { create, record } from "../support/task-panel.js";
 
 afterEach(() => vi.restoreAllMocks());
 describe("prompt tree and inspection", () => {
+  it.each(["dark", "light"])("emphasizes selection independently of reading focus and Done status (%s)", (name) => {
+    for (const original of [true, false]) {
+      const f = create(name);
+      f.records[0]!.input.draft = "Original 中文😀\x1b[2J";
+      f.records[0]!.input.model.id = "模型😀";
+      Object.assign(f.position, { selectedTaskId: original ? 1 : undefined, selectedId: 1 });
+      vi.spyOn(f.theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
+      const fg = vi.spyOn(f.theme, "fg");
+      const panel = new TaskPanel(f.actions, f.theme, () => f.size.rows, getKeybindings(), false, f.position,
+        (width) => workspaceLayout(width, f.size.rows));
+      for (const [width, rows] of [[40, 14], [100, 40], [160, 60]] as const) {
+        f.size.rows = rows;
+        fg.mockClear();
+        const frame = panel.render(width);
+        const active = frame.find((line) => stripVTControlCharacters(line).includes("›"))!;
+        const cell = active.split(f.theme.fg("muted", " │ "))[0]!;
+        expect(cell).toContain(f.theme.fg("accent", f.theme.bold("›")));
+        expect(cell).toContain(f.theme.bg("selectedBg", "probe").split("probe")[0]);
+        expect(fg.mock.calls.some(([token, value]) => token === "text" && value.includes("\x1b[1m") &&
+          value.includes(original ? (width === 160 ? "Original prompt" : "Original 中文😀") : "模型😀"))).toBe(true);
+        if (!original) {
+          expect(cell).toContain(f.theme.fg("muted", "└─ "));
+          expect(cell).toContain(f.theme.fg("success", "✓ Done"));
+          expect(cell).not.toContain(f.theme.fg("accent", "✓ Done"));
+        }
+        // The selected surface spans the entire cell, including ANSI/Unicode
+        // content and trailing padding, without swallowing the split divider.
+        const layout = workspaceLayout(width, rows);
+        const leftWidth = layout.innerWidth >= 72 ? Math.min(layout.innerWidth >= 120 ? 48 : 36, Math.floor(layout.innerWidth / 3)) : layout.innerWidth;
+        expect(visibleWidth(cell)).toBe(layout.inset + leftWidth);
+        expect(cell.slice(cell.indexOf("›"), cell.indexOf("\x1b[49m"))).not.toContain("\x1b[0m");
+        expect(frame.join("\n")).not.toContain("\x1b[2J");
+        expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
+        if (width >= 100) {
+          panel.handleInput("\t");
+          const reading = panel.render(width).find((line) => stripVTControlCharacters(line).includes("›"))!;
+          expect(reading.split(f.theme.fg("muted", " │ "))[0]).toBe(cell);
+          panel.handleInput("\x1b[B");
+          expect(f.position.selectedId).toBe(1);
+          expect(f.position.selectedTaskId).toBe(original ? 1 : undefined);
+          panel.handleInput("\t");
+        }
+      }
+      expect(f.actions.run).not.toHaveBeenCalled();
+      expect(f.actions.activate).not.toHaveBeenCalled();
+      vi.restoreAllMocks();
+    }
+  });
+
   it.each(["dark", "light"])("scales current tree cells without filling Preview with earlier tasks (%s)", (name) => {
     const records = Array.from({ length: 24 }, (_, index) => record(index + 1));
     records[0]!.input.draft = "Original 中文😀\x1b[2J";

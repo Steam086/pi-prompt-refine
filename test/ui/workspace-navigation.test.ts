@@ -20,7 +20,7 @@ describe("shared refine workspace", () => {
         const lines = workspace.render(100);
         expect(lines).toHaveLength(height);
         const strip = lines[4]!;
-        expect(strip).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(` ${page} `))));
+        expect(strip).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(` ${theme.underline(page)} `))));
         for (const label of ["Preview", "Usage", "Settings"]) expect(strip).toContain(label);
         expect(strip).not.toMatch(/h History|u Usage|←|→/);
         expect(stripVTControlCharacters(lines[1]!)).toContain(page === "Preview" ? "Prompt refine" : page);

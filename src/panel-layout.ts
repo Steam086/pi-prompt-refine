@@ -30,15 +30,19 @@ export const WORKSPACE_PAGES = ["Preview", "Usage", "Settings"] as const;
 export type WorkspacePage = typeof WORKSPACE_PAGES[number];
 
 /** Persistent page identity, unchanged when a child focus suspends page navigation. */
-export function workspaceTabs(layout: PanelLayout, active: WorkspacePage, theme: Pick<Theme, "fg" | "bg" | "bold">): string[] {
-  return panelTabs(layout, [...WORKSPACE_PAGES], WORKSPACE_PAGES.indexOf(active), theme);
+export function workspaceTabs(layout: PanelLayout, active: WorkspacePage, theme: Pick<Theme, "fg" | "bg" | "bold" | "underline">): string[] {
+  // Page identity stays clear even when the selected background is subtle.
+  // Keep the cue inside the existing padding; child group tabs stay unchanged.
+  return panelTabs(layout, [...WORKSPACE_PAGES], WORKSPACE_PAGES.indexOf(active), theme,
+    (label) => theme.bg("selectedBg", theme.fg("text", theme.bold(` ${theme.underline(label)} `))));
 }
 
 /** Shared group strip: reserve the same rows on reading and settings pages. */
-export function panelTabs(layout: PanelLayout, labels: string[], active: number, theme: Pick<Theme, "fg" | "bg" | "bold">): string[] {
+export function panelTabs(layout: PanelLayout, labels: string[], active: number, theme: Pick<Theme, "fg" | "bg" | "bold">,
+  selectedTab = (label: string) => theme.bg("toolPendingBg", theme.fg("text", theme.bold(` ${label} `)))): string[] {
   if (layout.bodyHeight < 4) return [];
   const tab = (label: string, index: number) => index === active
-    ? theme.bg("toolPendingBg", theme.fg("text", theme.bold(` ${label} `)))
+    ? selectedTab(label)
     : theme.fg("muted", ` ${label} `);
   const strip = labels.map(tab).join("  ");
   const line = visibleWidth(strip) <= layout.innerWidth ? strip : tab(labels[active]!, active);

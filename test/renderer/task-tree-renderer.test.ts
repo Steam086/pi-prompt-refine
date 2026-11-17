@@ -15,6 +15,7 @@ describe.each(["regular", "fullscreen"] as const)("task tree rendering (%s)", (m
     const tui = mode === "regular" ? new TuiMainScreen(terminal) : new TuiAltScreen(terminal);
     const theme = getThemeByName(name)!;
     const bold = vi.spyOn(theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
+    const underline = vi.spyOn(theme, "underline").mockImplementation((text) => `\x1b[4m${text}\x1b[24m`);
     const records = [record(1), record(2), record(3, 2)];
     for (const record of records) record.archivedAt = 1;
     records[0]!.input.draft = "Original 中文😀\x1b[2J";
@@ -42,6 +43,9 @@ describe.each(["regular", "fullscreen"] as const)("task tree rendering (%s)", (m
     try {
       tui.start();
       const initial = render();
+      expect(initial.join("\n")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(` ${theme.underline("Usage")} `))));
+      expect(writes.join("")).toContain(theme.fg("accent", theme.bold("›")));
+      expect(writes.join("")).toContain(theme.underline("Usage"));
       const root = left(initial).findIndex((line) => line.includes("› ▾ Earlier · Original prompt"));
       expect(root).toBeGreaterThanOrEqual(0);
       expect(left(initial)[root + 1]).toContain("  │ Original 中文😀");
@@ -51,6 +55,8 @@ describe.each(["regular", "fullscreen"] as const)("task tree rendering (%s)", (m
       const selected = render();
       const active = selected.findIndex((line) => strip(line).includes("› ├─ 模型😀"));
       expect(selected[active]).toContain(theme.fg("muted", "├─ "));
+      expect(selected[active]).toContain(theme.fg("accent", theme.bold("›")));
+      expect(selected[active]).toContain(theme.fg("success", "✓ Done"));
       expect(selected[active]).toContain(theme.bg("selectedBg", "probe").split("probe")[0]);
       expect(strip(selected[active + 1]!)).toContain("  │  Run #2");
       expect(position.selectedId).toBe(2);
@@ -79,6 +85,6 @@ describe.each(["regular", "fullscreen"] as const)("task tree rendering (%s)", (m
       expect(run).not.toHaveBeenCalled();
       expect(tui.fullRedraws).toBe(redraws);
       expect(writes.join("")).not.toMatch(/\x1b\[(?:2J|3J)/);
-    } finally { tui.stop(); bold.mockRestore(); vi.useRealTimers(); }
+    } finally { tui.stop(); underline.mockRestore(); bold.mockRestore(); vi.useRealTimers(); }
   });
 });
