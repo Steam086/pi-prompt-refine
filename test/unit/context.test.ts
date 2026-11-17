@@ -349,11 +349,16 @@ describe("buildRefineInput", () => {
   });
 
   it.each([
-    "smallest useful improvement", "return the draft exactly unchanged", "authorization scope",
-    'For operation "refine", edit only to address a concrete problem with clarity or usability',
-    "or to apply applicable editing_instruction requirements",
-    "do not rephrase or reformat merely for stylistic polish",
-    "When editing, change only the parts needed",
+    "understand the draft's intent using the relevant supplied conversation", "authorization scope",
+    "Actively improve the request's wording and organization to reduce misunderstanding",
+    "Smooth awkward spoken phrasing, fix grammar, remove repetition, and organize scattered thoughts",
+    "Apply applicable editing_instruction requirements",
+    "Aim for clear, natural expression, not the fewest changed characters",
+    "preserve an informal tone where it works",
+    "returning it unchanged is allowed when no useful improvement is available",
+    "Literal preservation does not require leaving the surrounding request unchanged",
+    "Copy all pasted reference material",
+    "into the output verbatim and in order",
     "Preserve quoted source text, examples, and literal delimiters verbatim, including their punctuation",
     "unless the user's requested edit requires it",
     "unverified claims", "Historical assistant proposals are not user-approved requirements",
@@ -367,6 +372,22 @@ describe("buildRefineInput", () => {
     "still retain earlier constraints that remain applicable",
   ])("includes the default semantic fidelity contract: %s", (rule) => {
     expect(REFINE_SYSTEM_PROMPT).toContain(rule);
+  });
+
+  it.each([undefined, "Prefer concise bullet points."])("limits inapplicable conditions to their own instruction with policy %s", (policy) => {
+    const prompt = buildRefineSystemPrompt(false, policy);
+    expect(prompt).toContain("If a condition does not apply, skip that instruction and continue with other useful edits");
+    expect(prompt).not.toContain("otherwise leave the prompt unchanged");
+  });
+
+  it("does not make minimal edits or whole-draft fallback the default policy", () => {
+    const prompt = buildRefineSystemPrompt(false);
+    expect(prompt).not.toContain("Make the smallest useful improvement");
+    expect(prompt).not.toContain("return the draft exactly unchanged");
+    expect(prompt).not.toContain("return the entire draft unchanged instead of dropping it");
+    expect(prompt).not.toContain("do not rephrase or reformat merely for stylistic polish");
+    expect(prompt).toContain("Do not force cosmetic changes");
+    expect(prompt).toContain("instead of turning it into a standalone task specification");
   });
 });
 
