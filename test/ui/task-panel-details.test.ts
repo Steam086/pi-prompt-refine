@@ -288,17 +288,19 @@ describe("prompt tree and inspection", () => {
     expect(text()).toContain("Timed out"); expect(text()).toContain("Revision of run #1");
     expect(text()).not.toContain("Revised result"); expect(text()).toContain(revised.input.draft);
   });
-  it.each(["dark", "light"])("prioritizes readable content and bold duration in %s", (name) => {
+  it.each(["dark", "light"])("keeps Tasks metadata secondary and content readable in %s", (name) => {
     const { panel, records, theme, text } = create(name);
     const result = records[0]!;
     const output = panel.render(100).join("\n");
-    expect(output).toContain(theme.fg("text", theme.bold("23s")));
+    expect(output).toContain(theme.fg("muted", "23s"));
     expect(text()).toContain("↑2.3k ↓670 · Cost —");
     expect(text()).toContain("Thinking xhigh");
+    const usage = create(name, true).panel.render(100).join("\n");
+    expect(usage).toContain(theme.fg("text", theme.bold("23s"))); // Other pages retain their existing emphasis.
     for (const hidden of ["Branch", "Frozen context", "Applied", "Round 1", "Cache read"]) expect(text()).not.toContain(hidden);
     result.status = "generating";
     result.candidate = undefined;
-    expect(panel.render(100).join("\n")).toContain(theme.fg("accent", theme.bold("23s")));
+    expect(panel.render(100).join("\n")).toContain(theme.fg("muted", "23s"));
     result.status = "queued";
     expect(text()).not.toContain("23s");
     expect(text()).toContain("Queued");

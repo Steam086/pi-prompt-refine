@@ -366,6 +366,7 @@ export class TaskPanel {
   }
   private headerOptions(row: Row) {
     return { inline: !!this.inline(row), preferences: !!this.actions.preferences,
+      taskPreview: !this.usage && !this.inspecting && !this.referenceOnly && !this.preferenceFocus && !this.retainedEarlier,
       inspecting: this.inspecting, referenceOnly: this.referenceOnly };
   }
   private originalHeight(row: Row, width: number): number {
