@@ -69,7 +69,7 @@ describe("workspace terminal rendering", () => {
       const initialFrame = workspace.render(columns);
       const initialHeight = initialFrame.length;
       const plain = initialFrame.map(stripVTControlCharacters);
-      const back = plain.findIndex((line) => line.includes("Esc: Back"));
+      const back = plain.findIndex((line) => /Esc:? Back/.test(line));
       const selectedRun = plain.findIndex((line) => line.includes("›"));
       expect(back).toBeGreaterThanOrEqual(0);
       expect(selectedRun).toBeGreaterThan(back);

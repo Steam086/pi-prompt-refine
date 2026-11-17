@@ -424,7 +424,7 @@ export class TaskPanel {
       (columns, rows) => this.pane(selected, columns, rows, true, false, false), this.canExpand() ? this.expansionHint?.() : undefined);
     const previewDetails = this.inspecting && !this.usage && this.compareId === undefined && !!selected && !selected.original && !!selected.record.candidate;
     const other = this.inspecting && this.compareId !== undefined ? this.entries(this.retainedEarlier).find((row) => !row.original && row.record.id === this.compareId) : undefined;
-    const passiveHints = !this.usage && !this.inspecting && !this.retainedEarlier && !this.referenceOnly;
+    const passiveHints = !this.inspecting && !this.retainedEarlier && !this.referenceOnly;
     const action = !this.inspecting && selected?.original && selected.record.status === "unsent" && (this.usage || selected.record.archivedAt === undefined) ? "Optimize" : "Inspect";
     const restored = selected?.record.input.contextUnavailable;
     const primary: KeyHint[] = !selected ? [["n", "New"]] : this.inspecting
@@ -452,7 +452,7 @@ export class TaskPanel {
       : alignedKeyHints([primary, secondary], layout.innerWidth, this.theme);
     if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["Esc", "Back"], ["?", "Help"], ...compact(primary)], layout.innerWidth, this.theme, " ");
     if (passiveHints && layout.footerHeight > 0) {
-      // Tasks alone use passive, naturally wrapping hints and no trailing tab gap.
+      // Tasks and Usage share passive, naturally wrapping hints and no trailing tab gap.
       if (tabs.length === 3) tabs = tabs.slice(0, -1);
       const wrapped = wrappedKeyHints([...primary, ...secondary], layout.innerWidth, this.theme);
       const available = layout.bodyHeight + layout.footerHeight - tabs.length - 1;
@@ -461,8 +461,8 @@ export class TaskPanel {
         // Extremely small canvases retain the existing primary/back priorities.
         const separator = layout.innerWidth < 30 ? " " : " · ";
         footer = layout.footerHeight === 1
-          ? [fittingKeyHints([["Esc", "Back"], ["?", "Help"], ...compact(primary)], layout.innerWidth, this.theme, " ", "secondary")]
-          : [fittingKeyHints(compact(primary), layout.innerWidth, this.theme, separator, "secondary"), fittingKeyHints(secondary, layout.innerWidth, this.theme, separator, "secondary")];
+          ? [fittingKeyHints([["Esc", "Back"], ["?", "Help"], ...compact(primary)], layout.innerWidth, this.theme, " ", "secondary-compact")]
+          : [fittingKeyHints(compact(primary), layout.innerWidth, this.theme, separator, "secondary-compact"), fittingKeyHints(secondary, layout.innerWidth, this.theme, separator, "secondary-compact")];
       }
       layout = { ...layout, footerHeight: footer.length, bodyHeight: layout.bodyHeight + layout.footerHeight - footer.length };
     }

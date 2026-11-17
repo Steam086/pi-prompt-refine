@@ -51,6 +51,42 @@ describe("shared refine workspace", () => {
     }
   });
 
+  it.each(["dark", "light"])("keeps focused setting names bold without emphasizing values across resize in %s", (name) => {
+    const { workspace, terminal, actions, theme } = create(40, name, true);
+    const bold = vi.spyOn(theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
+    actions.optimizer = () => ({ model: "provider/中文😀\x1b[31m".repeat(8), thinking: "Unavailable", thinkingEnabled: false });
+    try {
+      workspace.openSettings(undefined, 3);
+      for (const rows of [40, 8, 16, 40]) for (const width of [20, 40, 80, 160, 40]) {
+        terminal.rows = rows;
+        const frame = workspace.render(width);
+        const row = frame.find((line) => stripVTControlCharacters(line).includes("› Model"))!;
+        expect(row).toContain(theme.bold(width >= 80 ? "Model".padEnd(22) : "Model"));
+        expect(row).not.toContain(theme.bold("provider/"));
+        expect(row).not.toContain(theme.bold("Model:"));
+        expect(row.slice(row.indexOf("›"), row.indexOf("\x1b[49m"))).not.toContain("\x1b[0m");
+        expect(row).toContain(theme.bg("selectedBg", "X").split("X")[0]);
+        expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
+        expect(frame.join("\n")).not.toContain("\x1b[31m");
+        expect(workspace.render(width)).toEqual(frame);
+      }
+      workspace.handleInput("\x1b[B");
+      for (const width of [20, 40, 100]) {
+        const frame = workspace.render(width);
+        const current = frame.find((line) => stripVTControlCharacters(line).includes("› Thinking"))!;
+        const previous = frame.find((line) => /Model(?::| {2})/.test(stripVTControlCharacters(line)))!;
+        expect(current).toContain(theme.bold(width >= 100 ? "Thinking".padEnd(22) : "Thinking"));
+        expect(current).toContain(theme.fg("dim", "X").split("X")[0]! + theme.bold(width >= 100 ? "Thinking".padEnd(22) : "Thinking"));
+        expect(previous).toBeDefined();
+        expect(previous).not.toContain("\x1b[1m");
+      }
+      expect(actions.chooseModel).not.toHaveBeenCalled();
+      expect(actions.cycleThinking).not.toHaveBeenCalled();
+      expect(actions.saveContext).not.toHaveBeenCalled();
+      expect(actions.submit).not.toHaveBeenCalled();
+    } finally { bold.mockRestore(); workspace.dispose(); }
+  });
+
   it.each(["dark", "light"])("shares title, group strip and key styles between Main and Settings in %s", (name) => {
     const { workspace, theme } = create(40, name, true);
     const main = workspace.render(100);
