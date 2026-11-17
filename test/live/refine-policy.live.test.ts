@@ -18,12 +18,29 @@ const pathDraft = `检查 ${paths[0]} 的引用，使用 ${paths[1]} 和 ${paths
 const codeBlock = ['```python', 'def Hello(User_Name)', '\t# 保留原注释  ', '    print("你好", User_Name)  ', '```'].join("\n");
 const codeDraft = `修复下面代码的语法错误，并解释修改原因：\n\n${codeBlock}`;
 const revisedPaths = pathDraft.replace(paths[0], "../src/context.ts:145:7");
+const conversationalDraft = '就是前面那个吧，我想问的就是说它为啥会这样，就是为啥每次都重新弄一遍，先说原因就行，别改东西，先别改。日志是：\n\n```text\ncache rebuild: request_id=007\n```';
+const conversationalHistory = selectHistory([{ type: "message", message: { role: "user",
+  content: "我们在讨论 ../src/cache.ts:42 的缓存：每次请求都重新构建缓存。请只分析原因，不修改文件。" } }], 12, 1000);
+const checkConversationalRewrite = (text: string) => {
+  expect(text).not.toBe(conversationalDraft);
+  expect(text).toContain("../src/cache.ts:42");
+  expect(text).toContain("```text\ncache rebuild: request_id=007\n```");
+  expect(text).toMatch(/缓存/u);
+  expect(text).toMatch(/原因|为什么|为何/u);
+  expect(text).toMatch(/(?:不|勿|别|禁止).{0,8}(?:修改|改动|更改)/u);
+};
 const cases = [
   { name: "clear-no-edit", draft: clear, instruction: undefined, revision: undefined,
     check: (text: string) => expect(text).toBe(clear) },
   { name: "conditional-structure-no-edit", draft: clear,
     instruction: "Prompt rewriting instructions (manually selected):\nUse numbered items only if needed to clarify the draft; otherwise leave it unchanged.",
     revision: undefined, check: (text: string) => expect(text).toBe(clear) },
+  { name: "contextual-colloquial-rewrite", draft: conversationalDraft,
+    instruction: undefined, revision: undefined, history: conversationalHistory,
+    check: checkConversationalRewrite },
+  { name: "inapplicable-condition-still-allows-useful-rewrite", draft: conversationalDraft,
+    instruction: "Prompt rewriting instructions (manually selected):\nIf the draft compares multiple alternatives, organize the comparison as a table.",
+    revision: undefined, history: conversationalHistory, check: checkConversationalRewrite },
   { name: "explicit-translation-keeps-response-language",
     draft: `解释 \`${command}\` 的用途，不要执行。请用中文回答。`,
     instruction: "Prompt rewriting instructions (manually selected):\nTranslate the prompt into English.", revision: undefined,
@@ -91,16 +108,17 @@ const cases = [
     } },
 ] as const;
 
-describe.skipIf(process.env.REFINE_POLICY_LIVE !== "1")("live conservative policy safeguards", () => {
+describe.skipIf(process.env.REFINE_POLICY_LIVE !== "1")("live contextual editing and literal safeguards", () => {
   let runtime: ModelRuntime;
   beforeAll(async () => { runtime = await ModelRuntime.create(); });
 
-  it.each(cases)("$name", async ({ name, draft, instruction, revision, check }) => {
+  it.each(cases)("$name", async (testCase) => {
+    const { name, draft, instruction, revision, check } = testCase;
     const provider = process.env.REFINE_POLICY_PROVIDER ?? "openai-codex";
     const model = runtime.getModel(provider, process.env.REFINE_POLICY_MODEL ?? "gpt-6-luna");
     expect(model, "Model must be configured locally").toBeDefined();
     const systemPrompt = buildRefineSystemPrompt(false);
-    const packet = buildRefineInput(draft, selectHistory([], 0, 0), "", revision, instruction);
+    const packet = buildRefineInput(draft, "history" in testCase ? testCase.history : selectHistory([], 0, 0), "", revision, instruction);
     const response = await runtime.streamSimple(model!, {
       systemPrompt, tools: [], messages: [{ role: "user", content: packet, timestamp: Date.now() }],
     }, { maxTokens: 8192, reasoning: "high", maxRetries: 0, signal: AbortSignal.timeout(180_000) }).result();
