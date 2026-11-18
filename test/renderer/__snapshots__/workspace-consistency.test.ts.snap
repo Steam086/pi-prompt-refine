@@ -1,0 +1,213 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`workspace consistency (regular) > dark theme > keeps shared chrome and action hierarchy at 60×20 > compact workspace flow 1`] = `
+"=== Preview ===
+╭────────────────────────────────────────────────────────╮
+│  Prompt refine · Tasks                                 │
+│  1 prompts · 2 runs · ↑↓ select · Run: selected model  │
+│                                                        │
+│   Preview    Usage    Settings                         │
+│  a: Accept · Enter: Inspect · p: Preferences           │
+│  i: Edit original · n: New · m: Run model · Esc: Back  │
+│  ?: Help · f: Revise · Tab: Read                       │
+│  ────────────────────────────────────────────────────  │
+│    ▾ 本项目的原始要求                                  │
+│    ├─ model-2                                  ✓ Done  │
+│  › └─ model-1                                  ✓ Done  │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+╰────────────────────────────────────────────────────────╯
+
+=== Usage ===
+╭────────────────────────────────────────────────────────╮
+│  Usage · All rounds                                    │
+│  Current + history · 1 prompts · 2 runs · ↑↓ select ·  │
+│                                                        │
+│   Preview    Usage    Settings                         │
+│  a: Accept · Enter: Inspect · p: Preferences           │
+│  i: Edit original · n: New · m: Run model · Esc: Back  │
+│  ?: Help · f: Revise · Tab: Read                       │
+│  ────────────────────────────────────────────────────  │
+│    ▾ 本项目的原始要求                                  │
+│    ├─ model-2                                  ✓ Done  │
+│  › └─ model-1                                  ✓ Done  │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+╰────────────────────────────────────────────────────────╯
+
+=== Settings ===
+╭────────────────────────────────────────────────────────╮
+│  Settings                                              │
+│  Applies to future requests                            │
+│                                                        │
+│   Preview    Usage    Settings                         │
+│  Ctrl+S: Save settings · Enter: Change                 │
+│  Space: Change · Esc: Back · Tab: Group · ←: Usage     │
+│  →: Advanced · ↑↓: Select                              │
+│  ────────────────────────────────────────────────────  │
+│   Context    Advanced                                  │
+│  › Project instructions: Always ›                      │
+│    Directory tree: [ ] Off                             │
+│    Skill metadata: [ ] Off                             │
+│    Project context: [x] On                             │
+│    Directory references: [x] On                        │
+│    History messages: 12 messages ›                     │
+│    History characters: 16000 characters ›              │
+│  Include Pi rules (e.g. AGENTS.md) in every…           │
+╰────────────────────────────────────────────────────────╯
+
+=== Settings / number ===
+╭────────────────────────────────────────────────────────╮
+│  History characters                                    │
+│  0–100000 characters · Not saved until Ctrl+S in Sett  │
+│                                                        │
+│   Preview    Usage    Settings                         │
+│  Esc: Cancel · Enter: Apply · Tab: Preset              │
+│  ────────────────────────────────────────────────────  │
+│  History character budget, including role labels.      │
+│  Zero disables history. Applies to the next round.     │
+│                                                        │
+│  Presets: 0 / 8000 / 16000 / 32000 / 64000 / 100000    │
+│                                                        │
+│  16000                                                 │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+╰────────────────────────────────────────────────────────╯
+
+=== Settings / validation ===
+╭────────────────────────────────────────────────────────╮
+│  History characters                                    │
+│  Enter 0–100000 characters (whole numbers).            │
+│                                                        │
+│   Preview    Usage    Settings                         │
+│  Esc: Cancel · Enter: Apply · Tab: Preset              │
+│  ────────────────────────────────────────────────────  │
+│  History character budget, including role labels.      │
+│  Zero disables history. Applies to the next round.     │
+│                                                        │
+│  Presets: 0 / 8000 / 16000 / 32000 / 64000 / 100000    │
+│                                                        │
+│  -1                                                    │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+╰────────────────────────────────────────────────────────╯
+
+=== Result details ===
+╭────────────────────────────────────────────────────────╮
+│  Prompt details                                        │
+│  Selected: #1 model-1 · o Reference                    │
+│                                                        │
+│   Preview    Usage    Settings                         │
+│                                                        │
+│  a Accept · s Send · p Preferences · i Edit original   │
+│  Esc Back · ? Help · o Reference · c Compare           │
+│  ────────────────────────────────────────────────────  │
+│  model-1 · ✓ Done                                      │
+│  openai-codex · Thinking xhigh · 23s · ↑2.3k ↓670 ·    │
+│  Cost —                                                │
+│                                                        │
+│  Result                                                │
+│                                                        │
+│  Result 1                                              │
+│  Literal **正文** 中文😀                               │
+│  Another line�[31m                                     │
+╰────────────────────────────────────────────────────────╯
+
+=== Compare ===
+╭────────────────────────────────────────────────────────╮
+│  Compare results                                       │
+│  Selected: #1 model-1 · ↑↓ scroll                      │
+│                                                        │
+│   Preview    Usage    Settings                         │
+│                                                        │
+│  a Accept · s Send · p Preferences · i Edit original   │
+│  Esc Back · ? Help · Tab Switch result · f Revise      │
+│  ────────────────────────────────────────────────────  │
+│  A · Run #1 · Tab B · Run #2                           │
+│  model-1                                       ✓ Done  │
+│  openai-codex · Thinking xhigh                         │
+│  23s · ↑2.3k ↓670 · Cost —                             │
+│                                                        │
+│  Result                                                │
+│                                                        │
+│  Result 1                                              │
+│  Literal **正文** 中文😀                               │
+╰────────────────────────────────────────────────────────╯
+
+=== Revise ===
+╭────────────────────────────────────────────────────────╮
+│  Prompt details                                        │
+│  Read-only reference                                   │
+│                                                        │
+│   Preview    Usage    Settings                         │
+│                                                        │
+│  ────────────────────────────────────────────────────  │
+│  Revise · Run #1 · model-1                             │
+│  Revision not submitted                                │
+│  Preferences: None · Review full requirements          │
+│  › Additional requirements:                            │
+│  Keep 中文😀                                           │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+│  Ctrl+S Revise · Enter Newline                         │
+│  Esc Back      · Tab Focus     · Ctrl+E Editor only    │
+╰────────────────────────────────────────────────────────╯
+
+=== Preferences / library ===
+╭────────────────────────────────────────────────────────╮
+│  Preferences                                           │
+│  Focus: Library · 0 selected · 9/16000 chars           │
+│  Search:                                               │
+│    n Add             e Edit            d Delete        │
+│  Library 1/1 · 0 selected · s Selected                 │
+│  Unclassified                                          │
+│  › [ ] Preserve 中文😀                         Global  │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+│  ────────────────────────────────────────────────────  │
+│  Alt+Enter Bring back · Space Select                   │
+│  Esc Cancel selection · Tab / Shift+Tab Focus          │
+╰────────────────────────────────────────────────────────╯
+
+=== Preferences / read ===
+╭────────────────────────────────────────────────────────╮
+│  Full revision instruction                             │
+│  Read-only · No request sent                           │
+│  Preserve 中文😀                                       │
+│  global · literal                                      │
+│  Library entry                                         │
+│                                                        │
+│  Keep literals                                         │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+│  ────────────────────────────────────────────────────  │
+│  ↑↓ / PgUp / PgDn Scroll · 1–5 / 5 lines               │
+│  Esc Back                · No request sent             │
+╰────────────────────────────────────────────────────────╯"
+`;
