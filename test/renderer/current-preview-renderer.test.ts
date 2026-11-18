@@ -21,10 +21,12 @@ describe.each(["regular", "fullscreen"] as const)("current-round Preview (%s)", 
     const source = { ...record(), status: "unsent" as const, candidate: undefined };
     const run = vi.fn();
     const accept = vi.fn();
+    let showOptimizerQuota = false;
     const preview = new PreviewPanel({ state: { phase: "idle", requestId: 0, pendingSend: false }, contextLabel: "Draft only",
       elapsedSeconds: 0, openHint: "", canRestore: false }, theme, () => terminal.rows, () => tui.requestRender());
     const workspace = new RefineWorkspace(preview, tui, theme, getKeybindings(), {
-      tasks: { records: () => [source], appliedId: () => undefined, activate: () => false, run, stop() {}, accept, launchModel: () => model },
+      tasks: { records: () => [source], appliedId: () => undefined, activate: () => false, run, stop() {}, accept, launchModel: () => model,
+        showOptimizerQuota: () => showOptimizerQuota },
       history: () => [source], context: () => ({ instructions: "always", tree: false, skills: false }), contextEnabled: () => true,
       saveContext: async () => ({ message: "Saved", persisted: true }), submit: () => undefined,
     });
@@ -51,6 +53,18 @@ describe.each(["regular", "fullscreen"] as const)("current-round Preview (%s)", 
           expect(stripVTControlCharacters(header!).replace(/^│|│$/g, "").trim())
             .toBe(label + name + (counts ? " · 1 prompt · 0 runs" : ""));
         }
+        showOptimizerQuota = true;
+        for (const [columns, rows, hint] of [[120, 40, "May use optimizer quota or incur charges"],
+          [26, 10, "May use quota"], [17, 4, "May use quota"]] as const) {
+          Object.assign(terminal, { columns, rows }); workspace.invalidate();
+          tui.requestRender(); tui.renderNow();
+          const frame = workspace.render(columns);
+          expect(frame).toHaveLength(workspaceHeight(rows));
+          expect(frame.every((line) => visibleWidth(line) <= columns)).toBe(true);
+          expect(frame.join("\n")).toContain(theme.fg("warning", hint));
+        }
+        showOptimizerQuota = false;
+        Object.assign(terminal, { columns: 120, rows: 40 }); workspace.invalidate();
       }
       expect(run).not.toHaveBeenCalled();
       input("\r");

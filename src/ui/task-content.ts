@@ -39,6 +39,10 @@ export class TaskContent {
     return `Preferences: ${selected.length ? `${selected.length} · ${selected.map((entry) => entry.name).join(", ")}` : "None"}`;
   }
   invalidate(): void { this.cache.clear(); }
+  optimizerQuotaHint(width: number): string {
+    const labels = ["May use optimizer quota or incur charges", "May use optimizer quota", "May use quota", "Quota"];
+    return this.theme.fg("warning", labels.find((label) => visibleWidth(label) <= width) ?? "⚠");
+  }
   badge(record: RefineRecord): string {
     const warning = record.input.budget && (record.input.budget.status !== "ok" || record.input.budget.message) ? "⚠ " : "";
     return warning + this.statusBadge(record);

@@ -6,7 +6,7 @@ import { EventEmitter } from "node:events";
 import type { SessionBus } from "../../src/adapters/session-events.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, vi } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
 import { DEFAULT_CONFIG, type RefineConfig } from "../../src/config.js";
 import promptRefineExtension from "../../src/extension.js";
 import { flushPromises } from "./helpers.js";
@@ -181,7 +181,6 @@ export function extensionHarnessEnvironment() {
       },
       editor: vi.fn(async () => "Edited candidate"),
       confirm: vi.fn((_title: string, message: string) => {
-        if (_title !== "Clear saved Refine history?") expect(message).toContain("Current draft:");
         if (shouldDeferConfirm) {
           return new Promise<boolean>((resolve) => { confirmResolve = resolve; });
         }

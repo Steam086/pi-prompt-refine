@@ -1,4 +1,6 @@
-# Prompt Refine · PI WEB integration (experimental)
+# Prompt Refine · PI WEB integration (local development only)
+
+> **Release on hold.** This experimental subpackage is not published and is not included in the root Pi package. Hands-on testing did not meet the release bar; keep it for local development and isolated validation only. Do not install it for production use.
 
 A private, independently built browser/server plugin for the first Refine application slice. The offline suite is not deployment evidence. A separate authorized [isolated host/browser acceptance run](../../docs/multi-surface-acceptance.md) now covers the real bridge and browser workflow; **production deployment, human IME and external authentication remain unverified**.
 
@@ -18,7 +20,7 @@ Pinned development tools: TypeScript 5.9.3, Node types 22.20.5, pi-web public de
 
 The offline suite connects two `RefineClient`s through the real server peer and real core events adapter, with a fake capability/application behind it. It checks scope rejection, Unicode/full-limit paged output, lost acknowledgments and same-lease reconnect, plus emitted import graphs. Lightweight state/registry doubles also check source-bound forms, recovered draft receipts, unchanged CRLF and fresh element registration on module reload. Root tests separately exercise the real controller and SDK-facing extension in native/RPC/print harnesses. These are not browser E2E or a real plugin load test.
 
-## Supported panel workflow
+## Panel workflow for local testing
 
 1. Select an existing ready conversation that has the **root Refine extension** loaded.
 2. Open Refine and explicitly Connect. Merely rendering/mounting the panel makes no requests.
@@ -43,9 +45,9 @@ These are admission limits, not throughput or exact process-memory guarantees. P
 
 The initial whole-base64 staging gap was fixed with demand-driven core output paging, not by enlarging every server queue. The offline regression round-trips a 2,097,152-character result and equally large previous result, plus three 100,000-character original/requirement fields, using worst-case JSON escapes. It checks one frame per request, bounded frames, over-quota rejection and continued usability. The isolated host also round-tripped the full 2,097,152-character escape-heavy result. This is a functional limit check, not a throughput guarantee.
 
-## Installation / S6 authorization boundary
+## Isolated installation only
 
-Build first. Both the root Pi extension and this subpackage must be installed on the target machine. The root's existing package manifest is unchanged; it does not auto-install this subpackage. PI WEB accepts a local plugin directory/package according to its public plugin installation mechanism.
+Build first. Local validation requires both the root Pi extension and this subpackage in the isolated host. The root extension does not install the subpackage. PI WEB accepts a local plugin directory/package according to its public plugin installation mechanism.
 
 **Do not link this package into an active host or restart services just to run the offline suite.** Server-backed plugin installation/updates require a target session-daemon restart and browser reload. Restarting that daemon interrupts its active sessions and terminals, including agents it hosts. A web/API reload alone does not load the server peer.
 

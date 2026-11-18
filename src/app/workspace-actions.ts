@@ -28,6 +28,7 @@ interface WorkspaceActionsDependencies {
   triggerOptimize(ctx: ExtensionContext, force: boolean, draft: string, keepEditor: boolean, captureOnly: boolean): TriggerResult | undefined;
   reviseCandidate(ctx: ExtensionContext, token: CandidateToken, instruction: string): string | undefined;
   registeredModels(ctx: ExtensionContext): ReturnType<ExtensionContext["modelRegistry"]["getAvailable"]>;
+  showOptimizerQuota(): boolean;
   notify: Notify;
   preferenceRepository(ctx: ExtensionContext): PreferenceStore;
 }
@@ -44,7 +45,7 @@ interface WorkspaceMount {
 
 export function createWorkspaceActions({ controller, config, setCompletionContext, persistConfig,
   historyStorage, optimizationError, operations, triggerOptimize, reviseCandidate,
-  registeredModels, notify, preferenceRepository, saveOptimizer }: WorkspaceActionsDependencies) {
+  registeredModels, showOptimizerQuota, notify, preferenceRepository, saveOptimizer }: WorkspaceActionsDependencies) {
   // Runtime-only drafts survive overlay mounts, but never enter history persistence.
   const inputDrafts = new Map<string, string>();
   const revisionDrafts = new Map<string, RevisionDraft>();
@@ -129,6 +130,7 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
       tasks: {
         records: () => controller.getHistory(),
         launchModel: () => controller.getModel() ? displayModel(controller.getModel()!) : "No model",
+        showOptimizerQuota,
         appliedId: () => controller.getAppliedRecordId(),
         activate: (id) => {
           const record = controller.getRecord(id);

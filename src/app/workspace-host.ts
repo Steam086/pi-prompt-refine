@@ -277,7 +277,7 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
           await showPreviewContent(ctx, undefined, 3, undefined, true);
         }
       }
-      else if (action === "send") sendCandidate(ctx, token);
+      else if (action === "send") await sendCandidate(ctx, token);
     }
   }
 

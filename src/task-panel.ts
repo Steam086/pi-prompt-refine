@@ -28,6 +28,7 @@ export interface TaskPanelActions {
   preferencesKey?: KeyId | null;
   inlinePreferences?: InlinePreferences;
   launchModel?(): string;
+  showOptimizerQuota?(): boolean;
   historyStorage?(): HistoryStorageStatus;
 }
 export interface TaskPanelPosition {
@@ -430,7 +431,8 @@ export class TaskPanel {
     const inline = this.inline(selected);
     this.actions.inlinePreferences?.setTarget(inline ? selected!.record.id : undefined, this.preferenceFocus);
     if (inline && this.preferenceFocus && selected) return renderTaskPreferences(selected, inline, layout, tabs, this.theme, this.content,
-      (columns, rows) => this.pane(selected, columns, rows, true, false, false), this.canExpand() ? this.expansionHint?.() : undefined);
+      (columns, rows) => this.pane(selected, columns, rows, true, false, false), this.canExpand() ? this.expansionHint?.() : undefined,
+      this.actions.showOptimizerQuota?.());
     const previewDetails = this.inspecting && !this.usage && this.compareId === undefined && !!selected && !selected.original && !!selected.record.candidate;
     const other = this.inspecting && this.compareId !== undefined ? this.entries(this.retainedEarlier).find((row) => !row.original && row.record.id === this.compareId) : undefined;
     const passiveHints = !this.inspecting && !this.retainedEarlier && !this.referenceOnly;
@@ -639,7 +641,13 @@ export class TaskPanel {
       if (layout.headerHeight === 1) header[0] = truncateToWidth(feedback, layout.innerWidth, "…");
       else body = [feedback, ...body];
     }
-    const visibleTabs = layout.headerHeight === 0 && (this.notice || historyStatus) ? [] : tabs;
+    const quota = passiveHints && !this.notice && action === "Optimize" && !restored && this.actions.showOptimizerQuota?.()
+      ? this.content.optimizerQuotaHint(layout.innerWidth) : "";
+    if (quota && layout.headerHeight) {
+      const combined = header[0] + separator + quota;
+      header[0] = visibleWidth(combined) <= layout.innerWidth ? combined : quota;
+    } else if (quota) body = [quota, ...body];
+    const visibleTabs = layout.headerHeight === 0 && (this.notice || historyStatus || quota) ? [] : tabs;
     // Retain source geometry in Revise, but hide actions while its editor owns focus.
     return panelFrame(layout, header,
       [...visibleTabs, ...body], this.referenceOnly ? [] : footer, (text) => this.content.muted(text),

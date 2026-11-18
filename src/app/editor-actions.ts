@@ -17,6 +17,8 @@ interface EditorActionsDependencies {
 
 export function createEditorActions({ controller, config, useContext, sendUserMessage,
   notify, notifyIfSameSession }: EditorActionsDependencies) {
+  let directSendConfirmed = false;
+
   async function confirmCurrentDraft(ctx: ExtensionContext, currentDraft: string, purpose: string): Promise<boolean> {
     return ctx.ui.confirm(
       purpose,
@@ -103,11 +105,23 @@ export function createEditorActions({ controller, config, useContext, sendUserMe
     }
   }
 
-  function sendCandidate(ctx: ExtensionContext, token: CandidateToken): void {
+  async function sendCandidate(ctx: ExtensionContext, token: CandidateToken): Promise<void> {
     useContext(ctx);
     if (ctx.mode !== "tui" || !controller.isCandidateCurrent(token)) return;
-    const candidate = controller.getCandidate();
-    if (!candidate) return;
+    if (!directSendConfirmed) {
+      const leaf = ctx.sessionManager.getLeafId();
+      try {
+        if (!await ctx.ui.confirm("Send to the main Agent?",
+          "The main model may use quota or incur charges separately from Refine. The Pi editor draft stays unchanged.")) return;
+      } catch {
+        notifyIfSameSession(token.sessionId, "Confirmation incomplete. Nothing sent.");
+        return;
+      }
+      if (!controller.isCandidateCurrent(token) || ctx.sessionManager.getSessionId() !== token.sessionId || ctx.sessionManager.getLeafId() !== leaf) {
+        notifyIfSameSession(token.sessionId, "Candidate or session changed. Nothing sent.");
+        return;
+      }
+    }
     const send = controller.beginSend(token);
     if (!send) {
       notify(ctx, "Send already pending. Not resubmitted.", "warning");
@@ -117,6 +131,7 @@ export function createEditorActions({ controller, config, useContext, sendUserMe
       const busy = !ctx.isIdle();
       if (busy) sendUserMessage(send.text, { deliverAs: "followUp" });
       else sendUserMessage(send.text);
+      directSendConfirmed = true;
       notify(ctx, busy
         ? "Queued as Pi follow-up. Editor draft kept."
         : "Sent to Pi. Editor draft kept.", "info");
