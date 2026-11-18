@@ -8,8 +8,56 @@ import { workspaceHeight } from "../../src/workspace-overlay.js";
 import { RefineWorkspace } from "../../src/workspace.js";
 import { getThemeByName } from "../support/pi-theme.js";
 import { createRecordingTerminal } from "../support/recording-terminal.js";
+import { record } from "../support/task-panel.js";
 
 describe.each(["regular", "fullscreen"] as const)("current-round Preview (%s)", (mode) => {
+  it.each(["dark", "light"])("keeps the next Refine model readable in Preview and Usage (%s)", (themeName) => {
+    vi.useFakeTimers();
+    const { terminal, input } = createRecordingTerminal({ rows: 40, columns: 120 });
+    const tui = mode === "regular" ? new TuiMainScreen(terminal) : new TuiAltScreen(terminal);
+    const theme = getThemeByName(themeName)!;
+    const id = "vendor/模型😀-turbo";
+    const model = `openai-codex/${id}`;
+    const source = { ...record(), status: "unsent" as const, candidate: undefined };
+    const run = vi.fn();
+    const accept = vi.fn();
+    const preview = new PreviewPanel({ state: { phase: "idle", requestId: 0, pendingSend: false }, contextLabel: "Draft only",
+      elapsedSeconds: 0, openHint: "", canRestore: false }, theme, () => terminal.rows, () => tui.requestRender());
+    const workspace = new RefineWorkspace(preview, tui, theme, getKeybindings(), {
+      tasks: { records: () => [source], appliedId: () => undefined, activate: () => false, run, stop() {}, accept, launchModel: () => model },
+      history: () => [source], context: () => ({ instructions: "always", tree: false, skills: false }), contextEnabled: () => true,
+      saveContext: async () => ({ message: "Saved", persisted: true }), submit: () => undefined,
+    });
+    tui.addChild(workspace); tui.setFocus(workspace);
+    try {
+      tui.start();
+      for (const usage of [false, true]) {
+        if (usage) input("\x1b[C");
+        expect(workspace.isUsage()).toBe(usage);
+        for (const [columns, rows, label, name, counts] of [
+          [120, 40, "Refine model: ", model, true], [54, 24, "Refine model: ", model, false],
+          [46, 24, "Model: ", model, false], [34, 24, "Model: ", id, false], [24, 24, "", id, false],
+          [17, 24, "", "vendor/模型😀-…", false], [54, 10, "Refine model: ", model, false],
+          [120, 40, "Refine model: ", model, true],
+        ] as const) {
+          Object.assign(terminal, { columns, rows }); workspace.invalidate();
+          tui.requestRender(); tui.renderNow();
+          const frame = workspace.render(columns);
+          expect(frame).toHaveLength(workspaceHeight(rows));
+          expect(frame.every((line) => visibleWidth(line) <= columns)).toBe(true);
+          const styled = (label ? theme.fg("muted", label) : "") + theme.fg("text", name);
+          const header = frame.slice(0, 3).find((line) => line.includes(styled));
+          expect(header, `${columns}×${rows}`).toBeDefined();
+          expect(stripVTControlCharacters(header!).replace(/^│|│$/g, "").trim())
+            .toBe(label + name + (counts ? " · 1 prompt · 0 runs" : ""));
+        }
+      }
+      expect(run).not.toHaveBeenCalled();
+      input("\r");
+      expect(run).toHaveBeenCalledExactlyOnceWith(1);
+      expect(accept).not.toHaveBeenCalled();
+    } finally { workspace.dispose(); tui.stop(); vi.useRealTimers(); }
+  });
   it.each(["dark", "light"])("keeps empty Preview chrome concise through history navigation and resize (%s)", (themeName) => {
     vi.useFakeTimers();
     const { terminal, writes, input } = createRecordingTerminal({ rows: 40, columns: 120 });
@@ -50,7 +98,7 @@ describe.each(["regular", "fullscreen"] as const)("current-round Preview (%s)", 
         expect(text).toContain("Usage");
         expect(text).toMatch(/n:? New/);
         expect(text).toMatch(/Esc:? Back/);
-        expect(text).not.toContain("Default model:");
+        expect(text).not.toContain("Refine model:");
         if (columns === 120) {
           expect(frame.join("\n")).toContain(theme.fg("muted", "History → Usage · 1 earlier prompt"));
           const empty = frame.find((line) => line.includes("No current prompts."))!;
@@ -113,7 +161,7 @@ describe.each(["regular", "fullscreen"] as const)("current-round Preview (%s)", 
         expect(text).not.toContain("NEW RESULT");
       }
       expect(workspace.render(100).join("\n")).toContain(theme.fg("muted", "Earlier · kept open · Esc returns to current · History in Usage →"));
-      input("\x1b[C"); expect(render()).toContain("Current + history");
+      input("\x1b[C"); expect(render()).toContain("Usage · All rounds");
       expect(usagePosition.selectedId).toBe(1);
       expect(usagePosition.selectedTaskId).toBeUndefined();
       input("\x1b[D"); expect(render()).toContain("Earlier · kept open");
