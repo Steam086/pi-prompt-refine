@@ -94,6 +94,10 @@ describe("round workspace integration", () => {
     h.holdPanel();
     let view = shortcut(h, "ctrl+\\")(h.context);
     expect(h.panelLines(100).join("\n")).toContain("› ○ Unsent · Draft A");
+    expect(h.panelLines(100).join("\n")).toContain("May use optimizer quota or incur charges");
+    h.panelInput("\t");
+    expect(h.panelLines(100).join("\n")).toContain("May use optimizer quota or incur charges");
+    h.panelInput("\x1b");
     expect(h.complete).not.toHaveBeenCalled();
     h.panelInput("q"); await view;
     view = shortcut(h, "ctrl+\\")(h.context);
@@ -116,6 +120,7 @@ describe("round workspace integration", () => {
     h.panelInput("q"); await view;
     view = shortcut(h, "ctrl+\\")(h.context);
     expect(h.panelLines(100).join("\n")).toContain("› ○ Unsent · Draft A");
+    expect(h.panelLines(100).join("\n")).not.toContain("May use optimizer quota");
     expect(h.complete).toHaveBeenCalledTimes(1);
     h.panelInput("q"); await view;
   });

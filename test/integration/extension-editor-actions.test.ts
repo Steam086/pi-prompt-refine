@@ -30,7 +30,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await flushPromises();
     expect(harness.getEditor()).toBe("Draft B");
     expect(harness.editorWrites).toEqual(["Refined prompt", "Draft A"]);
-    expect(harness.context.ui.confirm).toHaveBeenCalledTimes(1);
+    expect(harness.context.ui.confirm).toHaveBeenCalledExactlyOnceWith("Draft changed", expect.stringContaining("Current draft:\n---\nDraft B"));
   });
 
   it.each(["Refined prompt", "Draft A", ""])("shortcut views an accepted result without calling the model when the editor contains %j", async (draft) => {
@@ -277,6 +277,44 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await flushPromises();
     expect(harness.editorWrites).toEqual([]);
     expect(harness.sent).toEqual([]);
+  });
+
+  it("warns before the first direct send, retains the result on cancellation, and does not repeat after dispatch", async () => {
+    const harness = await makeHarness();
+    await trigger(harness);
+    harness.setConfirm(false);
+    await panelAction(harness, "s");
+    expect(harness.context.ui.confirm).toHaveBeenCalledExactlyOnceWith("Send to the main Agent?",
+      expect.stringContaining("use quota or incur charges separately from Refine"));
+    expect(harness.sent).toEqual([]);
+    expect(harness.editorWrites).toEqual([]);
+
+    harness.setConfirm(true);
+    await panelAction(harness, "s");
+    expect(harness.sent).toEqual([{ text: "Refined prompt", options: undefined }]);
+    expect(harness.context.ui.confirm).toHaveBeenCalledTimes(2);
+    harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Refined prompt" } }, harness.context);
+    harness.setEditorText("Next draft");
+    await trigger(harness);
+    await panelAction(harness, "s");
+    expect(harness.sent).toHaveLength(2);
+    expect(harness.context.ui.confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not send when confirmation returns after the conversation changes", async () => {
+    const harness = await makeHarness();
+    await trigger(harness);
+    harness.deferConfirm();
+    harness.setCustomAction("s");
+    const view = harness.command("view", harness.context);
+    await vi.waitFor(() => expect(harness.context.ui.confirm).toHaveBeenCalledTimes(1));
+    expect(harness.sendUserMessage).not.toHaveBeenCalled();
+    expect(harness.widgetLines().join("\n")).not.toContain("Send pending");
+    harness.handlers.get("session_before_tree")?.[0]?.({ type: "session_before_tree" }, harness.context);
+    harness.resolveConfirm(true);
+    await view;
+    expect(harness.sendUserMessage).not.toHaveBeenCalled();
+    expect(harness.getEditor()).toBe("Draft A");
   });
 
   it("waits past Pi preflight until message start before archiving an explicitly sent candidate", async () => {

@@ -19,13 +19,14 @@ interface CompletionDependencies {
   directorySnapshot: ReturnType<typeof createContextJobs>["directorySnapshot"];
   capturePreparedInput: RefineController["capturePreparedInput"];
   captureBudget: RefineController["captureBudget"];
+  onOptimizerRequest(): void;
   reportProject(ctx: ExtensionContext, request: RefineRequest, warnings: string[], referencedDirectoryCount: number): void;
   notify: Notify;
   notifyIfSameSession: NotifyIfSameSession;
 }
 
 export function createCompletion({ config, getContext, getSessionId, directorySnapshot,
-  capturePreparedInput, captureBudget, reportProject, notify, notifyIfSameSession }: CompletionDependencies) {
+  capturePreparedInput, captureBudget, onOptimizerRequest, reportProject, notify, notifyIfSameSession }: CompletionDependencies) {
   return async (request: RefineRequest, signal: AbortSignal): Promise<RefineCompletion> => {
     const ctx = getContext();
     if (!ctx || ctx.sessionManager.getSessionId() !== request.sessionId || getSessionId() !== request.sessionId) {
@@ -90,6 +91,7 @@ export function createCompletion({ config, getContext, getSessionId, directorySn
       hasPricing: [model.cost?.input, model.cost?.output, model.cost?.cacheRead, model.cost?.cacheWrite].some((rate) => typeof rate === "number" && rate > 0),
       subscription: ctx.modelRegistry.isUsingOAuth(model),
     };
+    onOptimizerRequest();
     const response = await ctx.modelRegistry.streamSimple(
       model,
       { systemPrompt, messages: [userMessage], tools: [] },

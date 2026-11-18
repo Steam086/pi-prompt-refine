@@ -22,6 +22,7 @@ export function renderInactivePreferences(
 export function renderTaskPreferences(
   row: TaskRow, inline: InlinePreferences, layout: PanelLayout, tabs: string[], theme: Theme,
   content: TaskContent, renderOriginal: (width: number, height: number) => string[], expansion?: KeyHint,
+  showOptimizerQuota = false,
 ): string[] {
   const width = layout.innerWidth;
   const height = Math.max(1, layout.bodyHeight - tabs.length);
@@ -82,5 +83,15 @@ export function renderTaskPreferences(
     header[layout.headerHeight - 1] = formatKeyHint(submit, theme);
   }
   if (warning && layout.headerHeight > 0) header[layout.headerHeight - 1] = theme.fg("warning", sanitizeTerminalText(`⚠ ${warning}`));
+  if (showOptimizerQuota && mode === "select") {
+    const quota = content.optimizerQuotaHint(width);
+    if (layout.headerHeight > 1 || (layout.headerHeight === 1 && !warning && (layout.footerHeight !== 1 || pairFits))) {
+      const combined = header[0] + content.muted(" · ") + quota;
+      header[0] = visibleWidth(combined) <= width ? combined : quota;
+    } else {
+      body = [quota, ...body];
+      if (body.length + tabs.length > layout.bodyHeight) tabs = [];
+    }
+  }
   return panelFrame(layout, header, [...tabs, ...body], footer, (text) => content.muted(text), { footerAfterBodyRows: tabs.length });
 }

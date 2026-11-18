@@ -30,6 +30,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
   let currentUiContext: ExtensionContext | undefined;
   let completionContext: ExtensionContext | undefined;
   let lifecycleSequence = 0;
+  let optimizerRequestAttempted = false;
   const events = createApplicationEvents();
   let saveQueue: Promise<void> = Promise.resolve();
   let generatingRequestId: number | undefined;
@@ -64,6 +65,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     directorySnapshot: contextJobs.directorySnapshot,
     capturePreparedInput: (...args) => controller.capturePreparedInput(...args),
     captureBudget: (...args) => controller.captureBudget(...args),
+    onOptimizerRequest: () => { optimizerRequestAttempted = true; },
     reportProject: (...args) => requests.reportProject(...args), notify, notifyIfSameSession,
   });
   const lifecycle = createLifecycle({
@@ -122,7 +124,8 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     controller, config, setCompletionContext, persistConfig, historyStorage: lifecycle.historyStorage,
     optimizationError: requests.optimizationError, operations, saveOptimizer,
     triggerOptimize: requests.triggerOptimize, reviseCandidate: requests.reviseCandidate,
-    registeredModels: models.registeredModels, notify, preferenceRepository,
+    registeredModels: models.registeredModels, showOptimizerQuota: () => !optimizerRequestAttempted && !!controller.getModel(),
+    notify, preferenceRepository,
   });
   const host = createWorkspaceHost({
     controller, config, openHint, taskPositions, usagePositions, useContext,

@@ -26,7 +26,7 @@ Pi Prompt Refine 是 Pi Coding Agent 的提示词改写扩展，**主要面向�
 
 ## 安装
 
-原生工作流需要 **Node.js 22.19+**、已配置可用模型与认证的 Pi Coding Agent，以及 Pi 的**交互式 TUI**。
+当前发布范围是 Pi 的**原生 TUI 扩展**。需要 **Node.js 22.19+**，并在 Pi 中配置模型和认证。
 
 ```bash
 pi install git:github.com/Steam086/pi-prompt-refine
@@ -53,47 +53,18 @@ pi --extension git:github.com/Steam086/pi-prompt-refine
 
 ## 第一次使用
 
-### 1. 选择优化模型
+1. **选模型**：在 Pi 中运行 `/refine model`，选择负责改写的模型。这不会更换主 Agent 的模型。
+2. **写草稿并改写**：在 Pi 输入框写下需求，例如「看看刚才说的错误处理，先给建议，别改代码。」按 `Ctrl+\` 打开 Refine 并捕获草稿，再按 `Enter` 请求改写。捕获不调用模型；改写会把草稿和选中的上下文发给优化模型，可能消耗额度或产生费用。
+3. **检查结果**：选中满意的结果，按 `a` 放回 Pi 输入框，**不会发送**。你可以继续编辑，再自行提交给主 Agent；那是另一次模型请求。
 
-首次使用时，在 Pi 中执行 `/refine model`，从已配置认证的模型中选择独立的优化模型。
-
-可以优先尝试速度快、成本低、能力略低于主模型但足以理解当前对话的模型。以改写是否忠实、清楚作为选择依据，让优化模型专注于整理表达，主 Agent 负责后续任务。
-
-### 2. 写下草稿，启动优化
-
-在 Pi 主编辑器中自然地写下需求，例如：
-
-```text
-就刚才说的那个错误处理，看看 @src/ 里是不是有把异常吞掉的地方，先说说原因和建议，别直接改代码。
-```
-
-按 **`Ctrl+\`（Control + 反斜杠，不是 Command）**，将草稿作为 **Unsent** 保留并打开 Refine。选中原稿后按 **Enter** 才开始优化；也可先按 `i` 编辑，或按 **Tab → Space → Enter** 选择 Preferences 并启动。
-
-> **快捷键用于捕获／打开，Enter 才启动优化。** 草稿未变或已捕获时定位已有条目；输入框为空时只打开工作台。发送给主 Agent 是后续独立操作。
-
-也可以通过命令直接提交文本：
-
-```text
-/refine 看看错误处理，先给建议，不要改代码。
-```
-
-带正文的命令会直接发起优化。随后执行 `/refine` 查看结果。运行期间，主编辑器上方会显示 Refine 的运行、排队、新结果及失败状态。
-
-### 3. 查看结果，决定是否使用
-
-- 按 **`a`**：将选中结果放入 Pi 主编辑器，**不发送**；继续修改或自行提交。
-- 按 **Enter**：查看详情；按 `e` 手工编辑，或按 `f` 输入修订要求、**Ctrl+S** 发起修订。
-- 按 **`m`**：选择另一个模型，从同一原稿重新优化，供你比较。
-- 按 **`q` / Esc**：返回或关闭，保留当前草稿；后台任务继续运行。
-
-工作台关闭后可再按 `Ctrl+\` 打开。完整按键、删除记录、发送确认和恢复行为见[使用说明](docs/usage.md)。
+其他操作见[使用说明](docs/usage.md)。
 
 ## 常用命令
 
 | 命令 | 用途 |
 | --- | --- |
 | `/refine` | 打开工作台，不自动发起优化 |
-| `/refine <文本>` | 直接提交文本进行优化 |
+| `/refine <文本>` | 直接请求优化模型，可能消耗额度或产生费用 |
 | `/refine model` | 选择默认优化模型，不改变主 Agent 模型 |
 | `/refine history` | 在 Usage 中查看当前与历史记录 |
 | `/refine restore` | 恢复上次接受前被替换的 Pi 草稿，必要时确认 |
@@ -156,8 +127,6 @@ Refine 默认随 Pi 会话保留原稿、改写结果和已提交的修订要求
 | [上下文与 Prompt 协议](docs/context.md) | 历史选择、规则与目录采集、输入输出协议、隐私边界 |
 | [快捷键排查](docs/shortcut-troubleshooting.md) | 命令备用入口、终端按键排查与 Shell 按键注意事项 |
 | [应用接口](docs/application-api.md) | `/refine-api` 的配置、草稿、运行与查询协议 |
-| [Web 子包说明](packages/pi-web/README.md) | 可选浏览器入口、安装、宿主能力与功能边界 |
-| [隔离验收记录](docs/multi-surface-acceptance.md) | 多入口验证证据及待验收事项 |
 | [项目架构](AGENTS.md) · [设计原则与演进方向](DESIGN.md) | 模块职责、设计原因与尚未实现的方向 |
 
-本地开发检查：`npm ci`、`npm run typecheck`、`npm test`。
+本地开发检查：`npm ci`、`npm run typecheck`、`npm test`。Web 集成暂不发布；源码仅保留作本地开发和验证，见[开发说明](https://github.com/Steam086/pi-prompt-refine/tree/main/packages/pi-web#readme)。

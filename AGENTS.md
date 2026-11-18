@@ -2,7 +2,7 @@
 
 Pi Prompt Refine 是 TypeScript 编写的 Pi 扩展，入口由根 `package.json` 的 `pi.extensions` 指向 `src/extension.ts`。它主要服务于用户在聊天／Agent 窗口中的交互：结合当前对话快速整理思路、表达意图、减少主 Agent 的初始误解，由用户检查后决定是否接受或发送。它是后台文本改写器，不是执行任务的 Agent，也不以批量 prompt 优化、数据集改写或通用 benchmark 为设计目标。
 
-原生 TUI、`/refine-api` 和可选 Web 子包复用同一应用用例；多入口和并行模型比较不改变以用户检查和选择为中心的定位。只有同一 hosted session runtime 的客户端共享状态，不跨进程或原生终端共享 controller。优化模型独立于主模型，可优先选择快速、低成本且足以理解当前对话的模型；不要求能力强于主模型，也不把较弱模型能理解视为主模型必然理解的保证。
+原生 TUI、`/refine-api` 和暂不发布的 Web 实验子包复用同一应用用例；多入口和并行模型比较不改变以用户检查和选择为中心的定位。只有同一 hosted session runtime 的客户端共享状态，不跨进程或原生终端共享 controller。优化模型独立于主模型，可优先选择快速、低成本且足以理解当前对话的模型；不要求能力强于主模型，也不把较弱模型能理解视为主模型必然理解的保证。
 
 ## 默认改写策略
 
@@ -36,7 +36,7 @@ Pi Prompt Refine 是 TypeScript 编写的 Pi 扩展，入口由根 `package.json
 | `src/adapters/` | TUI 本地操作、独立 `/refine-api` 命令、纯 JSON wire 校验和 session-local 事件传输；core 持有有界输入暂存及按需输出分页 |
 | `src/workspace.ts`、`src/ui/`、`task-panel.ts` 等 | 页面、焦点、阅读位置和唯一原生 overlay；UI 不直接调用模型或写 Pi |
 | `src/context.ts`、`project-context.ts`、`config.ts`、偏好/历史存储 | 协议与输出校验、宿主背景采集、配置和白名单持久化；保留原有格式与所有权 |
-| `packages/pi-web/` | 独立 browser/server 构建与依赖；server 仅经公开 `pi-web.host / pi-session-events / v1` 连接宿主，不读 sidecar、不调用模型、不导入业务 runtime；核心不依赖 pi-web |
+| `packages/pi-web/` | 仅供本地开发与隔离验证，不随根包发布；独立 browser/server 构建与依赖；server 仅经公开 `pi-web.host / pi-session-events / v1` 连接宿主，不读 sidecar、不调用模型、不导入业务 runtime；核心不依赖 pi-web |
 
 ## 不可破坏的不变量
 
