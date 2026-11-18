@@ -89,7 +89,9 @@ export function createLifecycle({ controller, config, loaded, getUiContext, setU
     }
     canNameSession(ctx);
     controller.setSession(ctx.sessionManager.getSessionId());
-    const [preferences] = await Promise.all([preferenceRepository(ctx).load(), previousStore?.flush()]);
+    const [preferences] = await Promise.all([
+      preferenceRepository(ctx).load({ initializeStarters: ctx.mode === "tui" }), previousStore?.flush(),
+    ]);
     if (epoch !== historyEpoch) return;
     for (const warning of Object.values(preferences.errors)) notify(ctx, `Preferences: ${warning}`, "warning");
     const sessionFile = ctx.sessionManager.getSessionFile();

@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { mkdir, open, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, open, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { metadataValidation, preferenceValidation, preferenceKey, selectPreference, uniquePreferences, type SelectedPreference, type PreferenceLibrary, type PreferenceMetadata, type PreferenceRepository, type PreferenceScope, type PreferenceValue, type RevisionPreference } from "./revision-preferences.js";
@@ -8,6 +8,7 @@ import { ProjectPreferenceDefaults } from "./project-preference-defaults.js";
 export const PREFERENCE_MAX_BYTES = 1024 * 1024;
 export const PREFERENCE_MAX_ENTRIES = 500;
 const scopes: PreferenceScope[] = ["project", "global"];
+const starterIds = ["clarify-prompt-intent", "prompt-bullet-structure", "translate-prompt-to-english", "answer-in-bullet-points"];
 const code = (error: unknown): string | undefined => (error as NodeJS.ErrnoException)?.code;
 const message = (error: unknown): string => error instanceof Error ? error.message : "Unknown storage error";
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -43,10 +44,10 @@ export class PreferenceStore implements PreferenceRepository {
     return join(root, "prompt-refine-preferences.json");
   }
 
-  private async read(path: string, scope: PreferenceScope): Promise<RevisionPreference[]> {
+  private async read(path: string, scope: PreferenceScope): Promise<RevisionPreference[] | undefined> {
     let file;
     try { file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW); }
-    catch (error) { if (code(error) === "ENOENT") return []; throw error; }
+    catch (error) { if (code(error) === "ENOENT") return undefined; throw error; }
     try {
       const stat = await file.stat();
       if (!stat.isFile() || stat.size > PREFERENCE_MAX_BYTES) throw new Error("Preference library is not a regular file or exceeds 1 MiB.");
@@ -62,11 +63,14 @@ export class PreferenceStore implements PreferenceRepository {
     } finally { await file.close(); }
   }
 
-  async load(): Promise<PreferenceLibrary> {
+  async load({ initializeStarters = false } = {}): Promise<PreferenceLibrary> {
     const result: PreferenceLibrary = { entries: [], errors: {} };
     for (const scope of scopes) {
-      try { result.entries.push(...await this.read(await this.path(scope), scope)); }
-      catch (error) { result.errors[scope] = `${scope}: ${message(error)}`; }
+      try {
+        const path = await this.path(scope);
+        const entries = await this.read(path, scope);
+        result.entries.push(...(entries ?? (scope === "global" && initializeStarters ? await this.initializeGlobal(path) : [])));
+      } catch (error) { result.errors[scope] = `${scope}: ${message(error)}`; }
     }
     try {
       const keys = await new ProjectPreferenceDefaults(this.cwd).load();
@@ -97,32 +101,64 @@ export class PreferenceStore implements PreferenceRepository {
     return this.load();
   }
 
-  private async mutate<T>(scope: PreferenceScope, change: (entries: RevisionPreference[]) => T): Promise<T> {
-    const path = await this.path(scope);
+  private async initializeGlobal(path: string): Promise<RevisionPreference[]> {
+    const readCurrent = async () => await this.read(path, "global") ?? [];
+    return this.withLock(path, async (temp) => {
+      const existing = await this.read(path, "global");
+      if (existing) return existing; // An existing empty library is intentional too.
+      const catalog = decode(await readFile(new URL("../examples/prompt-refine-preferences.json", import.meta.url), "utf8"), "global");
+      const entries = starterIds.map((id) => {
+        const entry = catalog.find((item) => item.id === id);
+        if (!entry?.metadata) throw new Error(`Missing bundled starter preference: ${id}`);
+        // Fresh local identity; a project cannot pre-select a well-known starter ID.
+        return { ...entry, id: randomUUID(), version: 1 };
+      });
+      await this.writeTemp(temp, entries);
+      // Publish a complete file atomically, without replacing even a writer that bypassed the lock.
+      try { await link(temp, path); }
+      catch (error) { if (code(error) === "EEXIST") return readCurrent(); throw error; }
+      return entries;
+    }, readCurrent);
+  }
+
+  private async withLock<T>(path: string, action: (temp: string) => Promise<T>, onBusy?: () => Promise<T>): Promise<T> {
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     const lockPath = `${path}.lock`;
     let lock;
     try { lock = await open(lockPath, "wx", 0o600); }
     catch (error) {
-      if (code(error) === "EEXIST") throw new Error(`Library busy. Retry; if a writer crashed, remove ${lockPath} only after confirming no writer is active.`);
+      if (code(error) === "EEXIST") {
+        if (onBusy) return onBusy();
+        throw new Error(`Library busy. Retry; if a writer crashed, remove ${lockPath} only after confirming no writer is active.`);
+      }
       throw error;
     }
     const temp = `${path}.${randomUUID()}.tmp`;
-    try {
-      const entries = await this.read(path, scope);
-      const result = change(entries);
-      if (entries.length > PREFERENCE_MAX_ENTRIES) throw new Error(`Library limit: ${PREFERENCE_MAX_ENTRIES} entries.`);
-      const content = JSON.stringify({ version: entries.some((entry) => entry.metadata) ? 2 : 1,
-        entries: entries.map(({ scope: _, ...entry }) => entry) }, null, 2) + "\n";
-      if (Buffer.byteLength(content) > PREFERENCE_MAX_BYTES) throw new Error("Preference library exceeds 1 MiB.");
-      await writeFile(temp, content, { encoding: "utf8", flag: "wx", mode: 0o600 });
-      await rename(temp, path);
-      return result;
-    } finally {
+    try { return await action(temp); }
+    finally {
       await rm(temp, { force: true }).catch(() => undefined);
       await lock.close();
       await rm(lockPath, { force: true });
     }
+  }
+
+  private async writeTemp(path: string, entries: RevisionPreference[]): Promise<void> {
+    if (entries.length > PREFERENCE_MAX_ENTRIES) throw new Error(`Library limit: ${PREFERENCE_MAX_ENTRIES} entries.`);
+    const content = JSON.stringify({ version: entries.some((entry) => entry.metadata) ? 2 : 1,
+      entries: entries.map(({ scope: _, ...entry }) => entry) }, null, 2) + "\n";
+    if (Buffer.byteLength(content) > PREFERENCE_MAX_BYTES) throw new Error("Preference library exceeds 1 MiB.");
+    await writeFile(path, content, { encoding: "utf8", flag: "wx", mode: 0o600 });
+  }
+
+  private async mutate<T>(scope: PreferenceScope, change: (entries: RevisionPreference[]) => T): Promise<T> {
+    const path = await this.path(scope);
+    return this.withLock(path, async (temp) => {
+      const entries = await this.read(path, scope) ?? [];
+      const result = change(entries);
+      await this.writeTemp(temp, entries);
+      await rename(temp, path);
+      return result;
+    });
   }
 
   private current(entries: RevisionPreference[], expected: RevisionPreference): number {

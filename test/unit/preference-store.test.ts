@@ -114,6 +114,67 @@ describe("preference persistence", () => {
   });
 });
 
+describe("bundled starter preferences", () => {
+  it("initializes only the missing global library and respects edits and an intentionally empty library", async () => {
+    const f = await setup();
+    const project = await f.store.save("project", { name: "Project preference", body: "Project only" });
+    const projectBefore = await readFile(f.project, "utf8");
+    expect(await f.store.load()).toEqual({ entries: [project], errors: {} });
+    await expect(stat(f.global)).rejects.toMatchObject({ code: "ENOENT" });
+    const { entries, errors, projectDefaults } = await f.store.load({ initializeStarters: true });
+    const starters = entries.slice(1);
+    expect(entries[0]).toEqual(project);
+    expect(starters.map(({ name, metadata }) => [name, metadata?.kind, metadata?.activation])).toEqual([
+      ["Clarify Prompt Intent", "rewrite", "manual"], ["Prompt Bullet Structure", "rewrite", "manual"],
+      ["Translate Prompt to English", "rewrite", "manual"], ["Answer in Bullet Points", "task", "manual"],
+    ]);
+    expect(starters.every(({ scope }) => scope === "global")).toBe(true);
+    expect(new Set(starters.map(({ id }) => id)).size).toBe(4);
+    expect(errors).toEqual({});
+    expect(projectDefaults).toBeUndefined();
+    expect((await stat(f.global)).mode & 0o777).toBe(0o600);
+    expect(await readFile(f.project, "utf8")).toBe(projectBefore);
+    expect(f.store.getDefaultPreferences()).toEqual([]);
+
+    const edited = await f.store.save("global", { name: "My version", body: "Use my preference." }, starters[0]!);
+    const remove = [edited, ...starters.slice(1)];
+    expect((await f.store.load({ initializeStarters: true })).entries).toEqual([project, ...remove]);
+    for (const entry of remove) await f.store.remove(entry);
+    expect((await f.store.load({ initializeStarters: true })).entries).toEqual([project]);
+  });
+
+  it("preserves existing bytes, even if the global library is empty or unreadable", async () => {
+    const f = await setup();
+    for (const content of ['{ "version": 1, "entries": [] }', 'not a valid library']) {
+      await writeFile(f.global, content);
+      const { entries, errors } = await f.store.load({ initializeStarters: true });
+      expect(entries).toEqual([]);
+      expect(Boolean(errors.global)).toBe(content.startsWith("not"));
+      expect(await readFile(f.global, "utf8")).toBe(content);
+    }
+    await rm(f.global); await symlink(join(f.dir, "missing.json"), f.global);
+    expect((await f.store.load({ initializeStarters: true })).errors.global).toBeTruthy();
+    await expect(readFile(f.global, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("initializes just once across competing startup attempts and leaves an existing lock alone", async () => {
+    const f = await setup();
+    const peer = new PreferenceStore(f.agent, f.cwd);
+    await writeFile(`${f.global}.lock`, "existing writer");
+    expect(await f.store.load({ initializeStarters: true })).toEqual({ entries: [], errors: {} });
+    expect(await readFile(`${f.global}.lock`, "utf8")).toBe("existing writer");
+    await rm(`${f.global}.lock`);
+    const attempts = await Promise.all([f.store, peer].map((store) => store.load({ initializeStarters: true })));
+    const entries = (await f.store.load()).entries;
+    expect(entries).toHaveLength(4);
+    for (const attempt of attempts) {
+      expect(attempt.errors).toEqual({});
+      if (attempt.entries.length) expect(attempt.entries).toEqual(entries);
+    }
+    expect((await peer.load({ initializeStarters: true })).entries).toEqual(entries);
+  });
+});
+
 describe("typed preferences", () => {
   const metadata: PreferenceMetadata = { kind: "rewrite", description: "并列问题条目化", activation: "manual" };
   const entry: RevisionPreference = { id: "structured", version: 1, scope: "global", name: "Structure", body: "Keep literal 中文\tcommands.", metadata };

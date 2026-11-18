@@ -18,7 +18,7 @@
       "name": "Prompt Bullet Structure",
       "body": "Prefer a list-based structure when separating distinct requirements, questions, constraints, or other points would improve clarity and readability. Do not force every prompt into a list.\n\nOrganize suitable content into concise bullets. Use nested bullets for related details and numbered lists when sequence matters. You may restructure prose and group related points rather than merely split existing sentences.\n\nPreserve the original meaning, scope, and authorization boundaries. Preserve the original order by default. Regroup only without changing the relationships, priorities, or intended interpretation of the statements, and without introducing ambiguity.\n\nPreserve logical relationships, including conditions, exceptions, negation, sequencing, and whether requirements are mandatory, optional, or alternatives. Ensure that restructuring does not obscure or alter these relationships.\n\nDo not invent requirements, turn background into tasks, or present dependent steps as independent choices. Keep quotations, examples, and code intact.\n\nLeave the structure unchanged when the prompt already has a suitable list structure, has no distinct points to separate, relies on continuous prose to convey its meaning, or explicitly requires its current structure.\n\nThis preference governs the structure of the prompt itself, not the response. Preserve any existing response-format requirements; do not add an instruction to answer in bullets.",
       "metadata": {
-        "description": "将需要整理的独立并列要求改为列表；不改变回答格式。",
+        "description": "Structure parallel points in the prompt as a list; keep the answer format unchanged. 将需要整理的独立并列要求改为列表；不改变回答格式。",
         "kind": "rewrite",
         "activation": "manual"
       }
@@ -40,7 +40,7 @@
       "name": "Answer in Bullet Points",
       "body": "Use bullets for parallel points when they are easier to read than prose. Keep one idea per bullet, group related points, and merge repetition. Do not invent points to meet a quota or use unordered bullets to represent a sequence.",
       "metadata": {
-        "description": "回答中的并列要点使用列表，适合连贯叙述的内容保留段落。",
+        "description": "Use bullets for parallel points in the answer; keep prose where it reads better. 回答中的并列要点使用列表，适合连贯叙述的内容保留段落。",
         "kind": "task",
         "activation": "manual"
       }
@@ -95,7 +95,7 @@
       "name": "Clarify Prompt Intent",
       "body": "Clarify only references or scope that the supplied draft and context resolve unambiguously. Make the smallest useful edit; keep clear prompts unchanged. Do not add success criteria or repeat background merely to make the prompt standalone. Leave unresolved ambiguity intact and do not add an intent-analysis section.",
       "metadata": {
-        "description": "只澄清上下文能确定的指代和范围，保留无法消除的歧义，不扩展任务。",
+        "description": "Clarify only references or scope resolved by the context; do not expand the task. 只澄清上下文能确定的指代和范围，不扩展任务。",
         "kind": "rewrite",
         "activation": "manual"
       }
@@ -117,7 +117,7 @@
       "name": "Translate Prompt to English",
       "body": "Translate the prompt's natural-language content into English; leave existing English unchanged unless it needs an edit. Preserve its meaning, tone, uncertainty, structure, and formatting. Keep code, commands, paths, identifiers, URLs, numbers, units, versions, and explicitly verbatim text unchanged, including non-English literals. Translate response-language instructions faithfully: an English prompt does not imply a request for an English answer. Return no bilingual copy or translation commentary.",
       "metadata": {
-        "description": "将 prompt 的自然语言译成英文，保留字面量及原有回答语言要求；不等同于要求英文回答。",
+        "description": "Translate the prompt into English without changing literals or the requested answer language. 将 prompt 译成英文；保留字面量和原有回答语言要求。",
         "kind": "rewrite",
         "activation": "manual"
       }

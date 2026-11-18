@@ -1,6 +1,6 @@
 # 使用说明
 
-安装与最小流程见 [README](../README.md)，配置字段见 [配置参考](configuration.md)。本扩展是无工具的后台改写器，不执行 prompt 中的任务。
+安装与最小流程见[中文 README](../README.zh-CN.md)，配置字段见 [配置参考](configuration.md)。本扩展是无工具的后台改写器，不执行 prompt 中的任务。
 
 ## 多入口第一切片
 
@@ -183,7 +183,9 @@ Revise 中按 **Alt+P** 打开 Preferences，或用 **Tab / Shift+Tab** 在补�
 
 ### JSON 元数据与手动选择
 
-库支持旧版 v1；带元数据的写入使用 v2，防止旧插件静默丢失新字段。完整预制库见 [示例](../examples/prompt-refine-preferences.json)。条目中的 `metadata` 是 JSON 对象，不是需要再次解析的字符串：
+首次加载原生 TUI 时，如果没有全局库文件，Refine 会从[完整示例库](../examples/prompt-refine-preferences.json)复制四项：Clarify Prompt Intent、Prompt Bullet Structure、Translate Prompt to English、Answer in Bullet Points。它们是普通的全局条目，可以在 `p` 面板编辑或删除；不会设为项目默认或自动勾选。已有文件（包括删除所有条目后保留的空库）不改写、不合并；如果手工移除整个全局库文件，下次加载 TUI 会重新初始化。项目库不预填。
+
+库支持旧版 v1；带元数据的写入使用 v2，防止旧插件静默丢失新字段。条目中的 `metadata` 是 JSON 对象，不是需要再次解析的字符串：
 
 ```json
 {

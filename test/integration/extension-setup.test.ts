@@ -26,12 +26,49 @@ describe("startup hint", () => {
   });
 
   it.each(["rpc", "print"] as const)("stays silent in %s mode", async (mode) => {
-    const harness = await makeHarness({ mode });
+    const harness = await makeHarness({ mode, freshInstall: true });
     expect(harness.notifications).toEqual([]);
+    await expect(readFile(join(harness.agentDir, "prompt-refine-preferences.json"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
 
 describe("first optimizer model setup", () => {
+  it("offers four unchecked starters in the TUI without sending their text until explicitly selected", async () => {
+    const h = await makeHarness({ freshInstall: true });
+    h.setCustomAction("\r");
+    await h.command("model", h.context);
+    h.holdPanel();
+    const view = h.shortcuts.get("ctrl+\\")!(h.context);
+    h.panelInput("\t");
+    await vi.waitFor(() => {
+      const frame = h.panelLines(160).join("\n");
+      expect(frame).toContain("[ ] Clarify Prompt Intent");
+      expect(frame).toContain("[ ] Prompt Bullet Structure");
+      expect(frame).toContain("[ ] Translate Prompt to English");
+      expect(frame).toContain("[ ] Answer in Bullet Points");
+    });
+    expect(h.complete).not.toHaveBeenCalled();
+    h.panelInput("\r");
+    await vi.waitFor(() => expect(h.complete).toHaveBeenCalledTimes(1));
+    const call = h.complete.mock.calls[0]![1] as { messages: [{ content: [{ text: string }] }] };
+    expect(JSON.parse(call.messages[0].content[0].text)).not.toHaveProperty("editing_instruction");
+    h.panelInput("q"); await view;
+
+    h.setEditorText("A different draft");
+    const selectedView = h.shortcuts.get("ctrl+\\")!(h.context);
+    h.panelInput("\t");
+    await vi.waitFor(() => expect(h.panelLines(160).join("\n")).toContain("[ ] Clarify Prompt Intent"));
+    h.panelInput(" ");
+    expect(h.panelLines(160).join("\n")).toContain("[x] Clarify Prompt Intent");
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    h.panelInput("\r");
+    await vi.waitFor(() => expect(h.complete).toHaveBeenCalledTimes(2));
+    const selected = h.complete.mock.calls[1]![1] as typeof call;
+    expect(JSON.parse(selected.messages[0].content[0].text).editing_instruction).toContain("Clarify only references or scope");
+    expect(h.sent).toEqual([]); expect(h.editorWrites).toEqual([]);
+    h.panelInput("q"); await selectedView;
+  });
+
   it("guides a fresh install without borrowing the main model or starting a request", async () => {
     const harness = await makeHarness({ freshInstall: true });
     expect(harness.notifications).toEqual([expect.stringContaining("No optimizer model selected")]);
