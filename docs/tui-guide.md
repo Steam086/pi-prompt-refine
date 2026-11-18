@@ -1,0 +1,45 @@
+# TUI guide
+
+For installation and your first rewrite, start with the [README](../README.md). The native Pi TUI is the supported interface for this release.
+
+## Work with drafts and results
+
+The workspace has three tabs: **Preview** for the current round, **Usage** for current and earlier records, and **Settings** for configuration. Use the Left and Right arrow keys to switch tabs and `?` to see the actions available for your current selection.
+
+| To… | Do this |
+| --- | --- |
+| Capture a draft | Type in Pi and press `Ctrl+\`. Capture does not call a model or clear the Pi editor. |
+| Rewrite an Unsent draft | Select it and press `Enter`. To add Preferences first, press `Tab`, then `Space` on each item you want. Press `Enter` to start the rewrite. |
+| Try a different model | Select the draft or a run and press `m`. Choose a model and press `Enter` to run it without changing your default. |
+| Revise a result | Select the result and press `f`. Enter your revision instructions, then press `Ctrl+S` to request a new rewrite. |
+| Use a result | Press `a` to put it in the Pi editor **without sending**. Review and submit it yourself, or press `s` in result details to send directly. The first direct send after loading asks for confirmation. |
+| Stop a rewrite | Select its queued or running entry and press `x`. Closing the workspace does not stop it. |
+
+## Settings
+
+- Use `/refine model` to choose the default rewrite model. Your main agent's model does not change, and Pi still manages provider authentication.
+- In **Settings**, use `Tab` to change groups and `Ctrl+S` to save context and request limits. Context changes apply to the next round; they do not update context already captured for the current round.
+- The config file is `prompt-refine.json` in your Pi agent directory. See the [example config](../examples/prompt-refine.json); its model entry is illustrative. After editing the file, run `/reload` in Pi.
+
+## What the rewrite provider receives
+
+Refine sends the draft and selected context to the rewrite provider, which may differ from your main agent's provider. Conversation history can contain sensitive text. The rewrite model has no tools, and Refine does not load file contents from `@file` references.
+
+| Context | Default | How to limit it in **Settings → Context** |
+| --- | --- | --- |
+| Conversation history | Up to 12 visible user or assistant messages from the current branch, within a 16,000-character budget. Raw tool results and thinking are excluded. | Lower **History messages** or **History characters**. Set either to `0` to exclude conversation history. |
+| Explicit directory references | On. Refine can include bounded name listings from directories inside the working directory, not file contents. | Turn **Directory references** off. This is separate from **Directory tree**. |
+| Project instructions, default directory tree, and skill metadata | All off unless enabled. | Turn **Project context** off to exclude all project context, including explicit directory listings. This does not turn off conversation history. |
+
+To exclude both conversation history and project context, set either history limit to `0`, turn **Project context** off, and save with `Ctrl+S`. Use the next round for the new settings. The draft itself is still sent. These context controls do not change local history storage.
+
+## Local history and cleanup
+
+By default, when Pi uses a session file, Refine stores submitted drafts, results, submitted revision instructions, and run metadata alongside it in `<session-file>.prompt-refine.json`. It does not store unsent drafts, the full captured context, or the provider request payload. Drafts and results can still contain sensitive text. In **Usage**, press `b` to see the storage status and file path.
+
+- To stop loading and saving history, set `"historyPersistence": false` in the config and run `/reload`. This does **not** delete existing files.
+- To remove the saved history for the current session, run `/refine history clear` and confirm. This leaves the Pi conversation and in-memory Refine records intact, and pauses saving until the next reload.
+
+## If the shortcut does not work
+
+Use `/refine` to open the workspace without a model call, or `/refine optimize <text>` to request a rewrite without the shortcut. If your draft is itself a reserved command name, use the explicit form, for example `/refine optimize model`. Check `/hotkeys` in Pi to see the loaded binding. Avoid testing `Ctrl+\` at a shell prompt: it may send `SIGQUIT`.

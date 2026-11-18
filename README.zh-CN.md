@@ -61,7 +61,7 @@ pi --extension git:github.com/Steam086/pi-prompt-refine
 
 **试用偏好**：首次加载 TUI 时，如尚无全局偏好库，会放入四个可编辑示例：澄清指代、按要点整理 prompt、把 prompt 译成英文、让回答使用要点。它们不会自动勾选，已有库（包括空库）不受影响。选中 Unsent 草稿后按 `Tab`、用 `Space` 勾选，再按 `Enter` 请求改写。
 
-其他操作见[使用说明](docs/usage.md)。在 macOS 上试装可参考[验收清单](docs/macos-smoke-test.md)（英文）。
+如果 `Ctrl+\` 被终端拦截，可以在 Pi 中用 `/refine <文本>` 直接请求改写。其他操作见[中文使用说明](docs/usage.md)或[英文 TUI 指南](docs/tui-guide.md)。在 macOS 上试装可参考[验收清单](docs/macos-smoke-test.md)（英文）。
 
 ## 常用命令
 
@@ -119,18 +119,27 @@ Preview 默认只展示当前轮次；全部轮次、Earlier 和恢复记录均�
 
 ### 历史保存
 
-Refine 默认随 Pi 会话保留原稿、改写结果和已提交的修订要求，重新打开同一会话后仍可查看。保存范围和恢复方式见[使用说明](docs/usage.md#记录范围与用量)。
+Refine 默认在 Pi 会话文件旁保存已提交改写的原稿、改写结果和已提交的修订要求。将 `historyPersistence` 设为 `false` 后执行 `/reload`，会停止读写历史，但不会删除旧文件。若要删除当前会话已保存的 Refine 历史，执行 `/refine history clear` 并确认。详见[保存范围与清理方式](docs/usage.md#记录范围与用量)。
 
-## 更多文档
+## 中文参考
+
+本文提供安装和首次使用说明，下列中文参考可按需查阅。原生 TUI 的公开发布指南以[英文文档](README.md#documentation)为主；文档语言不代表界面语言，菜单和按键名称按实际界面书写。
 
 | 文档 | 内容 |
 | --- | --- |
 | [使用说明](docs/usage.md) | 完整操作、并行比较、轮次与冻结背景、接受／发送确认、恢复与重新运行 |
 | [配置参考](docs/configuration.md) | Settings 操作、配置文件、模型、thinking、改写策略、快捷键与预算 |
 | [Preferences 选择与保存](docs/preference-selection.md) | Selected only、组合顺序、搜索排名与新建后定位 |
-| [上下文与 Prompt 协议](docs/context.md) | 历史选择、规则与目录采集、输入输出协议、隐私边界 |
+| [上下文与数据边界](docs/context.md) | 历史选择、规则与目录采集、隐私边界 |
 | [快捷键排查](docs/shortcut-troubleshooting.md) | 命令备用入口、终端按键排查与 Shell 按键注意事项 |
-| [应用接口](docs/application-api.md) | `/refine-api` 的配置、草稿、运行与查询协议 |
-| [项目架构](AGENTS.md) · [设计原则与演进方向](DESIGN.md) | 模块职责、设计原因与尚未实现的方向 |
 
-本地开发检查：`npm ci`、`npm run typecheck`、`npm test`。Web 集成暂不发布；源码仅保留作本地开发和验证，见[开发说明](https://github.com/Steam086/pi-prompt-refine/tree/main/packages/pi-web#readme)。
+## 卸载
+
+运行 `pi remove git:github.com/Steam086/pi-prompt-refine`，然后重启 Pi 或执行 `/reload`。卸载不会删除 Refine 的偏好设置或已保存的历史。
+
+## 反馈与开发
+
+- 普通问题请提交到 [GitHub Issues](https://github.com/Steam086/pi-prompt-refine/issues)。请用虚构草稿复现，并遮盖截图或日志里的敏感信息；不要附上凭据、原始对话或 Refine 历史文件。
+- 安全问题请按[安全报告流程](SECURITY.md)（英文）私下报告。如果私密报告入口不可用，公开 issue 中只请求私下报告渠道，不要贴出漏洞细节。
+- 本地检查和提交说明见[贡献指南](CONTRIBUTING.md)（英文），其中也记录了[文档语言约定](CONTRIBUTING.md#documentation-languages)。
+- 开发参考：[应用接口](docs/application-api.md) · [项目架构](AGENTS.md) · [设计原则](DESIGN.md)。Web 集成暂不发布，仅供本地开发和验证，见 [Web 子包说明](packages/pi-web/README.md)。
