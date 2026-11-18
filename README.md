@@ -20,7 +20,7 @@ Start Pi, or run `/reload` in an existing session. Extensions run with your Pi p
 2. **Write and refine.** Type a draft in the Pi editor, such as “Explain why the second option might be faster. Don't change any code yet.” Press `Ctrl+\` to capture it, then `Enter` in Refine to request a rewrite. Capturing alone does not call a model. Rewriting can use quota or incur charges.
 3. **Review the result.** Select the result and press `a` to put it back in the Pi editor **without sending it**. Edit it if needed, then submit it yourself to the main agent. That is a separate model request.
 
-`/refine` opens the workspace without running a model. `/refine <text>` requests a rewrite directly. If the shortcut is intercepted by your terminal, see [shortcut troubleshooting](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/shortcut-troubleshooting.md).
+`/refine` opens the workspace without running a model. `/refine <text>` requests a rewrite directly. If the shortcut is intercepted by your terminal, see [shortcut troubleshooting](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/tui-guide.md#if-the-shortcut-does-not-work).
 
 ## Try a Preference
 
@@ -37,14 +37,13 @@ On an **Unsent** draft, press `Tab`, choose a Preference, and press `Space` to t
 
 ## Model calls and local history
 
-- The selected Refine provider receives the draft and selected context. It may be different from your main agent's provider. Refine does not load file contents from `@file` references, but selected conversation history can already contain sensitive text.
+- The selected Refine provider receives the draft and selected context. It may be different from your main agent's provider. Refine does not load file contents from `@file` references, but selected conversation history can already contain sensitive text. See [how to limit context](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/tui-guide.md#what-the-rewrite-provider-receives).
 - The rewrite model receives no tools. Review the result before sending it, especially your constraints, commands, and quoted text. The first direct send with `s` in Refine asks for confirmation before handing it to Pi.
-- Drafts, results, and submitted revision instructions are saved locally alongside the Pi session by default. Disabling `historyPersistence` stops reading and writing that history after `/reload`; it does not delete previously saved files. See [history and cleanup](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/usage.md#记录范围与用量).
+- Submitted drafts, results, and submitted revision instructions are saved locally alongside the Pi session file by default. Disabling `historyPersistence` stops reading and writing that history after `/reload`; it does not delete previously saved files. See [history and cleanup](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/tui-guide.md#local-history-and-cleanup).
 
-## More information
+## Documentation
 
-- [macOS smoke test](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/macos-smoke-test.md)
-- [Usage (Chinese)](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/usage.md) · [Configuration (Chinese)](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/configuration.md)
-- [Contributing](https://github.com/Steam086/pi-prompt-refine/blob/main/CONTRIBUTING.md) · [Reporting security issues](https://github.com/Steam086/pi-prompt-refine/blob/main/SECURITY.md)
+- **English:** [TUI guide](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/tui-guide.md) · [macOS smoke test](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/macos-smoke-test.md) · [Contributing](https://github.com/Steam086/pi-prompt-refine/blob/main/CONTRIBUTING.md) · [Reporting security issues](https://github.com/Steam086/pi-prompt-refine/blob/main/SECURITY.md)
+- **简体中文:** [安装与入门](https://github.com/Steam086/pi-prompt-refine/blob/main/README.zh-CN.md) · [详细用法](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/usage.md) · [配置参考](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/configuration.md)
 
 To remove the extension, run `pi remove git:github.com/Steam086/pi-prompt-refine` and restart Pi or run `/reload`. Uninstalling does not delete your Refine preferences or saved history.
