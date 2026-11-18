@@ -100,7 +100,11 @@ export function extensionHarnessEnvironment() {
     if (!options.useDefaultShortcuts) config.shortcuts = { ...config.shortcuts, view: "alt+v", selectModel: "alt+m", restore: "alt+z" };
     if (options.config?.shortcuts) config.shortcuts = { ...DEFAULT_CONFIG.shortcuts, ...options.config.shortcuts };
     if (options.configureModel !== false) config.model = { provider: "fake-provider", id: "fake-chat" };
-    if (!options.freshInstall) await writeFile(join(agentDir, "prompt-refine.json"), `${JSON.stringify(config)}\n`, "utf8");
+    if (!options.freshInstall) {
+      await writeFile(join(agentDir, "prompt-refine.json"), `${JSON.stringify(config)}\n`, "utf8");
+      // Existing-profile workflows control their own library entries. Fresh installs exercise startup seeding.
+      await writeFile(join(agentDir, "prompt-refine-preferences.json"), '{"version":1,"entries":[]}\n', "utf8");
+    }
 
     const model = { provider: "fake-provider", id: "fake-chat", name: "Fake Chat", contextWindow: 128_000, maxTokens: 16_384, reasoning: options.reasoning ?? false } as Model<Api>;
     const complete = vi.fn(async (_model?: Model<Api>, _context?: unknown, _options?: unknown) => ({
