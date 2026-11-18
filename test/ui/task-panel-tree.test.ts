@@ -349,7 +349,7 @@ describe("prompt tree and inspection", () => {
     const running: RefineRecord = { ...record(1), archivedAt: 1, status: "generating", candidate: undefined };
     const f = create("dark", false, [running, record(2, 2)]);
     expect(f.text()).toContain("1 running / queued");
-    expect(f.text()).toContain("Run: Default model");
+    expect(f.text()).not.toContain("Default model:");
     expect(f.text()).not.toContain("model-1");
     const usage = create("dark", true, f.records);
     usage.panel.handleInput("x");
@@ -442,7 +442,8 @@ describe("prompt tree and inspection", () => {
       }
     }
     const f = create("light", false, []);
-    expect(f.text()).toContain("p: Preferences");
+    expect(f.text()).not.toContain("p: Preferences");
+    f.panel.handleInput("?"); expect(f.text()).toContain("p Preferences"); f.panel.handleInput("\x1b");
     f.panel.handleInput("p"); expect(f.actions.preferences).toHaveBeenCalledWith(undefined, undefined);
   });
 
@@ -453,7 +454,7 @@ describe("prompt tree and inspection", () => {
     const f = create(name, false, [source]);
     const full = f.panel.render(100).join("\n");
     expect(full).toContain(f.theme.fg("muted", sanitizeTerminalText(`Preferences: 1 · ${source.input.preferences[0]!.name}`)));
-    expect(f.text()).toContain("p: Preferences");
+    expect(f.text()).toContain("Enter: Optimize");
     expect(full).not.toContain("\x1b[2J");
     for (const [width, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [100, 40]]) {
       f.size.rows = rows!;
@@ -517,7 +518,8 @@ describe("delete confirmation", () => {
     const { panel, actions, text, position } = create();
     const remove = vi.fn(() => true);
     Object.assign(actions, { deleteRecords: remove });
-    expect(text()).toContain("Delete");
+    expect(text()).not.toContain("d: Delete");
+    panel.handleInput("?"); expect(text()).toContain("d Delete"); panel.handleInput("\x1b");
     panel.handleInput("d");
     expect(text()).toContain("Delete run #1?");
     expect(text()).toContain("Running requests will be stopped");

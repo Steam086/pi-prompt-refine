@@ -18,7 +18,7 @@ Settings 沿用英文句式命名，提供三个分组。以下七项无需手�
 
 `Tab` 切换分组，左右键在分组及外侧顶层页面间移动，↑↓在组内选择。Enter / Space 切换开关；数值项按 Enter 打开同一工作区内的编辑页，可直接输入自定义值，Tab / Shift+Tab 循环常用档位，Enter 带回暂存值，Esc 取消本次数值编辑。输出常用档位为 2048 / 4096 / 8192 / 16384 / 32768 / 65536；超时为 30 / 60 / 120 / 300 秒。超时自定义值允许毫秒精度的秒数，其余数值为整数。非法或超限值保留在编辑页并显示警告；子页 Ctrl+S 不保存，也不请求模型。
 
-回到 Settings 后，任意分组按 **Ctrl+S Save settings** 才统一保存这些选项及原有 Context 开关。切页和进入模型／策略子页保留暂存值；在 Settings 按 Esc / q 取消未保存设置。模型、Thinking 和 Optimization prompt 保持原有的独立确认／保存边界。保存失败保留选择并提示 `Not persisted`，可重试；若已在内存中应用，取消不会撤销已应用的值。
+回到 Settings 后，任意分组按 **Ctrl+S**（顶部显示 `Ctrl+S: Save`）才统一保存这些选项及原有 Context 开关。左右键和 Space 不常驻显示，但键位不变。切页和进入模型／策略子页保留暂存值；在 Settings 按 Esc / q 取消未保存设置。模型、Thinking 和 Optimization prompt 保持原有的独立确认／保存边界。保存失败保留选择并提示 `Not persisted`，可重试；若已在内存中应用，取消不会撤销已应用的值。
 
 上下文选项从下一 round 首份输入生效，不改变当前 round 的冻结背景。输出上限和超时用于之后实际启动的请求（包括届时启动的排队请求）；运行中的输出预算、结果长度保护和计时器保持不变。原稿上限立即用于新的输入／编辑校验，不截断或删除已有原稿和结果。History messages / History characters 任一为 0 均禁用历史；Project context 不影响会话历史，Directory references 独立于默认 Directory tree（引用数量仍由配置文件中的 `maxReferences` 控制，默认 8）。
 

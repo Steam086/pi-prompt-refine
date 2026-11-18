@@ -14,13 +14,13 @@ describe("SettingsPage navigation seam", () => {
     const bold = vi.spyOn(theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
     workspace.openSettings();
     try {
-      for (const [width, count] of [[160, 1], [120, 2], [100, 2], [80, 2], [40, 4], [160, 1]] as const) {
+      for (const [width, count] of [[160, 1], [120, 1], [100, 1], [80, 1], [60, 1], [40, 2], [160, 1]] as const) {
         const frame = workspace.render(width);
         const hints = footer(frame);
         const output = hints.join("\n");
         expect(hints).toHaveLength(count);
-        for (const hint of [["Ctrl+S", "Save settings"], ["Enter", "Change"], ["Space", "Change"], ["Esc", "Back"],
-          ["Tab", "Group"], ["←", "Usage"], ["→", "Optimizer"], ["↑↓", "Select"]] as const) {
+        expect(strip(output)).not.toMatch(/(?:Space|←|→|↑↓):/);
+        for (const hint of [["Ctrl+S", "Save"], ["Enter", "Change"], ["Esc", "Back"], ["Tab", "Group"]] as const) {
           expect(output).toContain(formatKeyHint(hint, theme, 1, "secondary"));
           expect(output).not.toContain(theme.bold(hint[0]));
         }
@@ -33,7 +33,7 @@ describe("SettingsPage navigation seam", () => {
       }
       workspace.handleInput(" ");
       expect(workspace.render(160).join("\n")).toContain(theme.fg("warning", "Unsaved settings changes"));
-      expect(footer(workspace.render(160)).join("\n")).toContain(formatKeyHint(["Esc", "Discard changes"], theme, 1, "secondary"));
+      expect(footer(workspace.render(160)).join("\n")).toContain(formatKeyHint(["Esc", "Discard"], theme, 1, "secondary"));
       expect(actions.saveContext).not.toHaveBeenCalled();
       expect(actions.submit).not.toHaveBeenCalled();
     } finally { bold.mockRestore(); workspace.dispose(); }
@@ -47,7 +47,8 @@ describe("SettingsPage navigation seam", () => {
       for (const width of [160, 100, 40, 20, 12, 160]) {
         const frame = workspace.render(width);
         const hints = footer(frame);
-        expect(hints.map(strip).join("").replace(/[│\s·]/g, "")).toBe("Esc:CancelEnter:ApplyTab:Preset");
+        const shortcutText = hints.map(strip).join("").replace(/[│\s·]/g, "");
+        expect(shortcutText).toBe(width <= 20 ? "EscCancel↵Apply" : "Esc:CancelEnter:ApplyTab:Preset");
         expect(hints.join("\n")).not.toContain("\x1b[1m");
         if (width >= 100) expect(hints).toHaveLength(1);
         expect(frame.join("\n")).toContain(CURSOR_MARKER);

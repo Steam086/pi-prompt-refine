@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from "vitest";
 import { selectHistory } from "../../src/context.js";
 import type { RefineRecord } from "../../src/history.js";
 import { PreviewPanel } from "../../src/preview.js";
-import { sanitizeTerminalText } from "../../src/presentation.js";
 import { workspaceHeight } from "../../src/workspace-overlay.js";
 import { RefineWorkspace } from "../../src/workspace.js";
 import { getThemeByName } from "../support/pi-theme.js";
@@ -49,11 +48,11 @@ describe.each(["regular", "fullscreen"] as const)("current-round Preview (%s)", 
           expect(text).not.toContain(unavailable);
         }
         expect(text).toContain("Usage");
-        expect(text).toContain("n: New");
-        expect(text).toContain("Esc: Back");
+        expect(text).toMatch(/n:? New/);
+        expect(text).toMatch(/Esc:? Back/);
+        expect(text).not.toContain("Default model:");
         if (columns === 120) {
           expect(frame.join("\n")).toContain(theme.fg("muted", "History → Usage · 1 earlier prompt"));
-          expect(frame.join("\n")).toContain(theme.fg("muted", `Run: ${sanitizeTerminalText("provider/模型😀\x1b[2J")}`));
           const empty = frame.find((line) => line.includes("No current prompts."))!;
           expect(stripVTControlCharacters(empty).match(/│/g)).toHaveLength(2); // Outer shell only, no empty tree split.
         }

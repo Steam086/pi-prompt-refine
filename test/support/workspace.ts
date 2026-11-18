@@ -13,16 +13,14 @@ export const panelLayout = (width: number, rows: number) => ({ ...workspaceLayou
 
 // Settings lifts its action rows; Input and the legacy result reader retain bottom hints.
 export const footer = (lines: string[]) => {
-  const secondary = lines.findIndex((line) => /^[│ ]*(?:Ctrl\+S:|\^S:|Esc:)/.test(stripVTControlCharacters(line)));
+  const secondary = lines.findIndex((line) => /^[│ ]*(?:Ctrl\+S: Save|Esc: (?:Back|Discard|Cancel)|Esc (?:Back|Discard|Cancel))/.test(stripVTControlCharacters(line)));
   if (secondary >= 0) {
     const separator = lines.findIndex((line, index) => index > secondary && stripVTControlCharacters(line).replace(/│/g, "").trim().startsWith("─"));
     if (separator >= 0) return lines.slice(secondary, separator);
     let end = secondary + 1;
-    while (end < lines.length && /^[│ ]*(?:Enter:|Space:|Esc:|Tab:|←:|→:|↑↓:|↵:)/.test(stripVTControlCharacters(lines[end]!))) end++;
+    while (end < lines.length && /^[│ ]*(?:(?:Enter|Tab|Esc):|(?:Enter|Tab|↵|\^S) )/.test(stripVTControlCharacters(lines[end]!))) end++;
     return lines.slice(secondary, end);
   }
-  const settings = lines.findIndex((line) => /(?:Ctrl\+S Save settings|\^S Save|Esc (?:Back|Discard))/.test(stripVTControlCharacters(line)));
-  if (settings >= 0) return lines.slice(settings, settings + (stripVTControlCharacters(lines[settings + 1] ?? "").includes("Esc") ? 2 : 1));
   return stripVTControlCharacters(lines.at(-1)!).startsWith("╰") ? lines.slice(-3, -1) : lines.slice(-2);
 };
 

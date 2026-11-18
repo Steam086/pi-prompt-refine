@@ -13,27 +13,32 @@ describe("Tasks shortcut hierarchy", () => {
     const source = { ...record(), status: "unsent" as const, candidate: undefined };
     source.input.draft = "Original 中文😀\x1b[2J\n".repeat(60);
     const f = create(name, false, [source]);
+    f.actions.launchModel = () => "provider/模型😀\x1b[2J";
     const bold = vi.spyOn(f.theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
     const keys = getKeybindings();
     const picker = new InlinePreferences({ load: async () => ({ entries: [], errors: {} }), save: vi.fn(), remove: vi.fn() },
       () => ({ selected: [], save: () => undefined }), f.theme, keys, () => {});
     const panel = new TaskPanel({ ...f.actions, inlinePreferences: picker, deleteRecords: () => true }, f.theme,
       () => f.size.rows, keys, false, f.position, (width) => workspaceLayout(width, f.size.rows));
-    const expected = [["Enter", "Optimize"], ["Tab", "Preferences"], ["p", "Manage"], ["i", "Edit original"],
-      ["n", "New"], ["m", "Run model"], ["d", "Delete"], ["Esc", "Back"], ["?", "Actions"], ["o", "Read original"]] as const;
+    const expected = [["Enter", "Optimize"], ["Tab", "Preferences"], ["o", "Read original"], ["Esc", "Back"], ["?", "All shortcuts"]] as const;
     try {
-      for (const [width, rows, hintRows] of [[160, 40, 1], [120, 40, 2], [100, 40, 2], [80, 40, 2], [40, 24, 5], [160, 40, 1]] as const) {
+      for (const [width, rows, hintRows] of [[160, 40, 1], [120, 40, 1], [100, 40, 1], [80, 40, 2], [40, 24, 2], [160, 40, 1]] as const) {
         f.size.rows = rows;
         const layout = workspaceLayout(width, rows);
         const frame = panel.render(width);
         const lines = frame.map(strip);
-        const start = lines.findIndex((line) => line.includes("Enter:"));
+        const start = lines.findIndex((line) => /Enter: Optimize|↵ Optimize/.test(line));
         const end = lines.findIndex((line, index) => index > start && line.trim().startsWith("─"));
         const hints = frame.slice(start, end).join("\n");
         expect(end - start).toBe(hintRows);
-        for (const [key, label] of expected) {
-          expect(hints).toContain(formatKeyHint([key, key === "?" && width === 40 ? "Help" : label], f.theme, 1, "secondary"));
-          expect(hints).not.toContain(f.theme.bold(key));
+        expect(strip(hints)).not.toMatch(/(?:p|i|n|m|d):/);
+        expect(hints).not.toContain("\x1b[1m");
+        if (width === 40) {
+          for (const hint of [["Esc", "Back"], ["↵", "Optimize"], ["?", "Help"], ["Tab", "Preferences"]] as const) {
+            expect(hints).toContain(formatKeyHint(hint, f.theme, 1, "secondary-compact"));
+          }
+        } else {
+          for (const hint of expected) expect(hints).toContain(formatKeyHint(hint, f.theme, 1, "secondary"));
         }
         const tabs = lines.findIndex((line) => line.includes(" Preview "));
         expect(start).toBe(tabs + 1); // No trailing blank tab row.
@@ -43,9 +48,14 @@ describe("Tasks shortcut hierarchy", () => {
         expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
         expect(frame.join("\n")).toContain(f.theme.fg("text", f.theme.bold("Prompt refine · Tasks")));
         expect(frame.join("\n")).toContain(workspaceTabs(layout, "Preview", f.theme).find((line) => strip(line).includes("Preview"))!);
+        if (width >= 80) expect(strip(frame.join("\n"))).toContain("Default model: provider/模型😀");
         expect(frame.join("\n")).not.toContain("\x1b[2J");
         expect(f.position.selectedTaskId).toBe(1);
       }
+      panel.handleInput("?");
+      const help = strip(panel.render(100).join("\n"));
+      for (const action of ["p Manage / more", "i Edit original", "n New", "m Run model", "d Delete"]) expect(help).toContain(action);
+      panel.handleInput("\x1b");
       panel.handleInput("o"); panel.render(100); panel.handleInput("\x1b[6~"); panel.render(100);
       expect(f.position.scroll).toBeGreaterThan(0);
       panel.handleInput("i"); expect(f.actions.editOriginal).toHaveBeenCalledExactlyOnceWith(1);
@@ -73,11 +83,11 @@ describe("Tasks shortcut hierarchy", () => {
           const tab = plain.findIndex((line) => line.includes(" Preview "));
           const end = plain.findIndex((line, index) => index > tab && line.trim().startsWith("─"));
           const hints = frame.slice(tab + 1, end);
-          const expected: KeyHint[] = [["a", "Accept"], ["Enter", "Inspect"], ["p", "Preferences"], ["i", "Edit original"],
-            ["n", "New"], ["m", "Run model"], ["d", "Delete"], ["Esc", "Back"], ["?", width === 40 ? "Help" : "Actions"],
-            ["b", "Storage"], ["f", "Revise"], ["Tab", reading ? "Select" : "Read  "]];
+          const expected: KeyHint[] = [["Enter", "Inspect"], ["Tab", reading ? "Select" : "Read  "],
+            ["Esc", "Back"], ["?", width === 40 ? "Help" : "All shortcuts"]];
           expect(hints).toEqual(wrappedKeyHints(expected, workspaceLayout(width, rows).innerWidth, f.theme)
             .map((line) => " ".repeat(workspaceLayout(width, rows).inset) + line));
+          expect(hints).toHaveLength(width === 40 ? 2 : 1);
           expect(hints.join("\n")).not.toContain("\x1b[1m");
           expect(plain[tab - 1]!.trim()).toBe(""); // Retain the gap above, never below, the tabs.
           expect(plain[end + 1]!.trim()).not.toBe("");
@@ -91,6 +101,10 @@ describe("Tasks shortcut hierarchy", () => {
       panel.handleInput("\t"); panel.render(100); panel.handleInput("\x1b[B"); panel.render(100);
       expect(f.position.scroll).toBeGreaterThan(0);
       expect(f.position.selectedId).toBe(1);
+      panel.handleInput("?");
+      const help = strip(panel.render(100).join("\n"));
+      for (const action of ["a Accept", "d Delete", "f Revise", "b History storage status and file location", "← / → Switch Preview, Usage and Settings"]) expect(help).toContain(action);
+      panel.handleInput("\x1b");
       panel.handleInput("b");
       expect(strip(panel.render(100).join("\n"))).toContain("Confirmed saved runs");
       panel.handleInput("\x1b");
@@ -122,6 +136,20 @@ describe("Tasks shortcut hierarchy", () => {
         expect(f.actions.run).not.toHaveBeenCalled();
         expect(f.actions.accept).not.toHaveBeenCalled();
       } finally { bold.mockRestore(); }
+    }
+  });
+
+  it.each(["dark", "light"])("keeps Stop available for pending runs in Preview and Usage (%s)", (name) => {
+    for (const usage of [false, true]) for (const status of ["queued", "generating"] as const) {
+      const f = create(name, usage, [{ ...record(), status, candidate: undefined }]);
+      expect(f.panel.render(100).join("\n")).toContain(formatKeyHint(["x", "Stop"], f.theme, 1, "secondary"));
+      expect(f.text()).not.toContain("a: Accept");
+      expect(f.text()).not.toContain("Default model:");
+      f.size.rows = 8;
+      const short = f.text(32);
+      for (const hint of ["Esc Back", "x Stop", "? Help"]) expect(short).toContain(hint);
+      f.panel.handleInput("x");
+      expect(f.actions.stop).toHaveBeenCalledExactlyOnceWith(1);
     }
   });
 

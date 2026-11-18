@@ -4,16 +4,16 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 "=== Preview ===
 ╭────────────────────────────────────────────────────────╮
 │  Prompt refine · Tasks                                 │
-│  1 prompts · 2 runs · ↑↓ select · Run: selected model  │
+│  1 prompt · 2 runs                                     │
 │                                                        │
 │   Preview    Usage    Settings                         │
-│  a: Accept · Enter: Inspect · p: Preferences           │
-│  i: Edit original · n: New · m: Run model · Esc: Back  │
-│  ?: Help · f: Revise · Tab: Read                       │
+│  a: Accept · Enter: Inspect · Tab: Read   · Esc: Back  │
+│  ?: Help                                               │
 │  ────────────────────────────────────────────────────  │
 │    ▾ 本项目的原始要求                                  │
 │    ├─ model-2                                  ✓ Done  │
 │  › └─ model-1                                  ✓ Done  │
+│                                                        │
 │                                                        │
 │                                                        │
 │                                                        │
@@ -25,16 +25,16 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 === Usage ===
 ╭────────────────────────────────────────────────────────╮
 │  Usage · All rounds                                    │
-│  Current + history · 1 prompts · 2 runs · ↑↓ select ·  │
+│  Current + history · 1 prompt · 2 runs                 │
 │                                                        │
 │   Preview    Usage    Settings                         │
-│  a: Accept · Enter: Inspect · p: Preferences           │
-│  i: Edit original · n: New · m: Run model · Esc: Back  │
-│  ?: Help · f: Revise · Tab: Read                       │
+│  Enter: Inspect · Tab: Read   · Esc: Back · ?: Help    │
 │  ────────────────────────────────────────────────────  │
 │    ▾ 本项目的原始要求                                  │
 │    ├─ model-2                                  ✓ Done  │
 │  › └─ model-1                                  ✓ Done  │
+│                                                        │
+│                                                        │
 │                                                        │
 │                                                        │
 │                                                        │
@@ -49,9 +49,8 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │  Applies to future requests                            │
 │                                                        │
 │   Preview    Usage    Settings                         │
-│  Ctrl+S: Save settings · Enter: Change                 │
-│  Space: Change · Esc: Back · Tab: Group · ←: Usage     │
-│  →: Advanced · ↑↓: Select                              │
+│  Ctrl+S: Save · Enter: Change · Tab: Group             │
+│  Esc: Back                                             │
 │  ────────────────────────────────────────────────────  │
 │   Context    Advanced                                  │
 │  › Project instructions: Always ›                      │
@@ -61,6 +60,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │    Directory references: [x] On                        │
 │    History messages: 12 messages ›                     │
 │    History characters: 16000 characters ›              │
+│                                                        │
 │  Include Pi rules (e.g. AGENTS.md) in every…           │
 ╰────────────────────────────────────────────────────────╯
 

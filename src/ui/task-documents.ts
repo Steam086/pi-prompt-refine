@@ -86,8 +86,9 @@ export function renderTaskDocument(
       }
       if (options.deleteRecords) hints.push(["d", "Delete"]);
     }
-    if (!options.usage) body.push(content.muted("Preview shows the current round. Usage contains current and historical records; → opens Usage after leaving Preferences."), "");
+    if (!options.usage) body.push(content.muted("Preview shows the current round. Usage contains current and historical records."), "");
     else body.push(content.muted("All rounds: current prompts, Earlier records, results and usage details. Restored records have no reusable background."), "");
+    if (!options.inspecting && !options.retainedEarlier) hints.push(["← / →", "Switch Preview, Usage and Settings"]);
     if (options.usage && options.storage) hints.push(["b", "History storage status and file location"]);
     body.push(...hints.map((hint) => formatKeyHint(hint, theme)), "", content.muted("Read-only help. Return with Esc before using these actions."));
   }

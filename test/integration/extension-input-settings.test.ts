@@ -189,9 +189,9 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.panelLines().join("\n")).toContain("Edit original prompt");
     harness.panelInput("Original input"); harness.panelInput("\r");
     expect(harness.complete).not.toHaveBeenCalled();
-    expect(harness.panelLines().join("\n")).toContain("1 prompts");
+    expect(harness.panelLines().join("\n")).toContain("1 prompt ·");
     harness.panelInput("i"); harness.panelInput(" + edit"); harness.panelInput("\r");
-    expect(harness.panelLines().join("\n")).toContain("1 prompts");
+    expect(harness.panelLines().join("\n")).toContain("1 prompt ·");
     harness.panelInput("\r");
     await flushPromises();
     expect(JSON.parse((harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text).draft).toBe("Original input + edit");
@@ -251,12 +251,12 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(settings[1]).toContain("Settings");
     expect(settings).toHaveLength(main.length);
     expect(settings[0]).toBe(main[0]);
-    const settingsHints = settings.findIndex((line) => line.includes("Ctrl+S: Save settings"));
+    const settingsHints = settings.findIndex((line) => line.includes("Ctrl+S: Save"));
     const tabs = settings.findIndex((line) => line.includes(" Settings "));
     expect(tabs).toBeGreaterThan(0);
     expect(settingsHints).toBeGreaterThan(tabs);
-    expect(settings[settingsHints + 2]).toBe(main.at(-4));
-    expect(settings.findIndex((line) => line.includes("Directory tree"))).toBeGreaterThan(settingsHints + 2);
+    expect(settings[settingsHints + 1]).toContain("────────");
+    expect(settings.findIndex((line) => line.includes("Directory tree"))).toBeGreaterThan(settingsHints + 1);
     expect(settings[1]?.startsWith("│  ")).toBe(true);
     harness.panelInput(" ");
     const edited = harness.panelLines();

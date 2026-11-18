@@ -410,7 +410,8 @@ describe("prompt tree and inspection", () => {
     const { panel, records, text } = create("dark", true);
     records[0]!.usage = { input: 200, cacheRead: 800, cacheWrite: 0, output: 300, cost: { total: 0.012, cacheRead: 0.001 }, subscription: true };
     expect(text()).toContain("↑1k ↓300 · ≈$0.012 (sub)");
-    expect(text()).not.toContain("Cache hit");
+    // The taller browsing viewport can reveal the Usage section, but its fixed summary stays compact.
+    expect(text().split("Usage · tokens")[0]).not.toContain("Cache hit");
     panel.handleInput("\r");
     let details = "";
     for (let i = 0; i < 7; i++) { details += text(); panel.handleInput("\x1b[6~"); }

@@ -101,7 +101,11 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         expect(hintStrip, name).not.toContain("\x1b[1m");
         expect(hintStrip, name).toContain(`${theme.fg("muted", `${action[0]}:`)} ${theme.fg("muted", action[1])}`);
         expect(bodyText(lines[divider + 1]!), name).not.toBe("");
-        if (columns === 160) expect(hints, name).toHaveLength(1);
+        expect(strip(hintStrip), name).not.toMatch(/\s(?:Space|←|→|↑↓|b|d|p|m|f): /);
+        if (active === "Preview") expect(hintStrip).toContain(`${theme.fg("muted", "a:")} ${theme.fg("muted", "Accept")}`);
+        if (active !== "Settings") expect(strip(hintStrip)).toContain(columns >= 100 ? "?: All shortcuts" : "?: Help");
+        if (columns >= 100 || active === "Usage" || name === "Settings / number") expect(hints, name).toHaveLength(1);
+        else expect(hints, name).toHaveLength(2);
         return lines;
       }
       function operationHint(output: string, key: string, description: string) {
@@ -118,7 +122,7 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
           expect(selected).toContain(`${theme.getFgAnsi("text")}\x1b[1mmodel-1`);
         }
         input("\x1b[C");
-        const settings = passivePage("Settings", "Settings", ["Ctrl+S", "Save settings"]);
+        const settings = passivePage("Settings", "Settings", ["Ctrl+S", "Save"]);
         const focusedSetting = settings.find((line) => strip(line).includes("› Project instructions"));
         expect(focusedSetting).toContain(theme.getBgAnsi("selectedBg"));
         expect(focusedSetting).toMatch(/\x1b\[1mProject instructions *\x1b\[22m/);

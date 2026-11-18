@@ -106,12 +106,14 @@ describe("short and narrow feedback", () => {
 
   it("describes the current arrow-key focus without changing the selected target", () => {
     const { panel, text, position } = create();
-    expect(text(40)).toContain("↑↓ select");
+    expect(text(40)).not.toContain("↑↓ select");
+    expect(text(100)).toContain("Tab: Read");
     panel.handleInput("\t");
     expect(text(40)).toContain("↑↓ scroll"); expect(text(100)).toContain("↑↓ scroll");
     panel.handleInput("\x1b[B");
     expect(position.selectedId).toBe(1);
-    panel.handleInput("\t"); expect(text(40)).toContain("↑↓ select");
+    expect(text(100)).toContain("Tab: Select");
+    panel.handleInput("\t"); expect(text(40)).not.toContain("↑↓ scroll");
   });
 });
 
@@ -120,7 +122,10 @@ describe("history storage details", () => {
     const { panel, actions, size, position, text, theme } = create(name, true);
     const status = { state: "saved" as "saved" | "save-error", path: "/项目/中文😀\x1b[2J/session.jsonl.prompt-refine.json", savedIds: [1], memoryOnlyIds: [2], omittedIds: [2] };
     Object.assign(actions, { historyStorage: () => status });
-    expect(text(40)).toContain("b: Storage");
+    expect(text(40)).not.toContain("b: Storage");
+    panel.handleInput("?");
+    expect(text(100)).toContain("b History storage status and file location");
+    panel.handleInput("\x1b");
     panel.handleInput("b");
     const first = panel.render(100).join("\n");
     expect(first).toContain("Confirmed saved runs"); expect(first).toContain("#1");
@@ -166,8 +171,9 @@ describe("top action hints", () => {
         }
         expect(text).toMatch(/n:? New/);
         expect(text).toMatch(/Esc:? Back/);
-        if (width >= 40 && rows >= 24) expect(frame.join("\n")).toContain(formatKeyHint(["p", "Preferences"], f.theme, 1, "secondary"));
-        if (!usage && width === 120) expect(text).toContain("Run: provider/模型😀");
+        expect(text).not.toContain("p: Preferences");
+        expect(text).not.toContain("Default model:");
+        if (width === 120) expect(frame.join("\n")).toContain(formatKeyHint(["?", "All shortcuts"], f.theme, 1, "secondary"));
         expect(frame.join("\n")).not.toContain("\x1b[2J");
         expect(frame).toHaveLength(layout.height);
         expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
@@ -219,10 +225,10 @@ describe("top action hints", () => {
         return frame.slice(start, end);
       };
       const before = hints();
-      expect(before.join("\n")).toContain("Esc: Back");
+      expect(before.join("\n")).toMatch(/Esc:? Back/);
       panel.handleInput("\t");
       const after = hints();
-      expect(after.map((line) => line.replace("Tab: Select", "Tab: Read  ").trimEnd()), `hints at width ${width}`)
+      expect(after.map((line) => line.replace(/(Tab:?) Select/, "$1 Read  ").trimEnd()), `hints at width ${width}`)
         .toEqual(before.map((line) => line.trimEnd()));
       panel.handleInput("\t");
       expect(hints()).toEqual(before);

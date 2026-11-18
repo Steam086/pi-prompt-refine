@@ -14,7 +14,10 @@ describe("explicit candidate revision", () => {
     const h = await makeHarness({ config: { preferencesKey: null } });
     const store = new PreferenceStore(h.agentDir, h.context.cwd);
     h.setEditorText(""); h.holdPanel(); const view = shortcut(h, "ctrl+\\")(h.context);
-    expect(h.panelLines(100).join("\n")).toContain("p: Preferences");
+    expect(h.panelLines(100).join("\n")).not.toContain("p: Preferences");
+    h.panelInput("?");
+    expect(h.panelLines(100).join("\n")).toContain("p Preferences");
+    h.panelInput("\x1b");
     h.panelInput("p");
     await vi.waitFor(() => {
       expect(h.panelLines().join("\n")).toContain("Library is empty");

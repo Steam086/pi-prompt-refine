@@ -82,7 +82,7 @@ describe("workspace terminal rendering", () => {
         tui.requestRender(); tui.renderNow();
         const frame = workspace.render(columns);
         const settings = frame.map(stripVTControlCharacters);
-        const save = settings.findIndex((line) => /(?:Ctrl\+S:? Save settings|\^S:? Save)/.test(line));
+        const save = settings.findIndex((line) => /(?:Ctrl\+S: Save|\^S Save)/.test(line));
         const back = settings.findIndex((line) => /Esc:? Back/.test(line));
         const selected = settings.findIndex((line) => line.includes("› "));
         expect(save).toBeGreaterThan(settings.findIndex((line) => line.includes(" Settings ")));

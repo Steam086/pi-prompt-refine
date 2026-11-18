@@ -1,6 +1,6 @@
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { alignedHints, fittingHints } from "./panel-layout.js";
+import { alignedHints, fittingHints, type PanelLayout } from "./panel-layout.js";
 
 export type KeyHint = readonly [key: string, label: string];
 type HintTheme = Pick<Theme, "fg" | "bold">;
@@ -23,13 +23,14 @@ export function fittingKeyHints(hints: KeyHint[], width: number, theme: HintThem
 }
 
 /** Low-emphasis chrome: keep key/action pairs together, wrap rather than omit hints. */
-export function wrappedKeyHints(hints: KeyHint[], width: number, theme: HintTheme): string[] {
+export function wrappedKeyHints(hints: KeyHint[], width: number, theme: HintTheme, compact = false): string[] {
   if (width < 1) return [];
-  const separator = theme.fg("muted", " · ");
+  const separator = theme.fg("muted", compact && width < 30 ? " " : " · ");
   const lines: string[] = [];
   let line = "";
   for (const [key, label] of hints) {
-    const hint = formatKeyHint([key, label], theme, 1, "secondary");
+    const hint = formatKeyHint([key, label], theme, 1, compact ? "secondary-compact" : "secondary");
+    if (compact && visibleWidth(hint) > width) continue;
     const next = line ? line + separator + hint : hint;
     if (visibleWidth(next) <= width) {
       line = next;
@@ -42,6 +43,17 @@ export function wrappedKeyHints(hints: KeyHint[], width: number, theme: HintThem
   }
   if (line) lines.push(line);
   return lines;
+}
+
+/** Top browsing chrome consumes at most two rows and always leaves room for content. */
+export function passiveHintLayout(layout: PanelLayout, tabRows: number, hints: KeyHint[], compact: KeyHint[], theme: HintTheme) {
+  const budget = Math.max(0, Math.min(layout.footerHeight, layout.bodyHeight + layout.footerHeight - tabRows - 1));
+  const width = layout.innerWidth;
+  const fitsWholePairs = hints.every((hint) => visibleWidth(formatKeyHint(hint, theme, 1, "secondary")) <= width);
+  const wrapped = fitsWholePairs ? wrappedKeyHints(hints, width, theme) : undefined;
+  const footer = !budget ? [] : wrapped && wrapped.length <= budget ? wrapped
+    : wrappedKeyHints(compact, width, theme, true).slice(0, budget);
+  return { layout: { ...layout, bodyHeight: layout.bodyHeight + layout.footerHeight - footer.length, footerHeight: footer.length }, footer };
 }
 
 /** Fixed tab stops, measured in terminal columns (never literal tabs or ANSI length). */
