@@ -172,7 +172,7 @@ describe("top action hints", () => {
         expect(text).toMatch(/n:? New/);
         expect(text).toMatch(/Esc:? Back/);
         expect(text).not.toContain("p: Preferences");
-        expect(text).not.toContain("Default model:");
+        expect(text).not.toContain("Refine model:");
         if (width === 120) expect(frame.join("\n")).toContain(formatKeyHint(["?", "All shortcuts"], f.theme, 1, "secondary"));
         expect(frame.join("\n")).not.toContain("\x1b[2J");
         expect(frame).toHaveLength(layout.height);

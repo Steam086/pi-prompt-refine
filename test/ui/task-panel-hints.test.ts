@@ -48,7 +48,7 @@ describe("Tasks shortcut hierarchy", () => {
         expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
         expect(frame.join("\n")).toContain(f.theme.fg("text", f.theme.bold("Prompt refine · Tasks")));
         expect(frame.join("\n")).toContain(workspaceTabs(layout, "Preview", f.theme).find((line) => strip(line).includes("Preview"))!);
-        if (width >= 80) expect(strip(frame.join("\n"))).toContain("Default model: provider/模型😀");
+        expect(frame.join("\n")).toContain(f.theme.fg("muted", "Refine model: ") + f.theme.fg("text", "provider/模型😀�[2J"));
         expect(frame.join("\n")).not.toContain("\x1b[2J");
         expect(f.position.selectedTaskId).toBe(1);
       }
@@ -144,7 +144,7 @@ describe("Tasks shortcut hierarchy", () => {
       const f = create(name, usage, [{ ...record(), status, candidate: undefined }]);
       expect(f.panel.render(100).join("\n")).toContain(formatKeyHint(["x", "Stop"], f.theme, 1, "secondary"));
       expect(f.text()).not.toContain("a: Accept");
-      expect(f.text()).not.toContain("Default model:");
+      expect(f.text()).not.toContain("Refine model:");
       f.size.rows = 8;
       const short = f.text(32);
       for (const hint of ["Esc Back", "x Stop", "? Help"]) expect(short).toContain(hint);

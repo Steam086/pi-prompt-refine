@@ -4,7 +4,7 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { RefineRecord } from "./history.js";
 import { taskGroups } from "./app/queries.js";
 import type { HistoryStorageStatus } from "./history-store.js";
-import { panelFrame, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
+import { fittingHints, panelFrame, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
 import { alignedKeyHints, fittingKeyHints, formatKeyHint, passiveHintLayout, type KeyHint } from "./key-hints.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
@@ -171,6 +171,15 @@ export class TaskPanel {
   private inline(row?: Row): InlinePreferences | undefined {
     return !this.usage && !this.referenceOnly && !this.inspecting && this.canChoosePreferences(row) &&
       this.actions.inlinePreferences?.available(row!.record.id) ? this.actions.inlinePreferences : undefined;
+  }
+  private refineModelLabel(width: number): string {
+    const model = sanitizeTerminalText(this.actions.launchModel?.() ?? "selected model").replace(/\n/g, " ");
+    const id = model.slice(model.indexOf("/") + 1) || model;
+    // Preserve the qualified identity first, then the full ID before truncating anything.
+    const choices = [["Refine model: ", model], ["Model: ", model], ["Model: ", id], ["", id]] as const;
+    const [label, name] = choices.find(([label, name]) => visibleWidth(label + name) <= width)
+      ?? ["", stripVTControlCharacters(truncateToWidth(id, width, "…"))];
+    return (label ? this.theme.fg("muted", label) : "") + this.theme.fg("text", name);
   }
   private runOriginal(row: Row): void {
     this.actions.run(row.record.id);
@@ -585,16 +594,22 @@ export class TaskPanel {
     }
     const prompts = rows.filter((row) => row.original).length;
     const runs = rows.length - prompts;
-    const browseStatus = [
-      this.usage ? "Current + history" : "",
-      selected ? `${prompts} prompt${prompts === 1 ? "" : "s"} · ${runs} run${runs === 1 ? "" : "s"}` : "",
-      this.reading && selected ? "↑↓ scroll" : "",
-      action === "Optimize" ? `Default model: ${sanitizeTerminalText(this.actions.launchModel?.() ?? "selected model")}` : "",
-    ].filter(Boolean).join(" · ");
+    const separator = this.content.muted(" · ");
+    const model = passiveHints && !this.notice && action === "Optimize" ? this.refineModelLabel(layout.innerWidth) : "";
+    const preference = model && !inline && this.canChoosePreferences(selected)
+      ? this.content.muted(this.content.preferenceSummary(selected!.record).replace(/\n/g, " ")) : "";
+    const hasPreferences = !!selected?.record.input.preferences?.length;
+    const browseStatus = fittingHints([
+      model,
+      this.reading && selected ? this.content.muted("↑↓ scroll") : "",
+      hasPreferences ? preference : "",
+      selected ? this.content.muted(`${prompts} prompt${prompts === 1 ? "" : "s"} · ${runs} run${runs === 1 ? "" : "s"}`) : "",
+      hasPreferences ? "" : preference,
+    ].filter(Boolean), layout.innerWidth, separator);
     const subtitle = this.referenceOnly ? this.content.muted("Read-only reference") : this.notice ? feedback : this.retainedEarlier
       ? this.content.muted(layout.innerWidth < 32 ? "Earlier → Usage" : layout.innerWidth < 72
         ? "Earlier · Usage → · Esc current" : "Earlier · kept open · Esc returns to current · History in Usage →") : this.inspecting
-      ? inspectionSubtitle : this.content.muted(browseStatus);
+      ? inspectionSubtitle : browseStatus;
     const earlier = this.usage ? [] : this.actions.records().filter((record) => record.archivedAt !== undefined);
     const earlierPending = earlier.filter(pending).length;
     const earlierCount = new Set(earlier.map((record) => record.taskId)).size;
@@ -616,10 +631,9 @@ export class TaskPanel {
       if (layout.headerHeight === 1) header[0] = status;
       else body = [status, ...body];
     }
-    if (!inline && !this.notice && !this.referenceOnly && this.canChoosePreferences(selected)) {
-      const summary = this.content.muted(this.content.preferenceSummary(selected!.record));
-      header[1] = summary + this.content.muted(" · ") + subtitle;
-      if (layout.headerHeight === 1) header[0] = summary;
+    if (layout.headerHeight === 1 && model) {
+      const combined = header[0] + separator + model;
+      header[0] = visibleWidth(combined) <= layout.innerWidth ? combined : model;
     }
     if (this.notice && !this.referenceOnly && layout.headerHeight < 2) {
       if (layout.headerHeight === 1) header[0] = truncateToWidth(feedback, layout.innerWidth, "…");

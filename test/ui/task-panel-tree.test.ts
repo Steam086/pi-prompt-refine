@@ -349,7 +349,7 @@ describe("prompt tree and inspection", () => {
     const running: RefineRecord = { ...record(1), archivedAt: 1, status: "generating", candidate: undefined };
     const f = create("dark", false, [running, record(2, 2)]);
     expect(f.text()).toContain("1 running / queued");
-    expect(f.text()).not.toContain("Default model:");
+    expect(f.text()).not.toContain("Refine model:");
     expect(f.text()).not.toContain("model-1");
     const usage = create("dark", true, f.records);
     usage.panel.handleInput("x");
@@ -396,9 +396,24 @@ describe("prompt tree and inspection", () => {
     expect(full.join("\n")).not.toContain("0 prompts");
     expect(full.join("\n")).not.toContain("0 runs");
     const usage = create(name, true, f.records);
-    expect(usage.text()).toContain("Current + history");
+    expect(usage.text()).toContain("Usage · All rounds");
+    expect(usage.text()).not.toContain("Current + history");
     usage.panel.handleInput("?");
     expect(usage.text()).toContain("All rounds: current prompts");
+    expect(f.actions.run).not.toHaveBeenCalled();
+  });
+
+  it("gives the pending optimization model priority over history chrome, but not over warnings", () => {
+    const draft: RefineRecord = { ...record(2, 2), status: "unsent", candidate: undefined };
+    const f = create("dark", false, [draft, { ...record(), archivedAt: 1 }]);
+    f.actions.launchModel = () => "provider/refine-test";
+    expect(f.text(100)).toContain("History → Usage");
+    expect(f.text(100)).toContain("Refine model: provider/refine-test");
+    f.size.rows = 12; // Only one header row.
+    expect(f.text(32)).toContain("Model: provider/refine-test");
+    f.panel.setNotice("Request failed", "warning");
+    expect(f.panel.render(32).join("\n")).toContain(f.theme.fg("warning", "Request failed"));
+    expect(f.text(32)).not.toContain("refine-test");
     expect(f.actions.run).not.toHaveBeenCalled();
   });
 
@@ -453,7 +468,9 @@ describe("prompt tree and inspection", () => {
     source.input.editingInstruction = source.input.preferences[0]!.body;
     const f = create(name, false, [source]);
     const full = f.panel.render(100).join("\n");
-    expect(full).toContain(f.theme.fg("muted", sanitizeTerminalText(`Preferences: 1 · ${source.input.preferences[0]!.name}`)));
+    const subtitle = full.split("\n").find((line) => line.includes("Refine model:"))!;
+    expect(subtitle).toContain(f.theme.fg("muted", sanitizeTerminalText(`Preferences: 1 · ${source.input.preferences[0]!.name}`)));
+    expect(f.panel.render(40).find((line) => line.includes("Refine model:"))).not.toContain("Preferences:");
     expect(f.text()).toContain("Enter: Optimize");
     expect(full).not.toContain("\x1b[2J");
     for (const [width, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [100, 40]]) {

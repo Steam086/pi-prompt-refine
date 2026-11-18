@@ -19,7 +19,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.customCalls()).toBe(1);
     const frame = harness.panelLines().join("\n");
     expect(frame).toContain("No current prompts.");
-    expect(frame).not.toContain("Default model:");
+    expect(frame).not.toContain("Refine model:");
     expect(frame).toContain("n: New");
     expect(frame).not.toContain("m Model");
     expect(harness.complete).not.toHaveBeenCalled();

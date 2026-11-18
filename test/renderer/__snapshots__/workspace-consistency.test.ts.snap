@@ -25,7 +25,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 === Usage ===
 ╭────────────────────────────────────────────────────────╮
 │  Usage · All rounds                                    │
-│  Current + history · 1 prompt · 2 runs                 │
+│  1 prompt · 2 runs                                     │
 │                                                        │
 │   Preview    Usage    Settings                         │
 │  Enter: Inspect · Tab: Read   · Esc: Back · ?: Help    │
