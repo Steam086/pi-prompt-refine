@@ -126,7 +126,10 @@ describe("persistent session-local Refine history", () => {
     const h = await makeHarness({ persistHistory, config: { historyPersistence: enabled } });
     h.holdPanel();
     const view = h.command("usage", h.context);
-    expect(h.panelLines(40).join("\n")).toContain("b: Storage");
+    expect(h.panelLines(40).join("\n")).not.toContain("b: Storage");
+    h.panelInput("?");
+    expect(h.panelLines(100).join("\n")).toContain("b History storage status and file location");
+    h.panelInput("\x1b");
     h.panelInput("b");
     expect(h.panelLines(100).join("\n")).toContain("History storage");
     expect(h.panelLines(100).join("\n")).toContain(label);
@@ -200,7 +203,8 @@ describe("main request deletion shortcut", () => {
     harness.holdPanel();
     const view = shortcut(harness, "ctrl+\\")(harness.context);
     harness.panelInput("\r");
-    expect(harness.panelLines(100).join("\n")).toContain("d: Delete");
+    expect(harness.panelLines(100).join("\n")).toContain("x: Stop");
+    expect(harness.panelLines(100).join("\n")).not.toContain("d: Delete");
     harness.panelInput("d");
     expect(harness.panelLines().join("\n")).toContain("Confirmation required");
     harness.panelInput("n");

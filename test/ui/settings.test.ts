@@ -37,7 +37,7 @@ describe("Settings budgets and limits", () => {
       f.workspace.openSettings(undefined, cursor);
       const wide = f.workspace.render(100).join("\n");
       expect(wide).toContain(f.theme.fg("text", f.theme.bold(label.padEnd(22))));
-      expect(wide).toContain(formatKeyHint(["Ctrl+S", "Save settings"], f.theme, 1, "secondary"));
+      expect(wide).toContain(formatKeyHint(["Ctrl+S", "Save"], f.theme, 1, "secondary"));
       for (const rows of [40, 12, 8, 5, 40]) for (const width of [1, 12, 20, 40, 100, 160]) {
         f.terminal.rows = rows;
         const frame = f.workspace.render(width);

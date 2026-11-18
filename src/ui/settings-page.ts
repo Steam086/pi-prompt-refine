@@ -2,7 +2,7 @@ import { stripVTControlCharacters } from "node:util";
 import { parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { panelFrame, panelTabs, workspaceTabs, type PanelLayout, type PanelLayoutProvider } from "../panel-layout.js";
-import { fittingKeyHints, wrappedKeyHints, type KeyHint } from "../key-hints.js";
+import { passiveHintLayout, type KeyHint } from "../key-hints.js";
 import type { PromptInput } from "../prompt-input.js";
 import { sanitizeTerminalText } from "../presentation.js";
 import { DEFAULT_CONFIG } from "../config.js";
@@ -149,25 +149,16 @@ export class SettingsPage {
   }
 
   /** Settings and its numeric editor share the same passive top shortcut strip. */
-  private hintLayout(layout: PanelLayout, rows: KeyHint[][], compact: KeyHint[]) {
+  private hintLayout(layout: PanelLayout, hints: KeyHint[], compact: KeyHint[]) {
     const tabs = workspaceTabs(layout, "Settings", this.theme);
     const navigation = tabs.length === 3 ? tabs.slice(0, -1) : tabs;
-    const wrapped = wrappedKeyHints(rows.flat(), layout.innerWidth, this.theme);
-    // Preserve an active content row; tiny screens retain Back/Save priorities.
-    const available = layout.footerHeight === 1 ? 1 : layout.bodyHeight + layout.footerHeight - navigation.length - 1;
-    const footer = layout.footerHeight === 0 ? [] : wrapped.length <= available ? wrapped
-      : (layout.footerHeight === 1 ? [compact] : rows).map((hints) =>
-        fittingKeyHints(hints, layout.innerWidth, this.theme, " · ", "secondary-compact"));
-    return {
-      layout: { ...layout, footerHeight: footer.length, bodyHeight: layout.bodyHeight + layout.footerHeight - footer.length },
-      navigation, footer,
-    };
+    return { navigation, ...passiveHintLayout(layout, navigation.length, hints, compact, this.theme) };
   }
 
   private renderNumberInput(width: number): string[] {
     const { spec, input, error } = this.numberInput!;
     const hints: KeyHint[] = [["Esc", "Cancel"], ["Enter", "Apply"], ["Tab", "Preset"]];
-    const { layout, navigation, footer } = this.hintLayout(this.layout(width), [hints.slice(0, 2), hints.slice(2)], hints);
+    const { layout, navigation, footer } = this.hintLayout(this.layout(width), hints, [["Esc", "Cancel"], ["↵", "Apply"], ["Tab", "Preset"]]);
     const { innerWidth, bodyHeight } = layout;
     const theme = this.theme;
     const status = error || `${spec.min}–${spec.max} ${spec.unit} · Not saved until Ctrl+S in Settings`;
@@ -288,13 +279,10 @@ export class SettingsPage {
     const group = groups[this.settingsGroup]!.label;
     const action = this.cursor === 4 && !optimizer?.thinkingEnabled ? "Unavailable" : "Change";
     // Saving has a fixed key and an explicit scope, independent of row focus.
-    const primary: KeyHint[] = innerWidth < 30
-      ? [["^S", "Save"], ["↵", action]]
-      : [["Ctrl+S", "Save settings"], ["Enter", action], ...(!NUMBER_SETTINGS[this.cursor] && this.settingsGroup === 0 ? [["Space", action] as const] : [])];
-    const secondary: KeyHint[] = [["Esc", dirty ? (innerWidth >= 30 ? "Discard changes" : "Discard") : "Back"], ["Tab", "Group"],
-      ["←", groups[this.settingsGroup - 1]?.label ?? "Usage"], ["→", groups[this.settingsGroup + 1]?.label ?? "Preview"], ["↑↓", "Select"]];
-    const { layout, navigation, footer } = this.hintLayout(baseLayout, [primary, secondary],
-      [["Esc", dirty ? "Discard" : "Back"], ["^S", "Save"], ["↵", action]]);
+    const back: KeyHint = ["Esc", dirty ? "Discard" : "Back"];
+    const { layout, navigation, footer } = this.hintLayout(baseLayout,
+      [["Ctrl+S", "Save"], ["Enter", action], ["Tab", "Group"], back],
+      [back, ["^S", "Save"], ["↵", action], ["Tab", "Group"]]);
     const status = theme.fg(dirty || this.settingsFailed ? "warning" : "muted", sanitizeTerminalText(notice || "Applies to future requests"));
     header = [layout.headerHeight === 1 && notice ? status : theme.fg("text", theme.bold("Settings")), status];
     const contentHeight = layout.bodyHeight - navigation.length;
@@ -384,6 +372,7 @@ export class SettingsPage {
       : wrapTextWithAnsi(sanitizeTerminalText(focusedDetail), innerWidth);
     body.push(...details.slice(0, detailHeight).map((line, i) => theme.fg("muted",
       i === detailHeight - 1 && details.length > detailHeight ? truncateToWidth(line + "…", innerWidth, "…") : line)));
+    if (!layout.headerHeight && notice) body[0] = status;
     const lines = panelFrame(layout, header, body, footer, (text) => theme.fg("borderMuted", text), { footerAfterBodyRows: navigation.length });
     if (this.settingsFrames.size >= 12) this.settingsFrames.clear();
     this.settingsFrames.set(frameKey, { lines, scrollTop: this.settingsScrollTop });

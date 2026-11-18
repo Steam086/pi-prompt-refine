@@ -33,7 +33,8 @@ describe("multi-model preview and unified Usage", () => {
     expect(call[0]).toBe(b);
     expect(call[1].systemPrompt).toBe(firstInput.systemPrompt);
     expect(call[1].messages[0].content).toEqual(firstInput.messages[0].content);
-    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Run: fake-provider/fake-chat"));
+    await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("✓ Done"));
+    expect(harness.panelLines().join("\n")).not.toContain("Default model:");
     const savedAfter = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
     expect(savedAfter).toEqual({ ...JSON.parse(savedBefore), modelThinkingLevels: { "other-provider/second-model": "off" } });
     expect(harness.panelLines().join("\n")).toContain("Refined prompt");
@@ -96,7 +97,8 @@ describe("round workspace integration", () => {
     expect(h.complete).not.toHaveBeenCalled();
     h.panelInput("q"); await view;
     view = shortcut(h, "ctrl+\\")(h.context);
-    expect(h.panelLines().join("\n")).toContain("1 prompts");
+    expect(h.panelLines().join("\n")).toContain("1 prompt ·");
+    expect(h.panelLines().join("\n")).toContain("Default model: fake-provider/fake-chat");
     expect(h.complete).not.toHaveBeenCalled();
     h.panelInput("i"); h.panelInput(" edited 中文😀"); h.panelInput("\r");
     expect(h.panelLines(100).join("\n")).toContain("› ○ Unsent · Draft A edited");
@@ -200,7 +202,8 @@ describe("round workspace integration", () => {
     harness.panelInput("\r");
     expect(harness.complete).not.toHaveBeenCalled();
     harness.panelInput("i"); harness.panelInput("Independent original"); harness.panelInput("\r");
-    expect(harness.panelLines().join("\n")).toContain("1 prompts");
+    expect(harness.panelLines().join("\n")).toContain("1 prompt ·");
+    expect(harness.panelLines().join("\n")).toContain("Default model: No model");
     harness.panelInput("m"); await flushPromises(); harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).not.toContain("Run original with another model"));
     expect(harness.complete).toHaveBeenCalledTimes(1);

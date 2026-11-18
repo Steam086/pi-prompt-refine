@@ -152,10 +152,10 @@ describe("shared refine workspace", () => {
       expect(stripVTControlCharacters(textOf(context))).toContain(width < 40 ? "› Skill meta" : "› Skill metadata");
       for (const line of [...context, ...optimizer]) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       if (rows === 40 && width === 100) {
-        expect(textOf(context)).toContain(formatKeyHint(["←", "Usage"], theme, 1, "secondary"));
-        expect(textOf(context)).toContain(formatKeyHint(["→", "Optimizer"], theme, 1, "secondary"));
-        expect(textOf(optimizer)).toContain(formatKeyHint(["←", "Context"], theme, 1, "secondary"));
-        expect(textOf(optimizer)).toContain(formatKeyHint(["→", "Advanced"], theme, 1, "secondary"));
+        for (const frame of [context, optimizer]) {
+          expect(textOf(frame)).toContain(formatKeyHint(["Tab", "Group"], theme, 1, "secondary"));
+          expect(stripVTControlCharacters(textOf(frame))).not.toMatch(/[←→]:/);
+        }
         expect(textOf(context)).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Context "))));
         expect(textOf(optimizer)).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Optimizer "))));
       }

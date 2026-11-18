@@ -33,7 +33,7 @@ npm test -- test/renderer/workspace-consistency.test.ts
 ```
 
 - 在同一个原生 overlay 中走过 Preview / Usage / Settings（含数值编辑与校验），以及结果详情、Compare、Revise、Preferences 库和全文阅读。使用 Pi regular / fullscreen 渲染器的合成帧，而不是分别渲染各页再比较。覆盖暗／亮主题和 60×20、100×30、160×45，另检查数值校验在缩到 32×9 后仍能显示警告与取消键。
-- 比较外框几何与主 Tab 的位置和选中样式，检查浏览页的低强调快捷键、紧随提示的分隔线，以及操作页的加粗按键和中性正文。子页取消应恢复原画面，不改变任务目标或触发提交；关闭 overlay 后焦点回到 Pi 输入框。
+- 比较外框几何与主 Tab 的位置和选中样式，检查浏览页只显示低强调的主要快捷键、宽屏单行、窄屏回退、紧随提示的分隔线，以及操作页的加粗按键和中性正文。子页取消应恢复原画面，不改变任务目标或触发提交；关闭 overlay 后焦点回到 Pi 输入框。
 - 只提交一份 [60×20 文本基准](../test/renderer/__snapshots__/workspace-consistency.test.ts.snap)，方便审阅各页的间距、换行与截断。颜色、字重和选中态由两主题的实际 ANSI 断言检查，不靠文本快照。预期内的界面改动才使用 `npm test -- test/renderer/workspace-consistency.test.ts --update`，并逐帧审阅 diff；不要用更新基准来消除未知回归。
 
 这层默认随 `npm test` 运行，不启动外部 Pi 进程，不需要凭据、真实模型或截图依赖。若后续需要验证进程级按键冲突或像素观感，再单独用隔离 profile 录制截图；文本基准不替代实体终端、人工视觉或 IME 验收。
