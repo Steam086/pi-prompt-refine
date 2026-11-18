@@ -24,6 +24,20 @@ npm test -- --sequence.shuffle --sequence.seed=20261109
 
 可选的离线性能实验：`REFINE_BENCHMARK=1 npm test -- test/benchmarks/settings-performance.test.ts`。真实模型实验位于 `test/live/`，启用方法和费用边界见对应实验文档；普通验收不启用它们。
 
+## 原生 TUI 跨页一致性
+
+修改共享布局、主题或按键提示时，除单页用例外，运行 [工作台跨页回归](../test/renderer/workspace-consistency.test.ts)：
+
+```sh
+npm test -- test/renderer/workspace-consistency.test.ts
+```
+
+- 在同一个原生 overlay 中走过 Preview / Usage / Settings（含数值编辑与校验），以及结果详情、Compare、Revise、Preferences 库和全文阅读。使用 Pi regular / fullscreen 渲染器的合成帧，而不是分别渲染各页再比较。覆盖暗／亮主题和 60×20、100×30、160×45，另检查数值校验在缩到 32×9 后仍能显示警告与取消键。
+- 比较外框几何与主 Tab 的位置和选中样式，检查浏览页的低强调快捷键、紧随提示的分隔线，以及操作页的加粗按键和中性正文。子页取消应恢复原画面，不改变任务目标或触发提交；关闭 overlay 后焦点回到 Pi 输入框。
+- 只提交一份 [60×20 文本基准](../test/renderer/__snapshots__/workspace-consistency.test.ts.snap)，方便审阅各页的间距、换行与截断。颜色、字重和选中态由两主题的实际 ANSI 断言检查，不靠文本快照。预期内的界面改动才使用 `npm test -- test/renderer/workspace-consistency.test.ts --update`，并逐帧审阅 diff；不要用更新基准来消除未知回归。
+
+这层默认随 `npm test` 运行，不启动外部 Pi 进程，不需要凭据、真实模型或截图依赖。若后续需要验证进程级按键冲突或像素观感，再单独用隔离 profile 录制截图；文本基准不替代实体终端、人工视觉或 IME 验收。
+
 ## 多入口第一切片检查
 
 根检查仍只需根依赖，默认不启用真实 Provider/benchmark，也不导入 Web 子包：
