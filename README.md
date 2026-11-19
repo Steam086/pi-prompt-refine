@@ -24,16 +24,11 @@ Start Pi, or run `/reload` in an existing session. Extensions run with your Pi p
 
 ## Try a Preference
 
-If no global Refine preference library exists, the first TUI load adds four editable starter Preferences. Existing libraries, including empty ones, are left alone. Nothing is selected or applied automatically.
+You don't need to choose a Preference for an ordinary rewrite. Refine keeps your tone, clarifies references when the context resolves them, and uses bullets or numbered steps when they make existing requirements easier to follow. It preserves what you asked the main agent to do and how to answer, without adding requirements of its own.
 
-| Starter | What it changes |
-| --- | --- |
-| **Clarify Prompt Intent** | Clarifies references or scope only when the conversation makes them clear. |
-| **Prompt Bullet Structure** | Organizes parallel points in the prompt, not the answer. |
-| **Translate Prompt to English** | Translates the prompt without changing literal text or the requested answer language. |
-| **Answer in Bullet Points** | Adds an answer-format requirement when bullets make sense. |
+The only bundled Preference is **Translate Prompt to English**. It translates the prompt, not literal text or the requested answer language. The TUI adds it unchecked when no global library exists. Existing libraries (including empty ones), custom Preferences, and project defaults remain unchanged.
 
-To choose Preferences before the first rewrite, open `/refine` and press `n` to create a draft without a model call. On an **Unsent** draft, press `Tab`, choose a Preference, and press `Space` to toggle it. `Enter` starts the rewrite. Use `p` to manage the library. The [full example catalog](examples/prompt-refine-preferences.json) has more templates.
+To choose Preferences before the first rewrite, open `/refine` and press `n` to create a draft without a model call. On an **Unsent** draft, press `Tab`, choose a Preference, and press `Space` to toggle it. `Enter` starts the rewrite. Use `p` to manage the library.
 
 ## Model calls and local history
 
