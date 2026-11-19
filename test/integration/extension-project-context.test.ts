@@ -93,7 +93,8 @@ describe("project context injection", () => {
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     harness.panelInput("\x1b[D");
-    for (let i = 0; i < (disabled === "project" ? 3 : 4); i++) harness.panelInput("\x1b[B");
+    if (disabled === "project") harness.panelInput("\x1b[A");
+    else for (let i = 0; i < 3; i++) harness.panelInput("\x1b[B");
     harness.panelInput(" "); harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Settings saved"));
     harness.panelInput("q"); await view;

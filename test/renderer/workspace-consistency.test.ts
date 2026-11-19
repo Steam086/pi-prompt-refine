@@ -48,6 +48,8 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         tasks: { records: () => records, appliedId: () => undefined, activate: () => false, run, stop() {}, accept },
         taskPosition: position, usagePosition: { selectedId: 1 }, history: () => records,
         context: () => ({ instructions: "always", tree: false, skills: false }), contextEnabled: () => true, saveContext,
+        optimizer: () => ({ model: "provider/rewrite-model", thinking: "high", thinkingEnabled: true, thinkingDetail: "Inherited from current session." }),
+        editSystemPrompt: vi.fn(),
         submit, revision: () => ({ key: "run:1", label: "Run #1 · model-1", submit: revise }),
         preferences: { key: null, maxChars: 16000, repository: {
           load: async () => ({ entries: [{ id: "literal", scope: "global", version: 1, name: "Preserve 中文😀", body: "Keep literals" }], errors: {} }),
@@ -133,7 +135,16 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         const focusedSetting = settings.find((line) => strip(line).includes("› Project instructions"));
         expect(focusedSetting).toContain(theme.getBgAnsi("selectedBg"));
         expect(focusedSetting).toMatch(/\x1b\[1mProject instructions *\x1b\[22m/);
-        input("\x1b[A"); input("\r"); // Wrap up to the last Context setting and open its numeric editor.
+        input("\t"); input("\x1b[A");
+        const optimizer = passivePage("Settings / Optimizer", "Settings", ["Ctrl+S", "Save"]);
+        const optimizerText = optimizer.map(strip).join("\n");
+        expect(optimizerText).toMatch(/Default model:? +provider\/rewrite-model/);
+        expect(optimizerText).toMatch(/Thinking:? +high/);
+        expect(optimizerText).not.toContain("Advanced");
+        expect(optimizerText).toMatch(/› Draft character limit:? +16000 characters/);
+        expect(optimizerText.replace(/\s*│\n│\s*/g, " ")).toContain("Oversized drafts and revision instructions are rejected, not truncated.");
+        input("\t");
+        input("\x1b[A"); input("\x1b[A"); input("\r"); // Reach History characters from Project instructions.
         passivePage("Settings / number", "Settings", ["Esc", "Cancel"]);
         input("\x15"); input("-1"); input("\r");
         expect(frame("Settings / validation").join("\n")).toContain(theme.fg("warning", "Enter 0–100000 characters (whole numbers)."));

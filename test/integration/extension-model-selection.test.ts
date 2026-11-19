@@ -281,7 +281,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput(" ");
     harness.panelInput(" ");
     harness.panelInput("\t");
-    expect(harness.panelLines().join("\n")).toContain("Model:");
+    expect(harness.panelLines().join("\n")).toMatch(/Default model +fake-provider\/fake-chat/);
     harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Choose optimizer model"));
     harness.panelInput("\x1b");
@@ -290,10 +290,11 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.panelLines().join("\n")).toMatch(/Project instructions +Always/);
     harness.panelInput("\t");
     harness.panelInput("\x1b[B");
-    expect(harness.panelLines().join("\n")).toContain("Thinking: medium");
+    expect(harness.panelLines().join("\n")).toMatch(/Thinking +medium/);
     harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Thinking level saved"));
-    expect(harness.panelLines().join("\n")).toContain("Thinking: high · Extension setting");
+    expect(harness.panelLines().join("\n")).toMatch(/Thinking +high/);
+    expect(harness.panelLines().join("\n")).toContain("Extension setting. Changes save immediately.");
     expect(harness.context.thinkingLevel).toBe("medium");
     const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
     expect(saved.thinkingLevel).toBe("high");
@@ -317,7 +318,9 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\x1b[D");
     harness.panelInput("\t");
     for (let i = 0; i < 1; i++) harness.panelInput("\x1b[B");
-    expect(harness.panelLines().join("\n")).toContain(`Unavailable — ${options.reason}`);
+    const status = options.reason === "fixed for this model" ? "Fixed" : "Unavailable";
+    expect(harness.panelLines().join("\n")).toMatch(new RegExp(`Thinking +${status}`));
+    expect(harness.panelLines().join("\n")).toContain(options.reason);
     for (const key of ["\r", " ", "\x1b[Z"]) harness.panelInput(key);
     await flushPromises();
     expect(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8")).toBe(before);

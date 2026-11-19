@@ -22,7 +22,8 @@ To choose Preferences before the first rewrite, open `/refine`, press `n`, and s
 ## Settings
 
 - Use `/refine model` to choose the default rewrite model. Your main agent's model does not change, and Pi still manages provider authentication.
-- In **Settings**, use `Tab` to change groups and `Ctrl+S` to save context and request limits. Context changes apply to the next round; they do not update context already captured for the current round.
+- In **Settings**, use `Tab` to switch between **Context** and **Optimizer**. **Draft character limit** is the last Optimizer setting, or the last Context setting if Optimizer is unavailable. Select a row to read its full details; use `PgUp` / `PgDn` if they span multiple pages.
+- `Enter` stages a numeric edit; `Ctrl+S` back in Settings saves it. Context changes apply to the next round, not the current round. The model, thinking level, and optimization prompt save separately.
 - The config file is `prompt-refine.json` in your Pi agent directory. See the [example config](../examples/prompt-refine.json); its model entry is illustrative. After editing the file, run `/reload` in Pi.
 
 ## What the rewrite provider receives
@@ -33,7 +34,8 @@ Refine sends the draft and selected context to the rewrite provider, which may d
 | --- | --- | --- |
 | Conversation history | Up to 12 visible user or assistant messages from the current branch, within a 16,000-character budget. Raw tool results and thinking are excluded. | Lower **History messages** or **History characters**. Set either to `0` to exclude conversation history. |
 | Explicit directory references | On. Refine can include bounded name listings from directories inside the working directory, not file contents. | Turn **Directory references** off. This is separate from **Directory tree**. |
-| Project instructions, default directory tree, and skill metadata | All off unless enabled. | Turn **Project context** off to exclude all project context, including explicit directory listings. This does not turn off conversation history. |
+| Project instructions | Off. When enabled, Refine can send rules Pi has already loaded, such as `AGENTS.md`, to the rewrite model. | **First request only** includes rules on the first request of each task, not on Revise. **Off** does not change the main agent's rules. |
+| Default directory tree and skill metadata | Both off unless enabled. Refine uses the default tree only when no conversation history is included. | Turn **Project context** off to exclude rules, skills, and both kinds of directory listing. Child settings keep their values; any that were on are marked inactive. Conversation history is unaffected. |
 
 To exclude both conversation history and project context, set either history limit to `0`, turn **Project context** off, and save with `Ctrl+S`. Use the next round for the new settings. The draft itself is still sent. These context controls do not change local history storage.
 

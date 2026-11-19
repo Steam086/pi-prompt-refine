@@ -20,7 +20,7 @@ describe("SettingsPage navigation seam", () => {
         const output = hints.join("\n");
         expect(hints).toHaveLength(count);
         expect(strip(output)).not.toMatch(/(?:Space|←|→|↑↓):/);
-        for (const hint of [["Ctrl+S", "Save"], ["Enter", "Change"], ["Esc", "Back"], ["Tab", "Group"]] as const) {
+        for (const hint of [["Ctrl+S", "Save"], ["Enter", "Change"], ["Esc", "Back"], ["Tab", width >= 80 ? "Next group" : "Group"]] as const) {
           expect(output).toContain(formatKeyHint(hint, theme, 1, "secondary"));
           expect(output).not.toContain(theme.bold(hint[0]));
         }
@@ -49,7 +49,7 @@ describe("SettingsPage navigation seam", () => {
         const frame = workspace.render(width);
         const hints = footer(frame);
         const shortcutText = hints.map(strip).join("").replace(/[│\s·]/g, "");
-        expect(shortcutText).toBe(width <= 20 ? "EscCancel↵Apply" : "Esc:CancelEnter:ApplyTab:Preset");
+        expect(shortcutText).toBe(width <= 20 ? "EscCancel↵Stage" : "Esc:CancelEnter:StageTab:Preset");
         expect(hints.join("\n")).not.toContain("\x1b[1m");
         if (width >= 100) expect(hints).toHaveLength(1);
         expect(frame.join("\n")).toContain(CURSOR_MARKER);
@@ -87,9 +87,9 @@ describe("SettingsPage navigation seam", () => {
     page.focused = true;
     expect(page.handleInput("\x1b[D")).toBe(false);
     expect(page.handleInput("\x1b[C")).toBe(true);
-    expect(page.handleInput("\x1b[C")).toBe(true);
     expect(page.handleInput("\x1b[C")).toBe(false);
     expect(optimizer).toHaveBeenCalledTimes(1);
+    page.handleInput("\x1b[A"); // The draft limit is the final Optimizer setting.
     page.handleInput("\r");
     const editor = inputs.at(-1)!.editor;
     expect(page.editingNumber).toBe(true);
