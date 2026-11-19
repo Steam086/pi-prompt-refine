@@ -166,9 +166,11 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
         const thinkingEnabled = !!model && getSupportedThinkingLevels(model).length > 1;
         return {
           model: ref ? displayModel(ref) : "Not configured",
-          thinking: !model ? "Unavailable — select an available model first"
-            : !thinkingEnabled ? "Unavailable — fixed for this model"
-            : `${effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel)} · ${thinkingSource(config.thinkingLevel, ctx.thinkingLevel)}`,
+          thinking: !model ? "Unavailable" : !thinkingEnabled ? "Fixed"
+            : effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel),
+          thinkingDetail: !model ? "To change thinking, select an available model first."
+            : !thinkingEnabled ? "Thinking is fixed for this model."
+            : `${thinkingSource(config.thinkingLevel, ctx.thinkingLevel)}. Changes save immediately.`,
           thinkingEnabled,
         };
       },

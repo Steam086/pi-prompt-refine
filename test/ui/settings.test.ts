@@ -43,7 +43,10 @@ describe("Settings budgets and limits", () => {
         const frame = f.workspace.render(width);
         expect(frame).toHaveLength(workspaceHeight(rows));
         expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
-        if (width >= 40 && rows >= 8) expect(stripVTControlCharacters(frame.join("\n"))).toContain(`› ${label}`);
+        if (width >= 40 && rows >= 8) {
+          const short = NUMBER_SETTINGS[cursor]?.shortLabel;
+          expect(stripVTControlCharacters(frame.join("\n"))).toMatch(new RegExp(`› (?:${label}${short ? `|${short}` : ""})`));
+        }
         expect(frame.join("\n")).not.toContain("\x1b[31m");
       }
     }
@@ -139,12 +142,51 @@ describe("Settings budgets and limits", () => {
     expect(f.text()).not.toContain("Unsaved settings changes");
   });
 
+  it.each(["dark", "light"])("shows inactive child choices without disabling history or edits (%s)", (name) => {
+    const f = fixture(name);
+    Object.assign(f.saved, { instructions: "first", tree: true, skills: true, enabled: false });
+    f.workspace.openSettings(undefined, 6);
+    const rows = f.workspace.render(100);
+    const row = (label: string) => rows.find((line) => stripVTControlCharacters(line).includes(label))!;
+    expect(rows.indexOf(row("Project context"))).toBeLessThan(rows.indexOf(row("Project instructions")));
+    for (const label of ["Project instructions", "Directory tree", "Skill metadata", "Directory references"]) {
+      expect(row(label)).toContain(f.theme.fg("dim", label.padEnd(22)));
+      expect(stripVTControlCharacters(row(label))).toContain(" · inactive");
+    }
+    expect(row("History messages")).toContain(f.theme.fg("text", "History messages".padEnd(22)));
+    expect(stripVTControlCharacters(row("History messages"))).toContain("12 messages");
+    expect(f.text()).toContain("Project context is off. Conversation history is unaffected.");
+    f.workspace.handleInput(" ");
+    expect(f.text()).not.toContain("inactive");
+    expect(f.text()).toMatch(/Directory references +\[x\] On/);
+    expect(f.actions.saveContext).not.toHaveBeenCalled();
+    expect(f.actions.submit).not.toHaveBeenCalled();
+  });
+
+  it("identifies AGENTS.md inline and explains first-request rules on narrow and wide screens", () => {
+    const f = fixture();
+    f.workspace.openSettings({ ...f.saved, instructions: "first" }, 0);
+    expect(f.text(80).split("\n").find((line) => line.includes("Project instructions"))).toContain("AGENTS.md");
+    expect(f.text(60)).toContain("AGENTS.md");
+    expect(f.text()).toContain("first request per task, not Revise");
+    expect(f.text(120)).toContain("Main agent unchanged");
+    f.workspace.handleInput(" ");
+    expect(f.text()).toContain("even in Revise");
+    f.workspace.handleInput(" ");
+    expect(f.text()).toContain("No Pi-loaded rules (e.g. AGENTS.md) are sent to the optimizer");
+    for (const cursor of [8, 9]) {
+      f.workspace.openSettings(undefined, cursor);
+      expect(f.text(60)).toContain("Either limit set to 0 turns off history");
+    }
+  });
+
   it("stages switches independently, preserves them across child actions and discards them on Back", () => {
     const f = fixture();
     f.workspace.openSettings(undefined, 6);
     f.workspace.handleInput(" ");
     expect(f.text()).toContain("Project context is off");
-    f.workspace.handleInput("\x1b[B");
+    for (let i = 0; i < 4; i++) f.workspace.handleInput("\x1b[B");
+    expect(f.text()).toContain("› Directory references");
     f.workspace.handleInput(" ");
     f.workspace.handleInput("\t");
     f.workspace.handleInput("\r");
@@ -166,7 +208,7 @@ describe("Settings budgets and limits", () => {
     f.actions.saveContext.mockResolvedValueOnce({ message: "Not persisted", persisted: false });
     f.workspace.openSettings(undefined, 10);
     f.workspace.handleInput("\r"); f.value("12345"); f.workspace.handleInput("\r");
-    f.workspace.handleInput("\t");
+    f.workspace.handleInput("\x1b[B"); f.workspace.handleInput("\x1b[B");
     f.workspace.handleInput("\r"); f.value("54321"); f.workspace.handleInput("\r");
     f.workspace.handleInput("\x13");
     await vi.waitFor(() => expect(f.text()).toContain("Not persisted"));

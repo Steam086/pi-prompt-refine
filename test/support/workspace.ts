@@ -4,6 +4,7 @@ import type { RefineRecord } from "../../src/history.js";
 import { PreviewPanel, type PreviewOptions } from "../../src/preview.js";
 import { workspaceHeight, workspaceLayout, workspaceViewport } from "../../src/workspace-overlay.js";
 import { RefineWorkspace, type SettingsResult } from "../../src/workspace.js";
+import type { SettingsOptimizer } from "../../src/ui/settings-page.js";
 import { getThemeByName } from "./pi-theme.js";
 
 // Outer bounds and body offsets include the single shell, unlike child geometry.
@@ -28,7 +29,10 @@ export function create(rows = 40, themeName = "dark", optimizer = false, inputTe
     history: vi.fn((): RefineRecord[] => []),
     context: () => ({ instructions: "always" as const, tree: true, skills: false }), contextEnabled: () => true,
     ...(optimizer ? {
-      optimizer: () => ({ model: "provider/long-model-identifier-with-extra-details", thinking: "high · Extension setting", thinkingEnabled: true }),
+      optimizer: (): SettingsOptimizer => ({
+        model: "provider/long-model-identifier-with-extra-details", thinking: "high", thinkingEnabled: true,
+        thinkingDetail: "Extension setting. Changes save immediately.",
+      }),
       chooseModel: vi.fn(), editSystemPrompt: vi.fn(), cycleThinking: vi.fn(async (): Promise<SettingsResult> => ({ message: "Thinking level saved", persisted: true })),
     } : {}),
     saveContext: vi.fn(async (): Promise<SettingsResult> => ({ message: "Context saved", persisted: true })),

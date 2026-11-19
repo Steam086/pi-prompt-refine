@@ -45,37 +45,58 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 
 === Settings ===
 ╭────────────────────────────────────────────────────────╮
-│  Settings   Applies to future requests                 │
+│  Settings   Context changes take effect next round     │
 │   Preview    Usage    Settings                         │
 │  Ctrl+S: Save  Enter: Change  Tab: Group  Esc: Back    │
 │  ────────────────────────────────────────────────────  │
-│   Context    Advanced                                  │
+│   Context    Optimizer                                 │
+│    Project context: [x] On                             │
 │  › Project instructions: Always ›                      │
 │    Directory tree: [ ] Off                             │
 │    Skill metadata: [ ] Off                             │
-│    Project context: [x] On                             │
 │    Directory references: [x] On                        │
 │    History messages: 12 messages ›                     │
 │    History characters: 16000 characters ›              │
 │                                                        │
 │                                                        │
 │                                                        │
-│  Include Pi rules (e.g. AGENTS.md) in every            │
-│  refinement and Revise request.                        │
+│  Pi-loaded rules (e.g. AGENTS.md) may go to the        │
+│  optimizer, even in Revise. Main agent unchanged.      │
+╰────────────────────────────────────────────────────────╯
+
+=== Settings / Optimizer ===
+╭────────────────────────────────────────────────────────╮
+│  Settings                                              │
+│   Preview    Usage    Settings                         │
+│  Ctrl+S: Save  Enter: Change  Tab: Group  Esc: Back    │
+│  ────────────────────────────────────────────────────  │
+│   Context    Optimizer                                 │
+│    Default model: provider/rewrite-model ›             │
+│    Thinking: high ›                                    │
+│    Optimization prompt ›                               │
+│    Output token limit: 8192 tokens ›                   │
+│    Request timeout: 60 seconds ›                       │
+│  › Draft character limit: 16000 characters ›           │
+│                                                        │
+│                                                        │
+│                                                        │
+│                                                        │
+│  Oversized drafts and revision instructions are        │
+│  rejected, not truncated. Existing work is kept.       │
 ╰────────────────────────────────────────────────────────╯
 
 === Settings / number ===
 ╭────────────────────────────────────────────────────────╮
 │  History characters   0–100000 characters              │
 │   Preview    Usage    Settings                         │
-│  Esc: Cancel  Enter: Apply  Tab: Preset                │
+│  Esc: Cancel  Enter: Stage  Tab: Preset                │
 │  ────────────────────────────────────────────────────  │
-│  History character budget, including role labels.      │
-│  Zero disables history. Applies to the next round.     │
+│  Save in Settings with Ctrl+S.                         │
+│                                                        │
+│  Either limit set to 0 turns off history. Counts role  │
+│  labels as well as message text.                       │
 │                                                        │
 │  Presets: 0 / 8000 / 16000 / 32000 / 64000 / 100000    │
-│                                                        │
-│  Ctrl+S in Settings saves the value.                   │
 │  16000                                                 │
 │                                                        │
 │                                                        │
@@ -90,14 +111,14 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │  History characters                                    │
 │   Preview    Usage    Settings                         │
 │  Enter 0–100000 characters (whole numbers).            │
-│  Esc: Cancel  Enter: Apply  Tab: Preset                │
+│  Esc: Cancel  Enter: Stage  Tab: Preset                │
 │  ────────────────────────────────────────────────────  │
-│  History character budget, including role labels.      │
-│  Zero disables history. Applies to the next round.     │
+│  Save in Settings with Ctrl+S.                         │
+│                                                        │
+│  Either limit set to 0 turns off history. Counts role  │
+│  labels as well as message text.                       │
 │                                                        │
 │  Presets: 0 / 8000 / 16000 / 32000 / 64000 / 100000    │
-│                                                        │
-│  Ctrl+S in Settings saves the value.                   │
 │  -1                                                    │
 │                                                        │
 │                                                        │

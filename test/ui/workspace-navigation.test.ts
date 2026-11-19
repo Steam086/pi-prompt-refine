@@ -13,8 +13,8 @@ describe("shared refine workspace", () => {
     const { workspace, actions, theme } = create(40, name, true);
     const height = workspace.render(100).length;
     for (const [key, pages] of [
-      ["\x1b[C", ["Usage", "Settings", "Settings", "Settings", "Preview"]],
-      ["\x1b[D", ["Settings", "Settings", "Settings", "Usage", "Preview"]],
+      ["\x1b[C", ["Usage", "Settings", "Settings", "Preview"]],
+      ["\x1b[D", ["Settings", "Settings", "Usage", "Preview"]],
     ] as const) {
       for (const page of pages) {
         expect(workspace.handleInput(key)).toBe(true);
@@ -53,7 +53,6 @@ describe("shared refine workspace", () => {
     workspace.handleInput("\x1b[D");
     expect(textOf(workspace.render(100))).not.toContain("Unsaved settings changes");
     workspace.handleInput("\t");
-    workspace.handleInput("\t");
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toMatch(/Project instructions +Always/);
   });
 
@@ -74,8 +73,8 @@ describe("shared refine workspace", () => {
     workspace.handleInput("\x1b[C");
     expect(stripVTControlCharacters(workspace.render(100)[1]!)).toContain("Settings");
     workspace.handleInput("\x1b[C");
-    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Model");
-    workspace.handleInput("\x1b[C");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Default model");
+    workspace.handleInput("\x1b[A");
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Draft character limit");
     workspace.handleInput("\x1b[C");
     expect(workspace.render(100)).toEqual(preview);
@@ -88,7 +87,7 @@ describe("shared refine workspace", () => {
       for (const width of [1, 8, 12, 20, 40, 100]) {
         const { workspace } = create(rows, name, true);
         const openingHeight = workspace.render(width).length;
-        for (const page of ["Usage", "Settings", "Settings", "Settings", "Preview"]) {
+        for (const page of ["Usage", "Settings", "Settings", "Preview"]) {
           workspace.handleInput("\x1b[C");
           const lines = workspace.render(width);
           expect(lines).toHaveLength(openingHeight);
@@ -118,7 +117,7 @@ describe("shared refine workspace", () => {
   });
 
   it.each([
-    ["Tab", "\t", "\t\t"],
+    ["Tab", "\t", "\t"],
     ["arrows", "\x1b[C", "\x1b[D"],
     ["Kitty arrows", "\x1b[1;1C", "\x1b[1;1D"],
   ])("switches groups with %s without applying pending context and remembers each selection", (_name, next, previous) => {
@@ -127,10 +126,9 @@ describe("shared refine workspace", () => {
     workspace.handleInput("\r");
     workspace.handleInput("\x1b[B");
     workspace.handleInput(next);
-    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Model");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Default model");
     workspace.handleInput("\x1b[B");
-    if (previous === "\t\t") { workspace.handleInput("\t"); workspace.handleInput("\t"); }
-    else workspace.handleInput(previous);
+    workspace.handleInput(previous);
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Directory tree");
     expect(textOf(workspace.render(100))).toContain("Unsaved settings changes");
     workspace.handleInput(next);
@@ -147,14 +145,14 @@ describe("shared refine workspace", () => {
       workspace.render(width);
       workspace.handleInput("\x1b[C");
       const optimizer = workspace.render(width);
-      expect(stripVTControlCharacters(textOf(optimizer))).toContain("› Model");
+      expect(stripVTControlCharacters(textOf(optimizer))).toContain(width < 100 ? "› Model" : "› Default model");
       workspace.handleInput("\x1b[D");
       const context = workspace.render(width);
       expect(stripVTControlCharacters(textOf(context))).toContain(width < 40 ? "› Skill meta" : "› Skill metadata");
       for (const line of [...context, ...optimizer]) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       if (rows === 40 && width === 100) {
         for (const frame of [context, optimizer]) {
-          expect(textOf(frame)).toContain(formatKeyHint(["Tab", "Group"], theme, 1, "secondary"));
+          expect(textOf(frame)).toContain(formatKeyHint(["Tab", "Next group"], theme, 1, "secondary"));
           expect(stripVTControlCharacters(textOf(frame))).not.toMatch(/[←→]:/);
         }
         expect(textOf(context)).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Context "))));
@@ -173,10 +171,8 @@ describe("shared refine workspace", () => {
       expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Project instructions");
       if (optimizer) {
         workspace.handleInput("\x1b[C");
-        expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Model");
+        expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Default model");
       }
-      workspace.handleInput("\x1b[C");
-      expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Draft character limit");
       workspace.handleInput("\x1b[C");
       expect(stripVTControlCharacters(workspace.render(100)[1]!)).toContain("Prompt refine");
     }
@@ -204,9 +200,11 @@ describe("shared refine workspace", () => {
 
   it("wraps up/down within the current group and restores the requested optimizer row", () => {
     const { workspace } = create(40, "dark", true);
-    workspace.openSettings();
+    workspace.openSettings(undefined, 6);
     workspace.handleInput("\x1b[A");
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› History characters");
+    workspace.handleInput("\x1b[B");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Project context");
     workspace.handleInput("\x1b[B");
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Project instructions");
     workspace.openSettings(undefined, 5);
@@ -215,7 +213,9 @@ describe("shared refine workspace", () => {
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Output token limit");
     workspace.openSettings(undefined, 11);
     workspace.handleInput("\x1b[B");
-    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Model");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Draft character limit");
+    workspace.handleInput("\x1b[B");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Default model");
   });
 
   it("reuses settings frames without re-querying the optimizer on arrow input", () => {
@@ -233,7 +233,6 @@ describe("shared refine workspace", () => {
     workspace.refreshSettings();
     workspace.handleInput("\t");
     expect(textOf(workspace.render(100))).toContain("provider/updated-model");
-    workspace.handleInput("\t");
     workspace.handleInput("\t");
     workspace.handleInput(" ");
     expect(textOf(workspace.render(100))).toContain("Unsaved settings changes");

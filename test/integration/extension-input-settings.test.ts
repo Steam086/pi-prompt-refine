@@ -261,8 +261,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput(" ");
     const edited = harness.panelLines();
     harness.panelInput("\t");
-    expect(harness.panelLines().join("\n")).toContain("Model");
-    harness.panelInput("\t");
+    expect(harness.panelLines().join("\n")).toContain("Default model");
     harness.panelInput("\t");
     expect(harness.panelLines()).toEqual(edited);
     harness.panelInput(back);
@@ -291,13 +290,13 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const down = (count: number) => { for (let i = 0; i < count; i++) harness.panelInput("\x1b[B"); };
     const number = (text: string) => { harness.panelInput("\r"); harness.panelInput("\x15"); harness.panelInput(text); harness.panelInput("\r"); };
     harness.panelInput("\x1b[D");
-    down(3); harness.panelInput(" "); // Project context off.
-    down(1); harness.panelInput(" "); // Explicit directory references off.
+    harness.panelInput("\x1b[A"); harness.panelInput(" "); // Project context off.
+    down(4); harness.panelInput(" "); // Explicit directory references off.
     down(1); number("0");
     down(1); number("9000");
     harness.panelInput("\t"); down(3); number("4096");
     down(1); number("120");
-    harness.panelInput("\t"); number("32");
+    down(1); number("32");
     expect(await readFile(file, "utf8")).toBe(before);
     expect(harness.complete).not.toHaveBeenCalled();
     expect(harness.customCalls()).toBe(1); // Numeric editors stay inside the same shell.
@@ -339,6 +338,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     harness.panelInput("\x1b[D");
+    harness.panelInput("\x1b[A"); // Start at the Project context master switch.
     for (let i = 0; i < row; i++) harness.panelInput("\x1b[B");
     harness.panelInput("\r"); harness.panelInput("\x15"); harness.panelInput("0"); harness.panelInput("\r");
     harness.panelInput("\x13");

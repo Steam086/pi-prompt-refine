@@ -10,19 +10,19 @@ import { NUMBER_SETTINGS, numberSettingValue, settingsDirty, type ContextSetting
 
 const instructionModes = ["first", "always", "off"] as const;
 const instructionLabels = { first: "First request only", always: "Always", off: "Off" };
-const instructionSummaries = { first: "Include rules on the first request", always: "Include rules in every request", off: "Exclude project rules" };
 const instructionDescriptions = {
-  first: "Pi rules (e.g. AGENTS.md): first request per task; omitted from Revise.",
-  always: "Include Pi rules (e.g. AGENTS.md) in every refinement and Revise request.",
-  off: "Do not include Pi rules (e.g. AGENTS.md) in refinement requests.",
+  first: "Pi rules (e.g. AGENTS.md): optimizer's first request per task, not Revise.",
+  always: "Pi-loaded rules (e.g. AGENTS.md) may go to the optimizer, even in Revise.",
+  off: "No Pi-loaded rules (e.g. AGENTS.md) are sent to the optimizer.",
 };
 
 export interface SettingsResult { message: string; persisted: boolean }
+export interface SettingsOptimizer { model: string; thinking: string; thinkingEnabled: boolean; thinkingDetail?: string }
 
 export interface SettingsPageActions {
   context(): ContextSettings;
   contextEnabled(): boolean;
-  optimizer?(): { model: string; thinking: string; thinkingEnabled: boolean };
+  optimizer?(): SettingsOptimizer;
   chooseModel?(context: ContextSettings): void;
   editSystemPrompt?(context: ContextSettings): void;
   cycleThinking?(): Promise<SettingsResult>;
@@ -36,12 +36,14 @@ export class SettingsPage {
   private original: ContextSettings = { ...this.selected };
   private cursor = 0;
   private settingsScrollTop = 0;
-  private groupCursors = [0, 3, 12];
+  private groupCursors = [0, 3];
+  private detailPage = 0;
+  private detailPages = 1;
   private numberInput?: { spec: NumberSettingSpec; input: PromptInput; error: string };
-  private settingsOptimizer?: ReturnType<NonNullable<SettingsPageActions["optimizer"]>>;
+  private settingsOptimizer?: SettingsOptimizer;
   private settingsContextEnabled = true;
   private settingsCacheKey = "";
-  private settingsFrames = new Map<string, { lines: string[]; scrollTop: number }>();
+  private settingsFrames = new Map<string, { lines: string[]; scrollTop: number; detailPages: number }>();
   private saving = false;
   private disposed = false;
   private hasFocus = false;
@@ -75,16 +77,17 @@ export class SettingsPage {
     this.cursor = this.settingsGroups.flatMap((group) => group.rows).includes(cursor) ? cursor : 0;
     this.groupCursors[this.settingsGroups[this.settingsGroup]!.memory] = this.cursor;
     this.settingsScrollTop = 0;
+    this.detailPage = 0;
     this.settingsNotice = "";
     this.settingsFailed = false;
     this.refreshSettings();
   }
 
   private get settingsGroups(): { label: string; rows: number[]; memory: number }[] {
+    const optimizer = !!this.actions.optimizer;
     return [
-      { label: "Context", rows: [0, 1, 2, 6, 7, 8, 9], memory: 0 },
-      ...(this.actions.optimizer ? [{ label: "Optimizer", rows: [3, 4, ...(this.actions.editSystemPrompt ? [5] : []), 10, 11], memory: 1 }] : []),
-      { label: "Advanced", rows: [12], memory: 2 },
+      { label: "Context", rows: [6, 0, 1, 2, 7, 8, 9, ...(optimizer ? [] : [12])], memory: 0 },
+      ...(optimizer ? [{ label: "Optimizer", rows: [3, 4, ...(this.actions.editSystemPrompt ? [5] : []), 10, 11, 12], memory: 1 }] : []),
     ];
   }
 
@@ -99,6 +102,7 @@ export class SettingsPage {
     const next = groups[(current + direction + groups.length) % groups.length]!;
     this.cursor = this.groupCursors[next.memory]!;
     this.settingsScrollTop = 0;
+    this.detailPage = 0;
     this.tui.requestRender();
   }
 
@@ -156,8 +160,8 @@ export class SettingsPage {
 
   private renderNumberInput(width: number): string[] {
     const { spec, input, error } = this.numberInput!;
-    const hints: KeyHint[] = [["Esc", "Cancel"], ["Enter", "Apply"], ["Tab", "Preset"]];
-    const { layout, tabs, footer } = this.hintLayout(this.layout(width), hints, [["Esc", "Cancel"], ["↵", "Apply"], ["Tab", "Preset"]]);
+    const hints: KeyHint[] = [["Esc", "Cancel"], ["Enter", "Stage"], ["Tab", "Preset"]];
+    const { layout, tabs, footer } = this.hintLayout(this.layout(width), hints, [["Esc", "Cancel"], ["↵", "Stage"], ["Tab", "Preset"]]);
     const { innerWidth } = layout;
     const theme = this.theme;
     const status = error || `${spec.min}–${spec.max} ${spec.unit}`;
@@ -166,11 +170,14 @@ export class SettingsPage {
       : [theme.fg("text", theme.bold(spec.label)), feedback];
     const chrome = panelHeader(layout, header, tabs, footer);
     const height = chrome.layout.bodyHeight;
-    const help = wrapTextWithAnsi(sanitizeTerminalText(spec.description), innerWidth);
-    const presets = wrapTextWithAnsi(`Presets: ${spec.presets.join(" / ")}`, innerWidth);
-    // Always reserve an editable row, even after a short/narrow resize.
-    const notes = height >= 5 ? [...help, "", ...presets, "", ...wrapTextWithAnsi("Ctrl+S in Settings saves the value.", innerWidth)]
-      .slice(0, height - 2) : [];
+    // Keep the save boundary visible before optional help and presets. Only show
+    // complete blocks, leaving two rows for the editor (or error and editor).
+    const notes: string[] = [];
+    for (const text of ["Save in Settings with Ctrl+S.", spec.description, `Presets: ${spec.presets.join(" / ")}`]) {
+      const block = wrapTextWithAnsi(sanitizeTerminalText(text), innerWidth);
+      const gap = notes.length ? [""] : [];
+      if (notes.length + gap.length + block.length <= height - 2) notes.push(...gap, ...block);
+    }
     const body = [...notes, ...input.render(innerWidth, Math.max(1, height - notes.length))];
     if (error && layout.headerHeight === 0) body.unshift(feedback);
     return chrome.render(body, (text) => theme.fg("borderMuted", text));
@@ -208,7 +215,10 @@ export class SettingsPage {
     if (key === "q" || key === "ctrl+\\" || this.keys.matches(data, "tui.select.cancel")) {
       this.actions.close();
     } else if (key === "tab") {
-      this.switchSettingsGroup();
+      if (this.settingsGroups.length > 1) this.switchSettingsGroup();
+    } else if (key === "pageUp" || key === "pageDown") {
+      this.detailPage = Math.max(0, Math.min(this.detailPages - 1, this.detailPage + (key === "pageUp" ? -1 : 1)));
+      this.tui.requestRender();
     } else if (key === "ctrl+s") {
       this.saving = true;
       this.settingsFailed = false;
@@ -253,6 +263,8 @@ export class SettingsPage {
       if (this.keys.matches(data, "tui.select.up")) this.cursor = rows[(index + rows.length - 1) % rows.length]!;
       else if (this.keys.matches(data, "tui.select.down")) this.cursor = rows[(index + 1) % rows.length]!;
       else return true;
+      this.detailPage = 0;
+      this.detailPages = 1;
       this.tui.requestRender();
     }
     return true;
@@ -268,9 +280,13 @@ export class SettingsPage {
       this.settingsFrames.clear();
       this.settingsCacheKey = cacheKey;
     }
-    const frameKey = `${this.cursor}:${this.settingsScrollTop}`;
+    const frameKey = `${this.cursor}:${this.settingsScrollTop}:${this.detailPage}`;
     const cached = this.settingsFrames.get(frameKey);
-    if (cached) { this.settingsScrollTop = cached.scrollTop; return cached.lines; }
+    if (cached) {
+      this.settingsScrollTop = cached.scrollTop;
+      this.detailPages = cached.detailPages;
+      return cached.lines;
+    }
     let body: string[];
     const dirty = settingsDirty(this.selected, this.original);
     const notice = [this.saving ? "Saving..." : this.settingsNotice, dirty ? "Unsaved settings changes" : ""].filter(Boolean).join(" · ");
@@ -280,10 +296,12 @@ export class SettingsPage {
     const action = this.cursor === 4 && !optimizer?.thinkingEnabled ? "Unavailable" : "Change";
     // Saving has a fixed key and an explicit scope, independent of row focus.
     const back: KeyHint = ["Esc", dirty ? "Discard" : "Back"];
+    const groupHints: KeyHint[] = groups.length > 1 ? [["Tab", innerWidth >= 72 ? "Next group" : "Group"]] : [];
     const { layout, tabs, footer } = this.hintLayout(baseLayout,
-      [["Ctrl+S", "Save"], ["Enter", action], ["Tab", "Group"], back],
-      [back, ["^S", "Save"], ["↵", action], ["Tab", "Group"]]);
-    const status = theme.fg(dirty || this.settingsFailed ? "warning" : "muted", sanitizeTerminalText(notice || "Applies to future requests"));
+      [["Ctrl+S", "Save"], ["Enter", action], ...groupHints, back],
+      [back, ["^S", "Save"], ["↵", action], ...groupHints]);
+    const timing = group === "Context" && this.cursor !== 12 ? "Context changes take effect next round" : "";
+    const status = theme.fg(dirty || this.settingsFailed ? "warning" : "muted", sanitizeTerminalText(notice || timing));
     const header = [layout.headerHeight === 1 && notice ? status : theme.fg("text", theme.bold("Settings")), status];
     const chrome = panelHeader(layout, header, tabs, footer);
     const contentHeight = chrome.layout.bodyHeight;
@@ -302,63 +320,109 @@ export class SettingsPage {
       const text = clip(value, width);
       return text + " ".repeat(Math.max(0, width - visibleWidth(text)));
     };
-    const add = (index: number, label: string, value: string, description: string, affordance = "", disabled = false) => {
+    const add = (index: number, label: string, value: string, description: string, affordance = "", dimmed = false,
+      options: { detail?: string; shortLabel?: string; shortValue?: string } = {}) => {
       const active = index === this.cursor;
       label = sanitizeTerminalText(label);
       value = sanitizeTerminalText(value);
       description = sanitizeTerminalText(description);
-      const suffix = affordance && !disabled && innerWidth >= 20 ? ` ${affordance}` : "";
-      const labelColor = disabled ? "dim" : "text";
-      const valueColor = disabled ? "dim" : active ? "text" : "muted";
+      const suffix = affordance && innerWidth >= 20 ? ` ${affordance}` : "";
+      const labelColor = dimmed ? "dim" : "text";
+      const valueColor = dimmed ? "dim" : active || index === 3 ? "text" : "muted";
+      const fitPriority = group === "Optimizer" || index === 12;
+      const suffixWidth = visibleWidth(suffix);
       let content: string;
+      let valueClipped: boolean;
       if (columns) {
-        content = theme.fg(labelColor, active ? theme.bold(cell(label, labelWidth)) : cell(label, labelWidth)) + "  "
-          + theme.fg(valueColor, cell(clip(value, valueWidth - visibleWidth(suffix)) + suffix, valueWidth));
-        if (descriptions) content += "  " + theme.fg(disabled ? "dim" : active ? "text" : "muted", clip(description, innerWidth - labelWidth - valueWidth - 6));
+        const summaryWidth = innerWidth - labelWidth - valueWidth - 6;
+        const showSummary = descriptions && (!fitPriority || !!description && visibleWidth(description) <= summaryWidth);
+        const modelWidth = visibleWidth(value) + suffixWidth;
+        const nameWidth = index === 3 && modelWidth > innerWidth - labelWidth - 4 && modelWidth <= innerWidth - visibleWidth(label) - 4
+          ? visibleWidth(label) : labelWidth;
+        const width = fitPriority && !showSummary ? innerWidth - nameWidth - 4 : valueWidth;
+        const shownValue = clip(value, width - suffixWidth);
+        valueClipped = shownValue !== value;
+        content = theme.fg(labelColor, active ? theme.bold(cell(label, nameWidth)) : cell(label, nameWidth)) + "  "
+          + theme.fg(valueColor, cell(shownValue + suffix, width));
+        if (showSummary) content += "  " + theme.fg(valueColor, clip(description, summaryWidth));
       } else {
-        const compactLabel = index === 0 ? "Rules" : index === 5 ? "Prompt" : label;
-        const name = innerWidth < 32 ? compactLabel : label;
-        const compactValue = index === 0 && this.selected.instructions === "first" ? (innerWidth < 20 ? "First" : "First only") : value;
-        const available = Math.max(1, innerWidth - 2 - visibleWidth(suffix));
-        const text = clip(`${name}: ${compactValue}`, available);
+        const available = Math.max(1, innerWidth - 2 - suffixWidth);
+        const compactLabel = options.shortLabel ?? (index === 0 ? "Rules" : label);
+        const line = (name: string, val: string) => val ? `${name}: ${val}` : name;
+        const name = innerWidth < 32 || fitPriority && visibleWidth(line(label, value)) > available ? compactLabel : label;
+        let compactValue = index === 0 && this.selected.instructions === "first"
+          ? value.replace("First request only", innerWidth < 20 ? "First" : "First only") : value;
+        if (options.shortValue && visibleWidth(line(name, compactValue)) > available) compactValue = options.shortValue;
+        const text = clip(line(name, compactValue), available);
+        valueClipped = text !== line(name, value);
         // Match wide rows: emphasize only the focused name, not its value or affordance.
         const styled = active ? theme.bold(text.slice(0, name.length)) + text.slice(name.length) : text;
-        content = theme.fg(disabled ? "dim" : active ? "text" : "muted", styled + suffix);
+        content = theme.fg(valueColor, styled + suffix);
       }
       const rendered = innerWidth < 2 ? (active ? "›" : " ") : theme.fg("text", active ? "› " : "  ") + content;
       if (active) {
         focusStart = rows.length;
-        // Full values remain available when the table truncates them.
-        focusedDetail = index >= 3 ? `${label}: ${value} · ${description}` : description;
+        focusedDetail = fitPriority
+          ? [valueClipped ? value : "", options.detail ?? description].filter(Boolean).join("\n")
+          : description;
       }
       rows.push(active ? theme.bg("selectedBg", rendered + " ".repeat(Math.max(0, innerWidth - visibleWidth(rendered)))) : rendered);
       if (active) focusEnd = rows.length;
     };
     if (group === "Context") {
-      add(0, "Project instructions", instructionLabels[this.selected.instructions], instructionSummaries[this.selected.instructions], "›");
-      if (this.cursor === 0) focusedDetail = instructionDescriptions[this.selected.instructions];
-      add(1, "Directory tree", this.selected.tree ? "[x] On" : "[ ] Off", "Include the default directory tree");
-      if (this.cursor === 1) focusedDetail = "Default tree only; @directory references are separate.";
-      add(2, "Skill metadata", this.selected.skills ? "[x] On" : "[ ] Off", "Include skill names and descriptions");
-      if (this.cursor === 2) focusedDetail = "Include skill descriptions; never run skills.";
       const enabled = this.selected.enabled ?? this.settingsContextEnabled;
-      add(6, "Project context", enabled ? "[x] On" : "[ ] Off", "Include project rules, skills and directories");
-      if (this.cursor === 6) focusedDetail = "Master switch for all project background; conversation history is independent. Applies to the next round.";
-      add(7, "Directory references", (this.selected.referencedDirectories ?? DEFAULT_CONFIG.projectContext.referencedDirectories.enabled) ? "[x] On" : "[ ] Off", "Include explicit @directory listings");
-      if (this.cursor === 7) focusedDetail = "Explicit @directory listings only; independent of the default tree. Applies to the next round.";
-      if (!enabled) rows.push(theme.fg("warning", "Project context is off; rules, skills and directories are excluded."));
+      const checkbox = (on: boolean) => on ? "[x] On" : "[ ] Off";
+      // Inactive children remain editable; their choices take effect when project context is on.
+      const projectValue = (value: string, on: boolean) => !enabled && on ? `${value} · inactive` : value;
+      const projectCheckbox = (on: boolean) => !enabled && on ? "On · inactive" : checkbox(on);
+      add(6, "Project context", checkbox(enabled), "Rules, skills and directories");
+      if (this.cursor === 6) focusedDetail = enabled ? "Does not control conversation history." : "Child settings are kept but not applied.";
+      const mode = this.selected.instructions;
+      const ruleValue = mode === "first" && !enabled ? "First only" : instructionLabels[mode];
+      add(0, "Project instructions", projectValue(ruleValue, mode !== "off"), "AGENTS.md and other Pi rules", "›", !enabled);
+      if (this.cursor === 0) {
+        const detail = enabled || mode === "off" ? instructionDescriptions[mode]
+          : "Project context is off: no Pi-loaded rules (e.g. AGENTS.md) go to the optimizer.";
+        focusedDetail = `${detail} Main agent unchanged.`;
+      }
+      add(1, "Directory tree", projectCheckbox(this.selected.tree), "Default tree without history", "", !enabled);
+      if (this.cursor === 1) focusedDetail = "Only used if no history is included. @directory references are separate.";
+      add(2, "Skill metadata", projectCheckbox(this.selected.skills), "Skill names and descriptions", "", !enabled);
+      if (this.cursor === 2) focusedDetail = "Includes names and descriptions only; does not run skills.";
+      const references = this.selected.referencedDirectories ?? DEFAULT_CONFIG.projectContext.referencedDirectories.enabled;
+      add(7, "Directory references", projectCheckbox(references), "Names from @directory refs", "", !enabled);
+      if (this.cursor === 7) focusedDetail = "Lists names only, not file contents. Separate from the default tree.";
+      if (!enabled) rows.push(theme.fg("warning", "Project context is off. Conversation history is unaffected."));
     } else if (group === "Optimizer" && optimizer) {
-      add(3, "Model", optimizer.model, "Choose the prompt refinement model", "›");
-      add(4, "Thinking", optimizer.thinking, "Set refinement reasoning effort", "›", !optimizer.thinkingEnabled);
-      if (this.actions.editSystemPrompt) add(5, "Optimization prompt", "Edit", "Edit prompt rewriting instructions", "›");
+      add(3, "Default model", optimizer.model, "", "›", false, { shortLabel: "Model",
+        detail: optimizer.model === "Not configured" ? "Choose a model. Refine does not use the main agent's model." : "" });
+      add(4, "Thinking", optimizer.thinking, "", optimizer.thinkingEnabled ? "›" : "", !optimizer.thinkingEnabled,
+        { detail: optimizer.thinkingDetail });
+      if (this.actions.editSystemPrompt) add(5, "Optimization prompt", "", "Applies next round", "›", false, {
+        shortLabel: "Prompt", detail: "Refine's rewrite policy, not the main agent's prompt. Applies next round.",
+      });
     }
     for (const index of groups[this.settingsGroup]!.rows) {
       const spec = NUMBER_SETTINGS[index];
       if (!spec) continue;
       const value = numberSettingValue(this.selected, spec.field) / spec.scale;
-      add(index, spec.label, value === 0 ? "Off" : `${value} ${spec.unit}`, spec.description, "›");
+      add(index, spec.label, value === 0 ? "Off" : `${value} ${spec.unit}`, spec.summary ?? "", "›", false, {
+        detail: spec.description, shortLabel: spec.shortLabel, shortValue: spec.shortUnit ? `${value}${spec.shortUnit}` : undefined,
+      });
+      if (this.cursor === index && index < 10) focusedDetail = spec.description;
     }
-    const detailHeight = contentHeight >= 12 ? 2 : contentHeight >= 3 ? 1 : 0;
+    const details = focusedDetail ? wrapTextWithAnsi(sanitizeTerminalText(focusedDetail), innerWidth) : [];
+    const usualDetailHeight = contentHeight >= 12 ? 2 : contentHeight >= 3 ? 1 : 0;
+    const fitDetails = group === "Optimizer" || this.cursor === 12;
+    // Keep at least the selected row and, when possible, its neighbors. Long
+    // values use more detail lines on resize or can be read a page at a time.
+    const detailCapacity = Math.max(0, contentHeight - Math.min(3, Math.ceil(contentHeight / 2)));
+    const detailHeight = fitDetails ? Math.min(details.length, detailCapacity) : usualDetailHeight;
+    const paged = fitDetails && detailHeight > 0 && details.length > detailHeight;
+    const pageHint = paged && detailHeight >= 2 && innerWidth >= 13;
+    const detailSize = detailHeight - Number(pageHint);
+    this.detailPages = paged ? Math.ceil(details.length / detailSize) : 1;
+    this.detailPage = Math.min(this.detailPage, this.detailPages - 1);
     const listHeight = contentHeight - detailHeight;
     const maxStart = Math.max(0, rows.length - listHeight);
     let start = Math.min(this.settingsScrollTop, maxStart);
@@ -366,15 +430,19 @@ export class SettingsPage {
     else if (focusEnd > start + listHeight) start = Math.min(focusStart, focusEnd - listHeight);
     this.settingsScrollTop = Math.max(0, Math.min(start, maxStart));
     body = Array.from({ length: listHeight }, (_, i) => rows[this.settingsScrollTop + i] ?? "");
-    const details = group === "Context" && this.cursor < 3 && descriptions && detailHeight === 2
-      ? [instructionDescriptions[this.selected.instructions], "Tree: default only; @directory is separate. Skills: metadata only."]
-      : wrapTextWithAnsi(sanitizeTerminalText(focusedDetail), innerWidth);
-    body.push(...details.slice(0, detailHeight).map((line, i) => theme.fg("muted",
-      i === detailHeight - 1 && details.length > detailHeight ? truncateToWidth(line + "…", innerWidth, "…") : line)));
+    const detailStart = this.detailPage * detailSize;
+    body.push(...details.slice(detailStart, detailStart + detailSize).map((line, i) => theme.fg("muted",
+      !fitDetails && i === detailSize - 1 && details.length > detailSize ? truncateToWidth(line + "…", innerWidth, "…") : line)));
+    if (pageHint) {
+      while (body.length < contentHeight - 1) body.push("");
+      const hint = `PgUp/PgDn · ${this.detailPage + 1}/${this.detailPages}`;
+      body.push(theme.fg("muted", visibleWidth(hint) <= innerWidth ? hint : "PgUp/PgDn"));
+    }
     if (!layout.headerHeight && notice) body[0] = status;
     const lines = chrome.render(body, (text) => theme.fg("borderMuted", text));
     if (this.settingsFrames.size >= 12) this.settingsFrames.clear();
-    this.settingsFrames.set(frameKey, { lines, scrollTop: this.settingsScrollTop });
+    this.settingsFrames.set(`${this.cursor}:${this.settingsScrollTop}:${this.detailPage}`,
+      { lines, scrollTop: this.settingsScrollTop, detailPages: this.detailPages });
     return lines;
   }
 }

@@ -14,7 +14,7 @@ import { InlinePreferences } from "./inline-preferences.js";
 import type { PreferenceRepository, RevisionDraft, SelectedPreference } from "./revision-preferences.js";
 import { canonicalShortcut } from "./config.js";
 import type { ContextSettings } from "./settings.js";
-import { SettingsPage, type SettingsResult } from "./ui/settings-page.js";
+import { SettingsPage, type SettingsOptimizer, type SettingsResult } from "./ui/settings-page.js";
 import { RevisePage } from "./ui/revise-page.js";
 export type { SettingsResult } from "./ui/settings-page.js";
 export type { ContextSettings } from "./settings.js";
@@ -34,7 +34,7 @@ interface WorkspaceActions {
   usagePosition?: TaskPanelPosition;
   context(): ContextSettings;
   contextEnabled(): boolean;
-  optimizer?(): { model: string; thinking: string; thinkingEnabled: boolean };
+  optimizer?(): SettingsOptimizer;
   chooseModel?(context: ContextSettings): void;
   editSystemPrompt?(context: ContextSettings): void;
   cycleThinking?(): Promise<SettingsResult>;
