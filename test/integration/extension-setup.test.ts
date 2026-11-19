@@ -33,7 +33,7 @@ describe("startup hint", () => {
 });
 
 describe("first optimizer model setup", () => {
-  it("offers four unchecked starters in the TUI without sending their text until explicitly selected", async () => {
+  it("offers translation unchecked in the TUI and sends its instructions only when selected", async () => {
     const h = await makeHarness({ freshInstall: true });
     h.setCustomAction("\r");
     await h.command("model", h.context);
@@ -49,18 +49,16 @@ describe("first optimizer model setup", () => {
     h.panelInput("\t");
     await vi.waitFor(() => {
       const frame = h.panelLines(160).join("\n");
-      expect(frame).toContain("[ ] Clarify Prompt Intent");
-      expect(frame).toContain("[ ] Prompt Bullet Structure");
       expect(frame).toContain("[ ] Translate Prompt to English");
-      expect(frame).toContain("[ ] Answer in Bullet Points");
+      expect(frame).not.toContain("Answer in Bullet Points");
     });
     h.panelInput(" ");
-    expect(h.panelLines(160).join("\n")).toContain("[x] Clarify Prompt Intent");
+    expect(h.panelLines(160).join("\n")).toContain("[x] Translate Prompt to English");
     expect(h.complete).toHaveBeenCalledTimes(1);
     h.panelInput("\r");
     await vi.waitFor(() => expect(h.complete).toHaveBeenCalledTimes(2));
     const selected = h.complete.mock.calls[1]![1] as typeof call;
-    expect(JSON.parse(selected.messages[0].content[0].text).editing_instruction).toContain("Clarify only references or scope");
+    expect(JSON.parse(selected.messages[0].content[0].text).editing_instruction).toContain("Translate the prompt's natural-language content into English");
     expect(h.sent).toEqual([]); expect(h.editorWrites).toEqual([]);
     h.panelInput("q"); await selectedView;
   });

@@ -8,7 +8,7 @@ import { ProjectPreferenceDefaults } from "./project-preference-defaults.js";
 export const PREFERENCE_MAX_BYTES = 1024 * 1024;
 export const PREFERENCE_MAX_ENTRIES = 500;
 const scopes: PreferenceScope[] = ["project", "global"];
-const starterIds = ["clarify-prompt-intent", "prompt-bullet-structure", "translate-prompt-to-english", "answer-in-bullet-points"];
+const starterIds = ["translate-prompt-to-english"];
 const code = (error: unknown): string | undefined => (error as NodeJS.ErrnoException)?.code;
 const message = (error: unknown): string => error instanceof Error ? error.message : "Unknown storage error";
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);

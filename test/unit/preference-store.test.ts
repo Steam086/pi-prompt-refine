@@ -125,11 +125,10 @@ describe("bundled starter preferences", () => {
     const starters = entries.slice(1);
     expect(entries[0]).toEqual(project);
     expect(starters.map(({ name, metadata }) => [name, metadata?.kind, metadata?.activation])).toEqual([
-      ["Clarify Prompt Intent", "rewrite", "manual"], ["Prompt Bullet Structure", "rewrite", "manual"],
-      ["Translate Prompt to English", "rewrite", "manual"], ["Answer in Bullet Points", "task", "manual"],
+      ["Translate Prompt to English", "rewrite", "manual"],
     ]);
     expect(starters.every(({ scope }) => scope === "global")).toBe(true);
-    expect(new Set(starters.map(({ id }) => id)).size).toBe(4);
+    expect(starters[0]!.id).not.toBe("translate-prompt-to-english");
     expect(errors).toEqual({});
     expect(projectDefaults).toBeUndefined();
     expect((await stat(f.global)).mode & 0o777).toBe(0o600);
@@ -166,7 +165,7 @@ describe("bundled starter preferences", () => {
     await rm(`${f.global}.lock`);
     const attempts = await Promise.all([f.store, peer].map((store) => store.load({ initializeStarters: true })));
     const entries = (await f.store.load()).entries;
-    expect(entries).toHaveLength(4);
+    expect(entries).toHaveLength(1);
     for (const attempt of attempts) {
       expect(attempt.errors).toEqual({});
       if (attempt.entries.length) expect(attempt.entries).toEqual(entries);
@@ -179,22 +178,16 @@ describe("typed preferences", () => {
   const metadata: PreferenceMetadata = { kind: "rewrite", description: "并列问题条目化", activation: "manual" };
   const entry: RevisionPreference = { id: "structured", version: 1, scope: "global", name: "Structure", body: "Keep literal 中文\tcommands.", metadata };
 
-  it("keeps neutral prompt tone conditional and scoped to prompt wording", async () => {
+  it("retains an existing task preference and resolves its project default on startup", async () => {
     const f = await setup();
-    await writeFile(f.global, await readFile(new URL("../../examples/prompt-refine-preferences.json", import.meta.url), "utf8"));
-    const library = await f.store.load();
-    expect(library.errors).toEqual({});
-    const tone = library.entries.find((entry) => entry.id === "neutral-prompt-tone")!;
-    expect(tone).toMatchObject({
-      version: 3,
-      name: "Neutral Prompt Tone",
-      metadata: { kind: "rewrite", activation: "manual" },
-    });
-    expect(tone.body).toBe([
-      "Revise colloquial expressions, ambiguous wording, and repetition in the prompt only when they hinder understanding; leave clear wording unchanged. Preserve the user's original tone, including informal language, rather than making the prompt more formal.",
-      "This preference governs the wording of the prompt itself, not the response. Do not add response-style instructions on the basis of this preference.",
-    ].join("\n\n"));
-    expect(composeRevision([selectPreference(tone)], "")).toBe(`Prompt rewriting instructions (manually selected):\n${tone.body}`);
+    const task = await f.store.save("global", { name: "Answer in Bullet Points", body: "Use bullets for parallel points.",
+      metadata: { kind: "task", description: "Answer format", activation: "manual" } });
+    await f.store.setProjectDefault(task, true);
+    const before = await readFile(f.global, "utf8");
+    const restarted = new PreferenceStore(f.agent, f.cwd);
+    expect((await restarted.load({ initializeStarters: true })).entries).toEqual([task]);
+    expect(await readFile(f.global, "utf8")).toBe(before);
+    expect(composeRevision(restarted.getDefaultPreferences(), "")).toBe(`Main-agent task requirements (project default):\n${task.body}`);
   });
 
   it("loads the reorganized preset catalog through the production reader", async () => {
@@ -202,64 +195,11 @@ describe("typed preferences", () => {
     await writeFile(f.global, await readFile(new URL("../../examples/prompt-refine-preferences.json", import.meta.url), "utf8"));
     const library = await f.store.load();
     expect(library.errors).toEqual({});
-    expect(library.entries).toHaveLength(11);
-    const discussion = library.entries.filter((entry) => entry.id === "discussion-mode");
-    expect(discussion).toHaveLength(1);
-    expect(discussion[0]).toMatchObject({
-      version: 2,
-      name: "Discussion Mode",
-      metadata: {
-        description: "讨论需求和方案时只处理当前问题；需要选择时给出建议与取舍，追问仅限影响方向或阻塞规划的问题。",
-        kind: "task",
-        activation: "manual",
-      },
-    });
-    expect(discussion[0]!.body).toContain("must not convert an explicitly requested execution task into discussion only");
-    expect(discussion[0]!.body).toContain("Do not add tool-use or delegation authority");
-    const structure = library.entries.filter((entry) => ["prompt-bullet-structure", "prompt-step-structure"].includes(entry.id));
-    expect(structure.map((entry) => [entry.id, entry.version])).toEqual([
-      ["prompt-bullet-structure", 5], ["prompt-step-structure", 5],
-    ]);
-    const bullet = structure.find((entry) => entry.id === "prompt-bullet-structure")!;
-    expect(bullet.body.startsWith("Prefer a list-based structure when separating distinct requirements, questions, constraints, or other points would improve clarity and readability.")).toBe(true);
-    expect(bullet.body).toContain("Do not force every prompt into a list");
-    expect(bullet.body).toContain("Preserve the original order by default");
-    expect(bullet.body).toContain("without introducing ambiguity");
-    expect(bullet.body).toContain("conditions, exceptions, negation, sequencing");
-    expect(bullet.body).toContain("mandatory, optional, or alternatives");
-    expect(bullet.body).toContain("authorization boundaries");
-    expect(bullet.body).toContain("Leave the structure unchanged");
-    expect(bullet.body).toContain("do not add an instruction to answer in bullets");
-    const step = structure.find((entry) => entry.id === "prompt-step-structure")!;
-    expect(step.body).toContain("Use numbered steps only when the user's requirements explicitly establish an order or dependencies");
-    expect(step.body).toContain("Do not infer executable steps from background processes, quotations, examples, priorities, assumptions, or questions unless the user's requirements explicitly establish them as such");
-    expect(step.body).toContain("Leave the structure unchanged");
-    expect(step.body).toContain("authorization boundaries");
-    expect(step.body).toContain("Do not introduce additional steps, checks, tools, or deliverables");
-    expect(step.body).toContain("Preserve any existing response-format requirements; do not add an instruction to respond step by step");
-    for (const entry of structure) {
-      expect(entry.body).not.toContain("用户手动选择");
-      expect(entry.body).not.toContain("本地匹配");
-    }
-    expect(library.entries.every((entry) => entry.metadata?.description && ["rewrite", "task"].includes(entry.metadata.kind))).toBe(true);
-    expect(library.entries.every((entry) => entry.metadata?.activation === "manual" && !("match" in entry.metadata))).toBe(true);
-    for (const entry of library.entries) {
-      expect(entry.body).not.toMatch(/本地匹配|本地线索|update the candidate prompt|refiner output protocol|SCAMPER/);
-      expect(entry.metadata?.description).not.toMatch(/本地匹配|本地线索|手动选择后/);
-    }
-    const brainstorm = library.entries.find((entry) => entry.id === "brainstorm-alternatives")!;
-    expect(brainstorm.body).toContain("unless requested");
-    expect(brainstorm.body).toContain("If the task also asks for a choice");
-    const translate = library.entries.find((entry) => entry.id === "translate-prompt-to-english")!;
+    expect(library.entries).toMatchObject([{ id: "translate-prompt-to-english", version: 2,
+      metadata: { kind: "rewrite", activation: "manual" } }]);
+    const translate = library.entries[0]!;
     expect(translate.body).toContain("including non-English literals");
     expect(translate.body).toContain("an English prompt does not imply a request for an English answer");
-    const delegate = library.entries.find((entry) => entry.id === "coordinate-authorized-subagents")!;
-    expect(delegate.body).toContain("Only when the current draft explicitly authorizes delegation");
-    expect(delegate.body).toContain("Report unavailable agents or capabilities");
-    const clarify = library.entries.find((entry) => entry.id === "clarify-prompt-intent")!;
-    expect(clarify.metadata?.activation).toBe("manual");
-    expect(clarify.body.length).toBeLessThan(500);
-    expect(clarify.body).toContain("smallest useful edit");
   });
 
   it("round-trips v2 metadata, preserves it in old-style edits and isolates pending writes/snapshots", async () => {
