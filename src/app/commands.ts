@@ -10,7 +10,7 @@ import type { Notify } from "./contracts.js";
 
 interface CommandDependencies {
   controller: Pick<RefineController,
-    "cancelAndDismiss" | "getAppliedRecordId" | "getHistory" | "getModel" | "hasCapturedDraft">;
+    "cancelAndDismiss" | "getAppliedRecordId" | "getHistory" | "getModel" | "getSubmission" | "hasCapturedDraft">;
   taskPositions: Map<string, TaskPanelPosition>;
   useContext(ctx: ExtensionContext): void;
   host: Pick<ReturnType<typeof createWorkspaceHost>, "showPreview" | "isInteracting">;
@@ -18,11 +18,12 @@ interface CommandDependencies {
   models: Pick<ReturnType<typeof createModelSelection>, "selectModel" | "cycleModel">;
   editor: Pick<ReturnType<typeof createEditorActions>, "restoreDraft">;
   clearHistory(ctx: ExtensionContext): Promise<void>;
+  showOptimizerQuota(): boolean;
   notify: Notify;
 }
 
 export function createCommands({ controller, taskPositions, useContext, host, requests,
-  models, editor, clearHistory, notify }: CommandDependencies) {
+  models, editor, clearHistory, showOptimizerQuota, notify }: CommandDependencies) {
   const { showPreview, isInteracting } = host;
   const { triggerOptimize } = requests;
   const { selectModel, cycleModel } = models;
@@ -35,7 +36,9 @@ export function createCommands({ controller, taskPositions, useContext, host, re
       const draft = ctx.ui.getEditorText();
       if (!controller.getModel() || !draft.trim()) return showPreview(ctx);
       const knownDraft = controller.hasCapturedDraft(draft);
-      const captured = !knownDraft ? triggerOptimize(ctx, false, draft, true, true) : undefined;
+      const warnQuota = showOptimizerQuota();
+      const result = !knownDraft ? triggerOptimize(ctx, false, draft, true, "shortcut") : undefined;
+      if (result?.kind === "started" && warnQuota) notify(ctx, "Refine may use optimizer quota or incur charges.");
       const records = controller.getHistory();
       const position = taskPositions.get(ctx.sessionManager.getSessionId());
       const selected = records.find((record) => position?.selectedTaskId !== undefined
@@ -43,8 +46,9 @@ export function createCommands({ controller, taskPositions, useContext, host, re
         : record.id === (position?.selectedId ?? controller.getAppliedRecordId()));
       // Opening with an editor draft is an explicit navigation intent. Background
       // updates still preserve selection; a newly captured prompt must not inherit it.
-      let target = captured?.kind === "captured" ? records.find((record) => record.id === captured.recordId) : undefined;
-      let original = true;
+      const targetId = result?.kind === "captured" ? result.recordId : result && controller.getSubmission(result)?.recordId;
+      let target = records.find((record) => record.id === targetId);
+      let original = result?.kind !== "started";
       if (!target && knownDraft) {
         let matching = records.filter((record) => record.input.draft === draft);
         if (!matching.length) {

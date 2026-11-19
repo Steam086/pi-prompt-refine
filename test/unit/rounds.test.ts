@@ -48,6 +48,31 @@ describe("round workspace", () => {
     expect(jobs[0]!.signal.aborted).toBe(false);
   });
 
+  it("counts queued admission only in its own round, independently of journal retention", () => {
+    const { controller, jobs } = setup(1);
+    controller.trigger(input("Running"));
+    const archived = controller.capture(input("Earlier draft"));
+    expect(archived.kind).toBe("captured");
+    if (archived.kind !== "captured") throw new Error("Missing draft");
+    controller.onMessageStarted();
+    expect(controller.hasSubmittedRunInRound()).toBe(false);
+    const current = controller.capture(input("Current draft"));
+    if (current.kind !== "captured") throw new Error("Missing draft");
+    controller.startRecord(archived.recordId);
+    expect(controller.hasSubmittedRunInRound()).toBe(false);
+    const result = controller.startRecord(current.recordId);
+    expect(controller.getSubmission(result)).toEqual({ recordId: current.recordId, queued: true });
+    expect(jobs).toHaveLength(1);
+    expect(controller.hasSubmittedRunInRound()).toBe(true);
+    controller.deleteRecords([current.recordId]);
+    const another = controller.capture(input("Temporary draft"));
+    if (another.kind !== "captured") throw new Error("Missing draft");
+    controller.removeDraft(another.recordId);
+    expect(controller.hasSubmittedRunInRound()).toBe(true);
+    controller.onMessageStarted();
+    expect(controller.hasSubmittedRunInRound()).toBe(false);
+  });
+
   it("does not keep the background of a cancelled empty workspace", () => {
     const { controller } = setup();
     const draft = controller.createDraft(input("", "old background"));

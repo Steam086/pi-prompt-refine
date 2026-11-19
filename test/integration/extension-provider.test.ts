@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_CONFIG } from "../../src/config.js";
 import { PreferenceStore } from "../../src/preference-store.js";
 import { screenDraft } from "../fixtures/reference-preservation.js";
-import { extensionHarnessEnvironment, panelAction, refinement, shortcut, trigger } from "../support/extension-harness.js";
+import { extensionHarnessEnvironment, panelAction, refinement, trigger } from "../support/extension-harness.js";
 import { flushPromises } from "../support/helpers.js";
 
 const { makeHarness } = extensionHarnessEnvironment();
@@ -33,7 +33,8 @@ describe("source preservation in the provider path", () => {
       metadata: { kind, description: "Removal scope", activation: "manual" } });
     h.setEditorText(screenDraft);
     h.complete.mockResolvedValueOnce(refinement("Right side too low?", "Layout question"));
-    h.holdPanel(); const view = shortcut(h, "ctrl+\\")(h.context);
+    h.holdPanel(); const view = h.command("", h.context);
+    h.panelInput("n"); h.panelInput(screenDraft); h.panelInput("\r");
     h.panelInput("p");
     await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Removal"));
     h.panelInput(" "); h.panelInput("\x1b[13;3u");

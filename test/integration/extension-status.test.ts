@@ -37,8 +37,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.complete.mockImplementation(() => new Promise((res) => { resolve = res; }));
     harness.holdPanel();
     let view = shortcut(harness, "ctrl+\\")(harness.context);
-    expect(harness.complete).not.toHaveBeenCalled();
-    harness.panelInput("\r"); // Explicit start selects the running model beneath its original.
+    await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
+    expect(harness.panelLines().join("\n")).toMatch(/›\s+└─ fake-chat/);
     harness.panelInput("q"); await view;
     view = shortcut(harness, "ctrl+\\")(harness.context);
     expect(harness.panelLines().join("\n")).toContain("Running");

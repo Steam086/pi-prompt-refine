@@ -120,11 +120,12 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
   const editor = createEditorActions({
     controller, config, useContext, sendUserMessage: (...args) => pi.sendUserMessage(...args), notify, notifyIfSameSession,
   });
+  const showOptimizerQuota = () => !optimizerRequestAttempted && !!controller.getModel();
   const workspaceActions = createWorkspaceActions({
     controller, config, setCompletionContext, persistConfig, historyStorage: lifecycle.historyStorage,
     optimizationError: requests.optimizationError, operations, saveOptimizer,
     triggerOptimize: requests.triggerOptimize, reviseCandidate: requests.reviseCandidate,
-    registeredModels: models.registeredModels, showOptimizerQuota: () => !optimizerRequestAttempted && !!controller.getModel(),
+    registeredModels: models.registeredModels, showOptimizerQuota,
     notify, preferenceRepository,
   });
   const host = createWorkspaceHost({
@@ -136,7 +137,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
   });
   const commands = createCommands({
     controller, taskPositions, useContext, host, requests, models, editor,
-    clearHistory: lifecycle.clearHistory, notify,
+    clearHistory: lifecycle.clearHistory, showOptimizerQuota, notify,
   });
 
   events.subscribe(() => updatePresentation(controller.getState()), true);
