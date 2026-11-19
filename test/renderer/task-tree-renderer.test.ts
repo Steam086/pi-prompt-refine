@@ -1,3 +1,4 @@
+import { frameHints } from "../support/panel-chrome.js";
 import { getKeybindings, TuiAltScreen, TuiMainScreen, visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters as strip } from "node:util";
 import { describe, expect, it, vi } from "vitest";
@@ -113,18 +114,19 @@ describe.each(["regular", "fullscreen"] as const)("task tree rendering (%s)", (m
     try {
       tui.start();
       const initial = render();
-      expect(initial.join("\n")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(` ${theme.underline("Usage")} `))));
-      const tabs = initial.findIndex((line) => line.includes(theme.underline("Usage")));
+      expect(initial.join("\n")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Usage "))));
+      const tabs = initial.findIndex((line) => / Preview +Usage +Settings /.test(strip(line)));
       const divider = initial.findIndex((line, index) => index > tabs && /^─+$/u.test(strip(line).trim()));
-      const hints = initial.slice(tabs + 1, divider);
-      expect(strip(initial[tabs - 1]!).trim()).toBe("");
-      expect(hints).toHaveLength(1); // Wide Usage no longer reserves a blank tab gap or a second hint row.
+      const hints = frameHints(initial);
+      expect(strip(initial[tabs - 1]!).trim()).toMatch(/^Usage/);
+      expect(divider).toBe(tabs + 1);
+      expect(hints).toHaveLength(1);
       expect(hints[0]).toContain(formatKeyHint(["Enter", "Inspect"], theme, 1, "secondary"));
       expect(hints[0]).not.toContain("\x1b[1m");
       expect(strip(initial[divider + 1]!).trim()).not.toBe("");
       expect(writes.join("")).toContain(formatKeyHint(["Esc", "Back"], theme, 1, "secondary"));
       expect(writes.join("")).toContain(theme.fg("accent", theme.bold("›")));
-      expect(writes.join("")).toContain(theme.underline("Usage"));
+      expect(writes.join("")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Usage "))));
       const root = left(initial).findIndex((line) => line.includes("› ▾ Earlier · Original prompt"));
       expect(root).toBeGreaterThanOrEqual(0);
       expect(left(initial)[root + 1]).toContain("  │ Original 中文😀");

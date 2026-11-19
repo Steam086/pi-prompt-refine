@@ -1,6 +1,6 @@
-import { matchesKey, parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager, type KeyId } from "@earendil-works/pi-tui";
+import { matchesKey, parseKey, visibleWidth, wrapTextWithAnsi, type KeybindingsManager, type KeyId } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { panelFrame, type PanelLayoutProvider } from "../panel-layout.js";
+import { panelHeader, type PanelLayoutProvider } from "../panel-layout.js";
 import { alignedKeyHints, fittingKeyHints } from "../key-hints.js";
 import type { PromptInput } from "../prompt-input.js";
 import { sanitizeTerminalText } from "../presentation.js";
@@ -129,12 +129,13 @@ export class RevisePage {
       this.requirementsCache = { text, width: layout.innerWidth,
         lines: text.split("\n").flatMap((line) => wrapTextWithAnsi(sanitizeTerminalText(line), layout.innerWidth)) };
     }
-    this.requirementsScroll = Math.min(this.requirementsScroll, Math.max(0, this.requirementsCache.lines.length - layout.bodyHeight));
-    return panelFrame(layout, [this.theme.fg("text", this.theme.bold("Full revision requirements")),
-      this.theme.fg("muted", `${text.length} chars · Preference snapshots + additional requirements · Not sent`)],
-      this.requirementsCache.lines.slice(this.requirementsScroll, this.requirementsScroll + layout.bodyHeight).map((line) => this.theme.fg("text", line)),
-      alignedKeyHints([[["Esc", "Back"]], [["↑↓ / PgUp/PgDn", "Scroll"]]], layout.innerWidth, this.theme),
-      (line) => this.theme.fg("borderMuted", line));
+    const hints = fittingKeyHints([["Esc", "Back"], ["↑↓ / PgUp/PgDn", "Scroll"]], layout.innerWidth, this.theme);
+    const chrome = panelHeader(layout, [this.theme.fg("text", this.theme.bold("Full revision requirements")),
+      this.theme.fg("muted", `${text.length} chars`)], [], [hints]);
+    this.requirementsScroll = Math.min(this.requirementsScroll, Math.max(0, this.requirementsCache.lines.length - chrome.layout.bodyHeight));
+    const body = this.requirementsCache.lines.slice(this.requirementsScroll, this.requirementsScroll + chrome.layout.bodyHeight)
+      .map((line) => this.theme.fg("text", line));
+    return chrome.render(body, (line) => this.theme.fg("borderMuted", line));
   }
 
   private canInlineRevision(width: number): boolean {
@@ -147,11 +148,11 @@ export class RevisePage {
     const { theme } = this;
     const canInline = this.canInlineRevision(width);
     const inline = !this.revisionExpanded && canInline;
-    const editorHeight = inline ? Math.min(10, Math.max(5, Math.floor(layout.bodyHeight * 0.3))) : layout.bodyHeight;
     const title = layout.innerWidth < 64 ? "Revise" : "Revise current result";
     const identity = this.revisionTarget?.label ? theme.fg("muted", sanitizeTerminalText(` · ${this.revisionTarget.label}`)) : "";
     const selected = this.revisionSelected.length ? `${this.revisionSelected.length} · ${this.revisionSelected.map((item) => item.name + (item.body !== item.sourceBody ? "*" : "")).join(", ")}` : "None";
-    const status = this.inputError || this.options.preferencesKeyNotice.trim() || `Revision not submitted${this.revisionSelected.some((item) => item.body !== item.sourceBody) ? " · * Edited for this revision only" : ""}`;
+    const status = this.inputError || this.options.preferencesKeyNotice.trim()
+      || `Revision not submitted${this.revisionSelected.some((item) => item.body !== item.sourceBody) ? " · * Edited for this revision only" : ""}`;
     const warning = !!(this.inputError || this.options.preferencesKeyNotice);
     const feedback = theme.fg(warning ? "warning" : "muted", sanitizeTerminalText(`${warning ? "⚠ " : ""}${status}`));
     const control = (label: string, active: boolean) => active ? theme.bg("selectedBg", theme.fg("text", theme.bold(`› ${label}`))) : theme.fg("muted", label);
@@ -172,17 +173,19 @@ export class RevisePage {
     if (this.revisionFocus !== "input") footer[0] = fittingKeyHints([
       ...(layout.footerHeight === 1 ? [["Esc", "Back"] as const] : []),
       ["Enter", this.revisionFocus === "preferences" ? "Preferences" : "Review"], ["Tab", "Focus"], ["Ctrl+S", "Revise"]], layout.innerWidth, theme);
-    const visibleControls = layout.bodyHeight <= 1 && this.revisionFocus === "input" ? [] : layout.bodyHeight >= controls.length + 1 ? controls
+    const chrome = panelHeader(inline ? { ...layout, topSeparatorHeight: 0 } : layout, header, [], footer);
+    const { bodyHeight } = chrome.layout;
+    const editorHeight = inline ? Math.min(10, Math.max(5, Math.floor(bodyHeight * 0.3))) : bodyHeight;
+    const visibleControls = bodyHeight <= 1 && this.revisionFocus === "input" ? [] : bodyHeight >= controls.length + 1 ? controls
       : [this.revisionFocus === "preferences" ? preferences! : this.revisionFocus === "requirements" ? review : inputs];
-    const editor = this.revisionInput.render(layout.innerWidth, Math.max(1, inline ? editorHeight : layout.bodyHeight - visibleControls.length));
+    const inputHeight = Math.max(1, inline ? editorHeight : bodyHeight - visibleControls.length);
+    const editor = this.revisionInput.render(layout.innerWidth, inputHeight);
     const body = layout.headerHeight === 0 && warning ? [feedback, ...editor] : [...visibleControls, ...editor];
-    if (!inline) return panelFrame(layout, header, body, footer, (text) => theme.fg("borderMuted", text));
+    const lines = chrome.render(body, (text) => theme.fg("borderMuted", text));
+    if (!inline) return lines;
     // Keep the source panel's viewport/scroll unchanged; its snapshot has no live action hints.
     const source = this.revisionSource?.render(width);
-    const pad = (line: string) => " ".repeat(layout.inset) + truncateToWidth(line, layout.innerWidth, "");
-    const bottom = [theme.fg("borderMuted", "─".repeat(layout.innerWidth)), ...header,
-      ...visibleControls, ...Array.from({ length: editorHeight }, (_, i) => editor[i] ?? ""),
-      ...footer.slice(0, layout.footerHeight)].map(pad);
+    const bottom = ["", ...lines.slice(0, chrome.layout.headerHeight + chrome.layout.separatorHeight + visibleControls.length + inputHeight)];
     return [...(source ?? []).slice(0, layout.height - bottom.length), ...bottom];
   }
 

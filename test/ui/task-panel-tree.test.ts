@@ -160,7 +160,7 @@ describe("prompt tree and inspection", () => {
         expect(plain[activeAt + 1]).toContain("  │  Run #13");
         expect(plain[activeAt + 2]!.trimStart()).toMatch(/^│\s+│/);
         expect(frame[activeAt]).toContain(f.theme.fg("muted", "├─ "));
-      } else expect(plain.join("\n")).not.toContain("Run #13");
+      } else expect(plain[activeAt + 1]).not.toContain("  │  Run #13");
       expect(f.position.selectedId).toBe(13);
       expect(frame).toHaveLength(workspaceLayout(width, height).height);
       expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);

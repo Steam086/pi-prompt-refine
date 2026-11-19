@@ -1,7 +1,7 @@
 import { stripVTControlCharacters } from "node:util";
 import { parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { panelFrame, panelTabs, workspaceTabs, type PanelLayout, type PanelLayoutProvider } from "../panel-layout.js";
+import { panelHeader, panelTabs, workspaceTabs, type PanelLayout, type PanelLayoutProvider } from "../panel-layout.js";
 import { passiveHintLayout, type KeyHint } from "../key-hints.js";
 import type { PromptInput } from "../prompt-input.js";
 import { sanitizeTerminalText } from "../presentation.js";
@@ -151,28 +151,29 @@ export class SettingsPage {
   /** Settings and its numeric editor share the same passive top shortcut strip. */
   private hintLayout(layout: PanelLayout, hints: KeyHint[], compact: KeyHint[]) {
     const tabs = workspaceTabs(layout, "Settings", this.theme);
-    const navigation = tabs.length === 3 ? tabs.slice(0, -1) : tabs;
-    return { navigation, ...passiveHintLayout(layout, navigation.length, hints, compact, this.theme) };
+    return { tabs, ...passiveHintLayout(layout, tabs.length, hints, compact, this.theme) };
   }
 
   private renderNumberInput(width: number): string[] {
     const { spec, input, error } = this.numberInput!;
     const hints: KeyHint[] = [["Esc", "Cancel"], ["Enter", "Apply"], ["Tab", "Preset"]];
-    const { layout, navigation, footer } = this.hintLayout(this.layout(width), hints, [["Esc", "Cancel"], ["↵", "Apply"], ["Tab", "Preset"]]);
-    const { innerWidth, bodyHeight } = layout;
+    const { layout, tabs, footer } = this.hintLayout(this.layout(width), hints, [["Esc", "Cancel"], ["↵", "Apply"], ["Tab", "Preset"]]);
+    const { innerWidth } = layout;
     const theme = this.theme;
-    const status = error || `${spec.min}–${spec.max} ${spec.unit} · Not saved until Ctrl+S in Settings`;
+    const status = error || `${spec.min}–${spec.max} ${spec.unit}`;
     const feedback = theme.fg(error ? "warning" : "muted", status);
-    const height = Math.max(1, bodyHeight - navigation.length);
+    const header = layout.headerHeight === 1 && error ? [feedback]
+      : [theme.fg("text", theme.bold(spec.label)), feedback];
+    const chrome = panelHeader(layout, header, tabs, footer);
+    const height = chrome.layout.bodyHeight;
     const help = wrapTextWithAnsi(sanitizeTerminalText(spec.description), innerWidth);
     const presets = wrapTextWithAnsi(`Presets: ${spec.presets.join(" / ")}`, innerWidth);
     // Always reserve an editable row, even after a short/narrow resize.
-    const notes = height >= 5 ? [...help, "", ...presets, ""].slice(0, height - 2) : [];
-    const body = [...navigation, ...notes, ...input.render(innerWidth, Math.max(1, height - notes.length))];
-    if (error && layout.headerHeight === 0) body[navigation.length] = feedback;
-    const header = layout.headerHeight === 1 ? [error ? feedback : theme.fg("text", theme.bold(spec.label))]
-      : [theme.fg("text", theme.bold(spec.label)), feedback];
-    return panelFrame(layout, header, body, footer, (text) => theme.fg("borderMuted", text), { footerAfterBodyRows: navigation.length });
+    const notes = height >= 5 ? [...help, "", ...presets, "", ...wrapTextWithAnsi("Ctrl+S in Settings saves the value.", innerWidth)]
+      .slice(0, height - 2) : [];
+    const body = [...notes, ...input.render(innerWidth, Math.max(1, height - notes.length))];
+    if (error && layout.headerHeight === 0) body.unshift(feedback);
+    return chrome.render(body, (text) => theme.fg("borderMuted", text));
   }
 
   private cycleThinking(): void {
@@ -271,7 +272,6 @@ export class SettingsPage {
     const cached = this.settingsFrames.get(frameKey);
     if (cached) { this.settingsScrollTop = cached.scrollTop; return cached.lines; }
     let body: string[];
-    let header: string[];
     const dirty = settingsDirty(this.selected, this.original);
     const notice = [this.saving ? "Saving..." : this.settingsNotice, dirty ? "Unsaved settings changes" : ""].filter(Boolean).join(" · ");
     const optimizer = this.settingsOptimizer;
@@ -280,12 +280,13 @@ export class SettingsPage {
     const action = this.cursor === 4 && !optimizer?.thinkingEnabled ? "Unavailable" : "Change";
     // Saving has a fixed key and an explicit scope, independent of row focus.
     const back: KeyHint = ["Esc", dirty ? "Discard" : "Back"];
-    const { layout, navigation, footer } = this.hintLayout(baseLayout,
+    const { layout, tabs, footer } = this.hintLayout(baseLayout,
       [["Ctrl+S", "Save"], ["Enter", action], ["Tab", "Group"], back],
       [back, ["^S", "Save"], ["↵", action], ["Tab", "Group"]]);
     const status = theme.fg(dirty || this.settingsFailed ? "warning" : "muted", sanitizeTerminalText(notice || "Applies to future requests"));
-    header = [layout.headerHeight === 1 && notice ? status : theme.fg("text", theme.bold("Settings")), status];
-    const contentHeight = layout.bodyHeight - navigation.length;
+    const header = [layout.headerHeight === 1 && notice ? status : theme.fg("text", theme.bold("Settings")), status];
+    const chrome = panelHeader(layout, header, tabs, footer);
+    const contentHeight = chrome.layout.bodyHeight;
     // Keep top-level navigation fixed; the subordinate group strip is compact.
     const rows = panelTabs({ ...layout, bodyHeight: Math.min(7, contentHeight) }, groups.map((group) => group.label), this.settingsGroup, theme);
     let focusStart = 0;
@@ -364,16 +365,14 @@ export class SettingsPage {
     if (focusStart < start) start = focusStart;
     else if (focusEnd > start + listHeight) start = Math.min(focusStart, focusEnd - listHeight);
     this.settingsScrollTop = Math.max(0, Math.min(start, maxStart));
-    body = [...navigation, ...Array.from({ length: listHeight }, (_, i) => rows[this.settingsScrollTop + i] ?? "")];
-    // Wide tables already explain each option inline. Stable group notes and
-    // controls leave only the old/new focus rows to repaint on up/down.
+    body = Array.from({ length: listHeight }, (_, i) => rows[this.settingsScrollTop + i] ?? "");
     const details = group === "Context" && this.cursor < 3 && descriptions && detailHeight === 2
       ? [instructionDescriptions[this.selected.instructions], "Tree: default only; @directory is separate. Skills: metadata only."]
       : wrapTextWithAnsi(sanitizeTerminalText(focusedDetail), innerWidth);
     body.push(...details.slice(0, detailHeight).map((line, i) => theme.fg("muted",
       i === detailHeight - 1 && details.length > detailHeight ? truncateToWidth(line + "…", innerWidth, "…") : line)));
     if (!layout.headerHeight && notice) body[0] = status;
-    const lines = panelFrame(layout, header, body, footer, (text) => theme.fg("borderMuted", text), { footerAfterBodyRows: navigation.length });
+    const lines = chrome.render(body, (text) => theme.fg("borderMuted", text));
     if (this.settingsFrames.size >= 12) this.settingsFrames.clear();
     this.settingsFrames.set(frameKey, { lines, scrollTop: this.settingsScrollTop });
     return lines;

@@ -1,3 +1,4 @@
+import { frameHeader } from "../support/panel-chrome.js";
 import { getKeybindings, TuiAltScreen, TuiMainScreen, visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it, vi } from "vitest";
@@ -48,10 +49,11 @@ describe.each(["regular", "fullscreen"] as const)("current-round Preview (%s)", 
           expect(frame).toHaveLength(workspaceHeight(rows));
           expect(frame.every((line) => visibleWidth(line) <= columns)).toBe(true);
           const styled = (label ? theme.fg("muted", label) : "") + theme.fg("text", name);
-          const header = frame.slice(0, 3).find((line) => line.includes(styled));
+          const header = frameHeader(frame).find((line) => line.includes(styled));
           expect(header, `${columns}×${rows}`).toBeDefined();
           expect(stripVTControlCharacters(header!).replace(/^│|│$/g, "").trim())
-            .toBe(label + name + (counts ? " · 1 prompt · 0 runs" : ""));
+            .toContain(label + name + (counts ? " · 1 prompt · 0 runs" : ""));
+          if (!counts) expect(frameHeader(frame).join("\n")).not.toContain("1 prompt · 0 runs");
         }
         showOptimizerQuota = true;
         for (const [columns, rows, hint] of [[120, 40, "May use optimizer quota or incur charges"],

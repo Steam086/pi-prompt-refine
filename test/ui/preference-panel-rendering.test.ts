@@ -1,4 +1,5 @@
-import { CURSOR_MARKER, KeybindingsManager, TUI_KEYBINDINGS, truncateToWidth, visibleWidth, wrapTextWithAnsi, type TUI } from "@earendil-works/pi-tui";
+import { frameHeader } from "../support/panel-chrome.js";
+import { CURSOR_MARKER, KeybindingsManager, TUI_KEYBINDINGS, truncateToWidth, visibleWidth, type TUI } from "@earendil-works/pi-tui";
 import { performance } from "node:perf_hooks";
 import { stripVTControlCharacters } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -143,7 +144,7 @@ describe("preference rendering and responsiveness", () => {
     const f = setup([], "Extra", themeName); await loaded(f.panel);
     vi.spyOn(f.theme, "bold").mockImplementation((value) => `\x1b[1m${value}\x1b[22m`);
     const check = (...hints: KeyHint[]) => {
-      const footer = f.panel.render(100).slice(-2).join("\n");
+      const footer = frameHeader(f.panel.render(100)).join("\n");
       for (const hint of hints) {
         expect(footer).toContain(formatKeyHint(hint, f.theme));
         expect(footer).not.toContain(f.theme.bold(hint[1]));
@@ -182,7 +183,7 @@ describe("preference rendering and responsiveness", () => {
     expect(f.panel.render(100).join("\n")).toContain(CURSOR_MARKER);
     f.panel.handleInput("Edited"); f.panel.handleInput(esc); check();
     f.terminal.rows = 8;
-    expect(f.panel.render(20).at(-1)).toContain(formatKeyHint(["Esc", "Keep"], f.theme));
+    expect(frameHeader(f.panel.render(20)).join("\n")).toContain(formatKeyHint(["Esc", "Keep"], f.theme));
   });
 
   it.each(["dark", "light"])("separates reference headings, metadata and literal bodies (%s)", async (name) => {
@@ -215,7 +216,7 @@ describe("preference rendering and responsiveness", () => {
       expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
       expect(stripVTControlCharacters(lines.join("\n"))).toContain("Write conflict");
       expect(lines.join("\n")).toContain(f.theme.fg("error", "⚠ Write conflict 中文😀").split("⚠")[0]);
-      if (rows >= 8) expect(lines.at(-1)).toContain(formatKeyHint(["Esc", "Back"], f.theme));
+      if (rows >= 8) expect(frameHeader(lines).join("\n")).toContain(formatKeyHint(["Esc", "Back"], f.theme));
     }
     const failure = setup([], "Extra", name); await loaded(failure.panel);
     failure.library.errors.project = "Permission denied";
@@ -272,7 +273,7 @@ describe("preference rendering and responsiveness", () => {
     f.panel.handleInput("n"); f.panel.handleInput("Name"); save(f.panel); await loaded(f.panel);
     const output = f.panel.render(40).join("\n");
     expect(output).toContain("Write failed"); expect(output).not.toContain("\x1b[2J"); expect(output).not.toContain("\x1b]52");
-    const firstLine = wrapTextWithAnsi(presentation.sanitizeTerminalText(message), panelLayout(40, 40).innerWidth)[0]!;
-    expect(f.panel.render(40).slice(-2).join("\n")).toContain(f.theme.fg("error", firstLine));
+    const firstLine = truncateToWidth(`⚠ ${presentation.sanitizeTerminalText(message)}`, panelLayout(40, 40).innerWidth, "");
+    expect(frameHeader(f.panel.render(40)).join("\n")).toContain(f.theme.getFgAnsi("error") + stripVTControlCharacters(firstLine));
   });
 });

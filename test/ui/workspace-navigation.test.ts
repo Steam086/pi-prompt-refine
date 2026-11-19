@@ -1,3 +1,4 @@
+import { frameHeader } from "../support/panel-chrome.js";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it, vi } from "vitest";
@@ -19,8 +20,8 @@ describe("shared refine workspace", () => {
         expect(workspace.handleInput(key)).toBe(true);
         const lines = workspace.render(100);
         expect(lines).toHaveLength(height);
-        const strip = lines[4]!;
-        expect(strip).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(` ${theme.underline(page)} `))));
+        const strip = frameHeader(lines).find((line) => / Preview +Usage +Settings /.test(stripVTControlCharacters(line)))!;
+        expect(strip).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(` ${page} `))));
         for (const label of ["Preview", "Usage", "Settings"]) expect(strip).toContain(label);
         expect(strip).not.toMatch(/h History|u Usage|←|→/);
         expect(stripVTControlCharacters(lines[1]!)).toContain(page === "Preview" ? "Prompt refine" : page);
@@ -156,8 +157,8 @@ describe("shared refine workspace", () => {
           expect(textOf(frame)).toContain(formatKeyHint(["Tab", "Group"], theme, 1, "secondary"));
           expect(stripVTControlCharacters(textOf(frame))).not.toMatch(/[←→]:/);
         }
-        expect(textOf(context)).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Context "))));
-        expect(textOf(optimizer)).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Optimizer "))));
+        expect(textOf(context)).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Context "))));
+        expect(textOf(optimizer)).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Optimizer "))));
       }
     }
   });

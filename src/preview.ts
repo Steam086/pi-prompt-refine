@@ -1,7 +1,7 @@
 import { Markdown, ScrollView, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
-import { panelFrame, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
+import { panelHeader, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
 import { formatRunUsage, formatTokenUsage } from "./usage.js";
 import { resultHeading, sanitizeTerminalText, type SummaryOptions } from "./presentation.js";
 
@@ -330,13 +330,6 @@ export class PreviewPanel implements Component {
     const layout = this.layout(width);
     const { innerWidth } = layout;
     const navigation = workspaceTabs(layout, "Preview", theme);
-    if (options.navigation && layout.bodyHeight - navigation.length >= 4) {
-      const position = options.navigation;
-      navigation.push(theme.fg("muted", truncateToWidth(sanitizeTerminalText(
-        `${position.index}/${position.count} · ${position.label}`,
-      ), innerWidth)));
-    }
-    const bodyHeight = layout.bodyHeight - navigation.length;
     const heading = options.accepted
       ? theme.fg("success", theme.bold(`✓ Accepted · ${options.elapsedSeconds}s`))
       : options.state.phase === "idle" ? "" : resultHeading(options, theme, false);
@@ -348,12 +341,21 @@ export class PreviewPanel implements Component {
       ...(model && options.thinkingLevel ? [options.thinkingLevel] : []),
       ...(options.state.phase === "generating" || options.state.phase === "error" ? [options.contextLabel] : []),
     ].join(" · "));
-    const status = [heading, theme.fg("muted", metadata)].filter(Boolean).join(" · ");
-    header.push(this.referenceOnly ? theme.fg("muted", "Read-only reference") : options.notice ? theme.fg("muted", sanitizeTerminalText(options.notice)) : status);
+    const position = options.navigation;
+    const record = position ? theme.fg("muted", sanitizeTerminalText(`${position.index}/${position.count} · ${position.label}`)) : "";
+    const editorChanged = !this.referenceOnly && (options.draftChanged || options.accepted?.editorChanged)
+      ? theme.fg("warning", "Editor changed") : "";
+    const sending = options.state.pendingSend ? theme.fg("warning", "Send pending · draft kept") : "";
+    const notice = this.referenceOnly ? theme.fg("muted", "Read-only reference")
+      : options.notice ? theme.fg("muted", sanitizeTerminalText(options.notice)) : "";
+    const status = (scroll = "") => [sending, editorChanged, notice || heading, scroll, notice ? "" : theme.fg("muted", metadata), record]
+      .filter(Boolean).join(theme.fg("muted", " · "));
+    header.push(status());
+    if (layout.headerHeight === 1) header[0] = sending || editorChanged || (options.state.phase === "generating" ? heading : header[0]!);
     // Keep the main decision visible; secondary actions remain available in Help.
     // Pending/generating states take priority even if a previous candidate is retained.
     const primary: KeyHint[] = options.state.pendingSend
-      ? [["", "Send pending"]]
+      ? []
       : options.state.phase === "generating"
         ? [["x", "Stop"]]
         : options.accepted
@@ -377,9 +379,20 @@ export class PreviewPanel implements Component {
       ? [fittingKeyHints(primary, innerWidth, theme), fittingKeyHints(secondary, innerWidth, theme)]
       : alignedKeyHints([primary, secondary], innerWidth, theme);
     if (layout.footerHeight === 1) footer[0] = fittingKeyHints([...secondary.slice(0, 2), ...primary, ...secondary.slice(2)], innerWidth, theme);
+    const hints = this.referenceOnly ? [] : footer;
     // ScrollView owns offsets/clamping. Explicit viewport composition also works in regular
     // mode, where ScrollView.render() alone returns the entire document without clipping.
     const body = this.scroll.render(innerWidth);
+    let chrome = panelHeader(layout, header, navigation, hints);
+    const scrolling = body.length > chrome.layout.bodyHeight && !this.referenceOnly && layout.headerHeight > 1;
+    const last = body.length;
+    const rangeWidth = visibleWidth(`↑↓ ${last}–${last}/${last}`);
+    const withRange = (start: number, end: number) => {
+      const range = `↑↓ ${start}–${end}/${last}`.padEnd(rangeWidth);
+      return panelHeader(layout, [header[0]!, status(theme.fg("muted", range))], navigation, hints);
+    };
+    if (scrolling) chrome = withRange(last, last);
+    const bodyHeight = chrome.layout.bodyHeight;
     const anchor = this.lastBodyHeight !== bodyHeight ? this.heightAnchor ?? this.scroll.scrollTop : undefined;
     this.scroll.updateLayout(body.length, bodyHeight, this.requestRender);
     this.lastBodyHeight = bodyHeight;
@@ -403,28 +416,8 @@ export class PreviewPanel implements Component {
         ...visible.map((line) => " ".repeat(Math.max(0, Math.floor((innerWidth - visibleWidth(line)) / 2))) + line),
       ];
     }
-    if (body.length > bodyHeight && !this.referenceOnly) {
-      const position = `↑↓ ${start + 1}–${Math.min(body.length, start + bodyHeight)}/${body.length}`;
-      // Position is secondary to notices; scrolling must not hide request feedback.
-      header[1] = options.notice
-        ? theme.fg("muted", `${sanitizeTerminalText(options.notice)} · ${position}`)
-        : options.state.phase === "generating"
-          ? [heading, theme.fg("muted", position), theme.fg("muted", metadata)].filter(Boolean).join(" · ")
-          : [theme.fg("muted", position), status].filter(Boolean).join(" · ");
-    }
-    if (layout.headerHeight === 1 && options.state.phase === "generating") {
-      header[0] = heading;
-    }
-    if (!this.referenceOnly && (options.draftChanged || options.accepted?.editorChanged)) {
-      const warning = theme.fg("warning", "Editor changed");
-      header[1] = warning + theme.fg("muted", " · ") + header[1];
-      if (layout.headerHeight === 1) header[0] = warning;
-    }
-    if (options.state.pendingSend) {
-      // Delivery is not completion. Keep this visible even at the end of a long result.
-      header[1] = `${theme.fg("warning", "Send pending · draft kept")} · ${header[1]}`;
-      if (layout.headerHeight === 1) header[0] = theme.fg("warning", "Send pending · draft kept");
-    }
-    return panelFrame(layout, header, [...navigation, ...visible], footer, (text) => theme.fg("borderMuted", text));
+    if (scrolling) chrome = withRange(start + 1, Math.min(last, start + bodyHeight));
+    if (!layout.headerHeight && (sending || editorChanged)) visible.unshift(sending || editorChanged);
+    return chrome.render(visible, (text) => theme.fg("borderMuted", text));
   }
 }

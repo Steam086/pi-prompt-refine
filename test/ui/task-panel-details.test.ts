@@ -1,3 +1,4 @@
+import { frameHeader } from "../support/panel-chrome.js";
 import { Text, visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,7 +16,7 @@ describe("prompt tree and inspection", () => {
     panel.handleInput("\r");
     for (const width of [20, 28, 40, 80, 100, 160, 40]) {
       const lines = panel.render(width);
-      const subtitle = lines[2]!;
+      const subtitle = frameHeader(lines).find((line) => line.includes("#1"))!;
       expect(stripVTControlCharacters(subtitle)).toContain("#1");
       expect(stripVTControlCharacters(subtitle)).toContain("…");
       expect(subtitle).toContain(formatKeyHint(["o", width === 20 ? "Ref" : "Reference"], theme));
@@ -143,11 +144,11 @@ describe("prompt tree and inspection", () => {
     for (const label of ["Prompt details", "#2 模型😀�[1m", "Revised result", "Original prompt", "Revision instruction"]) {
       expect(output).toContain(heading(label));
     }
-    expect(output).toContain(theme.bg("selectedBg", heading(` ${theme.underline("Preview")} `)));
+    expect(output).toContain(theme.bg("selectedBg", heading(" Preview ")));
     for (const label of ["Selected: ", " Usage ", " Settings ", "openai-codex · Thinking xhigh", "23s", "Revision of run #1", " │ ", " · "]) {
       expect(output).toContain(muted(label));
     }
-    expect(output).toContain(muted("─".repeat(panelLayout(100, size.rows).innerWidth)));
+    expect(output).toContain(theme.fg("borderMuted", "─".repeat(panelLayout(100, size.rows).innerWidth)));
     expect(output).toContain(theme.fg("text", "模型😀�[1m") + muted(" · ") + theme.fg("success", "✓ Revised"));
     expect(output).not.toContain(theme.bold("23s"));
     for (const label of ["Result **literal**�[1m", revised.input.draft, revised.input.revision.instruction]) {

@@ -81,7 +81,7 @@ describe("Revise visual hierarchy and feedback", () => {
       expect(strip(lines.join("\n"))).toContain("Feedback");
       if (rows >= 8) {
         expect(lines.join("\n")).toContain(CURSOR_MARKER);
-        expect(lines.slice(-3).join("\n")).toContain(formatKeyHint(["Esc", "Back"], f.theme));
+        expect(lines.join("\n")).toContain(formatKeyHint(["Esc", "Back"], f.theme));
       }
     }
     f.terminal.rows = 40; f.terminal.columns = 100;

@@ -1,6 +1,6 @@
 import { Input, parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { panelFrame, panelLayout, type PanelLayoutProvider } from "./panel-layout.js";
+import { panelHeader, panelLayout, type PanelLayoutProvider } from "./panel-layout.js";
 import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
 import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
@@ -445,7 +445,7 @@ export class PreferencePanel {
   render(width: number): string[] {
     if (width < 1) return [];
     const layout = this.layout(width);
-    const { innerWidth: w, bodyHeight: h } = layout;
+    const { innerWidth: w } = layout;
     const clean = (text: string) => sanitizeTerminalText(text);
     const wrap = (text: string, columns = w) => wrapTextWithAnsi(clean(text), columns);
     const button = (text: string, active: boolean) => active ? this.theme.bg("selectedBg", this.theme.fg("text", `› ${clean(text)}`)) : this.theme.fg("muted", `  ${clean(text)}`);
@@ -455,7 +455,7 @@ export class PreferencePanel {
     const managing = this.purpose === "manage";
     let subtitle = `Focus: ${["Search", "Library", "Actions"][this.focus]} · ${managing ? `${this.working.length} frozen snapshots` : `${this.working.length} selected · ${this.requirementsChars}/${this.maxChars} chars`}`;
     let subtitleColor: DocumentPart["color"] = "muted";
-    let body: string[] = [];
+    let renderBody: (height: number) => string[];
     let hints: KeyHint[][] = [[...(!managing ? [["Alt+Enter", "Bring back"] as KeyHint] : []),
       ...(this.focus === 1 && !managing ? [["Space", this.selectedOnly ? "Deselect" : "Select"] as KeyHint] : []),
       ...(this.focus === 1 && this.repository.setProjectDefault ? [["g", "Project default"] as KeyHint] : []),
@@ -466,18 +466,22 @@ export class PreferencePanel {
       [["Esc", managing ? "Back" : "Cancel selection"], ["Tab / Shift+Tab", "Focus"], ...(this.focus !== 0 ? [["/", "Search"] as KeyHint] : [])]];
     const page = this.page;
     if (page.kind === "read") {
-      title = page.title; subtitle = "Read-only · No request sent";
-      const lines = this.document(page.document, w); this.viewport = Math.max(1, h);
-      page.scroll = Math.min(page.scroll, Math.max(0, lines.length - h));
-      body = lines.slice(page.scroll, page.scroll + h);
-      hints = [[["↑↓ / PgUp / PgDn", "Scroll"], ["", `${Math.min(lines.length, page.scroll + 1)}–${Math.min(lines.length, page.scroll + h)} / ${lines.length} lines`]],
-        [["Esc", "Back"], ["", "No request sent"]]];
+      title = page.title;
+      subtitle = "Read-only";
+      renderBody = (h) => {
+        const lines = this.document(page.document, w);
+        this.viewport = h;
+        page.scroll = Math.min(page.scroll, Math.max(0, lines.length - h));
+        return lines.slice(page.scroll, page.scroll + h);
+      };
+      hints = [[["↑↓ / PgUp / PgDn", "Scroll"]], [["Esc", "Back"]]];
     } else if (page.kind === "discard" || page.kind === "delete") {
       title = page.kind === "discard" ? "Discard unsaved form?" : "Delete library entry?";
-      body = page.kind === "discard"
+      subtitle = "";
+      renderBody = () => page.kind === "discard"
         ? wrap("Unsaved form changes will be discarded. Pending selection and saved library entries stay unchanged.").map((line) => this.theme.fg("warning", line))
-        : this.document(this.description(page.entry), w);
-      hints = [[["y", page.kind === "discard" ? "Discard" : "Delete"], ["", "Selected snapshots stay unchanged"]],
+        : [...this.document(this.description(page.entry), w), this.theme.fg("muted", "Selected snapshots stay unchanged")];
+      hints = [[["y", page.kind === "discard" ? "Discard" : "Delete"]],
         [["n / Esc", page.kind === "discard" ? "Keep editing" : "Cancel"]]];
     } else if (page.kind === "form") {
       const form = page.form;
@@ -492,15 +496,14 @@ export class PreferencePanel {
       // outer frame clips its minimal safe canvas in extremely narrow terminals.
       const editorWidth = Math.max(4, w);
       // Tiny viewports show the focused field; the same Tab order remains usable.
-      if (h < 9) {
-        body = form.focus === 0 ? name : form.focus === 5 ? [save] : form.focus === 4 ? description
+      renderBody = (h) => {
+        if (h < 9) return form.focus === 0 ? name : form.focus === 5 ? [save] : form.focus === 4 ? description
           : form.focus === 2 ? [scope] : form.focus === 3 ? [type] : form.body.render(editorWidth, Math.max(1, h));
-      } else {
-        body = [...name, ...form.body.render(editorWidth, h - 5), scope, type, ...description, save];
-      }
+        return [...name, ...form.body.render(editorWidth, h - 5), scope, type, ...description, save];
+      };
       const enterLabel = form.focus === 5 ? "Save to library" : form.focus === 1 ? "Newline" : form.focus === 0 || form.focus === 4 ? "Next field"
         : form.focus === 3 ? "Change type" : form.kind === "library" ? "Scope fixed" : "Change scope";
-      hints = [[["Enter", enterLabel], ["Tab / Shift+Tab", "Fields"]], [["Esc", "Back"], ["", "No request sent"]]];
+      hints = [[["Enter", enterLabel], ["Tab / Shift+Tab", "Fields"]], [["Esc", "Back"]]];
     } else {
       const entries = this.entries();
       this.index = Math.min(this.index, Math.max(0, entries.length - 1));
@@ -508,70 +511,73 @@ export class PreferencePanel {
       const status = errors.length ? errors.join(" · ") : this.selectedOnly && !this.working.length
         ? "No selections · s All to browse" : !this.library.entries.length && !this.working.length
           ? "Library is empty · n Add to start" : !entries.length ? "No matches · / Search to change query" : "";
-      const columns = Math.max(1, Math.min(3, Math.floor(w / 12)));
-      const cellWidth = Math.max(1, Math.floor((w - (columns - 1) * 2) / columns));
-      const toolbar: string[] = [];
-      for (let start = 0; start < ACTIONS.length; start += columns) {
-        toolbar.push(ACTIONS.slice(start, start + columns).map((action, i) => {
-          const active = this.focus === 2 && start + i === this.actionIndex;
-          const hint = `${active ? "›" : " "} ${formatKeyHint([action.key, action.label], this.theme)}`;
-          const cell = truncateToWidth(hint, cellWidth, "…");
-          const padded = cell + " ".repeat(Math.max(0, cellWidth - visibleWidth(cell)));
-          return active ? this.theme.bg("selectedBg", padded) : padded;
-        }).join("  "));
-      }
-      const chrome = [...this.search.render(w), ...toolbar];
-      const room = h >= chrome.length + 2;
-      const available = Math.max(1, room ? h - chrome.length - 1 : h);
-      this.viewport = available;
-      const split = room && w >= 76;
-      const leftWidth = split ? Math.floor(w * 0.43) : w;
-      const groupTitle = (entry: RevisionPreference) => entry.metadata?.kind === "task" ? "Task requirements"
-        : entry.metadata?.kind === "rewrite" ? "Prompt rewriting" : "Unclassified";
-      const window = selectionWindow(entries.length, this.index, available, this.top,
-        this.selectedOnly ? undefined : (index) => groupTitle(entries[index]!), available >= 10 ? 1 : 0, this.navigationDirection);
-      this.top = window.start;
-      const rows = window.rows;
-      this.viewport = Math.max(1, rows.filter((row) => typeof row === "number").length);
-      const list = rows.map((row) => {
-        if (typeof row === "string") return this.theme.fg("text", this.theme.bold(truncateToWidth(row, leftWidth, "…")));
-        const entry = entries[row]!;
-        const current = row === this.index;
-        const active = this.focus === 1 && current;
-        const local = this.local(entry);
-        const source = this.source(entry);
-        const unavailable = !!this.library.errors[entry.scope];
-        const changed = local && source && (local.version !== source.version || local.name !== source.name || local.sourceBody !== source.body ||
-          JSON.stringify(local.metadata) !== JSON.stringify(source.metadata));
-        const warning = unavailable ? "unavailable" : !source ? "deleted" : changed ? "snapshot kept" : "";
-        const cursor = active ? "›" : current ? "·" : " ";
-        return renderPreferenceRow({ width: leftWidth, name: entry.name, scope: entry.scope,
-          selected: !!local, focused: active, cursor, warning,
-          projectDefault: this.library.projectDefaults?.includes(preferenceKey(entry)) }, this.theme);
-      });
-      if (!entries.length) list.push(...wrap(status, leftWidth).map((line) => this.theme.fg(errors.length ? "error" : "muted", line)));
-      if (!room) {
-        body = this.focus === 0 ? this.search.render(w) : this.focus === 2
-          ? toolbar.slice(Math.min(Math.floor(this.actionIndex / columns), Math.max(0, toolbar.length - h))) : list;
-      } else {
-        const rightWidth = split ? w - leftWidth - 3 : w;
-        const detail = split && entries[this.index] ? this.document(this.description(entries[this.index]!, true), rightWidth) : [];
-        const headingText = this.theme.fg("text", this.theme.bold(`${this.selectedOnly ? "Selected" : "Library"} ${entries.length ? this.index + 1 : 0}/${entries.length}`));
-        const count = this.theme.fg("muted", ` · ${this.working.length} selected`);
-        const viewHint = this.focus !== 0 ? formatKeyHint(["s", this.selectedOnly ? "All" : "Selected"], this.theme) : "";
-        const hintFits = !!viewHint && visibleWidth(headingText) + 3 + visibleWidth(viewHint) <= leftWidth;
-        const countFits = visibleWidth(headingText + count) + (hintFits ? 3 + visibleWidth(viewHint) : 0) <= leftWidth;
-        const heading = truncateToWidth(headingText + (countFits ? count : ""), leftWidth, "")
-          + (hintFits ? this.theme.fg("muted", " · ") + viewHint : "");
-        const panes = Array.from({ length: available }, (_, i) => {
-          if (!split) return list[i] ?? "";
-          const left = list[i] ?? "";
-          return left + " ".repeat(Math.max(0, leftWidth - visibleWidth(left))) + this.theme.fg("borderMuted", " │ ") + (detail[i] ?? "");
+      renderBody = (h) => {
+        const columns = Math.max(1, Math.min(3, Math.floor(w / 12)));
+        const cellWidth = Math.max(1, Math.floor((w - (columns - 1) * 2) / columns));
+        const toolbar: string[] = [];
+        for (let start = 0; start < ACTIONS.length; start += columns) {
+          toolbar.push(ACTIONS.slice(start, start + columns).map((action, i) => {
+            const active = this.focus === 2 && start + i === this.actionIndex;
+            const hint = `${active ? "›" : " "} ${formatKeyHint([action.key, action.label], this.theme)}`;
+            const cell = truncateToWidth(hint, cellWidth, "…");
+            const padded = cell + " ".repeat(Math.max(0, cellWidth - visibleWidth(cell)));
+            return active ? this.theme.bg("selectedBg", padded) : padded;
+          }).join("  "));
+        }
+        const chrome = [...this.search.render(w), ...toolbar];
+        const room = h >= chrome.length + 2;
+        const available = Math.max(1, room ? h - chrome.length - 1 : h);
+        this.viewport = available;
+        const split = room && w >= 76;
+        const leftWidth = split ? Math.floor(w * 0.43) : w;
+        const groupTitle = (entry: RevisionPreference) => entry.metadata?.kind === "task" ? "Task requirements"
+          : entry.metadata?.kind === "rewrite" ? "Prompt rewriting" : "Unclassified";
+        const window = selectionWindow(entries.length, this.index, available, this.top,
+          this.selectedOnly ? undefined : (index) => groupTitle(entries[index]!), available >= 10 ? 1 : 0, this.navigationDirection);
+        this.top = window.start;
+        const rows = window.rows;
+        this.viewport = Math.max(1, rows.filter((row) => typeof row === "number").length);
+        const list = rows.map((row) => {
+          if (typeof row === "string") return this.theme.fg("text", this.theme.bold(truncateToWidth(row, leftWidth, "…")));
+          const entry = entries[row]!;
+          const current = row === this.index;
+          const active = this.focus === 1 && current;
+          const local = this.local(entry);
+          const source = this.source(entry);
+          const unavailable = !!this.library.errors[entry.scope];
+          const changed = local && source && (local.version !== source.version || local.name !== source.name || local.sourceBody !== source.body ||
+            JSON.stringify(local.metadata) !== JSON.stringify(source.metadata));
+          const warning = unavailable ? "unavailable" : !source ? "deleted" : changed ? "snapshot kept" : "";
+          const cursor = active ? "›" : current ? "·" : " ";
+          return renderPreferenceRow({ width: leftWidth, name: entry.name, scope: entry.scope,
+            selected: !!local, focused: active, cursor, warning,
+            projectDefault: this.library.projectDefaults?.includes(preferenceKey(entry)) }, this.theme);
         });
-        const section = split ? truncateToWidth(heading, leftWidth, "") + " ".repeat(Math.max(0, leftWidth - visibleWidth(heading)))
-          + this.theme.fg("borderMuted", " │ ") + this.theme.fg("muted", "Preview · Enter reads full text") : heading;
-        body = [...chrome, section, ...panes];
-      }
+        if (!entries.length) list.push(...wrap(status, leftWidth).map((line) => this.theme.fg(errors.length ? "error" : "muted", line)));
+        if (!room) {
+          return this.focus === 0 ? this.search.render(w) : this.focus === 2
+            ? toolbar.slice(Math.min(Math.floor(this.actionIndex / columns), Math.max(0, toolbar.length - h))) : list;
+        } else {
+          const rightWidth = split ? w - leftWidth - 3 : w;
+          const detail = split && entries[this.index] ? this.document(this.description(entries[this.index]!, true), rightWidth) : [];
+          const headingText = this.theme.fg("text", this.theme.bold(`${this.selectedOnly ? "Selected" : "Library"} ${entries.length ? this.index + 1 : 0}/${entries.length}`));
+          const viewHint = this.focus !== 0 ? formatKeyHint(["s", this.selectedOnly ? "All" : "Selected"], this.theme) : "";
+          const hintFits = !!viewHint && visibleWidth(headingText) + 3 + visibleWidth(viewHint) <= leftWidth;
+          const count = subtitleColor !== "muted" || this.notice || this.busy || layout.headerHeight < 2
+            ? this.theme.fg("muted", ` · ${this.working.length} selected`) : "";
+          const countFits = visibleWidth(headingText + count) + (hintFits ? 3 + visibleWidth(viewHint) : 0) <= leftWidth;
+          const heading = truncateToWidth(headingText + (countFits ? count : ""), leftWidth, "")
+            + (hintFits ? this.theme.fg("muted", " · ") + viewHint : "");
+          const panes = Array.from({ length: available }, (_, i) => {
+            if (!split) return list[i] ?? "";
+            const left = list[i] ?? "";
+            return left + " ".repeat(Math.max(0, leftWidth - visibleWidth(left))) + this.theme.fg("borderMuted", " │ ") + (detail[i] ?? "");
+          });
+          const section = split ? truncateToWidth(heading, leftWidth, "") + " ".repeat(Math.max(0, leftWidth - visibleWidth(heading)))
+            + this.theme.fg("borderMuted", " │ ") + this.theme.fg("muted", "Preview · Enter reads full text") : heading;
+          return [...chrome, section, ...panes];
+        }
+      };
       if (errors.length) { subtitle = `Load failed · ${errors.join(" · ")}`; subtitleColor = "error"; }
       else if (tooLong && !managing) { subtitle = `Too long · ${this.requirementsChars}/${this.maxChars} chars`; subtitleColor = "warning"; }
     }
@@ -585,21 +591,18 @@ export class PreferencePanel {
         "Save to library": "Save", "Save this revision's edit": "Save edit", "Change scope": "Scope", "Scope fixed": "Fixed" };
       hints = hints.map((row) => row.map(([key, label]) => [key === "n / Esc" ? "Esc" : key.split(" / ")[0]!, labels[label] ?? label]));
     }
-    const footer = w < 30
+    const footer = page.kind === "read"
+      ? [fittingKeyHints([hints[1]![0]!, ...hints[0]!], w, this.theme)]
+      : w < 30
       ? hints.map((row) => fittingKeyHints(row, w, this.theme))
       : alignedKeyHints(hints, w, this.theme);
     if (layout.footerHeight === 1) footer[0] = fittingKeyHints([hints[1]![0]!, ...hints[0]!], w, this.theme);
-    // Notices are untrusted plain text; sanitize before styling. Never sanitize
-    // already-styled key hints, which would strip their ANSI emphasis/colors.
-    if (this.notice && visibleWidth(clean(this.notice)) > w && page.kind !== "read" && layout.footerHeight > 1) {
-      // A long notice must not hide Back/Cancel or region navigation.
-      footer[0] = this.theme.fg(this.noticeColor, wrap(this.notice)[0] ?? "");
-    }
     const severe = subtitleColor !== "muted";
     const feedback = this.theme.fg(subtitleColor, clean(`${severe ? "⚠ " : ""}${subtitle}`));
-    const header = [this.theme.fg("text", this.theme.bold(clean(title))), feedback];
-    if (severe && layout.headerHeight === 1) header[0] = feedback;
-    if (severe && layout.headerHeight === 0) body = [feedback, ...body];
-    return panelFrame(layout, header, body, footer, (text) => this.theme.fg("borderMuted", text));
+    const heading = this.theme.fg("text", this.theme.bold(clean(title)));
+    const chrome = panelHeader(layout, [severe && layout.headerHeight === 1 ? feedback : heading, feedback], [], footer);
+    const body = renderBody(chrome.layout.bodyHeight);
+    if (severe && layout.headerHeight === 0) body.unshift(feedback);
+    return chrome.render(body, (text) => this.theme.fg("borderMuted", text));
   }
 }

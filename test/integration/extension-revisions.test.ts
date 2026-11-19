@@ -1,3 +1,4 @@
+import { frameHeader } from "../support/panel-chrome.js";
 import { describe, expect, it, vi } from "vitest";
 import { extensionHarnessEnvironment, projectConfig, refinement, resourcePrompt, trigger } from "../support/extension-harness.js";
 import { flushPromises } from "../support/helpers.js";
@@ -68,8 +69,9 @@ describe("explicit candidate revision", () => {
     const before = harness.panelLines(100);
     harness.panelInput("f");
     // Reference content keeps its viewport; only suspended navigation chrome changes.
-    expect(harness.panelLines(100).slice(9, 13)).toEqual(before.slice(9, 13));
-    const referenceHeader = harness.panelLines(100).slice(0, 9).join("\n");
+    const sourceLines = (lines: string[]) => lines.filter((line) => /Source line \d+/.test(line)).slice(0, 4);
+    expect(sourceLines(harness.panelLines(100))).toEqual(sourceLines(before));
+    const referenceHeader = frameHeader(harness.panelLines(100)).join("\n");
     expect(referenceHeader).toContain("Read-only reference");
     for (const hint of ["↑↓ scroll", "a Accept", "s Send to Pi", "p Preferences", "i Edit original", "f Revise"]) {
       expect(referenceHeader).not.toContain(hint);
@@ -121,7 +123,7 @@ describe("explicit candidate revision", () => {
     expect(harness.sent).toEqual([]);
     expect(harness.panelLines().join("\n")).toContain("Second result");
     harness.panelInput("f");
-    expect(harness.panelLines().join("\n")).not.toContain("再短一点");
+    expect(harness.panelLines().join("\n").split("Additional requirements:").at(-1)).not.toContain("再短一点");
     harness.panelInput("Use bullet points");
     harness.complete.mockResolvedValueOnce({ content: [{ type: "text", text: JSON.stringify({ prompt: "Third result" }) }], stopReason: "stop" });
     harness.panelInput("\x13");

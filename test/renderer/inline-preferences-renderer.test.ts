@@ -1,3 +1,4 @@
+import { sliceByColumn, visibleWidth as tabWidth } from "@earendil-works/pi-tui";
 import { getKeybindings, TuiAltScreen, TuiMainScreen, visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it, vi } from "vitest";
@@ -57,21 +58,22 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       expect(plain[selectedAt]).toContain("Original prompt");
       expect(plain[selectedAt + 1]).toContain("Current 中文😀");
       expect(initial.join("\n")).toContain(theme.fg("muted", sanitizeTerminalText(entries[0]!.metadata!.description!)));
-      const tabs = initial.find((line) => line.includes(" Preview "))!;
+      const tabStrip = (lines: string[]) => sliceByColumn(lines.find((line) => line.includes(" Preview "))!, 0, tabWidth("   Preview    Usage    Settings "));
+      const tabs = tabStrip(initial);
       expect(stripVTControlCharacters(tabs)).not.toMatch(/[←→]/);
       const redraws = tui.fullRedraws;
       writes.length = 0; // Exclude the renderer's initial fullscreen clear.
       input("\t"); input(" ");
       const selecting = render();
-      expect(selecting.find((line) => line.includes(" Preview "))).toBe(tabs);
+      expect(tabStrip(selecting)).toBe(tabs);
       for (const key of ["\x1b[D", "\x1b[C"]) {
         input(key);
-        expect(render().find((line) => line.includes(" Preview "))).toBe(tabs);
+        expect(tabStrip(render())).toBe(tabs);
       }
       expect(stripVTControlCharacters(selecting.join("\n"))).toContain("› [x] Choice 0");
       expect(stripVTControlCharacters(selecting.join("\n"))).toContain("Literal requirement 0");
       input("\x1b");
-      expect(render().find((line) => line.includes(" Preview "))).toBe(tabs);
+      expect(tabStrip(render())).toBe(tabs);
       expect(tui.fullRedraws).toBe(redraws);
       expect(writes.join("")).not.toContain("\x1b[2J");
       for (const [columns, rows] of [[45, 14], [160, 14], [160, 60]]) {
@@ -133,7 +135,7 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       tui.start(); render(); await Promise.resolve();
       expect(render()).toContain("Preferences · 0 selected");
       input("\t"); input(" ");
-      expect(render()).toContain("Focus: Preferences");
+      expect(render()).toContain("Choose preferences");
       expect(render()).toContain("› [x] Item 00");
       expect(panel.render(100).join("\n")).toContain(formatKeyHint(["Enter", "Optimize"], theme));
       expect(panel.render(100).join("\n")).toContain(formatKeyHint(["o", "Read"], theme));
