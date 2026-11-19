@@ -202,7 +202,6 @@ describe("main request deletion shortcut", () => {
     harness.complete.mockImplementationOnce(() => new Promise((res) => { resolve = res; }));
     harness.holdPanel();
     const view = shortcut(harness, "ctrl+\\")(harness.context);
-    harness.panelInput("\r");
     expect(harness.panelLines(100).join("\n")).toContain("x: Stop");
     expect(harness.panelLines(100).join("\n")).not.toContain("d: Delete");
     harness.panelInput("d");

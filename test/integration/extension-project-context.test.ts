@@ -223,16 +223,14 @@ describe("project context injection", () => {
       expect(harness.editorWrites).toEqual([]);
     });
 
-  it("injects frozen resources only after explicitly starting the first shortcut draft", async () => {
+  it("injects frozen resources when auto-starting the first shortcut draft", async () => {
     const harness = await makeHarness({ config: { projectContext: projectConfig(true) } });
     vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([]);
     const systemPrompt = vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
     harness.holdPanel();
     const view = shortcut(harness, "ctrl+\\")(harness.context);
-    expect(harness.complete).not.toHaveBeenCalled();
-    expect(harness.panelLines().join("\n")).toContain("Unsent");
+    expect(harness.panelLines().join("\n")).toMatch(/›\s+└─ fake-chat/);
     systemPrompt.mockReturnValue("Resources changed after capture");
-    harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
     const request = (harness.complete.mock.calls[0] as any[])[1];
     const input = request.messages[0].content[0].text;
@@ -243,7 +241,10 @@ describe("project context injection", () => {
     expect(input).not.toContain("PRIVATE MAIN AGENT TOOLS");
     expect(input).not.toContain("Use bash to load skills");
     expect(request.tools).toEqual([]);
-    expect(harness.notifications).toEqual(["Prompt Refine: Use Ctrl + \\ to refine your prompt."]);
+    expect(harness.notifications).toEqual([
+      "Prompt Refine: Use Ctrl + \\ to refine your prompt.",
+      "Refine may use optimizer quota or incur charges.",
+    ]);
     expect(harness.getEditor()).toBe("Draft A");
     expect(harness.sent).toEqual([]);
     expect(harness.sessionWrites).toEqual([]);

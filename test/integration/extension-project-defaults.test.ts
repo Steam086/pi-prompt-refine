@@ -47,7 +47,8 @@ describe("project defaults through the extension", () => {
     const h = await makeHarness();
     const store = new PreferenceStore(h.agentDir, h.context.cwd);
     const entry = await store.save(scope, { name: "Default 中文😀", body: "Keep commands literal." });
-    h.setEditorText("Existing draft"); h.holdPanel(); let view = shortcut(h, "ctrl+\\")(h.context);
+    h.holdPanel(); let view = h.command("", h.context);
+    h.panelInput("n"); h.panelInput("Existing draft"); h.panelInput("\r");
     const output = () => h.panelLines(100).join("\n");
     h.panelInput("p"); await vi.waitFor(() => expect(output()).not.toContain("Working…"));
     h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default enabled"));
@@ -57,8 +58,8 @@ describe("project defaults through the extension", () => {
     expect(h.complete).not.toHaveBeenCalled(); expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
     h.panelInput("q"); await view;
 
-    h.setEditorText("One request without defaults");
-    view = shortcut(h, "ctrl+\\")(h.context);
+    view = h.command("", h.context);
+    h.panelInput("n"); h.panelInput("One request without defaults"); h.panelInput("\r");
     expect(output()).toContain("Preferences · 1 selected");
     h.panelInput("\t"); await vi.waitFor(() => expect(output()).not.toContain("Loading preferences…"));
     h.panelInput("c"); expect(output()).toContain("Selected · 0");
@@ -84,7 +85,8 @@ describe("project defaults through the extension", () => {
     const h = await makeHarness(); const store = new PreferenceStore(h.agentDir, h.context.cwd);
     const entry = await store.save("global", { name: "Resumed default", body: "Keep task scope." });
     await store.setProjectDefault(entry, true); await h.reload("resume");
-    h.setEditorText("Resumed draft"); h.holdPanel(); const view = shortcut(h, "ctrl+\\")(h.context);
+    h.holdPanel(); const view = h.command("", h.context);
+    h.panelInput("n"); h.panelInput("Resumed draft"); h.panelInput("\r");
     const output = () => h.panelLines(100).join("\n");
     expect(output()).toContain("Preferences · 1 selected");
     h.panelInput("p"); await vi.waitFor(() => expect(output()).not.toContain("Working…"));
@@ -102,6 +104,20 @@ describe("project defaults through the extension", () => {
     expect(packet.editing_instruction).toBeUndefined();
     expect((await store.load()).projectDefaults).toEqual([preferenceKey(entry)]);
     h.panelInput("q"); await view;
+  });
+
+  it("uses configured project defaults on the first shortcut run", async () => {
+    const h = await makeHarness();
+    const store = new PreferenceStore(h.agentDir, h.context.cwd);
+    const entry = await store.save("global", { name: "Shortcut default", body: "Keep commands literal." });
+    await store.setProjectDefault(entry, true); await h.reload();
+    h.setCustomAction("q");
+    await shortcut(h, "ctrl+\\")(h.context);
+    await flushPromises();
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    const packet = JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
+    expect(packet).toMatchObject({ draft: "Draft A", editing_instruction: `Saved editing requirements (project default):\n${entry.body}` });
+    expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
   });
 
   it("can clear over-limit inherited requirements before any request is sent", async () => {
@@ -124,7 +140,8 @@ describe("project defaults through the extension", () => {
     const h = await makeHarness(); const store = new PreferenceStore(h.agentDir, h.context.cwd);
     const entry = await store.save("project", { name: "Toggle off", body: "Keep literal input." });
     await store.setProjectDefault(entry, true); await h.reload();
-    h.setEditorText("Captured with default"); h.holdPanel(); const view = shortcut(h, "ctrl+\\")(h.context);
+    h.holdPanel(); const view = h.command("", h.context);
+    h.panelInput("n"); h.panelInput("Captured with default"); h.panelInput("\r");
     const output = () => h.panelLines(100).join("\n");
     h.panelInput("p"); await vi.waitFor(() => expect(output()).not.toContain("Working…"));
     h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default disabled"));

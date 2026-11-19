@@ -87,7 +87,7 @@ Web 子包在 `packages/pi-web/` 单独 `npm ci --ignore-scripts --omit=optional
 修改视图前阅读 [界面维护约束](ui-conventions.md)；以下是测试侧的核心不变量，不替代完整样式与输入规则。
 
 - 唯一 overlay、稳定终端几何、焦点和来源快照保持不变。
-- 原稿/内联 Preferences 的显式 Enter 与 Revise 的 Ctrl+S 才提交；浏览、Space 勾选、库保存和带回不自动提交。
+- 原稿/内联 Preferences 用 Enter 提交，Revise 用 Ctrl+S。工作台外的优化快捷键仅能为当前轮次的首个请求自动提交新原稿；后续新原稿为 Unsent。浏览、Space 勾选、库保存和带回不提交。
 - 搜索、全文阅读、编辑、确认与子页面消费其输入，不泄漏到外层动作。
 - 保留暗/亮主题、窄/短和宽屏、ANSI/中文/emoji、resize、滚动、取消和确认的断言。
 - 正文、参考、辅助元数据、标题与按键维持现有语义主题样式；警告不被短布局吞掉。

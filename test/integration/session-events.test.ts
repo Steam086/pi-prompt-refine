@@ -42,7 +42,8 @@ describe("session-local application transport", () => {
     expect(one.binding.runtimeId).not.toBe(two.binding.runtimeId);
     expect(await wireRequest(b.events, { action: "query", binding: one.binding, query: { method: "snapshot", scope: "all" } })).toEqual({ kind: "conflict", code: "binding-stale" });
     a.holdPanel();
-    void a.shortcuts.get("ctrl+\\")!(a.context);
+    const view = a.command("", a.context);
+    a.panelInput("n"); a.panelInput("Native draft"); a.panelInput("\r");
     await flushPromises();
     const snapshot = requireValue(await wireRequest<Snapshot>(a.events, { action: "query", binding: one.binding, query: { method: "snapshot", scope: "current" } }));
     expect(snapshot.tasks).toHaveLength(1);
@@ -51,6 +52,7 @@ describe("session-local application transport", () => {
     expect(a.panelLines().join("\n")).toContain("from remote");
     expect(a.complete).not.toHaveBeenCalled();
     expect(a.getEditor()).toBe("Draft A");
+    a.panelInput("q"); await view;
   });
 
   it("stages long Unicode JSON losslessly and chunks full detail without narrowing application text limits", async () => {

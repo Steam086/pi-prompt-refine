@@ -131,7 +131,8 @@ describe("explicit candidate revision", () => {
     const store = new PreferenceStore(h.agentDir, h.context.cwd);
     const entry = await store.save("project", { name: "Inline 中文😀", body: "Only the main agent should use brief sections." });
     const original = "  Explain this literal task; do not run commands.\n";
-    h.setEditorText(original); h.holdPanel(); let view = shortcut(h, "ctrl+\\")(h.context);
+    h.setEditorText(original); h.holdPanel(); let view = h.command("", h.context);
+    h.panelInput("n"); h.panelInput(original); h.panelInput("\r");
     const output = () => h.panelLines(100).join("\n");
     h.panelInput("\t");
     await vi.waitFor(() => expect(output()).toContain("[ ] Inline 中文😀"));
@@ -158,7 +159,8 @@ describe("explicit candidate revision", () => {
   it("keeps nonempty inline search cached through the production controller adapter", async () => {
     const h = await makeHarness();
     await new PreferenceStore(h.agentDir, h.context.cwd).save("project", { name: "Needle 中文😀", body: "Keep literals." });
-    h.setEditorText("Unsent task"); h.holdPanel(); const view = shortcut(h, "ctrl+\\")(h.context);
+    h.holdPanel(); const view = h.command("", h.context);
+    h.panelInput("n"); h.panelInput("Unsent task"); h.panelInput("\r");
     const output = () => h.panelLines(100).join("\n");
     h.panelInput("\x1b[Z");
     await vi.waitFor(() => expect(output()).toContain("[ ] Needle 中文😀"));
@@ -246,7 +248,8 @@ describe("explicit candidate revision", () => {
     const original = "  Explain this command; do not run it.\n```sh\nnpm test -- --run\n```\n";
     const configBefore = await readFile(join(h.agentDir, "prompt-refine.json"), "utf8");
     h.setEditorText(original);
-    h.holdPanel(); let view = shortcut(h, "ctrl+\\")(h.context);
+    h.holdPanel(); let view = h.command("", h.context);
+    h.panelInput("n"); h.panelInput(original); h.panelInput("\r");
     expect(h.panelLines(100).join("\n")).toContain("› ○ Unsent");
     expect(h.complete).not.toHaveBeenCalled();
     h.panelInput("p");

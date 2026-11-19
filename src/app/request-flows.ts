@@ -11,7 +11,7 @@ import { composeRevision, type SelectedPreference } from "../revision-preference
 interface RequestFlowDependencies {
   controller: Pick<RefineController,
     "capture" | "getCandidate" | "getGeneration" | "getModel" | "getState" | "getTaskInput" |
-    "isCandidateCurrent" | "trigger">;
+    "hasSubmittedRunInRound" | "isCandidateCurrent" | "startRecord" | "trigger">;
   config: Pick<RefineConfig, "maxDraftChars" | "context" | "projectContext" | "systemPrompt" | "thinkingLevel">;
   useContext(ctx: ExtensionContext): void;
   setCompletionContext(ctx: ExtensionContext): void;
@@ -77,7 +77,8 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
     return preferences.length ? { preferences, editingInstruction: composeRevision(preferences, "") } : {};
   }
 
-  function triggerOptimize(ctx: ExtensionContext, force = false, suppliedDraft?: string, keepEditor = false, captureOnly = false): TriggerResult | undefined {
+  function triggerOptimize(ctx: ExtensionContext, force = false, suppliedDraft?: string, keepEditor = false,
+    mode: "run" | "capture" | "shortcut" = "run"): TriggerResult | undefined {
     useContext(ctx);
     if (ctx.mode !== "tui") {
       notify(ctx, "Background prompt refinement is only available in TUI mode; no model request was sent.", "warning");
@@ -121,7 +122,14 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
       ...(project ? { project: { cwd: ctx.cwd, snapshot: project,
         revisionSnapshot: captureProjectContext(ctx, config.projectContext, draft, true), config: structuredClone(config.projectContext) } } : {}),
     };
-    const result = captureOnly ? controller.capture(input) : controller.trigger(input, { force });
+    const defaultsTooLong = (input.editingInstruction?.length ?? 0) > config.maxDraftChars;
+    let result = mode === "run" ? controller.trigger(input, { force }) : controller.capture(input);
+    if (mode === "shortcut" && result.kind === "captured" && !controller.hasSubmittedRunInRound() && !defaultsTooLong) {
+      // Start the captured source in place. If admission is rejected, keep it editable.
+      const started = controller.startRecord(result.recordId, selected, input.thinkingLevel);
+      if (started.kind === "started") result = started;
+      else notify(ctx, `Request not started (${started.kind}); draft kept as Unsent.`, "warning");
+    }
     if (result.kind !== "started") {
       ({ historySnapshot, projectLabel, projectWarnings } = previousContext);
     }
@@ -131,7 +139,7 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
       void showPreview(ctx).catch(() => notifyCurrent("Could not open the refinement panel; the main draft was not changed.", "warning"));
     }
     else if (result.kind === "busy") notify(ctx, "Work is pending or the 100-entry journal is full. Existing work kept.", "warning");
-    if (result.kind === "captured" && (input.editingInstruction?.length ?? 0) > config.maxDraftChars) {
+    if (result.kind === "captured" && defaultsTooLong) {
       notify(ctx, `Project defaults exceed ${config.maxDraftChars} characters. Reduce the selection or use c to clear all in Preferences before optimizing.`, "warning");
     }
     return result;

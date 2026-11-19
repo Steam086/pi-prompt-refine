@@ -9,6 +9,7 @@ import type { TuiOperations } from "../adapters/tui-operations.js";
 import type { RefineWorkspace } from "../workspace.js";
 import type { RevisionDraft } from "../revision-preferences.js";
 import type { TaskPanelPosition } from "../task-panel.js";
+import type { createRequestFlows } from "./request-flows.js";
 import { displayModel, effectiveThinkingLevel, sameModel, thinkingSource } from "./model-selection.js";
 import { RESTORED_CONTEXT_HINT, type Notify, type WorkspaceSelection } from "./contracts.js";
 
@@ -25,7 +26,7 @@ interface WorkspaceActionsDependencies {
   historyStorage(ctx: ExtensionContext, sessionId: string): HistoryStorageStatus;
   optimizationError(ctx: ExtensionContext, draft: string): string | undefined;
   operations: TuiOperations;
-  triggerOptimize(ctx: ExtensionContext, force: boolean, draft: string, keepEditor: boolean, captureOnly: boolean): TriggerResult | undefined;
+  triggerOptimize: ReturnType<typeof createRequestFlows>["triggerOptimize"];
   reviseCandidate(ctx: ExtensionContext, token: CandidateToken, instruction: string): string | undefined;
   registeredModels(ctx: ExtensionContext): ReturnType<ExtensionContext["modelRegistry"]["getAvailable"]>;
   showOptimizerQuota(): boolean;
@@ -224,7 +225,7 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
         if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId) return "Session changed; no request sent.";
         const error = optimizationError(ctx, text);
         if (error) return error;
-        const result = triggerOptimize(ctx, true, text, true, controller.hasWorkspaceContent());
+        const result = triggerOptimize(ctx, true, text, true, controller.hasWorkspaceContent() ? "capture" : "run");
         return result && ["started", "captured", "duplicate", "ready"].includes(result.kind) ? undefined : "Could not add input; existing work kept.";
       },
     };

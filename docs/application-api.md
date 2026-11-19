@@ -1,6 +1,6 @@
 # 多入口应用接口（第一切片）
 
-核心类型见 `src/app/api.ts`，运行期由 `src/app/runtime.ts` 为每个 Pi session runtime 组装一个 application/controller。新增 `/refine-api`；旧 `/refine`、快捷键、TUI 几何与 sidecar 格式保持兼容。
+核心类型见 `src/app/api.ts`，运行期由 `src/app/runtime.ts` 为每个 Pi session runtime 组装一个 application/controller。新增 `/refine-api`；保留旧 `/refine` 命令、快捷键配置、TUI 几何与 sidecar 格式。
 
 支持：优化模型配置、显式创建/修改原稿、运行/停止、状态与结果查询。保存、浏览、重新连接不请求模型；只有 `startRun` / `optimizeText`（或已有 TUI 明确提交）启动优化。API 不接受客户端提供的 history、system prompt、项目背景、认证信息或文件路径，也不接受/发送到 Pi 编辑器。Web 接受/恢复仍不在本切片范围内。
 
@@ -33,7 +33,7 @@ execute({ binding, clientLeaseId, operationId }, mutation)
 
 支持 `setDefaultOptimizer`、`createDraft`、`captureDraft`、`updateDraft`、`copyToCurrent`、`discardDraft`、`startRun`、`optimizeText`、`stopRun`。具体字段与枚举以 `api.ts` 为准。
 
-- `createDraft` 允许空白、未配模型及显式重复原稿，不启动模型；`captureDraft` 保留快捷捕获的非空/模型校验和去重语义。
+- `createDraft` 允许空白、未配模型及显式重复原稿，不启动模型；`captureDraft` 使用与快捷捕获相同的非空/模型校验和去重规则，但不启动模型。TUI 快捷键直接启动本轮首个请求的规则不适用于 API。
 - update/copy/discard/start 带 taskId 和 expectedVersion；默认模型配置带 optimizer expectedVersion。来自 TUI 的文本/偏好变化、提交与归档也更新领域版本，防止另一客户端覆盖旧原稿。
 - 新文本背景只能在宿主采集；同 round 仍共用冻结背景。恢复记录不能用缺失的旧背景重跑，必须显式复制。
 - started/queued/duplicate 回执含稳定任务/运行 ID。已停止或完成的运行再次 stop 返回 already-terminal。

@@ -39,16 +39,6 @@ describe("first optimizer model setup", () => {
     await h.command("model", h.context);
     h.holdPanel();
     const view = h.shortcuts.get("ctrl+\\")!(h.context);
-    h.panelInput("\t");
-    await vi.waitFor(() => {
-      const frame = h.panelLines(160).join("\n");
-      expect(frame).toContain("[ ] Clarify Prompt Intent");
-      expect(frame).toContain("[ ] Prompt Bullet Structure");
-      expect(frame).toContain("[ ] Translate Prompt to English");
-      expect(frame).toContain("[ ] Answer in Bullet Points");
-    });
-    expect(h.complete).not.toHaveBeenCalled();
-    h.panelInput("\r");
     await vi.waitFor(() => expect(h.complete).toHaveBeenCalledTimes(1));
     const call = h.complete.mock.calls[0]![1] as { messages: [{ content: [{ text: string }] }] };
     expect(JSON.parse(call.messages[0].content[0].text)).not.toHaveProperty("editing_instruction");
@@ -57,7 +47,13 @@ describe("first optimizer model setup", () => {
     h.setEditorText("A different draft");
     const selectedView = h.shortcuts.get("ctrl+\\")!(h.context);
     h.panelInput("\t");
-    await vi.waitFor(() => expect(h.panelLines(160).join("\n")).toContain("[ ] Clarify Prompt Intent"));
+    await vi.waitFor(() => {
+      const frame = h.panelLines(160).join("\n");
+      expect(frame).toContain("[ ] Clarify Prompt Intent");
+      expect(frame).toContain("[ ] Prompt Bullet Structure");
+      expect(frame).toContain("[ ] Translate Prompt to English");
+      expect(frame).toContain("[ ] Answer in Bullet Points");
+    });
     h.panelInput(" ");
     expect(h.panelLines(160).join("\n")).toContain("[x] Clarify Prompt Intent");
     expect(h.complete).toHaveBeenCalledTimes(1);

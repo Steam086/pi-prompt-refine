@@ -8,12 +8,16 @@ The workspace has three tabs: **Preview** for the current round, **Usage** for c
 
 | To… | Do this |
 | --- | --- |
-| Capture a draft | Type in Pi and press `Ctrl+\`. Capture does not call a model or clear the Pi editor. |
+| Refine from the Pi editor | With an optimizer selected, type a new draft and press `Ctrl+\`. The first rewrite of the round starts immediately with your project defaults. Later new drafts open as **Unsent**. |
 | Rewrite an Unsent draft | Select it and press `Enter`. To add Preferences first, press `Tab`, then `Space` on each item you want. Press `Enter` to start the rewrite. |
 | Try a different model | Select the draft or a run and press `m`. Choose a model and press `Enter` to run it without changing your default. |
 | Revise a result | Select the result and press `f`. Enter your revision instructions, then press `Ctrl+S` to request a new rewrite. |
 | Use a result | Press `a` to put it in the Pi editor **without sending**. Review and submit it yourself, or press `s` in result details to send directly. The first direct send after loading asks for confirmation. |
 | Stop a rewrite | Select its queued or running entry and press `x`. Closing the workspace does not stop it. |
+
+The first request counts as soon as Refine queues it, even if you stop it, it fails, or you delete its record. An unchanged draft reopens its existing entry without calling the optimizer again. Sending a user message to Pi ends the round; merely accepting a result into the editor does not. The shortcut never changes the editor or sends to the main agent.
+
+To choose Preferences before the first rewrite, open `/refine`, press `n`, and save a draft with `Enter` before choosing Preferences.
 
 ## Settings
 

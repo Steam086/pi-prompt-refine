@@ -203,7 +203,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.getEditor()).toBe(draft);
   });
 
-  it("retains archived work after submission so new shortcut input is unsent", async () => {
+  it("does not rerun accepted text but auto-starts new shortcut input after Pi submission", async () => {
     const harness = await makeHarness({ useDefaultShortcuts: true });
     await trigger(harness);
     harness.setCustomAction("a");
@@ -216,8 +216,9 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.setEditorText("brand new task");
     await shortcut(harness, "ctrl+\\")(harness.context);
     await flushPromises();
-    expect(harness.complete).toHaveBeenCalledTimes(1);
-    expect(harness.panelLines().join("\n")).toContain("Unsent");
+    expect(harness.complete).toHaveBeenCalledTimes(2);
+    expect(harness.panelLines().join("\n")).toContain("brand new task");
+    expect(harness.sent).toEqual([]);
   });
 
   it("rejects a confirmation that returns after the session branch changed", async () => {

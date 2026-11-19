@@ -17,7 +17,7 @@ Start Pi, or run `/reload` in an existing session. Extensions run with your Pi p
 ## Quick start
 
 1. **Choose a model.** Run `/refine model` and pick the model that will rewrite your drafts. This does not change your main agent's model.
-2. **Write and refine.** Type a draft in the Pi editor, such as “Explain why the second option might be faster. Don't change any code yet.” Press `Ctrl+\` to capture it, then `Enter` in Refine to request a rewrite. Capturing alone does not call a model. Rewriting can use quota or incur charges.
+2. **Write and refine.** Type a draft in the Pi editor, such as “Explain why the second option might be faster. Don't change any code yet.” Press `Ctrl+\` to start the first rewrite of the round. Until you send a message to Pi, another new draft opens as **Unsent**; press `Enter` to rewrite it. Rewriting can use quota or incur charges.
 3. **Review the result.** Select the result and press `a` to put it back in the Pi editor **without sending it**. Edit it if needed, then submit it yourself to the main agent. That is a separate model request.
 
 `/refine` opens the workspace without running a model. `/refine <text>` requests a rewrite directly. If the shortcut is intercepted by your terminal, see [shortcut troubleshooting](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/tui-guide.md#if-the-shortcut-does-not-work).
@@ -33,7 +33,7 @@ If no global Refine preference library exists, the first TUI load adds four edit
 | **Translate Prompt to English** | Translates the prompt without changing literal text or the requested answer language. |
 | **Answer in Bullet Points** | Adds an answer-format requirement when bullets make sense. |
 
-On an **Unsent** draft, press `Tab`, choose a Preference, and press `Space` to toggle it. `Enter` starts the rewrite. Use `p` to manage the library. The [full example catalog](examples/prompt-refine-preferences.json) has more templates.
+To choose Preferences before the first rewrite, open `/refine` and press `n` to create a draft without a model call. On an **Unsent** draft, press `Tab`, choose a Preference, and press `Space` to toggle it. `Enter` starts the rewrite. Use `p` to manage the library. The [full example catalog](examples/prompt-refine-preferences.json) has more templates.
 
 ## Model calls and local history
 

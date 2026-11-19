@@ -89,43 +89,89 @@ describe("multi-model preview and unified Usage", () => {
 });
 
 describe("round workspace integration", () => {
-  it("captures the first shortcut input as Unsent, permits editing, and never submits on reopen", async () => {
+  it("auto-starts the first shortcut draft, then keeps later originals Unsent and editable even after deleting the run", async () => {
     const h = await makeHarness();
     h.holdPanel();
     let view = shortcut(h, "ctrl+\\")(h.context);
-    expect(h.panelLines(100).join("\n")).toContain("› ○ Unsent · Draft A");
-    expect(h.panelLines(100).join("\n")).toContain("May use optimizer quota or incur charges");
-    h.panelInput("\t");
-    expect(h.panelLines(100).join("\n")).toContain("May use optimizer quota or incur charges");
-    h.panelInput("\x1b");
-    expect(h.complete).not.toHaveBeenCalled();
+    expect(h.panelLines(100).join("\n")).toMatch(/›\s+└─ fake-chat/);
+    await flushPromises();
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    expect(h.notifications.at(-1)).toContain("may use optimizer quota or incur charges");
+    h.panelInput("d"); h.panelInput("y"); // Remove the only submitted run.
+    h.panelInput("q"); await view;
+
+    h.setEditorText("Draft B");
+    view = shortcut(h, "ctrl+\\")(h.context);
+    expect(h.panelLines(100).join("\n")).toContain("› ○ Unsent · Draft B");
+    expect(h.panelLines(100).join("\n")).not.toContain("May use optimizer quota");
+    expect(h.complete).toHaveBeenCalledTimes(1);
     h.panelInput("q"); await view;
     view = shortcut(h, "ctrl+\\")(h.context);
     expect(h.panelLines().join("\n")).toContain("1 prompt ·");
     expect(h.panelLines().join("\n")).toContain("Refine model: fake-provider/fake-chat");
-    expect(h.complete).not.toHaveBeenCalled();
+    expect(h.complete).toHaveBeenCalledTimes(1);
     h.panelInput("i"); h.panelInput(" edited 中文😀"); h.panelInput("\r");
-    expect(h.panelLines(100).join("\n")).toContain("› ○ Unsent · Draft A edited");
-    expect(h.panelLines(100).join("\n")).toContain("Draft A edited 中文😀");
-    expect(h.complete).not.toHaveBeenCalled();
+    expect(h.panelLines(100).join("\n")).toContain("› ○ Unsent · Draft B edited");
+    expect(h.complete).toHaveBeenCalledTimes(1);
     h.panelInput("\r");
     expect(h.panelLines(100).join("\n")).toMatch(/›\s+└─ fake-chat/);
     await flushPromises();
-    expect(h.complete).toHaveBeenCalledTimes(1);
-    expect(JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text).draft).toBe("Draft A edited 中文😀");
+    expect(h.complete).toHaveBeenCalledTimes(2);
+    expect(JSON.parse((h.complete.mock.calls[1] as any[])[1].messages[0].content[0].text).draft).toBe("Draft B edited 中文😀");
     expect(h.panelLines().join("\n")).toContain("Refined prompt");
-    expect(h.getEditor()).toBe("Draft A");
+    expect(h.getEditor()).toBe("Draft B");
     expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
-    h.panelInput("d"); h.panelInput("y"); // Empty the workspace again.
-    h.panelInput("q"); await view;
-    view = shortcut(h, "ctrl+\\")(h.context);
-    expect(h.panelLines(100).join("\n")).toContain("› ○ Unsent · Draft A");
-    expect(h.panelLines(100).join("\n")).not.toContain("May use optimizer quota");
-    expect(h.complete).toHaveBeenCalledTimes(1);
     h.panelInput("q"); await view;
   });
 
-  it("focuses a new shortcut draft over a remembered result from an earlier round", async () => {
+  it.each(["running", "cancelled", "failed"])("leaves later shortcut drafts Unsent while the first run is %s", async (state) => {
+    const h = await makeHarness();
+    if (state === "failed") h.complete.mockRejectedValueOnce(new Error("synthetic provider failure"));
+    else h.complete.mockImplementationOnce(() => new Promise(() => {}));
+    h.holdPanel();
+    let view = shortcut(h, "ctrl+\\")(h.context);
+    await flushPromises();
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    if (state === "cancelled") h.panelInput("x");
+    h.panelInput("q"); await view;
+    h.handlers.get("input")?.[0]?.({ text: "Draft A", source: "interactive" }, h.context);
+    h.setEditorText("Draft B");
+    view = shortcut(h, "ctrl+\\")(h.context);
+    await flushPromises();
+    expect(h.panelLines(100).join("\n")).toContain("› ○ Unsent · Draft B");
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    expect(h.getEditor()).toBe("Draft B");
+    expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
+    h.panelInput("q"); await view;
+  });
+
+  it("does not count a rejected shortcut attempt or an explicitly saved draft as a submission", async () => {
+    const h = await makeHarness({ config: { maxDraftChars: 100 } });
+    h.holdPanel();
+    let view = h.command("", h.context);
+    h.panelInput("n"); h.panelInput("Saved draft"); h.panelInput("\r");
+    expect(h.complete).not.toHaveBeenCalled();
+    expect(h.panelLines(100).join("\n")).toContain("May use optimizer quota or incur charges");
+    h.panelInput("\t");
+    expect(h.panelLines(100).join("\n")).toContain("May use optimizer quota or incur charges");
+    h.panelInput("\x1b"); h.panelInput("q"); await view;
+
+    h.setEditorText("X".repeat(101));
+    view = shortcut(h, "ctrl+\\")(h.context);
+    expect(h.notifications.at(-1)).toContain("no request was sent");
+    expect(h.complete).not.toHaveBeenCalled();
+    h.panelInput("q"); await view;
+
+    h.setEditorText("First submitted draft");
+    view = shortcut(h, "ctrl+\\")(h.context);
+    await flushPromises();
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    expect(h.panelLines(100).join("\n")).toMatch(/›\s+└─ fake-chat/);
+    expect(h.panelLines(100).join("\n")).toContain("○ Unsent · Saved draft");
+    h.panelInput("q"); await view;
+  });
+
+  it("focuses the first shortcut run over a remembered result from an earlier round", async () => {
     const harness = await makeHarness();
     await trigger(harness);
     harness.setCustomAction("q");
@@ -135,10 +181,9 @@ describe("round workspace integration", () => {
     harness.holdPanel();
     const view = shortcut(harness, "ctrl+\\")(harness.context);
     const lines = harness.panelLines(100).join("\n");
-    expect(lines).toContain("› ○ Unsent · Current draft");
+    expect(lines).toMatch(/›\s+└─ fake-chat/);
     expect(lines).toContain("Original prompt");
-    expect(harness.complete).toHaveBeenCalledTimes(1);
-    harness.panelInput("\r"); // No navigation is needed before starting the current draft.
+    expect(lines).toContain("Current draft");
     await flushPromises();
     expect(harness.complete).toHaveBeenCalledTimes(2);
     expect(JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text).draft).toBe("Current draft");
@@ -296,9 +341,7 @@ describe("round workspace integration", () => {
     harness.setEditorText("Next round draft");
     harness.holdPanel();
     const view = shortcut(harness, "ctrl+\\")(harness.context);
-    expect(harness.complete).toHaveBeenCalledTimes(1);
-    expect(harness.panelLines().join("\n")).toContain("Unsent");
-    harness.panelInput("\r");
+    expect(harness.panelLines().join("\n")).toMatch(/›\s+└─ fake-chat/);
     await flushPromises();
     expect(harness.complete).toHaveBeenCalledTimes(2);
     const second = JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);

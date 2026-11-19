@@ -43,7 +43,7 @@ Pi Prompt Refine 是 TypeScript 编写的 Pi 扩展，入口由根 `package.json
 
 - round 首份输入冻结系统模板、历史及项目资源，同 round 草稿共用背景。每个运行通过 Pi `streamSimple()` 发起一次无工具改写；不继承主 Agent 工具，不执行原稿中的任务。只有 Pi 用户消息 `message_start` 才自动归档旧 round。
 - 保留去重、最大并发、FIFO 排队、启动后超时、独立取消、晚到用量和过期操作守卫。关闭视图/断线不取消运行；后台完成不抢焦点、不改变阅读或操作目标。
-- 保存、勾选偏好、阅读、配置和连接本身不提交模型请求。只有原生 Unsent 的 Enter、Revise 的 Ctrl+S 等已有明确优化动作，以及 API 的显式运行才提交。Apply 仅切换 Refine 当前结果；接受/发送/恢复仍须明确动作及 session/candidate/编辑器确认守卫。Web 当前不提供 accept/send/restore。
+- 保存、勾选偏好、阅读、配置和连接本身不提交模型请求。优化快捷键只在本轮还未提交过运行时直接启动新原稿，后续新原稿为 Unsent；Unsent 的 Enter、Revise 的 Ctrl+S 和 API 显式运行等提交动作不受此限。Apply 仅切换 Refine 当前结果；接受/发送/恢复仍须明确动作及 session/candidate/编辑器确认守卫。Web 当前不提供 accept/send/restore。
 - Binding 为 `{ runtimeId, sessionId, lifecycleEpoch }`，任务/运行 ID 必须与其一起使用。生命周期失效、领域版本冲突、未知/过期重试不得静默迁移或重新执行；丢失回执先查原 lease/operation，不能换 nonce 盲目重试。本地 TUI 复用用例和守卫，不强行套远端账本；高级原生流程保留兼容边界。
 - 原生展示同步更新，远端 invalidation 合并通知；时钟读取不增加领域版本。浏览器表单、回执和运行目标绑定原 scope，不覆盖后续本地编辑，不因下拉选项迟到而丢失目标。
 - 对外只暴露脱离内部记录的白名单 DTO，不泄露完整背景、prepared input、凭据、原始 Provider 响应或内部路径。sidecar 仍是最小白名单；恢复记录没有可重跑的旧背景，只能显式复制到当前 round。读取与传输必须有界，超额明确拒绝，不截断为假成功。

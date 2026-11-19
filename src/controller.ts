@@ -39,7 +39,7 @@ export class RefineController {
   private readonly journal = new RefineHistory();
   private readonly active = new Map<number, ActiveRequest>();
   private readonly submissions = new WeakMap<TriggerResult, { recordId: number; queued: boolean }>();
-  private round?: { id: number; input: RefineRequestInput };
+  private round?: { id: number; input: RefineRequestInput; hasSubmittedRun: boolean };
   private roundSequence = 0;
   private taskSequence = 0;
   private taskId?: number;
@@ -76,6 +76,7 @@ export class RefineController {
   getGeneration(): number { return this.generation; }
   getSessionId(): string | undefined { return this.sessionId; }
   getRoundId(): number | undefined { return this.round?.id; }
+  hasSubmittedRunInRound(): boolean { return this.round?.hasSubmittedRun ?? false; }
   getTaskVersion(taskId: number): number { return this.journal.taskVersion(taskId); }
   getRunVersion(recordId: number): number { return this.journal.runVersion(recordId); }
   getRunElapsed(recordId: number): number | undefined {
@@ -259,7 +260,7 @@ export class RefineController {
     return undefined;
   }
   private freezeRound(input: RefineRequestInput): RefineRequestInput {
-    if (!this.round) this.round = { id: ++this.roundSequence, input: structuredClone(input) };
+    if (!this.round) this.round = { id: ++this.roundSequence, input: structuredClone(input), hasSubmittedRun: false };
     const snapshot = this.round.input;
     return structuredClone({ ...input, roundId: this.round.id, history: snapshot.history, project: snapshot.project,
       systemPrompt: snapshot.systemPrompt, generateTitle: snapshot.generateTitle, branchLeafId: snapshot.branchLeafId });
@@ -318,7 +319,7 @@ export class RefineController {
   }
   removeDraft(id: number): void {
     this.journal.removeDraft(id);
-    if (this.round && !this.getCurrentRecords().length) this.round = undefined;
+    if (this.round && !this.round.hasSubmittedRun && !this.getCurrentRecords().length) this.round = undefined;
     this.emitState();
   }
 
@@ -403,6 +404,8 @@ export class RefineController {
     const request: RefineRequest = { ...record.input, requestId, recordId, generation: this.generation };
     this.active.set(requestId, { request, controller: new AbortController(), previousCandidate });
     this.journal.update(recordId, { status: "queued" });
+    // Count admission, regardless of outcome or journal retention. Runs of archived work do not count.
+    if (this.round && record.input.roundId === this.round.id) this.round.hasSubmittedRun = true;
     this.pump();
     const result: TriggerResult = { kind: "started", requestId };
     const active = this.active.get(requestId);
