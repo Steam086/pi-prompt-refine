@@ -42,7 +42,7 @@ describe("workspace tabs", () => {
       const tabs = workspaceTabs(layout, active, theme);
       const plain = stripVTControlCharacters(tabs.join("\n"));
       expect(plain).not.toMatch(/[←→]/);
-      expect(tabs.join("\n")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(` ${theme.underline(active)} `))));
+      expect(tabs.join("\n")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(` ${active} `))));
       expect(tabs.join("\n")).not.toContain(theme.bg("toolPendingBg", "probe").split("probe")[0]);
       for (const label of WORKSPACE_PAGES.filter((label) => label !== active)) {
         expect(tabs.join("\n")).not.toContain(theme.underline(label));
@@ -54,18 +54,18 @@ describe("workspace tabs", () => {
     }
   });
 
-  it.each(["dark", "light"])("leaves child group selection and tab geometry unchanged (%s)", (name) => {
+  it.each(["dark", "light"])("shares flat one-row tabs between pages and groups (%s)", (name) => {
     const theme = getThemeByName(name)!;
     const layout = panelGeometry(100, 40, 100, false, false, 0);
     const groups = panelTabs(layout, ["Context", "Optimizer", "Advanced"], 0, theme);
-    expect(groups.join("\n")).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Context "))));
+    expect(groups.join("\n")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Context "))));
     expect(workspaceTabs(layout, "Preview", theme).map(stripVTControlCharacters)).toEqual([
-      "", " Preview    Usage    Settings ", "",
+      " Preview    Usage    Settings ",
     ]);
     for (const height of [1, 4, 8, 12, 40]) {
       const compact = panelGeometry(12, height, 12, false, false, 0);
       const tabs = workspaceTabs(compact, "Settings", theme);
-      expect(tabs).toHaveLength(compact.bodyHeight < 4 ? 0 : compact.bodyHeight >= 8 ? 3 : 1);
+      expect(tabs).toHaveLength(compact.bodyHeight < 4 ? 0 : 1);
     }
   });
 });

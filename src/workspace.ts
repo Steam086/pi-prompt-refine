@@ -1,9 +1,9 @@
 import { parseKey, type Component, type Focusable, type KeybindingsManager, type KeyId, type TUI } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { PreviewPanel } from "./preview.js";
-import { panelFrame, WORKSPACE_PAGES, type WorkspacePage } from "./panel-layout.js";
+import { panelHeader, WORKSPACE_PAGES, type WorkspacePage } from "./panel-layout.js";
 import { workspaceFrame, workspaceLayout, workspaceViewport } from "./workspace-overlay.js";
-import { alignedKeyHints, fittingKeyHints } from "./key-hints.js";
+import { fittingKeyHints } from "./key-hints.js";
 import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { TaskPanel, type TaskPanelActions, type TaskPanelPosition } from "./task-panel.js";
@@ -414,30 +414,21 @@ export class RefineWorkspace implements Component, Focusable {
     if (this.mode === "main") return this.taskPanel?.render(width, () => this.panel.render(width)) ?? this.panel.render(width);
     if (this.mode === "usage") return this.historyPanel?.render(width) ?? [];
     const layout = this.layout(width);
-    const { innerWidth, bodyHeight } = layout;
+    const { innerWidth } = layout;
     const { theme } = this;
-    let body: string[];
-    let header: string[];
-    let footer: string[];
-    let footerAfterBodyRows: number | undefined;
-    if (this.mode === "input") {
-      const cursor = this.activeInput.editor.getCursor();
-      const action = this.inputKind === "original" ? "Save" : this.actions.inputCaptureOnly?.() ? "Add unsent" : "Refine";
-      header = [theme.fg("text", theme.bold(this.inputKind === "original" ? "Edit original prompt" : "Input")),
-        theme.fg(this.inputError ? "warning" : "muted", sanitizeTerminalText(this.inputError || (this.inputKind === "original"
-          ? `Line ${cursor.line + 1} · Save only · Enter on the list to run` : `Line ${cursor.line + 1} · Not sent to main agent`)))];
-      body = this.activeInput.render(innerWidth, bodyHeight);
-      footer = alignedKeyHints(innerWidth < 30
-        ? [[["↵", action], ["⇧↵", "NL"]], [["Esc", "Back"]]]
-        : [[["Enter", action], ["Shift+Enter", "Newline"]], [["Esc", "Back"]]], innerWidth, theme);
-      if (layout.footerHeight === 1) footer = [fittingKeyHints([["Esc", "Back"], ["↵", action]], innerWidth, theme)];
-      if (this.inputError && layout.headerHeight < 2) {
-        const feedback = theme.fg("warning", sanitizeTerminalText(this.inputError));
-        if (layout.headerHeight === 1) header[0] = feedback;
-        else body = [feedback, ...body];
-      }
-    } else return [];
-    const lines = panelFrame(layout, header, body, footer, (text) => theme.fg("borderMuted", text), { footerAfterBodyRows });
-    return lines;
+    if (this.mode !== "input") return [];
+    const cursor = this.activeInput.editor.getCursor();
+    const action = this.inputKind === "original" ? "Save" : this.actions.inputCaptureOnly?.() ? "Add unsent" : "Refine";
+    const title = theme.fg("text", theme.bold(this.inputKind === "original" ? "Edit original prompt" : "Input"));
+    const status = theme.fg(this.inputError ? "warning" : "muted", sanitizeTerminalText(this.inputError || (this.inputKind === "original"
+      ? `Line ${cursor.line + 1} · Save only · Enter on the list to run` : `Line ${cursor.line + 1} · Not sent to main agent`)));
+    const header = [layout.headerHeight === 1 && this.inputError ? status : title, status];
+    const hints = innerWidth < 30
+      ? fittingKeyHints([["Esc", "Back"], ["↵", action], ["⇧↵", "NL"]], innerWidth, theme)
+      : fittingKeyHints([["Esc", "Back"], ["Enter", action], ["Shift+Enter", "Newline"]], innerWidth, theme);
+    const chrome = panelHeader(layout, header, [], [hints]);
+    const body = this.activeInput.render(innerWidth, chrome.layout.bodyHeight);
+    if (this.inputError && !layout.headerHeight) body.unshift(status);
+    return chrome.render(body, (text) => theme.fg("borderMuted", text));
   }
 }

@@ -18,7 +18,7 @@ describe("shared refine workspace", () => {
       expect(stripVTControlCharacters(lines.join("\n"))).toContain("Rejected");
       expect(lines.join("\n")).toContain(theme.fg("warning", "").split("\x1b[39m")[0]);
       expect(lines.join("\n")).not.toContain("\x1b[31m");
-      if (rows >= 8) expect(footer(lines).at(-1)).toContain(formatKeyHint(["Esc", "Back"], theme));
+      if (rows >= 8) expect(footer(lines).join("\n")).toContain(formatKeyHint(["Esc", "Back"], theme));
     }
     terminal.rows = 40;
     expect(textOf(workspace.render(100))).toContain("Retained draft 中文😀");
@@ -105,9 +105,13 @@ describe("shared refine workspace", () => {
         const lines = workspace.render(width);
         const layout = panelLayout(width, rows);
         expect(lines).toHaveLength(layout.height);
-        const bodyStart = layout.topSeparatorHeight + layout.headerHeight;
-        const body = lines.slice(bodyStart, bodyStart + layout.bodyHeight);
-        expect(body.filter((line) => line.trim())).toHaveLength(layout.bodyHeight);
+        const plain = lines.map(stripVTControlCharacters);
+        const rule = plain.findIndex((line) => /^[│ ]*─+[│ ]*$/u.test(line));
+        const body = rule >= 0 ? lines.slice(rule + 1, plain.at(-1)!.startsWith("╰") ? -1 : undefined) : lines;
+        if (rule >= 0) {
+          const contentRows = body.filter((line) => /[^│\s]/u.test(stripVTControlCharacters(line)));
+          expect(contentRows.length).toBeGreaterThanOrEqual(Math.min(45, body.length - 1));
+        }
         expect(textOf(body)).toContain(CURSOR_MARKER);
         for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       }

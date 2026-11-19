@@ -12,7 +12,7 @@ describe("Unsent preference selection", () => {
     const f = unsentWorkspaceSetup(null, false, theme); const w = f.workspace;
     text(w); await vi.waitFor(() => expect(text(w)).toContain(`[ ] ${a.name}`));
     w.handleInput(tab);
-    expect(text(w)).toContain("Focus: Preferences");
+    expect(text(w)).toContain("Choose preferences");
     expect(text(w)).not.toContain("Bring back");
     w.handleInput(" "); w.handleInput(down); w.handleInput("\x1b[32u");
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(a), selectPreference(b)]);
@@ -26,7 +26,7 @@ describe("Unsent preference selection", () => {
     expect(f.run).not.toHaveBeenCalled(); expect(f.complete).not.toHaveBeenCalled();
     expect(f.repo.save).not.toHaveBeenCalled();
     w.handleInput(esc); // Close reading, keeping preference selection focused.
-    expect(text(w)).toContain("Focus: Preferences");
+    expect(text(w)).toContain("Choose preferences");
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.draft).toBe(f.originals[0]!.input.draft);
     w.handleInput(theme === "dark" ? enter : "\x1b[13u");
     expect(f.run).toHaveBeenCalledExactlyOnceWith(f.originals[0]!.id);
@@ -79,7 +79,7 @@ describe("Unsent preference selection", () => {
     const before = structuredClone(f.position);
     w.handleInput(tab); w.handleInput(" "); w.handleInput(down);
     w.handleInput(key);
-    expect(text(w)).not.toContain("Focus: Preferences");
+    expect(text(w)).not.toContain("Choose preferences");
     expect(f.position).toEqual(before);
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(a)]);
     expect(f.run).not.toHaveBeenCalled();
@@ -100,7 +100,7 @@ describe("Unsent preference selection", () => {
     w.handleInput(backTab); w.handleInput("/"); w.handleInput("Literal");
     // Search owns all text and arrows; it cannot open another view or invoke task actions.
     for (const key of [left, right, ctrlS]) w.handleInput(key);
-    expect(text(w)).toContain("Focus: Preferences · Search");
+    expect(text(w)).toMatch(/Choose preferences +Search/);
     expect(f.run).not.toHaveBeenCalled();
     w.handleInput(enter); w.handleInput(" ");
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(b)]);
@@ -115,7 +115,7 @@ describe("Unsent preference selection", () => {
     expect(f.controller.getRecord(f.originals[1]!.id)!.input.preferences).toEqual([selectPreference(a)]);
     w.handleInput("p"); await loaded(w); w.handleInput(" "); w.handleInput(esc);
     expect(f.controller.getRecord(f.originals[1]!.id)!.input.preferences).toEqual([selectPreference(a)]);
-    expect(text(w)).toContain("Focus: Preferences");
+    expect(text(w)).toContain("Choose preferences");
     w.handleInput("p"); await loaded(w); w.handleInput(" "); w.handleInput(bringBack);
     expect(f.controller.getRecord(f.originals[1]!.id)!.input.preferences).toEqual([]);
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(b)]);
@@ -147,7 +147,7 @@ describe("Unsent preference selection", () => {
     w.handleInput(tab); w.handleInput(" "); w.handleInput(enter);
     expect(f.controller.getRecord(f.originals[0]!.id)!.status).toBe(status);
     expect(f.position.selectedTaskId).toBeUndefined();
-    expect(text(w)).not.toContain("Focus: Preferences");
+    expect(text(w)).not.toContain("Choose preferences");
     w.handleInput(enter);
     expect(f.run).toHaveBeenCalledExactlyOnceWith(f.originals[0]!.id);
     w.dispose(); f.controller.setSession("other");
@@ -159,13 +159,13 @@ describe("Unsent preference selection", () => {
     w.handleInput(tab); w.handleInput(" ");
     f.run.mockImplementationOnce(() => {});
     w.handleInput(enter);
-    expect(text(w)).toContain("Focus: Preferences");
+    expect(text(w)).toContain("Choose preferences");
     expect(text(w)).toContain(`[x] ${a.name}`);
     expect(f.position.selectedTaskId).toBe(f.originals[0]!.taskId);
     expect(f.complete).not.toHaveBeenCalled();
     w.handleInput(enter);
     expect(f.run).toHaveBeenCalledTimes(2);
-    expect(text(w)).not.toContain("Focus: Preferences");
+    expect(text(w)).not.toContain("Choose preferences");
     expect(f.position.selectedTaskId).toBeUndefined();
     w.handleInput(enter); // The submitted run is inspected, never submitted twice.
     expect(f.run).toHaveBeenCalledTimes(2);
@@ -192,19 +192,19 @@ describe("Unsent preference selection", () => {
     w.handleInput("o"); expect(text(w)).toContain("Original prompt");
     w.handleInput(tab); w.handleInput("/"); w.handleInput(a.name);
     for (const key of [tab, backTab, ctrlS]) w.handleInput(key);
-    expect(text(w)).toContain("Focus: Preferences · Search");
+    expect(text(w)).toMatch(/Choose preferences +Search/);
     w.handleInput(enter);
     expect(f.run).not.toHaveBeenCalled();
     w.handleInput("o");
     for (const key of [tab, backTab, enter, enter, ctrlS, bringBack]) w.handleInput(key);
-    expect(text(w)).toContain("Focus: Preferences · Read-only");
+    expect(text(w)).toMatch(/Choose preferences +Read-only/);
     expect(f.run).not.toHaveBeenCalled();
     w.handleInput(esc); w.handleInput("p"); await loaded(w);
     w.handleInput(" "); w.handleInput(enter); w.handleInput(enter);
     expect(f.run).not.toHaveBeenCalled();
     w.handleInput(esc); w.handleInput(bringBack);
     expect(f.run).not.toHaveBeenCalled();
-    expect(text(w)).toContain("Focus: Preferences");
+    expect(text(w)).toContain("Choose preferences");
     w.handleInput(enter);
     expect(f.run).toHaveBeenCalledExactlyOnceWith(f.originals[0]!.id);
     await Promise.resolve(); w.dispose();

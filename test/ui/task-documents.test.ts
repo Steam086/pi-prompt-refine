@@ -10,7 +10,7 @@ describe("TaskDocument reading seam", () => {
     const content = new TaskContent(theme);
     const page = Object.freeze({ kind: "help" as const, scroll: Number.MAX_SAFE_INTEGER });
     const layout = panelLayout(80, 16);
-    const options = { notice: "", noticeColor: "muted" as const, inspecting: false, reading: false,
+    const options = { notice: "Full feedback 中文😀. ".repeat(100), noticeColor: "muted" as const, inspecting: false, reading: false,
       retainedEarlier: false, usage: false, inline: false, preferences: false, revise: false, deleteRecords: false };
     const result = renderTaskDocument(layout, page, options, theme, content);
     expect(result.scroll).toBeGreaterThan(0);

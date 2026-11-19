@@ -4,7 +4,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ApplicationApi, Mutation, MutationMeta, Query, Reply } from "../app/api.js";
 import { identity, parseMutation, parseQuery } from "./wire.js";
 import { REFINE_OVERLAY_OPTIONS, workspaceLayout, workspaceFrame } from "../workspace-overlay.js";
-import { panelFrame } from "../panel-layout.js";
+import { panelHeader } from "../panel-layout.js";
 import { formatKeyHint } from "../key-hints.js";
 
 type Parsed = { kind: "query"; value: Query } | { kind: "mutation"; value: Mutation; operationId?: string };
@@ -133,12 +133,15 @@ export function createSlashAdapter(api: ApplicationApi) {
         render(width) {
           const layout = workspaceLayout(width, tui.terminal.rows);
           const lines = text.render(layout.innerWidth);
-          page = Math.max(1, layout.bodyHeight);
+          const title = theme.fg("text", theme.bold("Refine API"));
+          const warning = result.kind === "ok" ? "" : theme.fg("warning", result.code);
+          const chrome = panelHeader(layout, [layout.headerHeight === 1 && warning ? warning : title, warning],
+            [], [formatKeyHint(["Esc", "Back"], theme)]);
+          page = chrome.layout.bodyHeight;
           count = lines.length;
           offset = Math.max(0, Math.min(offset, count - page));
-          return workspaceFrame(width, tui.terminal.rows, panelFrame(layout,
-            [theme.fg("text", theme.bold("Refine API")) + (result.kind === "ok" ? "" : theme.fg("warning", ` · ${result.code}`))], lines.slice(offset, offset + page),
-            [formatKeyHint(["Esc", "Back"], theme)], (line) => theme.fg("borderMuted", line)), theme);
+          const body = lines.slice(offset, offset + page);
+          return workspaceFrame(width, tui.terminal.rows, chrome.render(body, (line) => theme.fg("borderMuted", line)), theme);
         },
         handleInput(data) {
           if (matchesKey(data, "escape") || matchesKey(data, "enter")) { close(); return; }

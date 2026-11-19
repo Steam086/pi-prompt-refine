@@ -1,5 +1,6 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
+import { stripVTControlCharacters } from "node:util";
 import { READING_WIDTH } from "./presentation.js";
 
 /** Shared frame geometry. Explicit heights remain bounded by the terminal. */
@@ -30,23 +31,61 @@ export const WORKSPACE_PAGES = ["Preview", "Usage", "Settings"] as const;
 export type WorkspacePage = typeof WORKSPACE_PAGES[number];
 
 /** Persistent page identity, unchanged when a child focus suspends page navigation. */
-export function workspaceTabs(layout: PanelLayout, active: WorkspacePage, theme: Pick<Theme, "fg" | "bg" | "bold" | "underline">): string[] {
-  // Page identity stays clear even when the selected background is subtle.
-  // Keep the cue inside the existing padding; child group tabs stay unchanged.
-  return panelTabs(layout, [...WORKSPACE_PAGES], WORKSPACE_PAGES.indexOf(active), theme,
-    (label) => theme.bg("selectedBg", theme.fg("text", theme.bold(` ${theme.underline(label)} `))));
+export function workspaceTabs(layout: PanelLayout, active: WorkspacePage, theme: Pick<Theme, "fg" | "bg" | "bold">): string[] {
+  return panelTabs(layout, [...WORKSPACE_PAGES], WORKSPACE_PAGES.indexOf(active), theme);
 }
 
-/** Shared group strip: reserve the same rows on reading and settings pages. */
+/** One row of tabs with a flat selection surface and quiet inactive labels. */
 export function panelTabs(layout: PanelLayout, labels: string[], active: number, theme: Pick<Theme, "fg" | "bg" | "bold">,
-  selectedTab = (label: string) => theme.bg("toolPendingBg", theme.fg("text", theme.bold(` ${label} `)))): string[] {
+  selectedTab = (label: string) => theme.bg("selectedBg", theme.fg("text", theme.bold(` ${label} `)))): string[] {
   if (layout.bodyHeight < 4) return [];
   const tab = (label: string, index: number) => index === active
     ? selectedTab(label)
     : theme.fg("muted", ` ${label} `);
   const strip = labels.map(tab).join("  ");
-  const line = visibleWidth(strip) <= layout.innerWidth ? strip : tab(labels[active]!, active);
-  return layout.bodyHeight >= 8 ? ["", line, ""] : [line];
+  if (visibleWidth(strip) <= layout.innerWidth) return [strip];
+  const label = labels[active]!;
+  if (layout.innerWidth < 3) return [theme.fg("text", theme.bold(truncateToWidth(label, layout.innerWidth, "")))];
+  return [selectedTab(stripVTControlCharacters(truncateToWidth(label, layout.innerWidth - 2, "…")))];
+}
+
+/** Place title, status, tabs and actions above the content, sharing rows where they fit. */
+export function panelHeader(base: PanelLayout, headings: string[], tabs: string[] = [], hints: string[] = []) {
+  const width = base.innerWidth;
+  const gap = 3;
+  const [title = "", status = ""] = headings;
+  const titleWidth = visibleWidth(title);
+  const statusWidth = visibleWidth(status);
+  const header: string[] = [];
+  if (base.headerHeight > 0 && titleWidth) header.push(title);
+  let separateStatus = "";
+  if (base.headerHeight > 1 && statusWidth) {
+    if (titleWidth && titleWidth + gap + statusWidth <= width) header[0] += " ".repeat(gap) + status;
+    else separateStatus = status;
+  }
+  const actions = hints.slice(0, base.footerHeight).filter((line) => visibleWidth(line) > 0);
+  if (!tabs.length && separateStatus) header.push(separateStatus);
+  header.push(...tabs);
+  if (actions.length === 1) {
+    const row = header.at(-1);
+    const action = actions[0];
+    if (row && action) {
+      const padding = width - visibleWidth(row) - visibleWidth(action);
+      if (padding >= gap) {
+        header[header.length - 1] = row + " ".repeat(padding) + action;
+        actions.shift();
+      }
+    }
+  }
+  if (tabs.length && separateStatus) header.push(separateStatus);
+  header.push(...actions);
+  const layout = { ...base, headerHeight: header.length, footerHeight: 0,
+    bodyHeight: base.height - base.topSeparatorHeight - base.separatorHeight - header.length };
+  return {
+    layout,
+    render: (body: string[], border: (text: string) => string) =>
+      panelFrame(layout, header, body, [], border, { footerAfterBodyRows: 0 }),
+  };
 }
 
 /** Optionally lift action hints above content, after the body's leading tab rows. */

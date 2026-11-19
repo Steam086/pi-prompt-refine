@@ -24,11 +24,12 @@ describe("SettingsPage navigation seam", () => {
           expect(output).toContain(formatKeyHint(hint, theme, 1, "secondary"));
           expect(output).not.toContain(theme.bold(hint[0]));
         }
-        const tab = frame.findIndex((line) => line.includes(theme.bg("selectedBg", theme.fg("text", theme.bold(` ${theme.underline("Settings")} `)))));
-        expect(frame[tab + 1]).toBe(hints[0]);
+        const tab = frame.findIndex((line) => line.includes(theme.bg("selectedBg", theme.fg("text", theme.bold(" Settings ")))));
+        const hintRow = frame.findIndex((line) => line.includes(formatKeyHint(["Ctrl+S", "Save"], theme, 1, "secondary")));
+        expect(hintRow).toBeGreaterThanOrEqual(tab);
         expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
         expect(frame.join("\n")).toContain(theme.fg("text", theme.bold("Settings")));
-        expect(frame.join("\n")).toContain(theme.bg("toolPendingBg", theme.fg("text", theme.bold(" Context "))));
+        expect(frame.join("\n")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Context "))));
         expect(workspace.render(width)).toEqual(frame); // Cached frames preserve geometry and style.
       }
       workspace.handleInput(" ");

@@ -1,3 +1,4 @@
+import { frameHeader } from "../support/panel-chrome.js";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { mkdir, readFile, rm } from "node:fs/promises";
@@ -30,12 +31,12 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     { reasoning: true, expected: "medium" },
     { reasoning: false, thinkingLevel: "high" as const, expected: "off" },
     { reasoning: true, thinkingLevel: "high" as const, config: { thinkingLevel: "low" as const }, expected: "low" },
-  ])("shows effective idle thinking below the title: $expected", async (options) => {
+  ])("shows effective idle thinking in the header: $expected", async (options) => {
     const harness = await makeHarness(options);
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     const lines = harness.panelLines();
-    expect(stripVTControlCharacters(lines[2]!).replace(/^│|│$/g, "").trim()).toBe(`fake-provider/fake-chat · ${options.expected}`);
+    expect(stripVTControlCharacters(frameHeader(lines).join("\n"))).toContain(`fake-provider/fake-chat · ${options.expected}`);
     expect(lines.join("\n").match(/fake-provider\/fake-chat/g)).toHaveLength(1);
     expect(lines.join("\n")).toContain("No result yet.");
     expect(harness.complete).not.toHaveBeenCalled();
@@ -56,9 +57,9 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     const lines = harness.panelLines();
-    expect(lines[2]).toContain("fake-provider/fake-chat · high");
-    expect(lines[2]).not.toContain("low");
-    if (phase === "accepted") expect(lines[2]).toContain("Accepted");
+    expect(frameHeader(lines).join("\n")).toContain("fake-provider/fake-chat · high");
+    expect(frameHeader(lines).join("\n")).not.toContain("low");
+    if (phase === "accepted") expect(frameHeader(lines).join("\n")).toContain("Accepted");
     expect(harness.complete).toHaveBeenCalledOnce();
     harness.panelInput("q");
     await view;

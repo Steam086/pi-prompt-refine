@@ -4,7 +4,7 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { RefineRecord } from "./history.js";
 import { taskGroups } from "./app/queries.js";
 import type { HistoryStorageStatus } from "./history-store.js";
-import { fittingHints, panelFrame, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
+import { fittingHints, panelHeader, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
 import { alignedKeyHints, fittingKeyHints, formatKeyHint, passiveHintLayout, type KeyHint } from "./key-hints.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
@@ -421,11 +421,11 @@ export class TaskPanel {
     if (this.deletion) {
       const body = this.content.wrapped(this.theme.fg("warning", `Delete ${this.deletion.label}?`) +
         "\n\nRunning requests will be stopped; queued requests will be removed.\nThis removes Refine history. Pi editor and conversation stay unchanged.", layout.innerWidth);
-      return panelFrame(layout, [this.content.heading("Delete request"), this.content.muted("Confirmation required")],
-        body, [fittingKeyHints([["Esc / n", "Cancel"], ["y", "Delete"]], layout.innerWidth, this.theme)],
-        (text) => this.content.muted(text), { footerAfterBodyRows: 0 });
+      const chrome = panelHeader(layout, [this.content.heading("Delete request"), this.content.muted("Confirmation required")], [],
+        [fittingKeyHints([["Esc / n", "Cancel"], ["y", "Delete"]], layout.innerWidth, this.theme)]);
+      return chrome.render(body, (text) => this.theme.fg("borderMuted", text));
     }
-    let tabs = workspaceTabs(layout, this.usage ? "Usage" : "Preview", this.theme);
+    const tabs = workspaceTabs(layout, this.usage ? "Usage" : "Preview", this.theme);
     const rows = this.entries();
     const selected = this.selected(rows);
     const inline = this.inline(selected);
@@ -444,7 +444,6 @@ export class TaskPanel {
     const compact = (hints: KeyHint[]): KeyHint[] => hints.map(([key, label]) => [key === "Enter" ? "↵" : key, label === "Send to Pi" ? "Send" : label]);
     let footer: string[];
     if (passiveHints) {
-      if (tabs.length === 3) tabs = tabs.slice(0, -1);
       const primary: KeyHint[] = !selected ? [["n", "New"]] : [["Enter", action]];
       if (stop) primary.unshift(["x", "Stop"]);
       if (run?.candidate && !this.usage) primary.unshift(["a", "Accept"]);
@@ -452,7 +451,7 @@ export class TaskPanel {
       const focus: KeyHint[] = inline ? [["Tab", "Preferences"], ["o", (this.reading ? "Select" : "Read original").padEnd("Read original".length)]]
         : selected ? [["Tab", (this.reading ? "Select" : "Read").padEnd("Select".length)]] : [];
       ({ layout, footer } = passiveHintLayout(layout, tabs.length,
-        [...primary, ...focus, back, ["?", layout.innerWidth < 56 ? "Help" : "All shortcuts"]],
+        [...primary, ...focus, back, ["?", "Help"]],
         [back, ...compact(primary.slice(0, 1)), ["?", "Help"], ...compact(primary.slice(1)), ...focus], this.theme));
     } else {
       const primary: KeyHint[] = !selected ? [["n", "New"]] : [
@@ -471,8 +470,8 @@ export class TaskPanel {
         if (expansion) secondary.push(expansion);
       }
       if (run?.candidate && !this.inspecting && !restored && this.actions.revise) secondary.push(["f", "Revise"]);
-      if (previewDetails) secondary.push(["o", this.original ? "Result" : "Reference"]);
-      if (other) secondary.push(["Tab", "Switch result"]);
+      if (previewDetails && (layout.headerHeight < 2 || this.notice)) secondary.push(["o", this.original ? "Result" : "Reference"]);
+      if (other && layout.innerWidth >= 72) secondary.push(["Tab", "Switch result"]);
       if (this.inspecting && selected && run?.candidate) {
         if (selected.records.some((record) => record.id !== run.id && record.candidate)) secondary.push(["c", other ? "Next comparison" : "Compare"]);
         secondary.push(["e", "Edit result"], ...(!restored ? [["f", "Revise"] as const] : []));
@@ -483,7 +482,80 @@ export class TaskPanel {
         : alignedKeyHints([primary, secondary], layout.innerWidth, this.theme);
       if (layout.footerHeight === 1) footer[0] = fittingKeyHints([back, ["?", "Help"], ...compact(primary)], layout.innerWidth, this.theme, " ");
     }
-    const height = Math.max(1, layout.bodyHeight - tabs.length);
+    const title = this.inspecting ? (other ? "Compare results" : "Prompt details") : this.usage ? "Usage · All rounds" : "Prompt refine · Tasks";
+    const feedback = this.notice ? this.theme.fg(this.noticeColor, sanitizeTerminalText(this.notice)) : "";
+    let inspectionSubtitle = "";
+    if (this.inspecting && selected) {
+      const scroll = formatKeyHint(["↑↓", `scroll${previewDetails ? (this.original ? " reference" : " result") : ""}`], this.theme);
+      const reference = previewDetails ? formatKeyHint(["o", this.original ? "Result" : "Reference"], this.theme) : "";
+      const prefix = !selected.original && layout.innerWidth >= 48 ? this.content.muted("Selected: ") : "";
+      const identity = !selected.original ? `#${selected.record.id} ${selected.record.input.model.id}` : "Original prompt";
+      const fullHints = scroll + (reference ? this.content.muted(" · ") + reference : "");
+      let hints = visibleWidth(prefix + fullHints) + 15 <= layout.innerWidth ? fullHints : reference || scroll;
+      if (visibleWidth(prefix + hints) + 7 > layout.innerWidth) {
+        hints = previewDetails ? formatKeyHint(["o", this.original ? "Result" : "Ref"], this.theme) : formatKeyHint(["↑↓", ""], this.theme);
+      }
+      const space = Math.max(0, layout.innerWidth - visibleWidth(prefix + hints) - 3);
+      const label = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(identity), space, "…"));
+      inspectionSubtitle = prefix + this.content.heading(label) + this.content.muted(" · ") + hints;
+    }
+    const prompts = rows.filter((row) => row.original).length;
+    const runs = rows.length - prompts;
+    const separator = this.content.muted(" · ");
+    const model = passiveHints && !this.notice && action === "Optimize" ? this.refineModelLabel(layout.innerWidth) : "";
+    const preference = model && !inline && this.canChoosePreferences(selected)
+      ? this.content.muted(this.content.preferenceSummary(selected!.record).replace(/\n/g, " ")) : "";
+    const hasPreferences = !!selected?.record.input.preferences?.length;
+    const browseStatus = fittingHints([
+      model,
+      this.reading && selected ? this.content.muted("↑↓ scroll") : "",
+      hasPreferences ? preference : "",
+      selected ? this.content.muted(`${prompts} prompt${prompts === 1 ? "" : "s"} · ${runs} run${runs === 1 ? "" : "s"}`) : "",
+      hasPreferences ? "" : preference,
+    ].filter(Boolean), layout.innerWidth, separator);
+    const subtitle = this.referenceOnly ? this.content.muted("Read-only reference") : this.notice ? feedback : this.retainedEarlier
+      ? this.content.muted(layout.innerWidth < 32 ? "Earlier → Usage" : layout.innerWidth < 72
+        ? "Earlier · Usage → · Esc current" : "Earlier · kept open · Esc returns to current · History in Usage →") : this.inspecting
+      ? inspectionSubtitle : browseStatus;
+    const earlier = this.usage ? [] : this.actions.records().filter((record) => record.archivedAt !== undefined);
+    const earlierPending = earlier.filter(pending).length;
+    const earlierCount = new Set(earlier.map((record) => record.taskId)).size;
+    const earlierLabel = `${earlierCount} earlier prompt${earlierCount === 1 ? "" : "s"}`;
+    const historyHint = layout.innerWidth < 32 ? "History → Usage"
+      : layout.innerWidth < 72 ? `History → Usage · ${earlierPending ? `${earlierPending} active` : earlierLabel}`
+      : `History → Usage · ${earlierPending ? `${earlierPending} running / queued · ` : ""}${earlierLabel}`;
+    const showHistoryHint = earlier.length > 0 && !this.retainedEarlier && !this.notice && !this.inspecting && !this.referenceOnly;
+    // Separate history navigation from the page title and retain the compact fallback on narrow screens.
+    const identity = this.retainedEarlier && selected && !selected.original
+      ? this.content.muted(" · ") + this.content.heading(`#${selected.record.id} ${selected.record.input.model.id}`) : "";
+    const historyGap = layout.innerWidth - visibleWidth(title) - visibleWidth(historyHint);
+    const header = [showHistoryHint
+      ? (historyGap >= 3 ? this.content.heading(title) + " ".repeat(historyGap) + this.content.muted(historyHint) : this.content.muted(historyHint))
+      : this.content.heading(title) + identity, subtitle];
+    const banners: string[] = [];
+    const historyStatus = this.retainedEarlier || showHistoryHint;
+    if (historyStatus && layout.headerHeight < 2 && !this.notice) {
+      const status = showHistoryHint ? this.content.muted(historyHint) : subtitle;
+      if (layout.headerHeight === 1) header[0] = status;
+      else banners.push(status);
+    }
+    if (layout.headerHeight === 1 && model) {
+      const combined = header[0] + separator + model;
+      header[0] = visibleWidth(combined) <= layout.innerWidth ? combined : model;
+    }
+    if (this.notice && !this.referenceOnly && layout.headerHeight < 2) {
+      if (layout.headerHeight === 1) header[0] = truncateToWidth(feedback, layout.innerWidth, "…");
+      else banners.unshift(feedback);
+    }
+    const quota = passiveHints && !this.notice && action === "Optimize" && !restored && this.actions.showOptimizerQuota?.()
+      ? this.content.optimizerQuotaHint(layout.innerWidth) : "";
+    if (quota && layout.headerHeight) {
+      const combined = header[0] + separator + quota;
+      header[0] = visibleWidth(combined) <= layout.innerWidth ? combined : quota;
+    } else if (quota) banners.push(quota);
+    const visibleTabs = layout.headerHeight === 0 && (this.notice || historyStatus || quota) ? [] : tabs;
+    const chrome = panelHeader(layout, header, visibleTabs, this.referenceOnly ? [] : footer);
+    const height = Math.max(1, chrome.layout.bodyHeight - banners.length);
     const split = !!selected && !this.inspecting && !this.retainedEarlier && layout.innerWidth >= 72;
     const leftWidth = split ? Math.min(layout.innerWidth >= 120 ? 48 : 36, Math.floor(layout.innerWidth / 3)) : layout.innerWidth;
     const rightWidth = split ? layout.innerWidth - leftWidth - 3 : layout.innerWidth;
@@ -561,10 +633,11 @@ export class TaskPanel {
           return line + " ".repeat(Math.max(0, half - visibleWidth(line))) + this.content.muted(" │ ") + (peer[i] ?? "");
         }));
       } else {
-        let caption = this.content.heading(identity(selected)) + this.content.muted(" · ") + formatKeyHint(["Tab", identity(other)], this.theme);
+        const peerLabel = (label: string) => this.referenceOnly ? this.content.muted(label) : formatKeyHint(["Tab", label], this.theme);
+        let caption = this.content.heading(identity(selected)) + this.content.muted(" · ") + peerLabel(identity(other));
         if (visibleWidth(caption) > layout.innerWidth) {
           const compact = (row: Row) => `${letter(row)}#${row.record.id}`;
-          caption = this.content.heading(compact(selected)) + " " + formatKeyHint(["Tab", compact(other)], this.theme);
+          caption = this.content.heading(compact(selected)) + " " + peerLabel(compact(other));
         }
         body = [caption, ...this.pane(selected, layout.innerWidth, height - 1)];
       }
@@ -577,80 +650,6 @@ export class TaskPanel {
         return line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line))) + this.content.muted(" │ ") + (right[i] ?? "");
       });
     }
-    const title = this.inspecting ? (other ? "Compare results" : "Prompt details") : this.usage ? "Usage · All rounds" : "Prompt refine · Tasks";
-    const feedback = this.notice ? this.theme.fg(this.noticeColor, sanitizeTerminalText(this.notice)) : "";
-    let inspectionSubtitle = "";
-    if (this.inspecting && selected) {
-      const scroll = formatKeyHint(["↑↓", `scroll${previewDetails ? (this.original ? " reference" : " result") : ""}`], this.theme);
-      const reference = previewDetails ? formatKeyHint(["o", this.original ? "Result" : "Reference"], this.theme) : "";
-      const prefix = !selected.original && layout.innerWidth >= 48 ? this.content.muted("Selected: ") : "";
-      const identity = !selected.original ? `#${selected.record.id} ${selected.record.input.model.id}` : "Original prompt";
-      const fullHints = scroll + (reference ? this.content.muted(" · ") + reference : "");
-      let hints = visibleWidth(prefix + fullHints) + 15 <= layout.innerWidth ? fullHints : reference || scroll;
-      if (visibleWidth(prefix + hints) + 7 > layout.innerWidth) {
-        hints = previewDetails ? formatKeyHint(["o", this.original ? "Result" : "Ref"], this.theme) : formatKeyHint(["↑↓", ""], this.theme);
-      }
-      const space = Math.max(0, layout.innerWidth - visibleWidth(prefix + hints) - 3);
-      const label = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(identity), space, "…"));
-      inspectionSubtitle = prefix + this.content.heading(label) + this.content.muted(" · ") + hints;
-    }
-    const prompts = rows.filter((row) => row.original).length;
-    const runs = rows.length - prompts;
-    const separator = this.content.muted(" · ");
-    const model = passiveHints && !this.notice && action === "Optimize" ? this.refineModelLabel(layout.innerWidth) : "";
-    const preference = model && !inline && this.canChoosePreferences(selected)
-      ? this.content.muted(this.content.preferenceSummary(selected!.record).replace(/\n/g, " ")) : "";
-    const hasPreferences = !!selected?.record.input.preferences?.length;
-    const browseStatus = fittingHints([
-      model,
-      this.reading && selected ? this.content.muted("↑↓ scroll") : "",
-      hasPreferences ? preference : "",
-      selected ? this.content.muted(`${prompts} prompt${prompts === 1 ? "" : "s"} · ${runs} run${runs === 1 ? "" : "s"}`) : "",
-      hasPreferences ? "" : preference,
-    ].filter(Boolean), layout.innerWidth, separator);
-    const subtitle = this.referenceOnly ? this.content.muted("Read-only reference") : this.notice ? feedback : this.retainedEarlier
-      ? this.content.muted(layout.innerWidth < 32 ? "Earlier → Usage" : layout.innerWidth < 72
-        ? "Earlier · Usage → · Esc current" : "Earlier · kept open · Esc returns to current · History in Usage →") : this.inspecting
-      ? inspectionSubtitle : browseStatus;
-    const earlier = this.usage ? [] : this.actions.records().filter((record) => record.archivedAt !== undefined);
-    const earlierPending = earlier.filter(pending).length;
-    const earlierCount = new Set(earlier.map((record) => record.taskId)).size;
-    const earlierLabel = `${earlierCount} earlier prompt${earlierCount === 1 ? "" : "s"}`;
-    const historyHint = layout.innerWidth < 32 ? "History → Usage"
-      : layout.innerWidth < 72 ? `History → Usage · ${earlierPending ? `${earlierPending} active` : earlierLabel}`
-      : `History → Usage · ${earlierPending ? `${earlierPending} running / queued · ` : ""}${earlierLabel}`;
-    const showHistoryHint = earlier.length > 0 && !this.retainedEarlier && !this.notice && !this.inspecting && !this.referenceOnly;
-    // Separate history navigation from the page title and retain the compact fallback on narrow screens.
-    const identity = this.retainedEarlier && selected && !selected.original
-      ? this.content.muted(" · ") + this.content.heading(`#${selected.record.id} ${selected.record.input.model.id}`) : "";
-    const historyGap = layout.innerWidth - visibleWidth(title) - visibleWidth(historyHint);
-    const header = [showHistoryHint
-      ? (historyGap >= 3 ? this.content.heading(title) + " ".repeat(historyGap) + this.content.muted(historyHint) : this.content.muted(historyHint))
-      : this.content.heading(title) + identity, subtitle];
-    const historyStatus = this.retainedEarlier || showHistoryHint;
-    if (historyStatus && layout.headerHeight < 2 && !this.notice) {
-      const status = showHistoryHint ? this.content.muted(historyHint) : subtitle;
-      if (layout.headerHeight === 1) header[0] = status;
-      else body = [status, ...body];
-    }
-    if (layout.headerHeight === 1 && model) {
-      const combined = header[0] + separator + model;
-      header[0] = visibleWidth(combined) <= layout.innerWidth ? combined : model;
-    }
-    if (this.notice && !this.referenceOnly && layout.headerHeight < 2) {
-      if (layout.headerHeight === 1) header[0] = truncateToWidth(feedback, layout.innerWidth, "…");
-      else body = [feedback, ...body];
-    }
-    const quota = passiveHints && !this.notice && action === "Optimize" && !restored && this.actions.showOptimizerQuota?.()
-      ? this.content.optimizerQuotaHint(layout.innerWidth) : "";
-    if (quota && layout.headerHeight) {
-      const combined = header[0] + separator + quota;
-      header[0] = visibleWidth(combined) <= layout.innerWidth ? combined : quota;
-    } else if (quota) body = [quota, ...body];
-    const visibleTabs = layout.headerHeight === 0 && (this.notice || historyStatus || quota) ? [] : tabs;
-    // Retain source geometry in Revise, but hide actions while its editor owns focus.
-    return panelFrame(layout, header,
-      [...visibleTabs, ...body], this.referenceOnly ? [] : footer, (text) => this.content.muted(text),
-      { footerAfterBodyRows: visibleTabs.length });
+    return chrome.render([...banners, ...body], (text) => this.theme.fg("borderMuted", text));
   }
 }

@@ -1,3 +1,4 @@
+import { frameHints } from "../support/panel-chrome.js";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -173,7 +174,7 @@ describe("top action hints", () => {
         expect(text).toMatch(/Esc:? Back/);
         expect(text).not.toContain("p: Preferences");
         expect(text).not.toContain("Refine model:");
-        if (width === 120) expect(frame.join("\n")).toContain(formatKeyHint(["?", "All shortcuts"], f.theme, 1, "secondary"));
+        if (width === 120) expect(frame.join("\n")).toContain(formatKeyHint(["?", "Help"], f.theme, 1, "secondary"));
         expect(frame.join("\n")).not.toContain("\x1b[2J");
         expect(frame).toHaveLength(layout.height);
         expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
@@ -190,7 +191,7 @@ describe("top action hints", () => {
       expect(f.actions.chooseModel).not.toHaveBeenCalled();
     }
   });
-  it.each(["dark", "light"])("places empty Preview and Usage hints below tabs and above content in %s", (name) => {
+  it.each(["dark", "light"])("places empty Preview and Usage hints beside or below tabs in %s", (name) => {
     for (const usage of [false, true]) {
       const { panel, theme, size } = create(name, usage, []);
       for (const [width, rows] of [[100, 40], [40, 24], [20, 12], [40, 8], [100, 40]] as const) {
@@ -204,7 +205,7 @@ describe("top action hints", () => {
         expect(back).toBeGreaterThanOrEqual(0);
         expect(content).toBeGreaterThan(back);
         if (workspaceTabs(layout, usage ? "Usage" : "Preview", theme).length) {
-          expect(back).toBeGreaterThan(tabs);
+          expect(back).toBeGreaterThanOrEqual(tabs);
           expect(tabs).toBeGreaterThanOrEqual(0);
         }
         expect(frame[back]).toContain(formatKeyHint(["Esc", "Back"], theme, 1, lines[back]!.includes("Esc:") ? "secondary" : "secondary-compact"));
@@ -217,13 +218,7 @@ describe("top action hints", () => {
   it.each(["dark", "light"])("keeps hint columns and visibility fixed across Tab toggles in %s", (name) => {
     const { panel, theme, size } = create(name);
     for (let width = 20; width <= 140; width++) {
-      const layout = panelLayout(width, size.rows);
-      const start = layout.topSeparatorHeight + layout.headerHeight + Math.min(2, workspaceTabs(layout, "Preview", theme).length);
-      const hints = () => {
-        const frame = panel.render(width).map(stripVTControlCharacters);
-        const end = frame.findIndex((line, index) => index >= start && line.trim().startsWith("─"));
-        return frame.slice(start, end);
-      };
+      const hints = () => frameHints(panel.render(width)).map(stripVTControlCharacters);
       const before = hints();
       expect(before.join("\n")).toMatch(/Esc:? Back/);
       panel.handleInput("\t");

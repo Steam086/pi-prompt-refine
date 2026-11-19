@@ -1,8 +1,9 @@
+import { frameHeader, frameHints } from "../support/panel-chrome.js";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 // Test-only access to the installed Pi palettes; production uses the injected theme.
 import { Markdown, Text, visibleWidth } from "@earendil-works/pi-tui";
-import { panelLayout, panelTabs } from "../../src/panel-layout.js";
+import { panelLayout } from "../../src/panel-layout.js";
 import { READING_WIDTH } from "../../src/presentation.js";
 import { PreviewPanel, type PreviewOptions } from "../../src/preview.js";
 import { getThemeByName } from "../support/pi-theme.js";
@@ -33,9 +34,9 @@ describe("result reading panel", () => {
     for (const width of [100, 40, 20]) {
       const frame = panel.render(width);
       expect(frame).toHaveLength(18);
-      expect(frame[2]).toContain(theme.fg("warning", "Editor changed"));
+      expect(frameHeader(frame).join("\n")).toContain(theme.fg("warning", "Editor changed"));
       panel.page(1);
-      expect(panel.render(width)[2]).toContain(theme.fg("warning", "Editor changed"));
+      expect(frameHeader(panel.render(width)).join("\n")).toContain(theme.fg("warning", "Editor changed"));
     }
   });
 
@@ -47,16 +48,16 @@ describe("result reading panel", () => {
     });
     const lines = panel.render(100);
     const text = lines.join("\n");
-    expect(lines.find((line) => line.includes("#5 refine"))?.trim()).toBe("1/2 · #5 refine");
-    expect(lines[2]).toContain("openai-codex/example-model · xhigh");
+    expect(frameHeader(lines).join("\n")).toContain("1/2 · #5 refine");
+    expect(frameHeader(lines).join("\n")).toContain("openai-codex/example-model · xhigh");
     expect(text.match(/xhigh/g)).toHaveLength(1);
-    expect(lines[2]).not.toContain("6 msgs");
+    expect(frameHeader(lines).join("\n")).not.toContain("6 msgs");
     expect(text).toContain("↑5.6k ↓335 · Cost —");
     expect(text).not.toContain("read 0");
     expect(text).not.toContain("think(out)");
     for (const hint of ["a Accept", "e Edit", "f Revise", "s Send", "i Input", "m Model", "g Same input", "q Back", "? Help"]) {
       expect(text.split(hint)).toHaveLength(2);
-      expect(lines.slice(-2).join("\n")).toContain(hint);
+      expect(frameHints(lines).join("\n")).toContain(hint);
     }
     for (const hint of ["c Cycle", "g Generate", "←/→ Page", "Candidates", "Accept puts"]) expect(text).not.toContain(hint);
     panel.toggleHelp();
@@ -78,8 +79,8 @@ describe("result reading panel", () => {
     const text = lines.join("\n");
     for (const hint of ["m Model", "g Same input", "i Input"]) expect(text.split(hint).length).toBeLessThanOrEqual(2);
     expect(text).not.toContain("←/→ Page");
-    expect(lines.slice(-2).join("\n")).toContain("q Back");
-    if (width >= 40) expect(lines.slice(-2).join("\n")).toContain("? Help");
+    expect(frameHints(lines).join("\n")).toContain("q Back");
+    if (width >= 40) expect(frameHints(lines).join("\n")).toContain("? Help");
   });
 
   it.each(["dark", "light"])("shows initial editing requirements as literal references and refreshes their cached body (%s)", (name) => {
@@ -159,7 +160,7 @@ describe("result reading panel", () => {
           expect(end.join("\n")).toContain("LAST");
           expect(end.join("\n")).toContain("↑↓");
           expect(end.join("\n")).toContain("Refining");
-          for (const label of ["Stop", "Back"]) expect(end.slice(-2).join("\n")).toContain(label);
+          for (const label of ["Stop", "Back"]) expect(frameHints(end).join("\n")).toContain(label);
         }
       }
     }
@@ -274,7 +275,7 @@ describe("result reading panel", () => {
     expect(text).toContain("? Help");
     expect(text).not.toContain("Enter won't send");
     expect(text).not.toContain("Accept puts the result in the editor; s sends directly.");
-    expect(panel.render(100).slice(-2)).toEqual([
+    expect(frameHints(panel.render(100))).toEqual([
       "  a Accept · e Edit · f Revise · s Send",
       "  q Back   · ? Help · i Input  · m Model",
     ]);
@@ -305,15 +306,14 @@ describe("result reading panel", () => {
     const panel = create({ candidateText: undefined, state: { ...options.state, phase: "idle" }, thinkingLevel: "high", contextLabel: "Context: not captured" });
     const lines = panel.render(100);
     expect(lines[0]).toBe("  " + "─".repeat(96));
-    expect(lines[1]).toBe("  Prompt refine");
-    expect(lines[2]?.trim()).toBe("openai-codex/example-model · high");
+    expect(lines[1]).toBe("  Prompt refine   openai-codex/example-model · high");
     const layout = panelLayout(100, 40);
-    const tabHeight = panelTabs(layout, ["Preview", "→ Settings"], 0, plainTheme).length;
-    const emptyRow = layout.topSeparatorHeight + layout.headerHeight + tabHeight + Math.floor((layout.bodyHeight - tabHeight - 1) / 2);
+    const divider = lines.findIndex((line, index) => index > 0 && /^─+$/.test(line.trim()));
+    const emptyRow = divider + 1 + Math.floor((lines.length - divider - 2) / 2);
     expect(lines[emptyRow]?.trim()).toBe("No result yet.");
-    expect(lines.slice(layout.topSeparatorHeight + layout.headerHeight + tabHeight, -3).filter((line) => line.trim())).toEqual([lines[emptyRow]]);
+    expect(lines.slice(divider + 1).filter((line) => line.trim())).toEqual([lines[emptyRow]]);
     expect(lines[emptyRow]).toBe(" ".repeat(layout.inset + Math.floor((layout.innerWidth - "No result yet.".length) / 2)) + "No result yet.");
-    expect(lines.slice(-2)).toEqual([
+    expect(frameHints(lines)).toEqual([
       "  r Refine · m Model · i Input",
       "  q Back   · ? Help",
     ]);
@@ -333,7 +333,7 @@ describe("result reading panel", () => {
     const lines = panel.render(100);
     const text = lines.join("\n");
     expect(text.match(/Prompt refine/gi)).toHaveLength(1);
-    expect(lines[2]).toContain(phase === "generating" ? "Refining" : phase === "error" ? "Failed" : "Done");
+    expect(frameHeader(lines).join("\n")).toContain(phase === "generating" ? "Refining" : phase === "error" ? "Failed" : "Done");
     if (phase === "generating") {
       expect(text).toContain("x Stop");
       expect(text).toContain("q returns to editing; work continues.");
@@ -361,15 +361,15 @@ describe("result reading panel", () => {
     expect(lines.join("\n")).toContain(theme.fg("muted", "No result yet."));
     expect(lines.join("\n")).toContain(theme.fg("muted", "openai-codex/example-model"));
     panel.setNotice("Context saved");
-    expect(panel.render(100)[2]).toContain("Context saved");
+    expect(frameHeader(panel.render(100)).join("\n")).toContain("Context saved");
     panel.toggleHelp();
-    expect(panel.render(100)[6]).toContain("Help");
+    expect(stripVTControlCharacters(frameHeader(panel.render(100)).join("\n"))).toContain("? Hide help");
   });
 
   it("keeps model guidance in the empty block when no model is selected", () => {
     const panel = create({ state: { phase: "idle", requestId: 1, pendingSend: false }, candidateText: undefined });
     expect(panel.render(100).join("\n")).toContain("No model selected");
-    expect(panel.render(100).slice(-2).join("\n")).toContain("m Model");
+    expect(frameHints(panel.render(100)).join("\n")).toContain("m Model");
   });
 
   it("offers a literal view without modifying the candidate", () => {
@@ -508,13 +508,13 @@ describe("result reading panel", () => {
     const panel = create({ state: { ...options.state, phase: "error" } });
     const text = panel.render(100).join("\n");
     expect(text).toContain("previous result kept");
-    expect(panel.render(100).slice(-2).join("\n")).toContain("a Accept · e Edit · f Revise");
+    expect(frameHints(panel.render(100)).join("\n")).toContain("a Accept · e Edit · f Revise");
     expect(text).not.toContain("r Retry");
   });
 
   it("aligns result actions with navigation using the same column stops as Tasks", () => {
     const panel = create({ navigation: { index: 1, count: 1, label: "#1 refine" } });
-    expect(panel.render(100).slice(-2).map((line) => line.trim())).toEqual([
+    expect(frameHints(panel.render(100)).map((line) => line.trim())).toEqual([
       "a Accept · e Edit · f Revise · s Send",
       "q Back   · ? Help · i Input  · m Model · g Same input",
     ]);
@@ -544,14 +544,17 @@ describe("result reading panel", () => {
       for (const helpVisible of [false, true]) {
         if (helpVisible) panel.toggleHelp();
         for (const width of [40, 60, 80, 100, 200]) {
-          const footer = panel.render(width).slice(-2);
-          const [top, bottom] = footer.map(stripVTControlCharacters);
-          const count = Math.min(starts(top!).length, starts(bottom!).length);
-          expect(starts(top!).slice(0, count)).toEqual(starts(bottom!).slice(0, count));
+          const footer = frameHints(panel.render(width));
+          const bottom = stripVTControlCharacters(footer.at(-1)!);
+          if (footer.length === 2) {
+            const top = stripVTControlCharacters(footer[0]!);
+            const count = Math.min(starts(top).length, starts(bottom).length);
+            expect(starts(top).slice(0, count)).toEqual(starts(bottom).slice(0, count));
+          }
           expect(bottom).toContain("q Back");
           expect(bottom).toContain(helpVisible ? "? Hide help" : "? Help");
-          expect(footer[1]).toContain(theme.fg("text", theme.bold("q")));
-          expect(footer[1]).toContain(theme.fg("muted", "Back"));
+          expect(footer.at(-1)).toContain(theme.fg("text", theme.bold("q")));
+          expect(footer.at(-1)).toContain(theme.fg("muted", "Back"));
           expect(footer.join("\n")).not.toContain("\t");
           for (const line of footer) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
         }
@@ -566,9 +569,9 @@ describe("result reading panel", () => {
     ]) {
       const panel = create(state);
       for (const width of [12, 20, 24, 30]) {
-        const footer = panel.render(width).slice(-2);
-        expect(footer[1]).toContain("q Back");
-        if (width >= 20) expect(footer[1]).toContain("? Help");
+        const footer = frameHints(panel.render(width));
+        expect(footer.at(-1)).toContain("q Back");
+        if (width >= 20) expect(footer.at(-1)).toContain("? Help");
         for (const line of footer) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       }
     }
@@ -576,9 +579,9 @@ describe("result reading panel", () => {
 
   it("prioritizes return and help in the single-line footer, then fits primary actions", () => {
     const panel = create({}, 8);
-    expect(panel.render(100).at(-1)?.trim()).toBe("q Back · ? Help · a Accept · e Edit · f Revise · s Send · i Input · m Model");
-    expect(panel.render(20).at(-1)?.trim()).toBe("q Back · ? Help");
-    expect(panel.render(12).at(-1)?.trim()).toBe("q Back");
+    expect(frameHints(panel.render(100)).at(-1)?.trim()).toBe("q Back · ? Help · a Accept · e Edit · f Revise · s Send · i Input · m Model");
+    expect(frameHints(panel.render(20)).at(-1)?.trim()).toBe("q Back · ? Help");
+    expect(frameHints(panel.render(12)).at(-1)?.trim()).toBe("q Back");
   });
 
   it("bounds state-specific footers and preserves return/help across resize", () => {
@@ -595,7 +598,7 @@ describe("result reading panel", () => {
           const layout = panelLayout(width, rows);
           expect(lines).toHaveLength(layout.height);
           for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
-          const footer = lines.slice(-layout.footerHeight).join("\n");
+          const footer = frameHints(lines).join("\n");
           expect(footer).toContain("q Back");
           if (width >= 40) expect(footer).toContain("? Help");
         }
@@ -609,17 +612,16 @@ describe("result reading panel", () => {
       panel.render(40);
       panel.scrollBy(10000);
       const lines = panel.render(40);
-      const layout = panelLayout(40, rows);
-      expect(lines.slice(layout.topSeparatorHeight, layout.topSeparatorHeight + layout.headerHeight).join("\n")).toContain("Send pending");
+      expect(frameHeader(lines).join("\n")).toContain("Send pending");
     }
   });
 
   it("retains model identity while scrolling and prioritizes notices", () => {
     const panel = create({ candidateText: "Result\n".repeat(100) });
-    expect(panel.render(100)[2]).toContain("openai-codex/example-model");
+    expect(frameHeader(panel.render(100)).join("\n")).toContain("openai-codex/example-model");
     panel.setNotice("Context saved");
     panel.scrollBy(10);
-    expect(panel.render(40)[2]).toMatch(/Context saved.*↑↓/);
+    expect(frameHeader(panel.render(40)).join("\n")).toMatch(/Context saved.*↑↓/);
   });
 
   it.each([40, 80, 100])("uses English chrome with elapsed time and no ellipses at %i columns", (width) => {
@@ -639,7 +641,7 @@ describe("result reading panel", () => {
     for (let elapsedSeconds = 1; elapsedSeconds <= 10; elapsedSeconds++) {
       panel.update({ ...pending, state: { ...pending.state }, elapsedSeconds });
       panel.scrollBy(1);
-      expect(panel.render(100)[2]).toContain(`${elapsedSeconds}s`);
+      expect(frameHeader(panel.render(100)).join("\n")).toContain(`${elapsedSeconds}s`);
     }
     expect(renderText).not.toHaveBeenCalled();
     panel.update({ ...pending, draftChanged: true });
@@ -656,7 +658,7 @@ describe("result reading panel", () => {
     renderMarkdown.mockClear();
     panel.update({ ...options, candidateText: "**A**\n\n".repeat(500), elapsedSeconds: 5, notice: "Saved" });
     panel.scrollBy(1);
-    expect(panel.render(100)[2]).toContain("Saved");
+    expect(frameHeader(panel.render(100)).join("\n")).toContain("Saved");
     expect(renderMarkdown).not.toHaveBeenCalled();
     panel.update({ ...options, candidateText: "**New result**" });
     expect(panel.render(100).join("\n")).toContain("New result");

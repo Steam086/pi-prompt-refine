@@ -1,6 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { HistoryStorageStatus } from "../history-store.js";
-import { panelFrame, type PanelLayout } from "../panel-layout.js";
+import { panelHeader, type PanelLayout } from "../panel-layout.js";
 import { fittingKeyHints, formatKeyHint, type KeyHint } from "../key-hints.js";
 import { sanitizeTerminalText } from "../presentation.js";
 import { truncatedOutputHint } from "../usage.js";
@@ -93,9 +93,13 @@ export function renderTaskDocument(
     body.push(...hints.map((hint) => formatKeyHint(hint, theme)), "", content.muted("Read-only help. Return with Esc before using these actions."));
   }
   const lines = content.wrapped(body.join("\n"), layout.innerWidth);
-  const viewport = Math.max(1, layout.bodyHeight);
-  const scroll = Math.min(page.scroll, Math.max(0, lines.length - viewport));
   const footer = [fittingKeyHints([["Esc", "Back"], ["↑↓", "Scroll"]], layout.innerWidth, theme)];
-  return { lines: panelFrame(layout, [content.heading(title), content.muted(`${scroll + 1}–${Math.min(lines.length, scroll + viewport)} / ${lines.length} lines`)],
-    lines.slice(scroll, scroll + viewport), footer, (text) => content.muted(text), { footerAfterBodyRows: 0 }), scroll, viewport };
+  const heading = content.heading(title);
+  const last = lines.length;
+  const statusWidth = `${last}–${last} / ${last} lines`.length;
+  const format = (start: number, end: number) => content.muted(`${start}–${end} / ${last} lines`.padEnd(statusWidth));
+  const viewport = panelHeader(layout, [heading, format(last, last)], [], footer).layout.bodyHeight;
+  const scroll = Math.min(page.scroll, Math.max(0, lines.length - viewport));
+  const chrome = panelHeader(layout, [heading, format(Math.min(last, scroll + 1), Math.min(last, scroll + viewport))], [], footer);
+  return { lines: chrome.render(lines.slice(scroll, scroll + viewport), (text) => theme.fg("borderMuted", text)), scroll, viewport };
 }

@@ -2,7 +2,7 @@ import { stripVTControlCharacters } from "node:util";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi, type SelectItem } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { sanitizeTerminalText } from "./presentation.js";
-import { panelFrame, panelLayout, type PanelLayout } from "./panel-layout.js";
+import { panelHeader, panelLayout, type PanelLayout } from "./panel-layout.js";
 import { workspaceFrame, workspaceLayout, workspaceViewport } from "./workspace-overlay.js";
 import { fittingKeyHints, type KeyHint } from "./key-hints.js";
 
@@ -69,7 +69,15 @@ export interface ModelPickerOptions {
 export function renderModelPicker(options: ModelPickerOptions, width: number, rows: number, theme: Theme,
   layout: PanelLayout = panelLayout(width, rows)): string[] {
   if (width < 1) return [];
-  const w = layout.innerWidth, h = layout.bodyHeight;
+  const w = layout.innerWidth;
+  const primary: KeyHint[] = [[w < 30 ? "↵" : "Enter", options.run ? "Run" : w < 30 ? "Use" : "Confirm"], ["↑↓", "Select"]];
+  const secondary: KeyHint[] = [["Esc", w < 16 ? "" : "Cancel"], ...(options.thinkingKeys ? [[options.thinkingKeys, "Thinking"] as KeyHint] : [])];
+  const hints = layout.footerHeight === 1
+    ? [fittingKeyHints([secondary[0]!, ...primary, ...secondary.slice(1)], w, theme, w < 30 ? " " : " · ")]
+    : [fittingKeyHints(primary, w, theme), fittingKeyHints(secondary, w, theme)];
+  const chrome = panelHeader(layout, [theme.fg("text", theme.bold(sanitizeTerminalText(options.title))),
+    theme.fg("muted", sanitizeTerminalText(options.subtitle))], [], hints);
+  const h = chrome.layout.bodyHeight;
   const search = h >= 4 ? [theme.fg("muted", "Search: ") + theme.fg(options.query ? "text" : "muted",
     truncateToWidth(sanitizeTerminalText(options.query || "provider/model, name, or thinking"), Math.max(1, w - 8), "…"))] : [];
   const detailHeight = h >= 6 ? Math.min(3, Math.floor(h / 4)) : 0;
@@ -79,12 +87,7 @@ export function renderModelPicker(options: ModelPickerOptions, width: number, ro
   const gap = detail.length ? 1 : 0;
   const listHeight = Math.max(0, h - search.length - detail.length - gap);
   const list = renderModelChoices(options.items, options.selectedKey, w, listHeight, theme);
-  const primary: KeyHint[] = [[w < 30 ? "↵" : "Enter", options.run ? "Run" : w < 30 ? "Use" : "Confirm"], ["↑↓", "Select"]];
-  const secondary: KeyHint[] = [["Esc", w < 16 ? "" : "Cancel"], ...(options.thinkingKeys ? [[options.thinkingKeys, "Thinking"] as KeyHint] : [])];
-  const footer = [fittingKeyHints(primary, w, theme), fittingKeyHints(secondary, w, theme)];
-  if (layout.footerHeight === 1) footer[0] = fittingKeyHints([secondary[0]!, primary[0]!, ...primary.slice(1), ...secondary.slice(1)], w, theme, w < 30 ? " " : " · ");
-  return panelFrame(layout, [theme.fg("text", theme.bold(sanitizeTerminalText(options.title))), theme.fg("muted", sanitizeTerminalText(options.subtitle))],
-    [...search, ...Array.from({ length: listHeight }, (_, i) => list[i] ?? ""), ...(gap ? [""] : []), ...detail], footer,
+  return chrome.render([...search, ...list, ...(gap ? [""] : []), ...detail],
     (text) => theme.fg("borderMuted", text));
 }
 
