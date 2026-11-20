@@ -14,7 +14,7 @@ import { InlinePreferences } from "./inline-preferences.js";
 import type { PreferenceRepository, RevisionDraft, SelectedPreference } from "./revision-preferences.js";
 import { canonicalShortcut } from "./config.js";
 import type { ContextSettings } from "./settings.js";
-import { SettingsPage, type SettingsOptimizer, type SettingsResult } from "./ui/settings-page.js";
+import { SettingsPage, type SettingsOptimizer, type SettingsPageActions, type SettingsResult } from "./ui/settings-page.js";
 import { RevisePage } from "./ui/revise-page.js";
 export type { SettingsResult } from "./ui/settings-page.js";
 export type { ContextSettings } from "./settings.js";
@@ -36,7 +36,7 @@ interface WorkspaceActions {
   contextEnabled(): boolean;
   optimizer?(): SettingsOptimizer;
   chooseModel?(context: ContextSettings): void;
-  editSystemPrompt?(context: ContextSettings): void;
+  editSystemPrompt?: SettingsPageActions["editSystemPrompt"];
   cycleThinking?(): Promise<SettingsResult>;
   saveContext(selected: ContextSettings): Promise<SettingsResult>;
   /** Undefined means the request was accepted; errors stay beside the retained input. */
@@ -163,7 +163,7 @@ export class RefineWorkspace implements Component, Focusable {
     this.input.editor.focused = value && !this.preferencePanel && this.mode === "input" && this.inputKind === "draft";
     this.revise.focused = value && !this.preferencePanel && this.mode === "input" && this.inputKind === "revision";
     this.originalInput.editor.focused = value && this.mode === "input" && this.inputKind === "original";
-    this.settings.focused = value;
+    this.settings.focused = value && this.mode === "context";
     if (this.preferencePanel) this.preferencePanel.focused = value;
     if (this.inlinePreferences) this.inlinePreferences.focused = value && !this.preferencePanel && this.mode === "main";
   }
@@ -306,6 +306,7 @@ export class RefineWorkspace implements Component, Focusable {
   }
 
   isUsage(): boolean { return this.mode === "usage"; }
+  isEditingOptimizationPrompt(): boolean { return this.mode === "context" && this.settings.editingOptimizationPrompt; }
   openTasks(): void { this.taskPanel?.openList(); this.switchMode("main"); }
 
   openResult(fromTasks = false): void { this.returnToTasks = fromTasks; this.switchMode("result"); }

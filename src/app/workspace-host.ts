@@ -1,7 +1,7 @@
 import { parseKey, type Component } from "@earendil-works/pi-tui";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { RefineConfig } from "../config.js";
-import { RefineWorkspace, type ContextSettings } from "../workspace.js";
+import { RefineWorkspace } from "../workspace.js";
 import { REFINE_OVERLAY_OPTIONS } from "../workspace-overlay.js";
 import { PreviewPanel, type PreviewOptions } from "../preview.js";
 import type { RefineController } from "../controller.js";
@@ -42,7 +42,7 @@ interface WorkspaceHostDependencies {
   acknowledge(sessionId: string): void;
   workspaceActions: ReturnType<typeof createWorkspaceActions>;
   editor: ReturnType<typeof createEditorActions>;
-  models: Pick<ReturnType<typeof createModelSelection>, "selectModel" | "editSystemPrompt" | "cycleModel" | "modelSwitchBlocked" | "registeredModels">;
+  models: Pick<ReturnType<typeof createModelSelection>, "selectModel" | "cycleModel" | "modelSwitchBlocked" | "registeredModels">;
   requests: Pick<ReturnType<typeof createRequestFlows>, "triggerOptimize" | "generateSameInput" | "contextLabel">;
   notify: Notify;
   notifyCurrent: NotifyCurrent;
@@ -52,7 +52,7 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
   useContext, canNameSession, updatePresentation, acknowledge, workspaceActions,
   editor, models, requests, notify, notifyCurrent }: WorkspaceHostDependencies) {
   const { acceptCandidate, editCandidate, restoreDraft, sendCandidate } = editor;
-  const { selectModel, editSystemPrompt, cycleModel, modelSwitchBlocked, registeredModels } = models;
+  const { selectModel, cycleModel, modelSwitchBlocked, registeredModels } = models;
   const { triggerOptimize, generateSameInput, contextLabel } = requests;
   const previewPositions = new Map<string, number>();
   let interacting = false;
@@ -62,7 +62,7 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
     if (interacting || ctx.mode !== "tui") return;
     interacting = true;
     ctx.ui.setFooter(() => ({ render: () => [], invalidate() {} }));
-    try { await showPreviewContent(ctx, undefined, 3, initialPage, resultView); }
+    try { await showPreviewContent(ctx, initialPage, resultView); }
     finally {
       interacting = false;
       ctx.ui.setFooter(undefined);
@@ -70,7 +70,7 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
     }
   }
 
-  async function showPreviewContent(ctx: ExtensionContext, settingsContext?: ContextSettings, settingsCursor = 3, initialPage?: "usage", resultView = false): Promise<void> {
+  async function showPreviewContent(ctx: ExtensionContext, initialPage?: "usage", resultView = false): Promise<void> {
     useContext(ctx);
     if (ctx.mode !== "tui") {
       notify(ctx, "Preview requires TUI mode.", "warning");
@@ -171,13 +171,12 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
           closePreview = undefined;
           done(value);
         };
-        if (settingsContext) workspace.openSettings(settingsContext, settingsCursor);
         if (initialPage) workspace.openUsage();
         else if (resultView) workspace.openResult();
         closePreview = (reason) => {
-          // Choosing the first/default model emits an idle state with no records.
-          // Keep this interaction open, but never suppress lifecycle invalidation.
-          if (reason === "idle" && choosingModel) refreshPreview?.();
+          // Keep explicit settings interactions open across idle refreshes;
+          // session transitions and shutdown still close the overlay.
+          if (reason === "idle" && (choosingModel || workspace.isEditingOptimizationPrompt())) refreshPreview?.();
           else finish();
         };
         refreshPreview = () => {
@@ -259,12 +258,6 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
     const { action, token } = selection;
     if (action === "dismiss") controller.cancelAndDismiss();
     else if (action === "restore") await restoreDraft(ctx);
-    else if (action === "system-prompt") {
-      await editSystemPrompt(ctx);
-      if (selection.settingsContext && ctx.sessionManager.getSessionId() === sessionId) {
-        await showPreviewContent(ctx, selection.settingsContext, 5);
-      }
-    }
     else if (action === "cycle") await cycleModel(ctx);
     else if (action === "optimize") {
       triggerOptimize(ctx, true);
@@ -274,7 +267,7 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
         await editCandidate(ctx, token);
         if (ctx.sessionManager.getSessionId() === sessionId &&
           controller.getSessionId() === sessionId && controller.getGeneration() === selection.generation) {
-          await showPreviewContent(ctx, undefined, 3, undefined, true);
+          await showPreviewContent(ctx, undefined, true);
         }
       }
       else if (action === "send") await sendCandidate(ctx, token);

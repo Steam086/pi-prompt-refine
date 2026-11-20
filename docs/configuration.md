@@ -28,7 +28,7 @@ Settings 提供 Context 和 Optimizer 两组。没有 Optimizer 时，Draft char
 - `favorites`：按配置顺序循环，跳过不可用模型。
 - `thinkingLevel`：默认优化模型的强度；省略时继承 session；可设 `off/minimal/low/medium/high/xhigh/max`，实际按模型能力调整。
 - `modelThinkingLevels`：按 `provider/model` 保存上次确认使用的强度（例如 `{"anthropic/claude-sonnet-4-5": "high"}`），包含仅用于比较的模型。选择器优先恢复该模型的记忆，Shift+Tab 只调整当前选中的模型，Enter 确认后保存；取消不保存临时调整。比较运行不会更改默认模型或 `thinkingLevel`；选择默认模型和循环模型时会恢复对应强度。没有记忆时沿用原有的当前运行／扩展设置／session 回退规则；恢复时仍按模型能力调整。
-- `systemPrompt`：可编辑的改写策略，省略时使用内置策略；固定角色、JSON 输出和标题协议始终由程序加入。面板编辑后需确认保存，下一 round 捕获时生效；当前 round 使用冻结模板。
+- `systemPrompt`：可编辑的改写策略，省略时使用内置策略；固定角色、JSON 输出和标题协议始终由程序加入。在 **Settings → Optimizer → Optimization prompt** 按 Enter 打开多行编辑页，Ctrl+S 后按 `y` 确认保存。确认页按 Esc 回到编辑页并保留输入，编辑页按 Esc 则放弃本次编辑。策略只影响 Refine，从下一 round 生效；当前 round 使用冻结模板。
 - `shortcuts`：默认仅 `optimize: "ctrl+\\"`；`view/dismiss/selectModel/cycleModel/restore` 为 `null`。`null` 只关闭全局绑定，不影响面板和命令。手工修改后执行 `/reload`。
 
 ## 历史保存与隐私

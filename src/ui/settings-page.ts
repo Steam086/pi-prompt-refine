@@ -7,6 +7,7 @@ import type { PromptInput } from "../prompt-input.js";
 import { sanitizeTerminalText } from "../presentation.js";
 import { DEFAULT_CONFIG } from "../config.js";
 import { NUMBER_SETTINGS, numberSettingValue, settingsDirty, type ContextSettings, type NumberSettingSpec } from "../settings.js";
+import { OptimizationPromptPage, type OptimizationPromptTarget } from "./optimization-prompt-page.js";
 
 const instructionModes = ["first", "always", "off"] as const;
 const instructionLabels = { first: "First request only", always: "Always", off: "Off" };
@@ -24,7 +25,7 @@ export interface SettingsPageActions {
   contextEnabled(): boolean;
   optimizer?(): SettingsOptimizer;
   chooseModel?(context: ContextSettings): void;
-  editSystemPrompt?(context: ContextSettings): void;
+  editSystemPrompt?(): OptimizationPromptTarget | undefined;
   cycleThinking?(): Promise<SettingsResult>;
   saveContext(selected: ContextSettings): Promise<SettingsResult>;
   close(message?: string): void;
@@ -40,6 +41,7 @@ export class SettingsPage {
   private detailPage = 0;
   private detailPages = 1;
   private numberInput?: { spec: NumberSettingSpec; input: PromptInput; error: string };
+  private optimizationPrompt?: OptimizationPromptPage;
   private settingsOptimizer?: SettingsOptimizer;
   private settingsContextEnabled = true;
   private settingsCacheKey = "";
@@ -59,12 +61,18 @@ export class SettingsPage {
   ) {}
   get busy(): boolean { return this.saving; }
   get editingNumber(): boolean { return !!this.numberInput; }
+  get editingOptimizationPrompt(): boolean { return !!this.optimizationPrompt; }
   set focused(value: boolean) {
     this.hasFocus = value;
     if (this.numberInput) this.numberInput.input.editor.focused = value;
+    if (this.optimizationPrompt) this.optimizationPrompt.focused = value;
   }
-  dispose(): void { this.disposed = true; this.focused = false; }
-  invalidate(): void { this.settingsFrames.clear(); }
+  dispose(): void {
+    this.disposed = true;
+    this.focused = false;
+    this.optimizationPrompt?.dispose();
+  }
+  invalidate(): void { this.settingsFrames.clear(); this.optimizationPrompt?.invalidate(); }
   refreshSettings(): void {
     this.settingsOptimizer = this.actions.optimizer?.();
     this.settingsContextEnabled = this.actions.contextEnabled();
@@ -74,6 +82,8 @@ export class SettingsPage {
     this.original = this.actions.context();
     this.selected = { ...selected };
     this.numberInput = undefined;
+    this.optimizationPrompt?.dispose();
+    this.optimizationPrompt = undefined;
     this.cursor = this.settingsGroups.flatMap((group) => group.rows).includes(cursor) ? cursor : 0;
     this.groupCursors[this.settingsGroups[this.settingsGroup]!.memory] = this.cursor;
     this.settingsScrollTop = 0;
@@ -183,6 +193,21 @@ export class SettingsPage {
     return chrome.render(body, (text) => theme.fg("borderMuted", text));
   }
 
+  private openOptimizationPrompt(): void {
+    const target = this.actions.editSystemPrompt?.();
+    if (!target) return;
+    this.optimizationPrompt = new OptimizationPromptPage(this.theme, this.keys, this.makeInput(), target, (result) => {
+      this.optimizationPrompt?.dispose();
+      this.optimizationPrompt = undefined;
+      if (result) {
+        this.settingsNotice = result.message;
+        this.settingsFailed = !result.persisted;
+      }
+    }, () => this.tui.requestRender());
+    this.optimizationPrompt.focused = this.hasFocus;
+    this.tui.requestRender();
+  }
+
   private cycleThinking(): void {
     if (!this.actions.cycleThinking || !this.settingsOptimizer?.thinkingEnabled) return;
     this.saving = true;
@@ -202,6 +227,7 @@ export class SettingsPage {
 
   /** False at an outer group boundary delegates page navigation to the workspace. */
   handleInput(data: string): boolean {
+    if (this.optimizationPrompt) { this.optimizationPrompt.handleInput(data); return true; }
     if (this.numberInput) { this.handleNumberInput(data); return true; }
     if (this.saving) return true;
     const key = parseKey(data);
@@ -255,7 +281,7 @@ export class SettingsPage {
         this.settingsFailed = false;
         this.tui.requestRender();
       } else if (this.cursor === 3) this.actions.chooseModel?.({ ...this.selected });
-      else if (this.cursor === 5) this.actions.editSystemPrompt?.({ ...this.selected });
+      else if (this.cursor === 5) this.openOptimizationPrompt();
       else this.cycleThinking();
     } else {
       const rows = this.settingsGroups[this.settingsGroup]!.rows;
@@ -270,6 +296,7 @@ export class SettingsPage {
     return true;
   }
   render(width: number): string[] {
+    if (this.optimizationPrompt) return this.optimizationPrompt.render(this.layout(width));
     if (this.numberInput) return this.renderNumberInput(width);
     const baseLayout = this.layout(width);
     const { innerWidth } = baseLayout;

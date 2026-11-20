@@ -40,6 +40,10 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
       const accept = vi.fn();
       const submit = vi.fn();
       const saveContext = vi.fn(async () => ({ message: "Saved", persisted: true }));
+      const savePrompt = vi.fn(async (_text: string) => ({ message: "Optimization prompt saved", persisted: true }));
+      const policy = ["Start of policy", ...Array.from({ length: 70 }, (_, i) => `Line ${i} 中文😀`), "End of policy"].join("\n");
+      const editPolicy = vi.fn(() => ({ text: "Short policy", save: savePrompt }))
+        .mockReturnValueOnce({ text: `${policy}\x1b[2J`, save: savePrompt });
       const revise = vi.fn();
       const position: TaskPanelPosition = { selectedId: 1 };
       const preview = new PreviewPanel({ state: { phase: "idle", requestId: 0, pendingSend: false }, contextLabel: "Draft only",
@@ -49,7 +53,7 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         taskPosition: position, usagePosition: { selectedId: 1 }, history: () => records,
         context: () => ({ instructions: "always", tree: false, skills: false }), contextEnabled: () => true, saveContext,
         optimizer: () => ({ model: "provider/rewrite-model", thinking: "high", thinkingEnabled: true, thinkingDetail: "Inherited from current session." }),
-        editSystemPrompt: vi.fn(),
+        editSystemPrompt: editPolicy,
         submit, revision: () => ({ key: "run:1", label: "#1 · model-1", submit: revise }),
         preferences: { key: null, maxChars: 16000, repository: {
           load: async () => ({ entries: [{ id: "literal", scope: "global", version: 1, name: "Preserve 中文😀", body: "Keep literals" }], errors: {} }),
@@ -143,7 +147,49 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         expect(optimizerText).not.toContain("Advanced");
         expect(optimizerText).toMatch(/› Draft character limit:? +16000 characters/);
         expect(optimizerText.replace(/\s*│\n│\s*/g, " ")).toContain("Oversized drafts and revision instructions are rejected, not truncated.");
-        input("\t");
+        input("\x1b[A"); input("\x1b[A"); input("\x1b[A"); input("\r");
+        const policyEditor = frame("Optimization prompt / editor", false).join("\n");
+        expect(policyEditor).toContain(theme.fg("text", theme.bold("Optimization prompt")));
+        expect(policyEditor).toContain(theme.fg("muted", "Refine only · Applies next round"));
+        expect(policyEditor).not.toContain("\x1b[2J");
+        expect(strip(policyEditor)).toContain("End of policy");
+        expect(strip(policyEditor)).not.toContain("Start of policy");
+        for (let i = 0; i < 10; i++) { input("\x1b[5~"); tui.renderNow(); }
+        expect(strip(frame("Optimization prompt / scroll up", false).join("\n"))).toContain("Start of policy");
+        for (let i = 0; i < 10; i++) { input("\x1b[6~"); tui.renderNow(); }
+        input("\x05"); input("\r"); input("q"); input("\t"); input("\x1b[Z"); input(" 中文😀");
+        Object.assign(terminal, { columns: 32, rows: 9 }); workspace.invalidate();
+        const shortEditor = frame("Optimization prompt / short editor", false).join("\n");
+        operationHint(shortEditor, "Esc", "Cancel");
+        operationHint(shortEditor, "^S", "Save");
+        expect(strip(shortEditor)).toContain("q 中文😀");
+        input("\x13");
+        const shortConfirm = frame("Optimization prompt / short confirmation", false).join("\n");
+        operationHint(shortConfirm, "Esc", "Back");
+        operationHint(shortConfirm, "y", "Save");
+        expect(strip(shortConfirm)).toContain("Save optimization prompt?");
+        expect(savePrompt).not.toHaveBeenCalled();
+        input("n");
+        expect(strip(frame("Optimization prompt / cancel confirmation", false).join("\n"))).toContain("q 中文😀");
+        Object.assign(terminal, { columns, rows }); workspace.invalidate();
+        input("\x13");
+        const confirmPrompt = frame("Optimization prompt / confirmation", false).join("\n");
+        expect(strip(confirmPrompt)).toContain("Save optimization prompt?");
+        expect(strip(confirmPrompt).replace(/\s*│\n│\s*/g, " ")).toContain("output protocol stay in place");
+        input("y");
+        await vi.waitFor(() => expect(strip(frame("Back to Optimizer", false).join("\n"))).toContain("› Optimization prompt"));
+        expect(savePrompt).toHaveBeenCalledExactlyOnceWith(`${policy}�[2J\nq 中文😀`);
+        input("\r"); input("\x15"); input("\x13");
+        Object.assign(terminal, { columns: 32, rows: 9 }); workspace.invalidate();
+        const invalidPolicy = frame("Optimization prompt / blank policy", false).join("\n");
+        expect(invalidPolicy).toContain(theme.fg("warning", "Prompt cannot be empty."));
+        operationHint(invalidPolicy, "Esc", "Cancel");
+        input("\x1b");
+        Object.assign(terminal, { columns, rows }); workspace.invalidate();
+        expect(strip(frame("Optimization prompt / cancel edit", false).join("\n"))).toContain("› Optimization prompt");
+        expect(savePrompt).toHaveBeenCalledTimes(1);
+        expect(saveContext).not.toHaveBeenCalled();
+        input("\x1b[B"); input("\x1b[B"); input("\x1b[B"); input("\t");
         input("\x1b[A"); input("\x1b[A"); input("\r"); // Reach History characters from Project instructions.
         passivePage("Settings / number", "Settings", ["Esc", "Cancel"]);
         input("\x15"); input("-1"); input("\r");
