@@ -10,7 +10,7 @@ import { assembleProjectContext, collectDirectoryContext, type TreeSnapshot } fr
 import { readRunUsage } from "../usage.js";
 import { displayModel, sameModel } from "./model-utils.js";
 import type { Notify, NotifyIfSameSession } from "./contracts.js";
-import type { createContextJobs } from "./context-jobs.js";
+import { directoryJobKeys, type createContextJobs } from "./context-jobs.js";
 
 interface CompletionDependencies {
   config: Pick<RefineConfig, "maxOutputTokens" | "projectContext">;
@@ -47,8 +47,7 @@ export function createCompletion({ config, getContext, getSessionId, directorySn
     if (request.project && request.preparedInput === undefined) {
       // History gates only the default tree; explicit @directories are independent.
       const project = request.project;
-      const roundKey = JSON.stringify([request.sessionId, request.roundId]);
-      const source = [request.draft, request.revision?.instruction ?? request.editingInstruction].filter((text) => text !== undefined).join("\n");
+      const { source, baseKey, referenceKey } = directoryJobKeys(request);
       // Reserve fixed shares so a frozen default tree and prompt-specific references
       // cannot double the configured per-request listing budgets. Both scopes run
       // under the same wall-clock collection deadline (in parallel).
@@ -59,8 +58,8 @@ export function createCompletion({ config, getContext, getSessionId, directorySn
         maxScannedEntries: Math.floor(projectConfig.tree.maxScannedEntries / 2),
       } } : projectConfig;
       const [base, references] = await Promise.all([
-        directorySnapshot(`${roundKey}:base`, (sharedSignal) => collectDirectoryContext(project.cwd, "", directoryConfig, !request.history.text, sharedSignal)),
-        directorySnapshot(`${roundKey}:${JSON.stringify(source)}`, (sharedSignal) => collectDirectoryContext(project.cwd, source, directoryConfig, false, sharedSignal)),
+        directorySnapshot(baseKey, (sharedSignal) => collectDirectoryContext(project.cwd, "", directoryConfig, !request.history.text, sharedSignal)),
+        directorySnapshot(referenceKey, (sharedSignal) => collectDirectoryContext(project.cwd, source, directoryConfig, false, sharedSignal)),
       ]);
       const tree: TreeSnapshot = { text: [base.text, references.text].filter(Boolean).join("\n\n"),
         warnings: [...new Set([...base.warnings, ...references.warnings])], referencedDirectoryCount: references.referencedDirectoryCount };
