@@ -36,8 +36,8 @@ describe("prompt tree and inspection", () => {
         const lines = panel.render(width);
         const output = stripVTControlCharacters(lines.join("\n"));
         expect(output).toContain("Compare results");
-        expect(output).toContain(width < 40 ? "A#1" : "A · Run #1");
-        expect(output).toContain(width < 40 ? "B#2" : "B · Run #2");
+        expect(output).toContain(width === 20 ? "A#1" : "A · #1");
+        expect(output).toContain(width === 20 ? "B#2" : "B · #2");
         expect(lines).toHaveLength(panelLayout(width, size.rows).height);
         expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
         expect(position.selectedId).toBe(selected);
@@ -45,7 +45,7 @@ describe("prompt tree and inspection", () => {
           expect(output).toContain(`Result ${selected}`);
           expect(output).not.toContain(`Result ${3 - selected}`);
           const peer = selected === 1 ? "B" : "A";
-          expect(lines.join("\n")).toContain(formatKeyHint(["Tab", width < 40 ? `${peer}#${3 - selected}` : `${peer} · Run #${3 - selected}`], theme));
+          expect(lines.join("\n")).toContain(formatKeyHint(["Tab", width === 20 ? `${peer}#${3 - selected}` : `${peer} · #${3 - selected}`], theme));
         } else {
           expect(output).toContain("Result 1"); expect(output).toContain("Result 2");
         }
@@ -87,8 +87,10 @@ describe("prompt tree and inspection", () => {
     let all = "";
     for (let i = 0; i < 8; i++) { all += text() + "\n"; panel.handleInput("\x1b[6~"); }
     for (const expected of ["Original prompt", revised.input.draft, "Revision instruction", "Keep **literal** commands", "Before revision", "BEFORE_REVISION"]) expect(all).toContain(expected);
-    if (usage) expect(all.indexOf("Revision instruction")).toBeLessThan(all.indexOf("Usage · tokens"));
-    else expect(all).not.toContain("Usage · tokens");
+    if (usage) {
+      expect(all.indexOf("Revision instruction")).toBeLessThan(all.indexOf("Usage · tokens"));
+      expect(all).toMatch(/^\s*#2 · revise from #1\s*$/m);
+    } else expect(all).not.toContain("Usage · tokens");
     if (usage) panel.handleInput("o");
     else for (let i = 0; i < 8; i++) panel.handleInput("\x1b[5~");
     expect(text()).toContain(revised.input.draft);

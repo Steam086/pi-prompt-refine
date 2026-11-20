@@ -216,7 +216,7 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
         return {
           // Failure rebases generation but keeps this source identity; retain its feedback.
           key: `${token.sessionId}:${controller.getCandidate()?.recordId ?? token.requestId}`,
-          label: `Run #${controller.getCandidate()!.recordId ?? "?"} · ${displayModel(controller.getCandidate()!.model)}`,
+          label: `#${controller.getCandidate()!.recordId ?? "?"} · ${displayModel(controller.getCandidate()!.model)}`,
           submit: (text: string) => {
             if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId) return "Session changed; no request sent.";
             return reviseCandidate(ctx, token, text);

@@ -603,7 +603,7 @@ export class TaskPanel {
         ? this.theme.bg("selectedBg", line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line)))) : line;
       if (rowHeight === 1) return [highlight(text)];
       const detail = row.original ? this.theme.fg("text", sanitizeTerminalText(draft))
-        : this.content.muted(`Run #${record.id} · ${record.input.model.provider}${record.elapsedSeconds !== undefined ? ` · ${record.elapsedSeconds}s` : ""}`);
+        : this.content.muted(`#${record.id} · ${record.input.model.provider}${record.elapsedSeconds !== undefined ? ` · ${record.elapsedSeconds}s` : ""}`);
       // Keep the parent/sibling spine through secondary lines and spacing,
       // but stop after the final child so separate prompts never join together.
       return [highlight(text),
@@ -621,7 +621,7 @@ export class TaskPanel {
     } else if (other && selected) {
       // A/B identities stay attached to runs when Tab swaps the action target.
       const letter = (row: Row) => row.record.id === Math.min(selected.record.id, other.record.id) ? "A" : "B";
-      const identity = (row: Row) => `${letter(row)} · Run #${row.record.id}`;
+      const identity = (row: Row) => `${letter(row)} · #${row.record.id}`;
       if (layout.innerWidth >= 72) {
         const half = Math.floor((layout.innerWidth - 3) / 2);
         const right = this.pane(selected, half, height - 1);

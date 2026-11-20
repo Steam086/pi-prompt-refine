@@ -48,7 +48,7 @@ describe("explicit candidate revision", () => {
     // Select the run rather than the original root.
     if (harness.panelLines(100).join("\n").includes("› ▾")) harness.panelInput("\x1b[B");
     harness.panelInput("f");
-    expect(harness.panelLines(100).join("\n")).toContain("Run #1");
+    expect(harness.panelLines(100).join("\n")).toMatch(/Revise(?: current result)? · #1 · /);
     harness.panelInput("Retain this feedback"); harness.panelInput("\x1b");
     expect(harness.panelLines(100).join("\n")).toContain("Prompt details");
     harness.panelInput("f"); expect(harness.panelLines(100).join("\n")).toContain("Retain this feedback");
@@ -76,7 +76,7 @@ describe("explicit candidate revision", () => {
     for (const hint of ["↑↓ scroll", "a Accept", "s Send to Pi", "p Preferences", "i Edit original", "f Revise"]) {
       expect(referenceHeader).not.toContain(hint);
     }
-    expect(harness.panelLines(100).join("\n")).toContain("Run #1");
+    expect(harness.panelLines(100).join("\n")).toMatch(/Revise(?: current result)? · #1 · /);
     harness.panelInput("Shorter");
     harness.panelInput("\r");
     harness.panelInput("Keep constraints");
