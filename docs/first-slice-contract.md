@@ -1,6 +1,6 @@
 # 第一切片：最小 API 契约、修改清单与 Web 构建方案
 
-状态：设计草案，待实施授权。本文件不表示接口、插件或测试已实现；不授权依赖安装、发布配置修改、宿主修改、部署或服务重启。
+状态：历史设计草案，不是待执行清单或部署授权。已实现的接口见[应用接口](application-api.md)；实际验证和未验收项见[隔离验收记录](multi-surface-acceptance.md)。
 
 关联：[总体计划](multi-surface-adaptation-plan.md)、[维护架构](architecture.md)、[测试约束](testing.md)。与总体计划存在阶段顺序差异时，本文明确列出的前移项是建议修订，不代表总体计划已被改写。
 
@@ -15,9 +15,9 @@
 - subagents 仅允许只读核实；代码实现、集成、回归由主 agent 完成。
 - 若宿主能力不足，先提出最小改造，再另行授权；接受／恢复不能用复制或插入冒充。
 
-P0 基线：commit `563073b43321296750df2102b9739d380d308810`；typecheck 通过；68 个测试文件通过、4 个默认跳过；1188 个展开用例通过、33 个跳过、0 失败。完整测试身份与状态位于 `/tmp/refine-p0-baseline-shMmp6/{tests,cases}.json`，属于临时证据，实施前需确认仍存在并重新采集起点。原有未跟踪 `foundations.md` 与总体计划未改动。
+P0 基线：commit `563073b43321296750df2102b9739d380d308810`；typecheck 通过；68 个测试文件通过、4 个默认跳过；1188 个展开用例通过、33 个跳过、0 失败。详细用例清单当时仅保存在隔离环境的临时目录；如需对照，请从基线提交重新采集。原有未跟踪 `foundations.md` 与总体计划未改动。
 
-本机安装及运行自报 pi-web `1.202611.1` / Pi `1.5.2` / Node `24.18.0`；仓库测试依赖 Pi `1.4.0`。安装目录为 `/home/example/.nvm/versions/node/v24.18.0/lib/node_modules/@jmfederico/pi-web`（下称 H）。公共 browser/server API v5、scoped backend、session-local events 的类型及实现已阅读；尚未完成新插件握手、浏览器 E2E、真实 Provider、视觉／IME 验收。未比对上游同版本发布包的逐字差异，运行中的模块也不能仅凭同版本号视为与磁盘逐字一致。
+本机安装及运行自报 pi-web `1.202611.1` / Pi `1.5.2` / Node `24.18.0`；仓库测试依赖 Pi `1.4.0`。下文 H 表示该版本的 pi-web 包根目录。公共 browser/server API v5、scoped backend、session-local events 的类型及实现已阅读；尚未完成新插件握手、浏览器 E2E、真实 Provider、视觉／IME 验收。未比对上游同版本发布包的逐字差异，运行中的模块也不能仅凭同版本号视为与磁盘逐字一致。
 
 ## 2. 第一切片完成范围
 

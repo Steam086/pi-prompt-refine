@@ -22,6 +22,7 @@ Pi Prompt Refine 是 TypeScript 编写的 Pi 扩展，入口由根 `package.json
 | application、适配器、DTO、Binding、重试与传输 | [多入口应用接口](docs/application-api.md) |
 | 原生 TUI、布局、样式、按键、Preferences/Revise | [界面维护约束](docs/ui-conventions.md) |
 | 测试设施、回归不变量与验收 | [测试与重构验收](docs/testing.md) |
+| npm 清单、打包试装、发布与隐私核查 | [发布清单](docs/release.md)、[用户数据边界](docs/tui-guide.md#what-the-rewrite-provider-receives) |
 | 公开文档、中英文维护范围 | [文档语言约定](CONTRIBUTING.md#documentation-languages) |
 | Web 构建、安装、宿主能力与重启边界 | [Web 子包说明](packages/pi-web/README.md) |
 
@@ -46,13 +47,15 @@ Pi Prompt Refine 是 TypeScript 编写的 Pi 扩展，入口由根 `package.json
 - 保存、勾选偏好、阅读、配置和连接本身不提交模型请求。优化快捷键只在本轮还未提交过运行时直接启动新原稿，后续新原稿为 Unsent；Unsent 的 Enter、Revise 的 Ctrl+S 和 API 显式运行等提交动作不受此限。Apply 仅切换 Refine 当前结果；接受/发送/恢复仍须明确动作及 session/candidate/编辑器确认守卫。Web 当前不提供 accept/send/restore。
 - Binding 为 `{ runtimeId, sessionId, lifecycleEpoch }`，任务/运行 ID 必须与其一起使用。生命周期失效、领域版本冲突、未知/过期重试不得静默迁移或重新执行；丢失回执先查原 lease/operation，不能换 nonce 盲目重试。本地 TUI 复用用例和守卫，不强行套远端账本；高级原生流程保留兼容边界。
 - 原生展示同步更新，远端 invalidation 合并通知；时钟读取不增加领域版本。浏览器表单、回执和运行目标绑定原 scope，不覆盖后续本地编辑，不因下拉选项迟到而丢失目标。
+- `project_context` 自动生成的目录列表、规则来源与告警不带宿主绝对路径；规则来源只标项目相对路径或 `external rule`。不要用全局字符串替换来处理路径，草稿、历史和规则正文中的字面内容保持原样。
 - 对外只暴露脱离内部记录的白名单 DTO，不泄露完整背景、prepared input、凭据、原始 Provider 响应或内部路径。sidecar 仍是最小白名单；恢复记录没有可重跑的旧背景，只能显式复制到当前 round。读取与传输必须有界，超额明确拒绝，不截断为假成功。
 - 保留旧 `/refine` 和快捷键；`/refine-api` 不求值 shell、不写模型 transcript，错误或命名冲突不能退化为 Agent 请求。Web 只按宿主权威 workspace/session 路由，不接受客户端文件路径；事件总线和 Host/Origin 检查都不是身份认证。
 - 原生 TUI 保持唯一稳定 overlay、每个视图唯一水平分割所有者，阅读焦点与动作目标分离。复用主题 token、`key-hints.ts` 和 ANSI-aware 列宽工具；正文可读、错误可见、输入不泄漏到外层动作。详细样式及子页规则见必读界面文档。
 
 ## 修改与验证
 
-- 除用户明确要求的行为变更外，保持既有行为与导入兼容；不升级依赖、不改发布配置、不引入框架。策略调整应同步更新对应测试断言，不将旧策略的措辞当作不可变行为；不得借此删除回归覆盖。不要为行数压缩代码，或把整个可变应用状态传给所有新模块。
+- 除用户明确要求的行为变更外，保持既有行为与导入兼容；不擅自升级依赖、改发布配置或引入框架。获准进行的发布整理限于文档、清单、锁文件来源和验收设施；涉及请求、存储、权限或界面行为的修复须先取得批准。策略调整应同步更新对应测试断言，不将旧策略的措辞当作不可变行为；不得借此删除回归覆盖。不要为行数压缩代码，或把整个可变应用状态传给所有新模块。
+- 发包从根目录操作。Pi 直接加载 TypeScript；保留 `pi-package`、`pi.extensions`、宿主 peers 和 `preference-store.ts` 运行时读取的 starter JSON。不在安装 hook 中运行构建或测试。用 `npm run check:pack` 核对白名单，不以 `.gitignore` 代替 npm 清单。不要提交真实 session、sidecar、凭据或含本机身份的实验输出；不要自行推送 tag、发布或改写 Git 历史。
 - 根检查：`npm run typecheck`、`npm test`。`test/` 按 unit/integration/ui/renderer/live/benchmarks 分层，support 每测试独立且可销毁，fixtures 只存数据；保持原用例身份和默认跳过策略。
 - 改写质量围绕真实交互验收：有价值的表达整理是否完成、上下文指代是否准确、字面材料是否保留、任务和授权是否越界；不以原样率、改写率或 benchmark 分数本身为目标。静态模板断言和离线测试仅证明协议／代码覆盖，不能证明模型实际理解或改写质量。
 - Web 修改另在 `packages/pi-web/` 执行 `npm run typecheck`、`npm test`（先安装该子包依赖）；根检查不覆盖它，也不得依赖它才能运行。保持 browser/server 构建图隔离，不把 Node 或业务 runtime 引入浏览器。

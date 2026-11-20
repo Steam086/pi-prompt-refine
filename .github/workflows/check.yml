@@ -1,0 +1,26 @@
+name: Native package checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['22.19.0', '24.x']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run check:pack
+      - name: Load the tarball with Pi (no provider credentials)
+        run: |
+          archive=$(npm pack --ignore-scripts --silent --pack-destination "$RUNNER_TEMP")
+          sh scripts/smoke-pack.sh "$RUNNER_TEMP/$archive"

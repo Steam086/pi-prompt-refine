@@ -1,12 +1,12 @@
-// Reproduction from the user-supplied TUI text. This reference is part of the
-// draft, not conversation/project background. Keep it literal in the fixture.
+// De-identified Preferences panel fixture. This reference is part of the draft,
+// not conversation/project background. Keep it literal across a rewrite.
 export const screen = ` Preferences
   Focus: Library · 0 frozen snapshots
   Search:
     n Add                           e Edit                          d Delete
   Library 3/17 · 0 selected · s Selected    │ Preview · Enter reads full text
   Prompt rewriting                          │ Prompt Bullet Structure
-    [ ] Clarify Prompt Intent       Project │ global · 8d656e43-33ed-4443-b415-d5e45419c87d
+    [ ] Clarify Prompt Intent       Project │ global · 00000000-0000-4000-8000-000000000001
     [ ] Neutral Prompt Tone          Global │ Library entry
   › [ ] Prompt Bullet Structure      Global │ Prompt rewriting · manual
     [ ] Prompt Step Structure        Global │ 将需要整理的独立并列要求改为列表；不改变回答格式。

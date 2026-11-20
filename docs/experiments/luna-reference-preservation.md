@@ -1,6 +1,6 @@
 # Luna：原稿内 TUI 参考被误删
 
-2026-11-09，独立 worktree `fix/luna-reference-preservation`。使用用户给出的 17 行 Preferences 界面文本及其末尾讨论问句作**合成回归样例**（`test/fixtures/reference-preservation.ts`），不读取私有 Pi session。一次请求 = 一个模型返回，不重试直到通过；使用本地 `openai-codex/gpt-6-luna`、无工具、空会话／项目背景、`maxTokens: 8192`；分别覆盖 `medium` / `high`，以及有／无当时手动选用的两条最小编辑偏好。初始原始请求的冻结背景不在 sidecar 中，因此实验不是历史请求的逐字复现。
+2026-11-09，独立 worktree `fix/luna-reference-preservation`。使用用户给出的 17 行 Preferences 界面文本及其末尾讨论问句作**合成回归样例**（当前 `test/fixtures/reference-preservation.ts` 已替换示例标识符），实验不读取私有 Pi session。一次请求 = 一个模型返回，不重试直到通过；使用本地 `openai-codex/gpt-6-luna`、无工具、空会话／项目背景、`maxTokens: 8192`；分别覆盖 `medium` / `high`，以及有／无当时手动选用的两条最小编辑偏好。初始原始请求的冻结背景不在 sidecar 中，因此实验不是历史请求的逐字复现。
 
 ## 定位与对照
 

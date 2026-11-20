@@ -30,9 +30,13 @@ Pi Prompt Refine 是 Pi Coding Agent 的提示词改写扩展，**主要面向�
 
 当前发布范围是 Pi 的**原生 TUI 扩展**。需要 **Node.js 22.19+**，并在 Pi 中配置模型和认证。
 
+首版上架 npm 后，用 `pi install npm:pi-prompt-refine` 安装。上架前可从 Git 试用：
+
 ```bash
 pi install git:github.com/Steam086/pi-prompt-refine
 ```
+
+二选一即可，`npm install -g` 不会将扩展注册到 Pi。
 
 安装命令会完成包获取。安装后启动 Pi；已有会话执行 `/reload`。扩展以 Pi 进程的用户权限运行，请只安装可信来源。
 
@@ -63,7 +67,7 @@ pi --extension git:github.com/Steam086/pi-prompt-refine
 
 唯一的官方偏好是 **Translate Prompt to English**：翻译 prompt，不改动字面材料或要求的回答语言。首次加载 TUI 时，仅在全局库文件不存在时复制该项，默认不勾选。已有库（包括空库）、自定义偏好和项目默认保持不变。如果想在首次改写前选偏好，用 `/refine` 打开工作台，按 `n` 新建并保存草稿，不会调用模型。选中 Unsent 草稿后按 `Tab`、用 `Space` 勾选，再按 `Enter` 请求改写。
 
-如果 `Ctrl+\` 被终端拦截，可以在 Pi 中用 `/refine <文本>` 直接请求改写。其他操作见[中文使用说明](docs/usage.md)或[英文 TUI 指南](docs/tui-guide.md)。在 macOS 上试装可参考[验收清单](docs/macos-smoke-test.md)（英文）。
+如果 `Ctrl+\` 被终端拦截，可以在 Pi 中用 `/refine <文本>` 直接请求改写。其他操作见[中文使用说明](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/usage.md)或[英文 TUI 指南](docs/tui-guide.md)。在 macOS 上试装可参考[验收清单](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/macos-smoke-test.md)（英文）。
 
 ## 常用命令
 
@@ -75,7 +79,7 @@ pi --extension git:github.com/Steam086/pi-prompt-refine
 | `/refine history` | 在 Usage 中查看当前与历史记录 |
 | `/refine restore` | 恢复上次接受前被替换的 Pi 草稿，必要时确认 |
 
-更多命令见[使用说明](docs/usage.md)。
+更多命令见[使用说明](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/usage.md)。
 
 ## 常用工作流
 
@@ -90,11 +94,11 @@ pi --extension git:github.com/Steam086/pi-prompt-refine
 | 复用编辑要求 | Preview 的 Unsent 原稿按 Tab 聚焦内联 Preferences，仅 Space 勾选，Enter 直接开始优化，Esc / Tab 返回并保留选择，`o` 阅读全文；`p`（或 Alt+P）仍打开完整面板，需 Alt+Enter 带回。Revise 中选择并带回后 Ctrl+S 修订。原始任务不变，要求独立传递 |
 | 切换模型 | 按 `m` 选模型，Enter 重新优化原稿 |
 
-项目默认、任务要求的合并规则，以及搜索和保存操作见 [Preferences 选择与保存](docs/preference-selection.md)。
+项目默认、任务要求的合并规则，以及搜索和保存操作见 [Preferences 选择与保存](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/preference-selection.md)。
 
 Preview 默认只展示当前轮次；全部轮次、Earlier 和恢复记录均可到右侧 Usage 查看。查看中的目标归档后继续保留当前阅读内容，Esc 返回当前列表。
 
-结果对比、直接发送及其他操作见[使用说明](docs/usage.md)。
+结果对比、直接发送及其他操作见[使用说明](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/usage.md)。
 
 ### 对比改写效果与耗时，选择默认优化模型
 
@@ -108,7 +112,7 @@ Preview 默认只展示当前轮次；全部轮次、Earlier 和恢复记录均�
 
 ### 模型会收到什么？
 
-所选优化 Provider 会收到草稿及已启用的背景，**它可能不同于主 Agent 使用的 Provider**。
+所选优化 Provider 会收到草稿、已提交的编辑／修订要求（含选中的偏好正文）及已启用的背景，**它可能不同于主 Agent 使用的 Provider**。Project context 默认开启，但扩展只在本机用工作目录定位文件，不会自动把它的绝对路径加入请求。`@src/` 可附带 `src/` 下的名称；规则来源只标注项目相对路径或 `external rule`。草稿、选中历史和启用的规则正文中原有的路径不会被抹去。要排除项目背景和对话正文，关闭 Project context 并将任一历史上限设为 0，保存后在下一轮使用。
 
 | 背景来源 | 默认行为与边界 |
 | --- | --- |
@@ -121,7 +125,7 @@ Preview 默认只展示当前轮次；全部轮次、Earlier 和恢复记录均�
 
 ### 历史保存
 
-Refine 默认在 Pi 会话文件旁保存已提交改写的原稿、改写结果和已提交的修订要求。将 `historyPersistence` 设为 `false` 后执行 `/reload`，会停止读写历史，但不会删除旧文件。若要删除当前会话已保存的 Refine 历史，执行 `/refine history clear` 并确认。详见[保存范围与清理方式](docs/usage.md#记录范围与用量)。
+Refine 默认在 Pi 会话文件旁保存已提交改写的原稿、改写结果和已提交的首次编辑及修订要求。将 `historyPersistence` 设为 `false` 后执行 `/reload`，会停止读写历史，但不会删除旧文件。若要删除当前会话已保存的 Refine 历史，执行 `/refine history clear` 并确认。详见[保存范围与清理方式](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/usage.md#记录范围与用量)。
 
 ## 中文参考
 
@@ -129,19 +133,19 @@ Refine 默认在 Pi 会话文件旁保存已提交改写的原稿、改写结果
 
 | 文档 | 内容 |
 | --- | --- |
-| [使用说明](docs/usage.md) | 完整操作、并行比较、轮次与冻结背景、接受／发送确认、恢复与重新运行 |
-| [配置参考](docs/configuration.md) | Settings 操作、配置文件、模型、thinking、改写策略、快捷键与预算 |
-| [Preferences 选择与保存](docs/preference-selection.md) | Selected only、组合顺序、搜索排名与新建后定位 |
-| [上下文与数据边界](docs/context.md) | 历史选择、规则与目录采集、隐私边界 |
-| [快捷键排查](docs/shortcut-troubleshooting.md) | 命令备用入口、终端按键排查与 Shell 按键注意事项 |
+| [使用说明](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/usage.md) | 完整操作、并行比较、轮次与冻结背景、接受／发送确认、恢复与重新运行 |
+| [配置参考](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/configuration.md) | Settings 操作、配置文件、模型、thinking、改写策略、快捷键与预算 |
+| [Preferences 选择与保存](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/preference-selection.md) | Selected only、组合顺序、搜索排名与新建后定位 |
+| [上下文与数据边界](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/context.md) | 历史选择、规则与目录采集、隐私边界 |
+| [快捷键排查](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/shortcut-troubleshooting.md) | 命令备用入口、终端按键排查与 Shell 按键注意事项 |
 
 ## 卸载
 
-运行 `pi remove git:github.com/Steam086/pi-prompt-refine`，然后重启 Pi 或执行 `/reload`。卸载不会删除 Refine 的偏好设置或已保存的历史。
+用 `pi list` 确认安装来源：npm 安装用 `pi remove npm:pi-prompt-refine`，Git 安装用 `pi remove git:github.com/Steam086/pi-prompt-refine`。然后重启 Pi 或执行 `/reload`。卸载不会删除 Refine 的偏好设置或已保存的历史。
 
 ## 反馈与开发
 
 - 普通问题请提交到 [GitHub Issues](https://github.com/Steam086/pi-prompt-refine/issues)。请用虚构草稿复现，并遮盖截图或日志里的敏感信息；不要附上凭据、原始对话或 Refine 历史文件。
 - 安全问题请按[安全报告流程](SECURITY.md)（英文）私下报告。如果私密报告入口不可用，公开 issue 中只请求私下报告渠道，不要贴出漏洞细节。
-- 本地检查和提交说明见[贡献指南](CONTRIBUTING.md)（英文），其中也记录了[文档语言约定](CONTRIBUTING.md#documentation-languages)。
-- 开发参考：[应用接口](docs/application-api.md) · [项目架构](AGENTS.md) · [设计原则](DESIGN.md)。Web 集成暂不发布，仅供本地开发和验证，见 [Web 子包说明](packages/pi-web/README.md)。
+- 本地检查和提交说明见[贡献指南](https://github.com/Steam086/pi-prompt-refine/blob/main/CONTRIBUTING.md)（英文），其中也记录了文档语言约定。
+- 开发参考：[一次改写的实现流程](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/architecture.md#跟随一次改写) · [应用接口](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/application-api.md) · [设计原则](https://github.com/Steam086/pi-prompt-refine/blob/main/DESIGN.md)。Web 集成暂不发布，仅供本地开发和验证，见 [Web 子包说明](https://github.com/Steam086/pi-prompt-refine/tree/main/packages/pi-web#readme)。

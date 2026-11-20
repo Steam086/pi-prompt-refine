@@ -58,7 +58,7 @@
 
 ## 证据与清理
 
-本机临时证据目录：`/tmp/refine-s6.0luCoT/`。保留 `acceptance.json`、`host-checks.json`、`browser-final.json`、配对诊断、脚本、日志与截图；临时进程、socket、浏览器 profile、agent/auth/session/project/data 状态及候选副本均已清理。测试脚本未作为默认 CI 或新测试框架引入。
+证据保存在隔离环境的临时目录，不随仓库或 npm 包分发。保留 `acceptance.json`、`host-checks.json`、`browser-final.json`、配对诊断、脚本、日志与截图；临时进程、socket、浏览器 profile、agent/auth/session/project/data 状态及候选副本均已清理。测试脚本未作为默认 CI 或新测试框架引入。
 
 最终候选实际配对 revision：`sha256:a7e309478c1184bd97e379f3e889f77f7b2c6f15da954f2930c55e37184eeab7`（宿主包内容摘要，不是 Git commit）。
 
@@ -71,4 +71,4 @@
 | 420-dark.png | 27cf6cb23aba10f3d3de9eb143679623ac78862650b667307315e2874452aa38 |
 | 420-light.png | 3b32f23467caae5981c7b90abb3c043b07e450774e9e3399ceb53f9850b2bbfa |
 
-清理后检查：生产 `pi-web.service` / `pi-web-sessiond.service` 均 active，原 `/home/example/.pi-web/sessiond.sock` 仍可用；没有向它们发送重启或停止命令。
+清理后检查：生产 `pi-web.service` / `pi-web-sessiond.service` 均 active，原用户级 session socket 仍可用；没有向它们发送重启或停止命令。

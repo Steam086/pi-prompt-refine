@@ -15,6 +15,20 @@ coverage/
 !.env.example
 !.env.sample
 
+# Private release/experiment inputs and outputs (not synthetic tracked fixtures)
+.npmrc
+*.prompt-refine.json
+*.prompt-refine.json.*.tmp
+.prompt-refine.*.tmp
+/prompt-refine.json
+/prompt-refine-preferences.json
+/prompt-refine-preference-defaults.json
+/docs/experiments/ifeval-*/
+/auth.json
+/models.json
+/sessions/
+/release-artifacts/
+
 # Logs and package archives
 *.log
 *.tgz

@@ -1,4 +1,8 @@
-可以。**对这个项目，推荐保留现有的 `modelRegistry.streamSimple()` 调用，通过 `onPayload` 只给请求体补充 `prompt_cache_key`，继续保持 SDK 的 `options.sessionId` 未设置。**
+# 按会话提供 prompt cache key（未实施提案）
+
+本文是基于旧提交的设计讨论，不描述当前行为。当前调用点在 [app/completion.ts](../src/app/completion.ts)；扩展没有设置 `onPayload`、`prompt_cache_key` 或 SDK `sessionId`，也不承诺缓存命中。改变发给 Provider 的标识需另行评审。
+
+**提案：保留现有的 `modelRegistry.streamSimple()` 调用，通过 `onPayload` 只给请求体补充 `prompt_cache_key`，继续保持 SDK 的 `options.sessionId` 未设置。**
 
 这样可以把服务端缓存标识与 Pi SDK 的连接生命周期分开：同一组请求使用稳定的 cache key，同时保持现有的 WebSocket 使用方式、并行请求、取消和 session 切换逻辑。
 

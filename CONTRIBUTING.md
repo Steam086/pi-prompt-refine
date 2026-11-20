@@ -5,12 +5,15 @@ For bugs and feature requests, open a [GitHub issue](https://github.com/Steam086
 Run the default checks from the repository root with Node.js 22.19 or later:
 
 ```sh
-npm ci
+npm ci --ignore-scripts
 npm run typecheck
 npm test
+npm run check:pack
 ```
 
 The default tests do not need model credentials or a running Web host. Keep pull requests focused and include a regression test for changed behavior where practical. If you tested a terminal interaction by hand, report the terminal and OS. Web is not in the native TUI release scope.
+
+Maintainers: use the [release checklist](docs/release.md) to audit dependencies, inspect and try the actual tarball, and plan recovery. Keep registry credentials out of PRs. Tests, contributor docs and experimental Web code are repository resources, not Pi package entry points.
 
 ## Documentation languages
 

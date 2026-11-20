@@ -50,7 +50,7 @@ describe("Tasks preview hierarchy", () => {
     const content = new TaskContent(getThemeByName(name)!);
     const run = previewRecord();
     run.input.draft = "中英文 mixed 😀 " + "readable prose with natural spacing. ".repeat(10)
-      + "\n\n```ts\n    const path = '/path/to/sources/中文/path.ts';\n```\n\n"
+      + "\n\n```ts\n    const path = '/example/repo/中文/path.ts';\n```\n\n"
       + "https://example.com/" + "long-path/".repeat(20) + "\n" + "Z".repeat(240)
       + "\n\nEND 中文😀 **literal**\x1b[2J";
     const frozen = structuredClone(run);

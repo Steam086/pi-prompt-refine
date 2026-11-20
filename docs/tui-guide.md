@@ -33,18 +33,22 @@ Refine sends the draft and selected context to the rewrite provider, which may d
 | Context | Default | How to limit it in **Settings → Context** |
 | --- | --- | --- |
 | Conversation history | Up to 12 visible user or assistant messages from the current branch, within a 16,000-character budget. Raw tool results and thinking are excluded. | Lower **History messages** or **History characters**. Set either to `0` to exclude conversation history. |
+| Working directory and rule sources | Refine uses the absolute working directory locally, not as a field in the request. Project rule sources are relative to that directory (e.g. `docs/AGENTS.md`); rules from elsewhere are labeled `external rule`. | No setting is needed to hide the absolute source path. Paths already in your draft, selected history or rule text are not redacted. |
 | Explicit directory references | On. Refine can include bounded name listings from directories inside the working directory, not file contents. | Turn **Directory references** off. This is separate from **Directory tree**. |
 | Project instructions | Off. When enabled, Refine can send rules Pi has already loaded, such as `AGENTS.md`, to the rewrite model. | **First request only** includes rules on the first request of each task, not on Revise. **Off** does not change the main agent's rules. |
 | Default directory tree and skill metadata | Both off unless enabled. Refine uses the default tree only when no conversation history is included. | Turn **Project context** off to exclude rules, skills, and both kinds of directory listing. Child settings keep their values; any that were on are marked inactive. Conversation history is unaffected. |
 
-To exclude both conversation history and project context, set either history limit to `0`, turn **Project context** off, and save with `Ctrl+S`. Use the next round for the new settings. The draft itself is still sent. These context controls do not change local history storage.
+To exclude both conversation history and project context, set either history limit to `0`, turn **Project context** off, and save with `Ctrl+S`. Use the next round for the new settings. The draft, rewrite policy, and any submitted editing instructions (including project-default or manually selected Preference bodies) are still sent. Revise also sends the previous candidate and can include earlier editing instructions. These settings exclude conversation text, not the packet's history counts. Refine cannot redact arbitrary secrets or control a provider's retention. These context controls do not change local history storage.
 
 ## Local history and cleanup
 
-By default, when Pi uses a session file, Refine stores submitted drafts, results, submitted revision instructions, and run metadata alongside it in `<session-file>.prompt-refine.json`. It does not store unsent drafts, the full captured context, or the provider request payload. Drafts and results can still contain sensitive text. In **Usage**, press `b` to see the storage status and file path.
+By default, when Pi uses a session file, Refine stores submitted drafts, results, submitted initial and revision instructions, and run metadata alongside it in `<session-file>.prompt-refine.json`. It does not store unsent drafts, the full captured context, or the provider request payload. Drafts and results can still contain sensitive text. In **Usage**, press `b` to see the storage status and file path.
 
 - To stop loading and saving history, set `"historyPersistence": false` in the config and run `/reload`. This does **not** delete existing files.
+- These are plaintext files, not encrypted storage. The sidecar writer requests owner-only permissions (`0600` on POSIX) and limits each session to 100 runs / 2 MiB. Accepting or sending a result can also set a previously unnamed Pi session's title. Clearing Refine history does not clear Pi metadata, the provider's records, or backups.
 - To remove the saved history for the current session, run `/refine history clear` and confirm. This leaves the Pi conversation and in-memory Refine records intact, and pauses saving until the next reload.
+
+Config and preferences are separate from history. The Pi agent directory can contain `prompt-refine.json` (model and policy) and `prompt-refine-preferences.json` (names and bodies). Project entries and enabled defaults live in `.pi/prompt-refine-preferences.json` and `.pi/prompt-refine-preference-defaults.json` under the working directory. Removing the package leaves these files in place; if you no longer want them, close Pi and remove only the Refine files you identified. Never share a Pi profile, `.npmrc`, sidecar, or raw session to report a bug. Use a synthetic draft instead.
 
 ## If the shortcut does not work
 
