@@ -62,6 +62,24 @@ describe("host project resources", () => {
     expect(captureProjectContext(ctx, { ...DEFAULT_CONFIG.projectContext, skillsEnabled: true }, "Use /skill:publish now").text).toContain("Publish releases");
   });
 
+  it("omits the working directory even when project context is on and all optional sources are off", () => {
+    const cwd = "/private/work/example";
+    const snapshot = formatProjectResources({ cwd }, DEFAULTS.projectContext, "draft");
+    expect(snapshot.text).not.toContain(cwd);
+    expect(snapshot.text).not.toContain("WORKING DIRECTORY:");
+  });
+
+  it("does not infer rule locations from an absent root or a non-filesystem source", () => {
+    const rule = { path: "/somewhere/private-rule.md", content: "Keep the example." };
+    for (const resources of [{ contextFiles: [rule] },
+      { cwd: "/repo", contextFiles: [{ ...rule, path: "file:///somewhere/private-rule.md" }] }]) {
+      const snapshot = formatProjectResources(resources, DEFAULT_CONFIG.projectContext, "draft");
+      expect(snapshot.text).toContain('"source":"external rule"');
+      expect(snapshot.text).not.toContain("private-rule.md");
+      expect(snapshot.text).toContain(rule.content);
+    }
+  });
+
   it("distinguishes absent resources, opaque system prompts, malformed sections and read failures", () => {
     expect(resourcesFromPrompt("<cwd>\n/repo\n</cwd>").warnings).toEqual([]);
     expect(resourcesFromPrompt("opaque custom prompt").warnings.join(" ")).toContain("did not provide recognizable project resources");
@@ -73,7 +91,9 @@ describe("host project resources", () => {
   it("keeps complete Markdown sections with line provenance and warns rather than silently head/tail truncating instructions", () => {
     const content = "# Environment\nUse the project venv.\n\n# Large section\n" + "x".repeat(3000) + "\n\n# Restrictions\nNever publish.\n";
     const config = { ...DEFAULT_CONFIG.projectContext, instructionsMaxChars: 512 };
-    const snapshot = formatProjectResources({ contextFiles: [{ path: "/repo/AGENTS.md", content }] }, config, "draft");
+    const snapshot = formatProjectResources({ cwd: "/repo", contextFiles: [{ path: "/repo/AGENTS.md", content }] }, config, "draft");
+    expect(snapshot.text).toContain('"source":"AGENTS.md"');
+    expect(snapshot.text).not.toContain("/repo");
     expect(snapshot.text).toContain("Use the project venv.");
     expect(snapshot.text).toContain("Never publish.");
     expect(snapshot.text).toContain('"complete":false');
@@ -170,6 +190,7 @@ describe("explicit directory references", () => {
     expect(result.text).toContain("[separate @reference]");
     const root = await collectDirectoryContext(dir, "@./ @.", config(), true, signal());
     expect(root.referencedDirectoryCount).toBe(1);
+    expect(root.text).toContain('REFERENCED DIRECTORY: "."\n./');
     expect(root.text).not.toContain("WORKING DIRECTORY TREE:");
   });
 

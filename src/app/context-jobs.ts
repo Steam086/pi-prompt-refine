@@ -1,5 +1,14 @@
 import type { RefineRecord } from "../history.js";
 import type { TreeSnapshot } from "../project-context.js";
+import type { RefineRequestInput } from "../request-types.js";
+
+/** The text scanned for @directories is also the identity used when retaining its snapshot. */
+export function directoryJobKeys(input: Pick<RefineRequestInput, "sessionId" | "roundId" | "draft" | "editingInstruction" | "revision">) {
+  const round = JSON.stringify([input.sessionId, input.roundId]);
+  const instruction = input.revision?.instruction ?? input.editingInstruction;
+  const source = instruction === undefined ? input.draft : `${input.draft}\n${instruction}`;
+  return { source, baseKey: `${round}:base`, referenceKey: `${round}:${JSON.stringify(source)}` };
+}
 
 /** Shared collection survives cancellation of an individual model request. */
 export function createContextJobs(getHistory: () => RefineRecord[]) {
@@ -9,9 +18,8 @@ export function createContextJobs(getHistory: () => RefineRecord[]) {
     if (existing) return existing.promise;
     if (contextJobs.size >= 200) {
       const retained = new Set(getHistory().flatMap(({ input }) => {
-        const prefix = JSON.stringify([input.sessionId, input.roundId]) + ":";
-        const source = input.revision ? `${input.draft}\n${input.revision.instruction}` : input.draft;
-        return [prefix + "base", prefix + JSON.stringify(source)];
+        const { baseKey, referenceKey } = directoryJobKeys(input);
+        return [baseKey, referenceKey];
       }));
       for (const [jobKey, job] of contextJobs) {
         if (job.settled && !retained.has(jobKey)) contextJobs.delete(jobKey);

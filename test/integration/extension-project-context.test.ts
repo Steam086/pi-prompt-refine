@@ -40,6 +40,34 @@ describe("project context injection", () => {
     expect(harness.editorWrites).toEqual([]);
   });
 
+  it("sends the literal draft but only relative or generic project labels, including warnings", async () => {
+    const harness = await makeHarness({ config: { projectContext: projectConfig(false) } });
+    const root = harness.context.cwd;
+    await mkdir(join(root, "src"));
+    await writeFile(join(root, "src", "example.ts"), "PRIVATE BODY");
+    const external = root + "-other";
+    Object.assign(harness.context, { getSystemPromptOptions: () => ({ contextFiles: [
+      { path: join(external, "private-rules.md"), content: "Shared rule" },
+      { path: join(root, "docs", "AGENTS.md"), content: "Keep /literal/from/rule verbatim." },
+    ] }) });
+    const draft = `Compare @src/ and @"${join(root, "missing")}"; leave @"${external}" alone.`;
+    harness.setEditorText(draft);
+    await trigger(harness);
+    await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledOnce());
+    const packet = JSON.parse((harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
+    expect(packet.draft).toBe(draft);
+    const project = packet.project_context;
+    expect(project).toContain('REFERENCED DIRECTORY: "src"');
+    expect(project).toContain('"example.ts"');
+    expect(project).toContain('Directory reference "missing" unavailable');
+    expect(project).toContain("within cwd");
+    expect(project).toContain('"source":"docs/AGENTS.md"');
+    expect(project).toContain('"source":"external rule"');
+    expect(project).toContain("Keep /literal/from/rule verbatim.");
+    expect(project).toContain("Shared rule");
+    for (const hidden of [root, "private-rules.md", "PRIVATE BODY"]) expect(project).not.toContain(hidden);
+  });
+
   it("reuses the final directory-enriched input for g without rescanning files or rules", async () => {
     const harness = await makeHarness({ config: { projectContext: projectConfig(false) } });
     await mkdir(join(harness.agentDir, "src"));
@@ -179,7 +207,8 @@ describe("project context injection", () => {
     await trigger(harness);
     const input = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
     expect(input).toContain("Use the project venv.");
-    expect(input).toContain("/repo/AGENTS.md");
+    expect(JSON.parse(input).project_context).toContain('"source":"external rule"');
+    expect(input).not.toContain("/repo/AGENTS.md");
     expect(input).not.toContain("Extract PDF tables");
   });
 
@@ -263,7 +292,8 @@ describe("project context injection", () => {
     expect(JSON.parse(input).conversation.items).toEqual([
       expect.objectContaining({ role, text: "Selected visible history", status: "complete" }),
     ]);
-    expect(input).toContain("/repo/AGENTS.md");
+    expect(JSON.parse(input).project_context).toContain('"source":"external rule"');
+    expect(input).not.toContain("/repo/AGENTS.md");
     expect(input).toContain("Use the project venv.");
     expect(input).toContain("Extract PDF tables");
     expect(input).not.toContain("PROJECT TREE");

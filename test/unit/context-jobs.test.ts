@@ -68,24 +68,30 @@ describe("shared context jobs", () => {
     const record: RefineRecord = {
       id: 1, taskId: 1, kind: "revise", createdAt: 0, status: "generated",
       input: {
-        draft: "Original", revision: { previousCandidate: "Candidate", instruction: "Shorter" },
+        draft: "Original", editingInstruction: "Check @docs", revision: { previousCandidate: "Candidate", instruction: "Shorter" },
         model: { provider: "provider", id: "model" }, sessionId: "session", roundId: 7,
         branchLeafId: "leaf", history: selectHistory([], 0, 0), systemPrompt: "Policy",
       },
     };
-    const jobs = cache([record]);
+    const initial: RefineRecord = { ...record, id: 2, kind: "refine", input: {
+      ...record.input, revision: undefined,
+    } };
+    const jobs = cache([record, initial]);
     const prefix = JSON.stringify(["session", 7]) + ":";
     const collect = vi.fn(async () => snapshot);
     const base = jobs.directorySnapshot(prefix + "base", collect);
     const revision = jobs.directorySnapshot(prefix + JSON.stringify("Original\nShorter"), collect);
+    const withPreference = prefix + JSON.stringify("Original\nCheck @docs");
+    const initialSnapshot = jobs.directorySnapshot(withPreference, collect);
     const pending = deferred<TreeSnapshot>();
     const unsettled = jobs.directorySnapshot("unsettled", () => pending.promise);
-    const obsolete = Array.from({ length: 197 }, (_, index) => jobs.directorySnapshot(`obsolete-${index}`, collect));
-    await Promise.all([base, revision, ...obsolete]);
+    const obsolete = Array.from({ length: 196 }, (_, index) => jobs.directorySnapshot(`obsolete-${index}`, collect));
+    await Promise.all([base, revision, initialSnapshot, ...obsolete]);
 
     await jobs.directorySnapshot("next", collect);
     expect(jobs.directorySnapshot(prefix + "base", collect)).toBe(base);
     expect(jobs.directorySnapshot(prefix + JSON.stringify("Original\nShorter"), collect)).toBe(revision);
+    expect(jobs.directorySnapshot(withPreference, collect)).toBe(initialSnapshot);
     expect(jobs.directorySnapshot("unsettled", collect)).toBe(unsettled);
     expect(jobs.directorySnapshot("obsolete-0", collect)).not.toBe(obsolete[0]);
     expect(collect).toHaveBeenCalledTimes(201);

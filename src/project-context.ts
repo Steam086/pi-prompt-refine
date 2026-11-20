@@ -97,23 +97,39 @@ function markdownSections(content: string): Array<{ startLine: number; content: 
   return sections;
 }
 
-function instructionRecord(file: ContextFile, budget: number): { text: string; incomplete: boolean } {
-  if (budget < 80) return { text: "", incomplete: true };
-  const source = { source: file.path, sourceDirectory: dirname(file.path) };
+// A URI or foreign drive path must not become a supposedly project-relative label.
+function unsupportedPath(path: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(path) || (sep === "/" && (path.includes("\\") || /^[A-Za-z]:/.test(path)));
+}
+
+function outsideProject(name: string): boolean {
+  return name === ".." || name.startsWith(`..${sep}`) || isAbsolute(name);
+}
+
+/** Pi supplies local file paths. Expose provenance only relative to a known project root. */
+function ruleSource(cwd: string | undefined, path: string): string {
+  if (!cwd || !isAbsolute(cwd) || !path || unsupportedPath(path)) return "external rule";
+  const name = relative(cwd, resolve(cwd, path));
+  return name && !outsideProject(name) ? name.split(sep).join("/") : "external rule";
+}
+
+function instructionRecord(file: { source: string; content: string }, budget: number): { text: string; incomplete: boolean } {
+  const source = file.source;
   if (file.content.length <= budget) {
-    const full = JSON.stringify({ ...source, complete: true, content: file.content });
+    const full = JSON.stringify({ source, complete: true, content: file.content });
     if (full.length <= budget) return { text: full, incomplete: false };
   }
+  if (budget < 80) return { text: "", incomplete: true };
   // Retain whole Markdown sections only; never cut a prohibition or exception mid-sentence.
   const scannedText = prefix(file.content, Math.max(65_536, budget * 8));
   const sections = markdownSections(scannedText);
   if (scannedText.length < file.content.length) sections.pop(); // The final scanned section may be incomplete.
   const selected: Array<{ startLine: number; content: string }> = [];
   for (const section of sections) {
-    const candidate = JSON.stringify({ ...source, complete: false, sections: [...selected, section] });
+    const candidate = JSON.stringify({ source, complete: false, sections: [...selected, section] });
     if (candidate.length <= budget) selected.push(section);
   }
-  const text = JSON.stringify({ ...source, complete: false, sections: selected });
+  const text = JSON.stringify({ source, complete: false, sections: selected });
   return { text: text.length <= budget ? text : "", incomplete: true };
 }
 
@@ -121,16 +137,14 @@ export function formatProjectResources(resources: HostResources, config: Project
   const warnings = [...initialWarnings];
   const reserve = Math.min(1100, Math.floor(config.maxChars / 2));
   let available = config.maxChars - reserve;
-  const files = resources.contextFiles ?? [];
+  const files = (resources.contextFiles ?? []).map(({ path, content }) => ({ source: ruleSource(resources.cwd, path), content }));
   const instructions: string[] = [];
-  let environment = resources.cwd ? `WORKING DIRECTORY: ${JSON.stringify(resources.cwd)}\n\n` : "";
-  if (environment.length > available / 2) { environment = ""; warnings.push("The working directory name exceeded the context budget and was omitted."); }
-  const instructionHeader = environment + "PROJECT INSTRUCTIONS (JSON records, in host precedence order):\n";
+  const instructionHeader = "PROJECT INSTRUCTIONS (JSON records, in host precedence order):\n";
   const skillHeader = "\n\nMAIN AGENT SKILLS (metadata only; not optimizer tools):\n";
   available -= instructionHeader.length + skillHeader.length + 32;
   let instructionBudget = Math.min(config.instructionsMaxChars, Math.max(0, available));
   const fullSizes = files.map((file) => file.content.length <= instructionBudget
-    ? JSON.stringify({ source: file.path, sourceDirectory: dirname(file.path), complete: true, content: file.content }).length
+    ? JSON.stringify({ source: file.source, complete: true, content: file.content }).length
     : Number.POSITIVE_INFINITY);
   const allInstructionsFit = fullSizes.reduce((sum, size) => sum + size + 1, 0) <= instructionBudget;
   let incompleteFiles = 0;
@@ -273,9 +287,9 @@ export async function collectTree(cwd: string, draft: string, config: ProjectCon
     if (queue.length && entries.length >= config.maxEntries) reasons.add("total tree entry limit");
     if (combined.aborted) return { text: "", warnings: [] };
     const visible = entries;
-    const lines = [JSON.stringify(basename(root) || root) + "/"];
+    const lines = ["./"]; // Relative to cwd or the REFERENCED DIRECTORY header, never the host path.
     const footer = `\n[Partial tree: maxDepth=${config.maxDepth}; default excludes + .gitignore; unlisted paths may exist.]`;
-    if (lines[0]!.length + footer.length > config.maxChars) { lines[0] = "./"; reasons.add("tree character budget"); }
+    if (lines[0]!.length + footer.length > config.maxChars) reasons.add("tree character budget");
     let used = lines[0]!.length + footer.length;
     const render = (parent: string, indent: string): void => {
       const children = visible.filter((entry) => dirname(entry.path) === (parent || "."));
@@ -358,14 +372,13 @@ export async function collectDirectoryContext(
       if (combined.aborted) return empty();
       const path = resolve(root, ref);
       const name = relative(root, path);
-      const label = JSON.stringify(prefix(ref, 200));
-      if (name === ".." || name.startsWith(`..${sep}`) || isAbsolute(name) ||
-          ref.split(/[\\/]/).includes("..") || /[\x00-\x1f\x7f]/.test(ref) || (sep !== "\\" && ref.includes("\\"))) {
-        warnings.push(`Directory reference ${label} skipped: only literal paths within cwd are supported.`);
+      if (outsideProject(name) || ref.split(/[\\/]/).includes("..") || /[\x00-\x1f\x7f]/.test(ref) || unsupportedPath(ref)) {
+        warnings.push("Directory reference skipped: only literal paths within cwd are supported.");
         continue;
       }
       if (checked.has(path)) continue;
       checked.add(path);
+      const label = JSON.stringify(prefix(name.split(sep).join("/") || ".", 200));
       const parts = name ? name.split(sep) : [];
       if (parts.length > 32) { warnings.push(`Directory reference ${label} skipped: path depth limit.`); continue; }
       let current = root;
@@ -413,7 +426,7 @@ export async function collectDirectoryContext(
     let remainingScans = config.tree.maxScannedEntries;
     for (const target of targets) {
       if (combined.aborted) return empty();
-      const header = target.explicit ? `REFERENCED DIRECTORY: ${JSON.stringify(relative(root, target.path) || ".")}\n` : "WORKING DIRECTORY TREE:\n";
+      const header = target.explicit ? `REFERENCED DIRECTORY: ${JSON.stringify(relative(root, target.path).split(sep).join("/") || ".")}\n` : "WORKING DIRECTORY TREE:\n";
       const separator = sections.length ? 2 : 0;
       const room = remainingChars - header.length - separator;
       if (room < 128 || remainingEntries <= 0 || remainingScans <= 0) {
