@@ -2,7 +2,7 @@ import { stripVTControlCharacters } from "node:util";
 import { parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { panelHeader, panelTabs, workspaceTabs, type PanelLayout, type PanelLayoutProvider } from "../panel-layout.js";
-import { passiveHintLayout, type KeyHint } from "../key-hints.js";
+import { formatKeyHint, passiveHintLayout, type KeyHint } from "../key-hints.js";
 import type { PromptInput } from "../prompt-input.js";
 import { sanitizeTerminalText } from "../presentation.js";
 import { DEFAULT_CONFIG } from "../config.js";
@@ -28,7 +28,7 @@ export interface SettingsPageActions {
   editSystemPrompt?(): OptimizationPromptTarget | undefined;
   cycleThinking?(): Promise<SettingsResult>;
   saveContext(selected: ContextSettings): Promise<SettingsResult>;
-  close(message?: string): void;
+  close(): void;
 }
 
 /** Settings owns its draft and caches; navigation and page lifetime belong to the workspace. */
@@ -180,16 +180,27 @@ export class SettingsPage {
       : [theme.fg("text", theme.bold(spec.label)), feedback];
     const chrome = panelHeader(layout, header, tabs, footer);
     const height = chrome.layout.bodyHeight;
-    // Keep the save boundary visible before optional help and presets. Only show
-    // complete blocks, leaving two rows for the editor (or error and editor).
-    const notes: string[] = [];
-    for (const text of ["Save in Settings with Ctrl+S.", spec.description, `Presets: ${spec.presets.join(" / ")}`]) {
-      const block = wrapTextWithAnsi(sanitizeTerminalText(text), innerWidth);
-      const gap = notes.length ? [""] : [];
-      if (notes.length + gap.length + block.length <= height - 2) notes.push(...gap, ...block);
+    const body: string[] = error && !layout.headerHeight && height > 1 ? [feedback] : [];
+    const prefix = innerWidth >= 12 ? "› " : "";
+    // Show the field first, with a small viewport for wrapped or multiline paste.
+    // PromptInput still owns the cursor and scroll position.
+    const indent = " ".repeat(visibleWidth(prefix));
+    const fieldWidth = innerWidth - visibleWidth(prefix);
+    const field = input.render(fieldWidth, Math.min(3, height - body.length));
+    body.push(...field.map((line, index) => theme.fg("muted", index === 0 ? prefix : indent)
+      + theme.fg("text", line)));
+    const save = wrapTextWithAnsi("Ctrl+S in Settings saves staged changes.", innerWidth);
+    if (body.length + save.length <= height) {
+      if (body.length + save.length + 2 <= height) body.push("");
+      body.push(...save.map((line) => theme.fg("muted", line)));
+      for (const note of [spec.description, `Presets: ${spec.presets.join(" / ")}`]) {
+        const block = wrapTextWithAnsi(note, innerWidth);
+        if (body.length + block.length <= height) body.push(...block.map((line) => theme.fg("muted", line)));
+      }
+    } else if (body.length < height) {
+      const compact = theme.fg("muted", "Settings: ") + formatKeyHint(["^S", "Save"], theme, 1, "secondary-compact");
+      if (visibleWidth(compact) <= innerWidth) body.push(compact);
     }
-    const body = [...notes, ...input.render(innerWidth, Math.max(1, height - notes.length))];
-    if (error && layout.headerHeight === 0) body.unshift(feedback);
     return chrome.render(body, (text) => theme.fg("borderMuted", text));
   }
 
@@ -249,14 +260,12 @@ export class SettingsPage {
       this.saving = true;
       this.settingsFailed = false;
       this.tui.requestRender();
-      void this.actions.saveContext({ ...this.selected }).then((result) => {
+      const saved = { ...this.selected };
+      void this.actions.saveContext(saved).then((result) => {
         if (this.disposed) return;
-        if (!result.persisted) {
-          this.settingsNotice = result.message;
-          this.settingsFailed = true;
-          return;
-        }
-        this.actions.close(result.message);
+        this.settingsNotice = result.message;
+        this.settingsFailed = !result.persisted;
+        if (result.persisted) this.original = saved;
       }).catch(() => {
         if (this.disposed) return;
         this.settingsNotice = "Could not save settings. Retry with Ctrl+S.";
@@ -314,21 +323,24 @@ export class SettingsPage {
       this.detailPages = cached.detailPages;
       return cached.lines;
     }
-    let body: string[];
     const dirty = settingsDirty(this.selected, this.original);
-    const notice = [this.saving ? "Saving..." : this.settingsNotice, dirty ? "Unsaved settings changes" : ""].filter(Boolean).join(" · ");
+    const message = sanitizeTerminalText(this.saving ? "Saving..." : this.settingsNotice);
+    const notice = [message && theme.fg(this.settingsFailed ? "warning" : "muted", message),
+      dirty && theme.fg("warning", "Unsaved settings changes")].filter(Boolean).join(theme.fg("muted", " · "));
     const optimizer = this.settingsOptimizer;
     const groups = this.settingsGroups;
     const group = groups[this.settingsGroup]!.label;
-    const action = this.cursor === 4 && !optimizer?.thinkingEnabled ? "Unavailable" : "Change";
+    const action = this.cursor === 4 ? (optimizer?.thinkingEnabled ? "Cycle" : undefined)
+      : this.cursor === 3 ? "Choose" : this.cursor === 5 || NUMBER_SETTINGS[this.cursor] ? "Edit" : "Change";
+    const enterHint = (key: string): KeyHint[] => action ? [[key, action]] : [];
     // Saving has a fixed key and an explicit scope, independent of row focus.
     const back: KeyHint = ["Esc", dirty ? "Discard" : "Back"];
     const groupHints: KeyHint[] = groups.length > 1 ? [["Tab", innerWidth >= 72 ? "Next group" : "Group"]] : [];
     const { layout, tabs, footer } = this.hintLayout(baseLayout,
-      [["Ctrl+S", "Save"], ["Enter", action], ...groupHints, back],
-      [back, ["^S", "Save"], ["↵", action], ...groupHints]);
+      this.saving ? [] : [["Ctrl+S", "Save"], ...enterHint("Enter"), ...groupHints, back],
+      this.saving ? [] : [back, ["^S", "Save"], ...enterHint("↵"), ...groupHints]);
     const timing = group === "Context" && this.cursor !== 12 ? "Context changes take effect next round" : "";
-    const status = theme.fg(dirty || this.settingsFailed ? "warning" : "muted", sanitizeTerminalText(notice || timing));
+    const status = notice || theme.fg("muted", timing);
     const header = [layout.headerHeight === 1 && notice ? status : theme.fg("text", theme.bold("Settings")), status];
     const chrome = panelHeader(layout, header, tabs, footer);
     const contentHeight = chrome.layout.bodyHeight;
@@ -371,7 +383,7 @@ export class SettingsPage {
         valueClipped = shownValue !== value;
         content = theme.fg(labelColor, active ? theme.bold(cell(label, nameWidth)) : cell(label, nameWidth)) + "  "
           + theme.fg(valueColor, cell(shownValue + suffix, width));
-        if (showSummary) content += "  " + theme.fg(valueColor, clip(description, summaryWidth));
+        if (showSummary) content += "  " + theme.fg(dimmed ? "dim" : "muted", clip(description, summaryWidth));
       } else {
         const available = Math.max(1, innerWidth - 2 - suffixWidth);
         const compactLabel = options.shortLabel ?? (index === 0 ? "Rules" : label);
@@ -383,8 +395,10 @@ export class SettingsPage {
         const text = clip(line(name, compactValue), available);
         valueClipped = text !== line(name, value);
         // Match wide rows: emphasize only the focused name, not its value or affordance.
-        const styled = active ? theme.bold(text.slice(0, name.length)) + text.slice(name.length) : text;
-        content = theme.fg(valueColor, styled + suffix);
+        const nameText = clip(name, available);
+        // Slice only at the end of the full, untruncated label; never inside a wide grapheme.
+        const tail = nameText === name ? text.slice(name.length) : "";
+        content = theme.fg(labelColor, active ? theme.bold(nameText) : nameText) + theme.fg(valueColor, tail + suffix);
       }
       const rendered = innerWidth < 2 ? (active ? "›" : " ") : theme.fg("text", active ? "› " : "  ") + content;
       if (active) {
@@ -456,12 +470,12 @@ export class SettingsPage {
     if (focusStart < start) start = focusStart;
     else if (focusEnd > start + listHeight) start = Math.min(focusStart, focusEnd - listHeight);
     this.settingsScrollTop = Math.max(0, Math.min(start, maxStart));
-    body = Array.from({ length: listHeight }, (_, i) => rows[this.settingsScrollTop + i] ?? "");
+    const body = rows.slice(this.settingsScrollTop, this.settingsScrollTop + listHeight);
+    if (detailSize > 0 && details.length && body.length < listHeight) body.push("");
     const detailStart = this.detailPage * detailSize;
     body.push(...details.slice(detailStart, detailStart + detailSize).map((line, i) => theme.fg("muted",
       !fitDetails && i === detailSize - 1 && details.length > detailSize ? truncateToWidth(line + "…", innerWidth, "…") : line)));
     if (pageHint) {
-      while (body.length < contentHeight - 1) body.push("");
       const hint = `PgUp/PgDn · ${this.detailPage + 1}/${this.detailPages}`;
       body.push(theme.fg("muted", visibleWidth(hint) <= innerWidth ? hint : "PgUp/PgDn"));
     }

@@ -31,6 +31,39 @@ describe("model picker layout", () => {
       if (width >= 40 && rows >= 24) expect(lines.join("\n")).toContain("模型 Model 12");
     }
   });
+  it.each(["dark", "light"])("keeps Settings picker chrome, filter and selected identity readable (%s)", (name) => {
+    const theme = getThemeByName(name)!;
+    const bold = vi.spyOn(theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
+    const item = { value: "p/model", label: "p/model [thinking] (current)", description: "Model 中文😀", usedInTask: true };
+    const options: ModelPickerOptions = { items: [...items, item], selectedKey: item.value, fromSettings: true,
+      title: "Choose optimizer model", subtitle: "", query: "中文😀\x1b[2J", run: false,
+      thinkingKeys: "Shift+Tab", thinkingStatus: "Thinking level: high · Last used for this model" };
+    try {
+      for (const [width, rows] of [[160, 40], [60, 20], [32, 9], [160, 40]] as const) {
+        const lines = renderOverlayModelPicker(options, width, rows, theme);
+        const output = lines.join("\n");
+        expect(lines.map(visibleWidth)).toEqual(Array<number>(workspaceHeight(rows)).fill(width));
+        expect(output).toContain(formatKeyHint(["Esc", "Cancel"], theme));
+        expect(output).toContain(formatKeyHint(["Enter", "Save"], theme));
+        expect(output).toContain(theme.fg("text", "中文😀�[2J"));
+        expect(output).toContain(theme.fg("text", theme.bold(item.description)));
+        expect(output).toContain(theme.fg("muted", `  ${item.value}`));
+        expect(output).not.toContain("\x1b[2J");
+        if (rows >= 20) {
+          expect(output).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Settings "))));
+          expect(output).toContain(formatKeyHint(["Shift+Tab", "Thinking"], theme));
+          expect(output).toContain("This task");
+          expect(output).not.toContain(theme.bold("This task"));
+        }
+      }
+      options.items = []; options.thinkingKeys = "";
+      const empty = renderOverlayModelPicker(options, 32, 9, theme).join("\n");
+      expect(empty).toContain(theme.fg("warning", "No matching models"));
+      expect(empty).toContain(formatKeyHint(["Esc", "Cancel"], theme));
+      expect(empty).not.toContain(formatKeyHint(["Enter", "Save"], theme));
+    } finally { bold.mockRestore(); }
+  });
+
   it.each(["dark", "light"])("budgets the full picker frame across resize, search and thinking changes (%s)", (name) => {
     const theme = getThemeByName(name)!;
     const options: ModelPickerOptions = { items, selectedKey: items[12]!.value, query: "", title: "Choose optimizer model",

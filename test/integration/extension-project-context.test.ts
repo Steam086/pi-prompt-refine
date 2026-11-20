@@ -125,7 +125,7 @@ describe("project context injection", () => {
     else for (let i = 0; i < 3; i++) harness.panelInput("\x1b[B");
     harness.panelInput(" "); harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Settings saved"));
-    harness.panelInput("q"); await view;
+    harness.panelInput("\x1b"); harness.panelInput("q"); await view;
     harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Sent" } }, harness.context);
     harness.setEditorText("Explain @src again"); await trigger(harness);
     await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(2));
@@ -226,7 +226,7 @@ describe("project context injection", () => {
       expect(harness.panelLines().join("\n")).toMatch(new RegExp(`Project instructions +${mode}`));
       harness.panelInput("\x13");
       await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Settings saved · Context applies to next round"));
-      harness.panelInput("q");
+      harness.panelInput("\x1b"); harness.panelInput("q");
       await settings;
       const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
       expect(saved.projectContext.instructionsEnabled).toBe(mode !== "Off");

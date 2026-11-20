@@ -41,7 +41,7 @@ interface WorkspaceMount {
   isUsage(): boolean;
   position: TaskPanelPosition;
   usagePosition: TaskPanelPosition;
-  openModelPicker(id?: number): void;
+  openModelPicker(id?: number, origin?: "settings"): void;
   finish(value?: WorkspaceSelection): void;
 }
 
@@ -175,7 +175,7 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
           thinkingEnabled,
         };
       },
-      chooseModel: () => openModelPicker(),
+      chooseModel: () => openModelPicker(undefined, "settings"),
       editSystemPrompt: () => {
         const inSession = () => !isClosed() && ctx.sessionManager.getSessionId() === sessionId && controller.getSessionId() === sessionId;
         if (!inSession()) return undefined;
@@ -208,7 +208,7 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
         const current = effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel);
         const next = levels[(levels.indexOf(current) + 1) % levels.length]!;
         const persisted = await saveOptimizer(ref!, next);
-        return { message: persisted ? "Thinking level saved" : "Thinking applied · Not persisted; check configuration", persisted };
+        return { message: persisted ? "Thinking level saved" : "Not persisted · Thinking applied in this process only", persisted };
       },
       saveContext: async (selected) => {
         if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId) return { message: "Session changed; settings not saved.", persisted: false };
@@ -226,7 +226,7 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
         config.maxDraftChars = selected.maxDraftChars ?? config.maxDraftChars;
         const persisted = await persistConfig(ctx);
         return { message: persisted ? "Settings saved · Context applies to next round; limits apply to new work"
-          : "Settings applied · Not persisted; check configuration", persisted };
+          : "Not persisted · Settings applied in this process only", persisted };
       },
       revisionDrafts,
       revision: (id) => {

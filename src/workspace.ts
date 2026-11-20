@@ -115,8 +115,7 @@ export class RefineWorkspace implements Component, Focusable {
       get editSystemPrompt() { return actions.editSystemPrompt; },
       get cycleThinking() { return actions.cycleThinking; },
       saveContext: (selected) => actions.saveContext(selected),
-      close: (message) => {
-        if (message !== undefined) { this.panel.setNotice(message); this.taskPanel?.setNotice(message); }
+      close: () => {
         this.settingsInitialized = false;
         this.switchMode("main");
       },

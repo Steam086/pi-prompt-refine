@@ -2,7 +2,7 @@ import { parseKey, SelectList, type SelectItem } from "@earendil-works/pi-tui";
 import { getSupportedThinkingLevels, type Api, type Model, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { modelKey, type ModelRef, type RefineConfig } from "../config.js";
-import { renderOverlayModelPicker } from "../model-picker.js";
+import { renderOverlayModelPicker, type ModelChoice } from "../model-picker.js";
 import { REFINE_OVERLAY_OPTIONS } from "../workspace-overlay.js";
 import type { RefineController } from "../controller.js";
 import type { TaskPanelPosition } from "../task-panel.js";
@@ -68,7 +68,8 @@ export function createModelSelection({ controller, config, useContext, setComple
   }
 
   async function selectModel(ctx: ExtensionContext, runId?: number, runUsage = false,
-    present: ModelPickerPresenter = (factory) => ctx.ui.custom(factory, { overlay: true, overlayOptions: REFINE_OVERLAY_OPTIONS })): Promise<void> {
+    present: ModelPickerPresenter = (factory) => ctx.ui.custom(factory, { overlay: true, overlayOptions: REFINE_OVERLAY_OPTIONS }),
+    origin?: "settings"): Promise<void> {
     useContext(ctx);
     if (ctx.mode !== "tui") {
       notify(ctx, "Optimizer model selection is only available in TUI mode.", "warning");
@@ -102,7 +103,8 @@ export function createModelSelection({ controller, config, useContext, setComple
     const selection = await present((tui, theme, keybindings, done) => {
       let query = "";
       let list: SelectList;
-      let items: SelectItem[] = [];
+      let items: ModelChoice[] = [];
+      const fromSettings = origin === "settings";
       // Edits belong to individual models and stay local until confirmation.
       const thinkingEdits = new Map<string, ModelThinkingLevel>();
       const thinkingOverride = (model: ModelRef): ModelThinkingLevel | undefined =>
@@ -124,9 +126,11 @@ export function createModelSelection({ controller, config, useContext, setComple
         return `Thinking level: ${level} · ${source}`;
       };
       const rebuild = () => {
-        items = modelPickerItems(available, query, controller.getModel()).map((item) => ({
-          ...item, description: `${taskModels.includes(item.value) ? "This task · " : ""}${item.description ?? ""}`,
-        }));
+        items = modelPickerItems(available, query, controller.getModel()).map((item) => {
+          const usedInTask = taskModels.includes(item.value);
+          return fromSettings ? { ...item, usedInTask }
+            : { ...item, description: `${usedInTask ? "This task · " : ""}${item.description ?? ""}` };
+        });
         list = new SelectList(items, Math.min(10, Math.max(1, items.length)), {
           selectedPrefix: (text) => theme.fg("accent", text),
           selectedText: (text) => theme.fg("accent", text),
@@ -149,6 +153,8 @@ export function createModelSelection({ controller, config, useContext, setComple
       return {
         render: (width) => {
           const retained = source ? controller.getHistory().filter((record) => record.taskId === source.taskId && record.status !== "unsent") : [];
+          const model = highlightedModel();
+          const canCycleThinking = !!model && getSupportedThinkingLevels(model).length > 1;
           return renderOverlayModelPicker({
             items: items.map((item) => {
               if (!source) return item;
@@ -162,7 +168,8 @@ export function createModelSelection({ controller, config, useContext, setComple
             selectedKey: list.getSelectedItem()?.value,
             title: source ? "Run original with another model" : "Choose optimizer model",
             subtitle: source ? "Same original and conversation context · Default model unchanged" : "Optimizer only · Main session unchanged",
-            query, thinkingStatus: statusFor(highlightedModel()), thinkingKeys: cycleThinkingKeys, run: !!source,
+            query, fromSettings, thinkingStatus: statusFor(model),
+            thinkingKeys: !fromSettings || canCycleThinking ? cycleThinkingKeys : "", run: !!source,
           }, width, tui.terminal.rows, theme);
         },
         invalidate: () => list.invalidate(),

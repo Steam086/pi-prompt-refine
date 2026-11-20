@@ -74,6 +74,17 @@ describe.each(["regular", "fullscreen"] as const)("TUI layout regressions (%s)",
       }
       expect(render()).toContain(theme.fg("text", theme.bold(options.title)));
       expect(render()).toContain(theme.fg("muted", options.thinkingStatus));
+      options.fromSettings = true;
+      options.query = "中文😀";
+      for (const [columns, rows] of [[100, 40], [40, 12], [32, 9], [160, 45], [100, 40]] as const) {
+        Object.assign(terminal, { columns, rows });
+        const output = render();
+        expect(output).toContain(formatKeyHint(["Esc", "Cancel"], theme));
+        expect(output).toContain(formatKeyHint(["Enter", "Save"], theme));
+        expect(output).toContain(theme.fg("text", "中文😀"));
+        expect(output).toContain(theme.fg("text", theme.bold("Model 12 中文😀")));
+        if (rows >= 12) expect(output).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Settings "))));
+      }
       const redraws = tui.fullRedraws;
       view = workspace;
       input("i"); input("Retained 中文😀"); input("\r");

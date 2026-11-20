@@ -22,6 +22,19 @@ export function fittingKeyHints(hints: KeyHint[], width: number, theme: HintThem
   return fittingHints(hints.map((hint) => formatKeyHint(hint, theme, 1, style)), width, theme.fg("muted", separator));
 }
 
+/** Operation pages keep Back and the primary action together, with one optional hint. */
+export function operationHintRows(primary: KeyHint[], secondary: KeyHint | undefined, layout: PanelLayout, theme: HintTheme): string[] {
+  const { innerWidth: width, footerHeight } = layout;
+  if (!footerHeight) return [];
+  const first = fittingKeyHints(primary, width, theme);
+  if (!first) return [];
+  if (!secondary || first !== fittingKeyHints(primary, Number.POSITIVE_INFINITY, theme)) return [first];
+  const extra = formatKeyHint(secondary, theme);
+  const combined = first + theme.fg("muted", " · ") + extra;
+  if (visibleWidth(combined) <= width) return [combined];
+  return footerHeight > 1 && visibleWidth(extra) <= width ? [first, extra] : [first];
+}
+
 /** Low-emphasis chrome: keep key/action pairs together, wrap rather than omit hints. */
 export function wrappedKeyHints(hints: KeyHint[], width: number, theme: HintTheme, compact = false, gap = " · "): string[] {
   if (width < 1) return [];

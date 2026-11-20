@@ -305,7 +305,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const saved = JSON.parse(await readFile(file, "utf8"));
     expect(saved).toMatchObject({ maxOutputTokens: 4096, timeoutMs: 120000, maxDraftChars: 32,
       context: { maxMessages: 0, maxChars: 9000 }, projectContext: { enabled: false, referencedDirectories: { enabled: false, maxReferences: 8 } } });
-    harness.panelInput("q"); await view;
+    harness.panelInput("\x1b"); harness.panelInput("q"); await view;
     harness.setEditorText("x".repeat(33));
     await trigger(harness);
     expect(harness.complete).not.toHaveBeenCalled();
@@ -343,7 +343,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\r"); harness.panelInput("\x15"); harness.panelInput("0"); harness.panelInput("\r");
     harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Settings saved"));
-    harness.panelInput("q"); await view;
+    harness.panelInput("\x1b"); harness.panelInput("q"); await view;
     harness.setEditorText("Second draft in frozen round"); await trigger(harness);
     expect(packet(1).conversation).toEqual(first);
     harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Sent" } }, harness.context);
@@ -367,6 +367,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const result = "x".repeat(20000); // Above the new character guard, within the old one.
     resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: result }) }], stopReason: "stop" });
     await flushPromises();
+    harness.panelInput("\x1b"); // Return to Preview after saving.
     harness.panelInput("\x1b[B"); // Original root -> completed run.
     harness.panelInput("a");
     await vi.waitFor(() => expect(harness.getEditor(), harness.panelLines(100).join("\n")).toBe(result));
@@ -393,7 +394,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput(" ");
     harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Settings saved"));
-    harness.panelInput("q");
+    harness.panelInput("\x1b"); harness.panelInput("q");
     await view;
     const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
     expect(saved.projectContext).toMatchObject({ instructionsEnabled: true, skillsEnabled: true, tree: { enabled: true } });
@@ -423,7 +424,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
     expect(saved.projectContext.instructionsEnabled).toBe(enabled);
     expect(saved.projectContext.instructionsOnFollowUp).toBe(followUp);
-    harness.panelInput("q");
+    harness.panelInput("\x1b"); harness.panelInput("q");
     await view;
   });
 

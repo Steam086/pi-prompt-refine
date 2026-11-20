@@ -39,7 +39,7 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
       const run = vi.fn();
       const accept = vi.fn();
       const submit = vi.fn();
-      const saveContext = vi.fn(async () => ({ message: "Saved", persisted: true }));
+      const saveContext = vi.fn(async () => ({ message: "Settings saved", persisted: true }));
       const savePrompt = vi.fn(async (_text: string) => ({ message: "Optimization prompt saved", persisted: true }));
       const policy = ["Start of policy", ...Array.from({ length: 70 }, (_, i) => `Line ${i} 中文😀`), "End of policy"].join("\n");
       const editPolicy = vi.fn(() => ({ text: "Short policy", save: savePrompt }))
@@ -152,7 +152,7 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         expect(policyEditor).toContain(theme.fg("text", theme.bold("Optimization prompt")));
         expect(policyEditor).toContain(theme.fg("muted", "Refine only · Applies next round"));
         expect(policyEditor).not.toContain("\x1b[2J");
-        expect(strip(policyEditor)).toContain("End of policy");
+        expect(policyEditor).toContain(theme.getFgAnsi("text") + "End of policy");
         expect(strip(policyEditor)).not.toContain("Start of policy");
         for (let i = 0; i < 10; i++) { input("\x1b[5~"); tui.renderNow(); }
         expect(strip(frame("Optimization prompt / scroll up", false).join("\n"))).toContain("Start of policy");
@@ -184,6 +184,10 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         const invalidPolicy = frame("Optimization prompt / blank policy", false).join("\n");
         expect(invalidPolicy).toContain(theme.fg("warning", "Prompt cannot be empty."));
         operationHint(invalidPolicy, "Esc", "Cancel");
+        Object.assign(terminal, { columns: 22 }); workspace.invalidate();
+        const narrowError = frame("Optimization prompt / narrow validation", false).join("\n");
+        expect(narrowError).toContain(theme.fg("warning", "Empty prompt"));
+        operationHint(narrowError, "Esc", "Cancel");
         input("\x1b");
         Object.assign(terminal, { columns, rows }); workspace.invalidate();
         expect(strip(frame("Optimization prompt / cancel edit", false).join("\n"))).toContain("› Optimization prompt");
@@ -191,13 +195,16 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         expect(saveContext).not.toHaveBeenCalled();
         input("\x1b[B"); input("\x1b[B"); input("\x1b[B"); input("\t");
         input("\x1b[A"); input("\x1b[A"); input("\r"); // Reach History characters from Project instructions.
-        passivePage("Settings / number", "Settings", ["Esc", "Cancel"]);
+        const number = passivePage("Settings / number", "Settings", ["Esc", "Cancel"]);
+        const rule = number.findIndex((line, index) => index > 0 && /^─+$/u.test(strip(line).slice(1, -1).trim()));
+        expect(number[rule + 1]).toContain(theme.fg("muted", "› ") + theme.getFgAnsi("text") + "16000");
         input("\x15"); input("-1"); input("\r");
         expect(frame("Settings / validation").join("\n")).toContain(theme.fg("warning", "Enter 0–100000 characters (whole numbers)."));
         Object.assign(terminal, { columns: 32, rows: 9 }); workspace.invalidate();
         const short = frame("Settings / validation after resize", false).join("\n");
         expect(short).toContain(`${theme.fg("muted", "Esc:")} ${theme.fg("muted", "Cancel")}`);
         expect(short).toContain(theme.getFgAnsi("warning") + "Enter 0–100000");
+        expect(short).toContain(theme.fg("muted", "› ") + theme.getFgAnsi("text") + "-1");
         Object.assign(terminal, { columns, rows }); workspace.invalidate();
         input("\x1b"); input("\x1b");
         expect(frame("Back to Preview", false)).toEqual(previewFrame);
@@ -243,6 +250,21 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         expect(run).not.toHaveBeenCalled();
         expect(submit).not.toHaveBeenCalled();
         expect(editor.getValue()).toBe("Host draft 中文😀");
+        workspace.openSettings(undefined, 2);
+        input(" "); input("\x13");
+        await vi.waitFor(() => expect(frame("Settings / saved", false).join("\n")).toContain(theme.fg("muted", "Settings saved")));
+        const saved = frame("Settings / same selection", false).map(strip).join("\n");
+        expect(saved).toContain("› Skill metadata");
+        expect(saved).not.toContain("Unsaved settings changes");
+        Object.assign(terminal, { columns: 32, rows: 9 }); workspace.invalidate();
+        const shortSaved = frame("Settings / saved after resize", false).map(strip).join("\n");
+        expect(shortSaved).toContain("Settings saved");
+        expect(shortSaved).toContain("› Skill metadata");
+        expect(shortSaved).toMatch(/Esc:? Back/);
+        expect(saveContext).toHaveBeenCalledExactlyOnceWith({ instructions: "always", tree: false, skills: true });
+        input("\x1b");
+        Object.assign(terminal, { columns, rows }); workspace.invalidate();
+        expect(frame("Preview after leaving Settings", false).join("\n")).not.toContain("Settings saved");
         overlay.hide(); tui.renderNow();
         expect(editor.focused).toBe(true);
         expect(strip(screenLines(tui).join("\n"))).toContain("Host draft 中文😀");
