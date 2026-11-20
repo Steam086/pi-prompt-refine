@@ -56,7 +56,7 @@ export function renderTaskDocument(
     const row = options.row;
     if (options.notice) body.push(content.heading("Feedback"), theme.fg(options.noticeColor, sanitizeTerminalText(options.notice)), "");
     if (row) {
-      body.push(content.heading(row.original ? "Original prompt" : `Run #${row.record.id} · ${row.record.input.model.id}`));
+      body.push(content.heading(row.original ? "Original prompt" : `#${row.record.id} · ${row.record.input.model.id}`));
       if (row.record.error) body.push(theme.fg("error", sanitizeTerminalText(`Error: ${row.record.error}`)));
       if (row.record.error === "truncated") body.push(theme.fg("warning", truncatedOutputHint(row.record.usage)));
     }

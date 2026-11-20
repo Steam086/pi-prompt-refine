@@ -82,6 +82,7 @@ describe("short and narrow feedback", () => {
     panel.handleInput("?");
     let all = "";
     for (let i = 0; i < 50; i++) { all += text(40); panel.handleInput("\x1b[B"); }
+    expect(all).toMatch(/^\s*#1 · model-1\s*$/m);
     for (const action of ["Accept", "Send to Pi", "Edit result", "Revise"]) expect(all).toContain(action);
     for (const key of ["a", "s", "f", "m"]) panel.handleInput(key);
     expect(actions.accept).not.toHaveBeenCalled(); expect(actions.activate).not.toHaveBeenCalled();

@@ -50,7 +50,7 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         context: () => ({ instructions: "always", tree: false, skills: false }), contextEnabled: () => true, saveContext,
         optimizer: () => ({ model: "provider/rewrite-model", thinking: "high", thinkingEnabled: true, thinkingDetail: "Inherited from current session." }),
         editSystemPrompt: vi.fn(),
-        submit, revision: () => ({ key: "run:1", label: "Run #1 · model-1", submit: revise }),
+        submit, revision: () => ({ key: "run:1", label: "#1 · model-1", submit: revise }),
         preferences: { key: null, maxChars: 16000, repository: {
           load: async () => ({ entries: [{ id: "literal", scope: "global", version: 1, name: "Preserve 中文😀", body: "Keep literals" }], errors: {} }),
           save: vi.fn(), remove: vi.fn(),
@@ -165,13 +165,13 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         input("c");
         const compare = frame("Compare").join("\n");
         operationHint(compare, "Esc", "Back");
-        expect(strip(compare)).toContain("A · Run #1");
-        expect(strip(compare)).toContain("B · Run #2");
+        expect(strip(compare)).toContain("A · #1");
+        expect(strip(compare)).toContain("B · #2");
         input("f"); input("Keep 中文😀");
         const revision = frame("Revise").join("\n");
         operationHint(revision, "Ctrl+S", "Revise");
         expect(revision).toContain(theme.fg("text", theme.bold(columns === 60 ? "Revise" : "Revise current result"))
-          + theme.fg("muted", " · Run #1 · model-1"));
+          + theme.fg("muted", " · #1 · model-1"));
         expect(strip(revision)).not.toMatch(/\b(?:Accept|Send)\b/);
         input("\t"); input("\r"); // Revise's Preferences control owns Enter, not the editor underneath.
         await vi.waitFor(() => {

@@ -80,11 +80,11 @@ describe("prompt tree and inspection", () => {
       expect(plain[selectedAt]).toContain("model-1");
       expect(cells[selectedAt]).toContain(selectedBg);
       if (spacious) {
-        expect(plain[selectedAt + 1]).toContain("Run #1 · openai-codex · 23s");
+        expect(plain[selectedAt + 1]!.trim()).toBe("#1 · openai-codex · 23s");
         expect(cells[selectedAt + 1]).toContain(selectedBg);
         expect(plain[selectedAt + 2]!.trim()).toBe("");
         expect(visibleWidth(cells[0]!)).toBeGreaterThan(36);
-      } else expect(plain.join("\n")).not.toContain("Run #1");
+      } else expect(plain.join("\n")).not.toContain("#1 · openai-codex");
       expect(stripVTControlCharacters(frame.join("\n"))).not.toContain("model-90");
       expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
       expect(frame).toHaveLength(workspaceLayout(width, height).height);
@@ -125,9 +125,9 @@ describe("prompt tree and inspection", () => {
     expect(root).toBeGreaterThanOrEqual(0);
     expect(plain.slice(root + 1, root + 3)).toEqual([`  │ ${sanitizeTerminalText(records[0]!.input.draft)}`, "  │"]);
     expect(plain[root + 3]).toContain("  ├─ model-2");
-    expect(plain.slice(root + 4, root + 6)).toEqual(["  │  Run #2 · openai-codex · 23s", "  │"]);
+    expect(plain.slice(root + 4, root + 6)).toEqual(["  │  #2 · openai-codex · 23s", "  │"]);
     expect(plain[root + 6]).toContain("  └─ model-1");
-    expect(plain.slice(root + 7, root + 9)).toEqual(["     Run #1 · openai-codex · 23s", ""]);
+    expect(plain.slice(root + 7, root + 9)).toEqual(["     #1 · openai-codex · 23s", ""]);
     expect(plain[root + 9]).toContain("Earlier · Original prompt");
     expect(plain[root + 11]).toBe("  │");
     const unsent = plain.findIndex((line) => line.includes("○ Unsent"));
@@ -157,10 +157,10 @@ describe("prompt tree and inspection", () => {
         const left = frame.filter((line) => line.includes(f.theme.fg("muted", " │ ")))
           .map((line) => stripVTControlCharacters(line.split(f.theme.fg("muted", " │ "))[0]!));
         expect(left.join("\n")).not.toContain("Original prompt");
-        expect(plain[activeAt + 1]).toContain("  │  Run #13");
+        expect(plain[activeAt + 1]).toContain("  │  #13 · openai-codex");
         expect(plain[activeAt + 2]!.trimStart()).toMatch(/^│\s+│/);
         expect(frame[activeAt]).toContain(f.theme.fg("muted", "├─ "));
-      } else expect(plain[activeAt + 1]).not.toContain("  │  Run #13");
+      } else expect(plain[activeAt + 1]).not.toContain("  │  #13 · openai-codex");
       expect(f.position.selectedId).toBe(13);
       expect(frame).toHaveLength(workspaceLayout(width, height).height);
       expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);

@@ -139,7 +139,8 @@ describe.each(["regular", "fullscreen"] as const)("task tree rendering (%s)", (m
       expect(selected[active]).toContain(theme.fg("accent", theme.bold("›")));
       expect(selected[active]).toContain(theme.fg("success", "✓ Done"));
       expect(selected[active]).toContain(theme.bg("selectedBg", "probe").split("probe")[0]);
-      expect(strip(selected[active + 1]!)).toContain("  │  Run #2");
+      expect(selected[active + 1]).toContain(theme.fg("muted", "#2 · openai-codex · 23s"));
+      expect(left(selected).find((line) => line.includes("#2 · openai-codex"))?.trimStart()).toBe("│  #2 · openai-codex · 23s");
       expect(position.selectedId).toBe(2);
       input("\t"); render();
       input("\x1b[B"); render(); // Scroll the summary, not the selected run.
@@ -147,7 +148,7 @@ describe.each(["regular", "fullscreen"] as const)("task tree rendering (%s)", (m
       input("\t"); input("\x1b[B");
       const last = left(render());
       const lastAt = last.findIndex((line) => line.includes("› └─ model-1"));
-      expect(last[lastAt + 1]!.trimStart()).toBe("Run #1 · openai-codex · 23s");
+      expect(last[lastAt + 1]!.trimStart()).toBe("#1 · openai-codex · 23s");
       expect(last[lastAt + 2]!.trim()).toBe("");
       for (const [columns, rows] of [[45, 14], [160, 14], [100, 40], [160, 60]]) {
         Object.assign(terminal, { columns, rows }); view.invalidate(); render();

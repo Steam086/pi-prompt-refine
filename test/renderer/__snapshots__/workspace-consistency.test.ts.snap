@@ -155,7 +155,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │  a Accept · s Send · p Preferences · i Edit original   │
 │  Esc Back · ? Help · c Next comparison · f Revise      │
 │  ────────────────────────────────────────────────────  │
-│  A · Run #1 · Tab B · Run #2                           │
+│  A · #1 · Tab B · #2                                   │
 │  model-1                                       ✓ Done  │
 │  openai-codex · Thinking xhigh                         │
 │  23s · ↑2.3k ↓670 · Cost —                             │
@@ -177,7 +177,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │  model-1 · ✓ Done                                      │
 │  openai-codex · Thinking xhigh · 23s · ↑2.3k ↓670 ·    │
 │                                                        │
-│  Revise · Run #1 · model-1   Revision not submitted    │
+│  Revise · #1 · model-1   Revision not submitted        │
 │  Ctrl+S Revise · Enter Newline                         │
 │  Esc Back      · Tab Focus     · Ctrl+E Editor only    │
 │  ────────────────────────────────────────────────────  │
