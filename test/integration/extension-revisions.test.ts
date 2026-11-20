@@ -202,6 +202,7 @@ describe("explicit candidate revision", () => {
     harness.panelInput(" "); // Disable project instructions for the next round.
     harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Settings saved"));
+    harness.panelInput("\x1b");
     harness.panelInput("\r"); // Inspect the selected result before revising.
     harness.panelInput("f");
     harness.panelInput("Shorter");

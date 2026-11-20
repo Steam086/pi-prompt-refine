@@ -125,7 +125,7 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
         let choosingModel = false;
         let modelPicker: Component | undefined;
         let finishModelPicker: ((selection: ModelSelection) => void) | undefined;
-        const openModelPicker = (recordId?: number) => {
+        const openModelPicker = (recordId?: number, origin?: "settings") => {
           if (closed || choosingModel) return;
           choosingModel = true;
           // Replace only the modal's content. Calling the native done() here would
@@ -141,7 +141,7 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
             modelPicker = factory(tui, theme, keybindings, finishModelPicker);
             workspace.focused = false;
             tui.requestRender();
-          })).catch(() => {
+          }), origin).catch(() => {
             if (!closed) notify(ctx, "Could not select optimizer model; existing work kept.", "error");
           }).finally(() => {
             choosingModel = false;

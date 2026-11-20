@@ -220,7 +220,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     input("\x1b[D"); input(" "); // Stage a change to project instructions.
     input("\t"); input("\x1b[B"); input("\x1b[B");
     expect(frame()).toContain("› Optimization prompt");
-    expect(frame()).toContain("Enter: Change");
+    expect(frame()).toContain("Enter: Edit");
     input("\r");
     expect(frame()).toContain(original);
     expect(frame()).toContain("Refine only · Applies next round");
@@ -368,6 +368,15 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.panelLines().join("\n")).toMatch(/Default model +fake-provider\/fake-chat/);
     harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Choose optimizer model"));
+    const picker = () => stripVTControlCharacters(harness.panelLines(120).join("\n"));
+    expect(picker()).toMatch(/Preview +Usage +Settings.*Esc Cancel.*Enter Save/);
+    expect(picker()).toContain("Thinking: medium");
+    harness.panelInput("\x1b[Z");
+    expect(picker()).toContain("Thinking: high");
+    harness.panelInput("q");
+    expect(picker()).toContain("Search: q");
+    expect(picker()).toContain("No matching models");
+    expect(picker()).not.toContain("Enter Save");
     harness.panelInput("\x1b");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Unsaved settings changes"));
     harness.panelInput("\x1b[D");
@@ -375,6 +384,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\t");
     harness.panelInput("\x1b[B");
     expect(harness.panelLines().join("\n")).toMatch(/Thinking +medium/);
+    expect(picker()).toContain("Enter: Cycle");
     harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Thinking level saved"));
     expect(harness.panelLines().join("\n")).toMatch(/Thinking +high/);
@@ -384,6 +394,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(saved.thinkingLevel).toBe("high");
     expect(saved.modelThinkingLevels["fake-provider/fake-chat"]).toBe("high");
     expect(saved.projectContext.instructionsEnabled).toBe(false);
+    expect(harness.customCalls()).toBe(1);
+    expect(harness.complete).not.toHaveBeenCalled();
     harness.panelInput("\x1b");
     harness.panelInput("q");
     await view;
@@ -424,9 +436,15 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\t");
     harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Settings saved"));
+    const frame = () => stripVTControlCharacters(harness.panelLines().join("\n"));
+    expect(frame()).toContain("› Default model");
+    expect(frame()).toContain("Esc: Back");
+    expect(frame()).not.toContain("Unsaved settings changes");
     expect(harness.customCalls()).toBe(1);
     const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
     expect(saved.projectContext.instructionsEnabled).toBe(true);
+    harness.panelInput("\x1b");
+    expect(frame()).not.toContain("Settings saved");
     harness.panelInput("q");
     await view;
   });

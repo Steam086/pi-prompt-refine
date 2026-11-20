@@ -160,7 +160,7 @@ describe("shared refine workspace", () => {
     expect(lines[model]?.replace(/│\s*$/, "").trimEnd()).toMatch(/›$/);
     expect(lines[model + 1]).toContain("Thinking:");
     workspace.handleInput("\x1b[B");
-    expect(workspace.render(40).findIndex((line) => line.includes("Model:"))).toBe(model);
+    expect(workspace.render(40).findIndex((line) => stripVTControlCharacters(line).includes("Model:"))).toBe(model);
   });
 
   it.each(["dark", "light"])("keeps Optimizer values and key details readable from 32 to 120 columns in %s", (name) => {
@@ -270,7 +270,7 @@ describe("shared refine workspace", () => {
     const { workspace } = create(40, "dark", true);
     workspace.openSettings(undefined, cursor);
     const hints = footer(workspace.render(100)).map((line) => stripVTControlCharacters(line).replace(/^│|│$/g, "").trim());
-    expect(hints).toEqual(["Ctrl+S: Save  Enter: Change  Tab: Next group  Esc: Back"]);
+    expect(hints).toEqual([`Ctrl+S: Save  Enter: ${cursor === 3 ? "Choose" : "Change"}  Tab: Next group  Esc: Back`]);
   });
 
   it.each(["dark", "light"])("aligns Settings hints across groups, dirty/disabled states and resize in %s", (name) => {
@@ -283,7 +283,7 @@ describe("shared refine workspace", () => {
           const lines = workspace.render(width);
           const footerRows = footer(lines);
           const hints = footerRows.map(stripVTControlCharacters).join("\n");
-          const action = cursor === 4 ? "Unavailable" : "Change";
+          const action = cursor === 3 ? "Choose" : cursor === 4 ? undefined : cursor === 5 ? "Edit" : "Change";
           const back = dirty ? "Discard" : "Back";
           expect(hints).not.toMatch(/(?:Space|←|→|↑↓):|\t/);
           expect(hints).toMatch(/(?:Ctrl\+S:|\^S) Save/);
@@ -293,7 +293,8 @@ describe("shared refine workspace", () => {
           expect(lines).toHaveLength(panelLayout(width, 40).height);
           for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
           if (width >= 80) {
-            expect(hints).toContain(`Enter: ${action}  ${optimizer ? "Tab: Next group  " : ""}Esc: ${back}`);
+            expect(hints).toContain(`${action ? `Enter: ${action}  ` : ""}${optimizer ? "Tab: Next group  " : ""}Esc: ${back}`);
+            if (!action) expect(hints).not.toContain("Enter:");
             expect(footerRows[0]).toContain(formatKeyHint(["Ctrl+S", "Save"], theme, 1, "secondary"));
             expect(footerRows[0]).toContain(formatKeyHint(["Esc", back], theme, 1, "secondary"));
           }
@@ -320,9 +321,9 @@ describe("shared refine workspace", () => {
       expect(footer(workspace.render(24)).map(stripVTControlCharacters).join("\n")).toMatch(/Esc:? Discard/);
     }
     terminal.rows = 5;
-    expect(stripVTControlCharacters(footer(workspace.render(40)).at(-1)!).trim()).toBe("Esc Discard · ^S Save · ↵ Change");
+    expect(stripVTControlCharacters(footer(workspace.render(40)).at(-1)!).trim()).toBe("Esc Discard · ^S Save · ↵ Choose");
     workspace.openSettings();
-    expect(stripVTControlCharacters(footer(workspace.render(40)).at(-1)!).trim()).toBe("Esc Back · ^S Save · ↵ Change");
+    expect(stripVTControlCharacters(footer(workspace.render(40)).at(-1)!).trim()).toBe("Esc Back · ^S Save · ↵ Choose");
     expect(stripVTControlCharacters(footer(workspace.render(12)).at(-1)!).trim()).toBe("Esc Back");
   });
 
@@ -418,10 +419,11 @@ describe("shared refine workspace", () => {
     }
     resolve({ message: "Thinking level saved", persisted: true });
     await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain("Thinking level saved"));
-    const status = workspace.render(100)[2];
+    const status = workspace.render(100)[1];
+    expect(status).toContain("Thinking level saved");
     expect(status).not.toContain("Context changes take effect next round");
     workspace.handleInput("\x1b[D");
-    expect(workspace.render(100)[2]).toBe(status);
+    expect(workspace.render(100)[1]).toBe(status);
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Project instructions");
     expect(actions.saveContext).not.toHaveBeenCalled();
     expect(actions.chooseModel).not.toHaveBeenCalled();
@@ -444,23 +446,24 @@ describe("shared refine workspace", () => {
 
   it.each(["dark", "light"])("warns on applied-but-unpersisted settings and allows retry in %s", async (name) => {
     const { workspace, actions, terminal, theme } = create(40, name, true);
-    const failure = { message: "Context applied · Not persisted; check configuration", persisted: false };
+    const failure = { message: "Not persisted · Context applied in this process only", persisted: false };
     actions.saveContext.mockResolvedValueOnce(failure);
     workspace.openSettings(); workspace.handleInput("\r"); workspace.handleInput("\x13");
-    await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain(theme.fg("warning", `${failure.message} · Unsaved settings changes`)));
+    await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain(theme.fg("warning", failure.message)
+      + theme.fg("muted", " · ") + theme.fg("warning", "Unsaved settings changes")));
     expect(textOf(workspace.render(100))).toContain("Settings");
     expect(textOf(workspace.render(100))).not.toContain("Context saved");
     for (const rows of [8, 12, 40]) {
       terminal.rows = rows;
-      expect(textOf(workspace.render(100))).toContain("Not persisted");
+      for (const width of [24, 100]) expect(textOf(workspace.render(width))).toContain("Not persisted");
       expect(workspace.render(100)).toHaveLength(panelLayout(100, rows).height);
     }
     workspace.handleInput("\x13");
     await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain("Context saved"));
     terminal.rows = 40;
-    actions.cycleThinking!.mockResolvedValueOnce({ message: "Thinking applied · Not persisted; check configuration", persisted: false });
+    actions.cycleThinking!.mockResolvedValueOnce({ message: "Not persisted · Thinking applied in this process only", persisted: false });
     workspace.openSettings(undefined, 4); workspace.handleInput("\r");
-    await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain(theme.fg("warning", "Thinking applied · Not persisted; check configuration")));
+    await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain(theme.fg("warning", "Not persisted · Thinking applied in this process only")));
     workspace.handleInput("\r");
     await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain(theme.fg("muted", "Thinking level saved")));
   });
@@ -479,7 +482,7 @@ describe("shared refine workspace", () => {
     const output = textOf(workspace.render(100));
     expect(stripVTControlCharacters(output)).toContain("Unavailable — select model first");
     expect(output).toContain(theme.fg("dim", "Thinking              "));
-    expect(output).toContain("Enter");
+    expect(output).not.toContain("Enter");
     expect(output).not.toContain("Cycle");
     for (const key of ["\r", " ", "\x1b[Z"]) workspace.handleInput(key);
     expect(actions.cycleThinking).not.toHaveBeenCalled();

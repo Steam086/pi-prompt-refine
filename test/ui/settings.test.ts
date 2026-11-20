@@ -53,6 +53,30 @@ describe("Settings budgets and limits", () => {
     expect(f.actions.submit).not.toHaveBeenCalled();
   });
 
+  it.each(["dark", "light"])("puts all five active fields ahead of muted help and presets (%s)", (name) => {
+    const f = fixture(name);
+    for (const [cursor, spec] of Object.entries(NUMBER_SETTINGS)) {
+      f.workspace.openSettings(undefined, Number(cursor));
+      f.workspace.handleInput("\r");
+      const value = String(f.saved[spec.field]! / spec.scale);
+      for (const [width, rows] of [[160, 40], [60, 20], [32, 9], [160, 40]] as const) {
+        f.terminal.rows = rows;
+        const frame = f.workspace.render(width);
+        const field = frame.findIndex((line) => line.includes(CURSOR_MARKER));
+        const divider = frame.findIndex((line) => /^[│ ]*─+[│ ]*$/u.test(stripVTControlCharacters(line)));
+        expect(field).toBeGreaterThan(0);
+        expect(frame[field]).toContain(f.theme.fg("muted", "› ") + f.theme.getFgAnsi("text") + value);
+        if (divider >= 0) expect(field).toBe(divider + 1);
+        expect(frame.slice(0, field).join("\n")).not.toContain("Presets:");
+        if (width >= 60) expect(frame.slice(field + 1).join("\n")).toContain(f.theme.fg("muted", "Ctrl+S in Settings saves staged changes."));
+        if (width === 160) expect(frame.slice(field + 1).join("\n")).toContain(f.theme.fg("muted", `Presets: ${spec.presets.join(" / ")}`));
+      }
+      f.workspace.handleInput("\x1b");
+    }
+    expect(f.actions.saveContext).not.toHaveBeenCalled();
+    expect(f.actions.submit).not.toHaveBeenCalled();
+  });
+
   it.each(Object.entries(NUMBER_SETTINGS))("edits %s using presets, custom values and explicit saving", async (cursor, spec) => {
     const f = fixture();
     f.workspace.openSettings(undefined, Number(cursor));
@@ -69,7 +93,20 @@ describe("Settings budgets and limits", () => {
     f.workspace.handleInput("\x13");
     expect(f.actions.saveContext).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ [spec.field]: spec.min * spec.scale }));
     await vi.waitFor(() => expect(f.text()).toContain("Settings saved"));
+    expect(f.text()).toContain(`› ${spec.label}`);
+    expect(f.text()).toContain("Esc: Back");
+    expect(f.text()).not.toContain("Unsaved settings changes");
     expect(f.saved[spec.field]).toBe(spec.min * spec.scale);
+    f.workspace.handleInput("\r");
+    f.value(String(spec.max));
+    f.workspace.handleInput("\r");
+    expect(f.text()).toContain("Esc: Discard");
+    f.workspace.handleInput("\x1b");
+    expect(f.text()).toContain("Prompt refine");
+    expect(f.saved[spec.field]).toBe(spec.min * spec.scale);
+    f.workspace.openSettings(undefined, Number(cursor));
+    expect(f.text()).not.toContain("Unsaved settings changes");
+    expect(f.actions.saveContext).toHaveBeenCalledTimes(1);
     expect(f.actions.submit).not.toHaveBeenCalled();
   });
 

@@ -2,13 +2,15 @@ import { stripVTControlCharacters } from "node:util";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi, type SelectItem } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { sanitizeTerminalText } from "./presentation.js";
-import { panelHeader, panelLayout, type PanelLayout } from "./panel-layout.js";
+import { panelHeader, panelLayout, workspaceTabs, type PanelLayout } from "./panel-layout.js";
 import { workspaceFrame, workspaceLayout, workspaceViewport } from "./workspace-overlay.js";
-import { fittingKeyHints, type KeyHint } from "./key-hints.js";
+import { fittingKeyHints, operationHintRows, type KeyHint } from "./key-hints.js";
+
+export type ModelChoice = SelectItem & { usedInTask?: boolean };
 
 /** Render independently of SelectList's fixed label/description columns; keep its input behavior. */
 export function renderModelChoices(
-  items: SelectItem[], selectedKey: string | undefined, width: number, height: number, theme: Theme,
+  items: ModelChoice[], selectedKey: string | undefined, width: number, height: number, theme: Theme,
 ): string[] {
   if (width < 1 || height < 1) return [];
   if (!items.length) return [truncateToWidth(theme.fg("warning", "No matching models"), width)];
@@ -20,7 +22,8 @@ export function renderModelChoices(
     const item = items[index]!;
     const active = index === selected;
     const prefix = active ? "› " : "  ";
-    const badges = `${item.label?.includes(" [thinking]") ? " · Thinking capable" : ""}${item.label?.endsWith(" (current)") ? " · Current" : ""}`;
+    const badges = [item.label?.includes(" [thinking]") && "Thinking capable", item.label?.endsWith(" (current)") && "Current",
+      item.usedInTask && "This task"].filter(Boolean).map((badge) => ` · ${badge}`).join("");
     // On narrow terminals keep badges separate so they never consume the model name's space.
     const name = sanitizeTerminalText(item.description || item.value);
     const compact = visibleWidth(prefix + name + badges) > width;
@@ -45,7 +48,7 @@ export function renderModelChoices(
   while (true) {
     const start = Math.max(0, Math.min(selected - Math.floor(count / 2), items.length - count));
     lines = Array.from({ length: count }, (_, i) => entryAt(start + i)).flat();
-    moreHeight = items.length > count && height >= 2 ? 1 : 0;
+    moreHeight = items.length > count && height >= 3 ? 1 : 0;
     if (lines.length <= height - moreHeight || count === 1) break;
     count--;
   }
@@ -55,8 +58,9 @@ export function renderModelChoices(
 }
 
 export interface ModelPickerOptions {
-  items: SelectItem[];
+  items: ModelChoice[];
   selectedKey?: string;
+  fromSettings?: boolean;
   title: string;
   subtitle: string;
   query: string;
@@ -65,10 +69,37 @@ export interface ModelPickerOptions {
   run: boolean;
 }
 
+function renderSettingsModelPicker(options: ModelPickerOptions, layout: PanelLayout, theme: Theme): string[] {
+  const { innerWidth: width } = layout;
+  const primary: KeyHint[] = [["Esc", width >= 10 ? "Cancel" : ""]];
+  if (options.items.length) primary.push([width >= 24 ? "Enter" : "↵", "Save"]);
+  const thinking: KeyHint | undefined = options.thinkingKeys ? [options.thinkingKeys, "Thinking"] : undefined;
+  const hints = operationHintRows(primary, thinking, layout, theme);
+  const fullTitle = sanitizeTerminalText(options.title);
+  const title = visibleWidth(fullTitle) <= width ? fullTitle : "Optimizer model";
+  const scope = "Saves only optimizer settings";
+  const chrome = panelHeader(layout, [theme.fg("text", theme.bold(title)),
+    visibleWidth(scope) <= width ? theme.fg("muted", scope) : ""], workspaceTabs(layout, "Settings", theme), hints);
+  const height = chrome.layout.bodyHeight;
+  const body: string[] = [];
+  if (height >= 2 && width > 8) {
+    const query = truncateToWidth(sanitizeTerminalText(options.query || "Type to filter"), width - 8, "…");
+    body.push(theme.fg("muted", "Search: ") + theme.fg(options.query ? "text" : "muted", query));
+  }
+  // Always leave space for the highlighted name and model ID before adding metadata.
+  if (options.items.length && height - body.length >= 3) {
+    const status = sanitizeTerminalText(options.thinkingStatus).replace(/^Thinking level: /, "Thinking: ");
+    body.push(theme.fg("muted", truncateToWidth(status, width, "…")));
+  }
+  const choices = renderModelChoices(options.items, options.selectedKey, width, height - body.length, theme);
+  return chrome.render([...body, ...choices], (line) => theme.fg("borderMuted", line));
+}
+
 /** Budget actual content rows inside the same bounded frame as the workspace. */
 export function renderModelPicker(options: ModelPickerOptions, width: number, rows: number, theme: Theme,
   layout: PanelLayout = panelLayout(width, rows)): string[] {
   if (width < 1) return [];
+  if (options.fromSettings) return renderSettingsModelPicker(options, layout, theme);
   const w = layout.innerWidth;
   const primary: KeyHint[] = [[w < 30 ? "↵" : "Enter", options.run ? "Run" : w < 30 ? "Use" : "Confirm"], ["↑↓", "Select"]];
   const secondary: KeyHint[] = [["Esc", w < 16 ? "" : "Cancel"], ...(options.thinkingKeys ? [[options.thinkingKeys, "Thinking"] as KeyHint] : [])];

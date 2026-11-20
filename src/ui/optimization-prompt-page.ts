@@ -1,6 +1,6 @@
 import { parseKey, visibleWidth, wrapTextWithAnsi, type KeybindingsManager } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { fittingKeyHints, type KeyHint } from "../key-hints.js";
+import { operationHintRows, type KeyHint } from "../key-hints.js";
 import { panelHeader, workspaceTabs, type PanelLayout } from "../panel-layout.js";
 import { sanitizeTerminalText } from "../presentation.js";
 import type { PromptInput } from "../prompt-input.js";
@@ -90,28 +90,32 @@ export class OptimizationPromptPage {
     const { theme } = this;
     const { innerWidth: width } = layout;
     const confirming = this.confirmation !== undefined;
-    const title = theme.fg("text", theme.bold(confirming ? "Save optimization prompt?" : "Optimization prompt"));
-    const scope = theme.fg("muted", width >= 34 ? "Refine only · Applies next round" : "Refine only · Next round");
-    const status = this.error ? theme.fg("warning", this.error) : this.saving ? theme.fg("muted", "Saving…") : scope;
-    const hints: KeyHint[] = this.saving ? [] : confirming
-      ? [["Esc", "Back"], ["y", "Save"]]
-      : [["Esc", "Cancel"], [width >= 34 ? "Ctrl+S" : "^S", "Save"], ["Enter", "Newline"]];
-    const hintLine = fittingKeyHints(hints, width, theme);
+    const confirmTitle = "Save optimization prompt?";
+    const heading = this.saving ? "Saving prompt…" : confirming
+      ? (visibleWidth(confirmTitle) <= width ? confirmTitle : "Save prompt?") : "Optimization prompt";
+    const title = theme.fg("text", theme.bold(heading));
+    const scope = width >= 34 ? "Refine only · Applies next round" : "Refine only · Next round";
+    const status = this.error ? theme.fg("warning", visibleWidth(this.error) <= width ? this.error : "Empty prompt")
+      : !confirming && visibleWidth(scope) <= width ? theme.fg("muted", scope) : "";
+    const primary: KeyHint[] = confirming
+      ? [["Esc", width >= 8 ? "Back" : ""], ["y", "Save"]]
+      : [["Esc", width >= 10 ? "Cancel" : ""], [width >= 34 ? "Ctrl+S" : "^S", "Save"]];
+    const hints = this.saving ? [] : operationHintRows(primary, confirming ? undefined : ["Enter", "Newline"], layout, theme);
     const tabs = workspaceTabs(layout, "Settings", theme);
     const header = layout.headerHeight === 1 && this.error ? [status] : [title, status];
-    const chrome = panelHeader(layout, header, tabs, [hintLine]);
+    const chrome = panelHeader(layout, header, tabs, hints);
+    const height = chrome.layout.bodyHeight;
     const body: string[] = [];
-    if (layout.headerHeight === 0 && this.error) body.push(status);
-    if (layout.footerHeight === 0 && hintLine) body.push(hintLine);
-    if (layout.headerHeight < 2 && !this.error) body.push(status);
     if (confirming) {
-      const details = "Writes to prompt-refine.json. The fixed role and JSON output protocol stay in place.";
-      const notes = wrapTextWithAnsi(details, width);
-      if (body.length + notes.length <= chrome.layout.bodyHeight) body.push(...notes.map((line) => theme.fg("muted", line)));
+      if (!layout.headerHeight) body.push(title);
+      for (const detail of ["Writes to prompt-refine.json for the next round.", "The fixed role and JSON output protocol stay in place."]) {
+        const notes = wrapTextWithAnsi(detail, width);
+        if (body.length + notes.length > height) break;
+        body.push(...notes.map((line) => theme.fg("muted", line)));
+      }
     } else {
-      // In very short terminals, don't let optional scope text hide the edit cursor.
-      if (body.at(-1) === scope && (body.length >= chrome.layout.bodyHeight || visibleWidth(scope) > width)) body.pop();
-      body.push(...this.input.render(width, Math.max(1, chrome.layout.bodyHeight - body.length)));
+      if (!layout.headerHeight && this.error && height > 1) body.push(status);
+      body.push(...this.input.render(width, height - body.length).map((line) => theme.fg("text", line)));
     }
     return chrome.render(body, (line) => theme.fg("borderMuted", line));
   }

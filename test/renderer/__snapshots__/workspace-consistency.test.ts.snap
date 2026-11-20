@@ -58,17 +58,17 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │    History messages: 12 messages ›                     │
 │    History characters: 16000 characters ›              │
 │                                                        │
-│                                                        │
-│                                                        │
 │  Pi-loaded rules (e.g. AGENTS.md) may go to the        │
 │  optimizer, even in Revise. Main agent unchanged.      │
+│                                                        │
+│                                                        │
 ╰────────────────────────────────────────────────────────╯
 
 === Settings / Optimizer ===
 ╭────────────────────────────────────────────────────────╮
 │  Settings                                              │
 │   Preview    Usage    Settings                         │
-│  Ctrl+S: Save  Enter: Change  Tab: Group  Esc: Back    │
+│  Ctrl+S: Save  Enter: Edit  Tab: Group  Esc: Back      │
 │  ────────────────────────────────────────────────────  │
 │   Context    Optimizer                                 │
 │    Default model: provider/rewrite-model ›             │
@@ -78,11 +78,11 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │    Request timeout: 60 seconds ›                       │
 │  › Draft character limit: 16000 characters ›           │
 │                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
 │  Oversized drafts and revision instructions are        │
 │  rejected, not truncated. Existing work is kept.       │
+│                                                        │
+│                                                        │
+│                                                        │
 ╰────────────────────────────────────────────────────────╯
 
 === Settings / number ===
@@ -91,13 +91,13 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │   Preview    Usage    Settings                         │
 │  Esc: Cancel  Enter: Stage  Tab: Preset                │
 │  ────────────────────────────────────────────────────  │
-│  Save in Settings with Ctrl+S.                         │
+│  › 16000                                               │
 │                                                        │
+│  Ctrl+S in Settings saves staged changes.              │
 │  Either limit set to 0 turns off history. Counts role  │
 │  labels as well as message text.                       │
-│                                                        │
 │  Presets: 0 / 8000 / 16000 / 32000 / 64000 / 100000    │
-│  16000                                                 │
+│                                                        │
 │                                                        │
 │                                                        │
 │                                                        │
@@ -113,13 +113,13 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │  Enter 0–100000 characters (whole numbers).            │
 │  Esc: Cancel  Enter: Stage  Tab: Preset                │
 │  ────────────────────────────────────────────────────  │
-│  Save in Settings with Ctrl+S.                         │
+│  › -1                                                  │
 │                                                        │
+│  Ctrl+S in Settings saves staged changes.              │
 │  Either limit set to 0 turns off history. Counts role  │
 │  labels as well as message text.                       │
-│                                                        │
 │  Presets: 0 / 8000 / 16000 / 32000 / 64000 / 100000    │
-│  -1                                                    │
+│                                                        │
 │                                                        │
 │                                                        │
 │                                                        │
