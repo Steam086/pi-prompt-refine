@@ -1,6 +1,13 @@
 # 维护架构
 
-本文说明行为保持型重构和多入口第一切片落实后的维护结构与依赖边界。新增 application、`/refine-api` 与独立 Web 子包，保留原有 TUI 行为、根配置及 sidecar 格式；不以此进行根依赖升级或发布配置迁移。历史设计取舍见 [DESIGN](../DESIGN.md)，行为说明见 [使用说明](usage.md)。
+根 npm 包通过 `pi.extensions` 暴露 TypeScript 入口，不是独立 CLI 或 Web 服务。Pi 提供 SDK 与 TUI；`ignore` 用于目录过滤。`examples/prompt-refine-preferences.json` 虽在 examples 下，却是首次初始化全局偏好库的运行时资源。历史设计取舍见 [DESIGN](../DESIGN.md)，行为说明见 [使用说明](usage.md)。
+
+## 跟随一次改写
+
+1. `extension.ts` 将快捷键和 `/refine` 交给 `app/runtime.ts` 组装的用例。`request-flows.ts` 采集当前草稿、可见分支历史、策略与项目资源；controller 在同一 round 内复用首份背景，为不同模型保留同一比较起点。
+2. `controller.ts` 决定去重、立即启动或排队（最多 4 个运行中）。`app/completion.ts` 准备目录快照，`context.ts` 生成结构化输入，`budget.ts` 按目标模型窗口裁减可选背景。放不下必要输入就停止；不会为节省 token 截断原稿。
+3. 通过 `ctx.modelRegistry.streamSimple()` 发送一次无工具请求。只有完整、有效的 JSON 才能产生候选；`reference-preservation.ts` 另对首次改写严重遗漏粘贴 TUI 材料作窄范围回退，不是通用语义验证器。
+4. `workspace` 展示结果。`app/editor-actions.ts` 核对候选身份与编辑器后才接受或发送；接受只回填，主会话的用户消息开始才归档 round。`app/lifecycle.ts` 配合 `history-store.ts` 写有界的本地记录，不能从该文件复原模型输入。传给优化模型的字段与保存在磁盘的字段是两份不同的白名单，见[上下文说明](context.md)和[配置参考](configuration.md)。
 
 ## 结构原则
 

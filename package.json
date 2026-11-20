@@ -3,7 +3,14 @@
   "version": "0.1.0",
   "license": "MIT",
   "type": "module",
-  "description": "Non-blocking prompt refinement extension for Pi",
+  "description": "Rewrite a draft against the current conversation and review it before sending it to the Pi agent.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Steam086/pi-prompt-refine.git"
+  },
+  "homepage": "https://github.com/Steam086/pi-prompt-refine#readme",
+  "bugs": { "url": "https://github.com/Steam086/pi-prompt-refine/issues" },
+  "publishConfig": { "registry": "https://registry.npmjs.org/", "access": "public" },
   "keywords": [
     "pi-package",
     "pi-extension",
@@ -15,14 +22,20 @@
     ]
   },
   "files": [
-    "src/",
-    "examples/",
+    "src/**/*.ts",
+    "examples/prompt-refine-preferences.json",
+    "examples/prompt-refine.json",
+    "docs/tui-guide.md",
     "README.md",
-    "DESIGN.md"
+    "README.zh-CN.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:pack": "node scripts/check-pack.mjs"
   },
   "engines": {
     "node": ">=22.19.0"

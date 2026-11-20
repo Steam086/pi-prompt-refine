@@ -1,5 +1,7 @@
 # Refine 默认保守策略：修改与 IFEval 回归
 
+历史实验：本页的“新策略”指当时被测的保守编辑模板，不是本版默认策略。当前行为见[上下文与 Prompt 协议](../context.md)。
+
 后续结果见[扩展实测与费用对比](ifeval-conservative-policy-random12.md)：新增 Luna medium 的 12 题中，当前策略 Strict 为 19/24、原稿为 23/24；再新增的另一批 12 题中，Terra high／medium 的当前策略均为 24/24。批次不同，不能跨样本排名模型；本页六题结果也不能外推为无损保证。版本差异、失败调用及 Terra 批次的不活跃 UI 源码变更例外已在报告单列。
 
 ## 改动范围
@@ -13,7 +15,7 @@
 
 ## 实验设置
 
-使用[前次实验](ifeval-20261109/README.md)固定的 6 道 IFEval：202、1251、3608、2563、1746、3287，共 8 项检查约束。未重抽题，也未围绕实验成绩继续调整生产模板。
+使用前次本地实验（原始记录不分发）固定的 6 道 IFEval：202、1251、3608、2563、1746、3287，共 8 项检查约束。未重抽题，也未围绕实验成绩继续调整生产模板。
 
 - 三组：原稿直接执行、旧默认策略 Refine 后执行、新默认策略 Refine 后执行。
 - 每题每组两次独立采样，36 次主模型执行、24 次 Refine，共 60 次生成；不复用前次输出。
@@ -63,7 +65,7 @@
 
 ## 补充验证与边界
 
-`test/refine-policy.live.test.ts` 使用六项合成输入直接调用真实 Provider，全部通过：清楚请求原样返回、条件结构偏好不强制改写、翻译不改变回答语言、明确修改引用字面量、整合兼容任务要求、Revise 明确格式修改。该 SDK 测试使用显式系统提示，不注入 cwd，不受上述 TUI 环境问题影响。
+`test/live/refine-policy.live.test.ts` 使用六项合成输入直接调用真实 Provider，全部通过：清楚请求原样返回、条件结构偏好不强制改写、翻译不改变回答语言、明确修改引用字面量、整合兼容任务要求、Revise 明确格式修改。该 SDK 测试使用显式系统提示，不注入 cwd，不受上述 TUI 环境问题影响。
 
 离线检查：`npm run typecheck` 通过；`npm test` 为 1026 项通过、19 项默认跳过（包括显式 opt-in 的真实模型测试）。模板字符串断言只证明规则存在，不证明模型遵循。
 
@@ -71,7 +73,7 @@
 
 ## 本地证据与复现
 
-沿用前次实验约定，原始记录保留在被 `.git/info/exclude` 排除的本地目录，不纳入 Git：
+以下路径指实验者的本地材料，已由仓库 `.gitignore` 排除，不能从公开检出直接复跑：
 
 - `docs/experiments/ifeval-20261109/conservative-policy/run_regression.py`：复用前次 PTY runner；每次启动生成新目录，不读取旧回答。
 - `.../20261109T033630Z/metadata.json`：新旧完整策略、源文件／评分器／抽样哈希、配置与版本。
@@ -86,7 +88,7 @@
 
 ```sh
 PYTHONPATH=/tmp/pi-ifeval-20261109/python-deps:/tmp/pi-ifeval-20261109/upstream \
-  /home/jjr/pyenvs/vllm-py312/.venv/bin/python \
+  python3 \
   docs/experiments/ifeval-20261109/conservative-policy/run_regression.py
 ```
 

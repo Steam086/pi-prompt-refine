@@ -1,6 +1,6 @@
 # TUI / Web UI / Slash 三端对齐实施计划
 
-状态：待实施。本文只规划重构、接入与验证，不表示功能已实现，也不授权宿主改造、依赖升级、发布配置修改或服务重启。
+状态：历史实施计划。第一切片的交付范围见[应用接口](application-api.md)，实测边界见[隔离验收记录](multi-surface-acceptance.md)。Web 子包仍不发布；本文不授权宿主改造或重启。
 
 首个 Web 宿主已明确为当前机器正在运行的 [jmfederico/pi-web](https://github.com/jmfederico/pi-web)。核心 Application API 保持宿主无关；首个 Web 桥接与实际端到端验收针对该运行实例。上游仓库用于参考，不能代替核对本机安装版本及其实际能力。
 

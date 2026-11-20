@@ -1,5 +1,7 @@
 # IFEval 保守策略：Luna 与 Terra 随机样本实测
 
+文中的“当前策略”指实验当时的保守编辑模板，并非 npm 候选版本所用的默认策略。当前协议见[上下文说明](../context.md)。
+
 本页包含两批不同的随机 12 题：A 为此前的 Luna medium，B 为新增的 Terra high / medium。统一结果表保留两批结果，并在总 token 下列出 Cost 估计。**A/B 样本不同，不可直接用分数排名 Luna 与 Terra；B 的两档 Terra 共用相同题目。** B 的设置、逐项核查、一次请求失败及源码一致性例外见文末。
 
 2026-11-09，A 批次参考[前轮流程](ifeval-conservative-policy.md)，完成真实 Pi TUI 三组对照。**当前默认策略原样返回更多，但 A 批次下游成绩低于直接执行；发现了修改“必须逐字复述的原文”这一具体保真问题。** 未据此调整生产模板或重抽题。
@@ -84,7 +86,7 @@ Cost 为成功计划调用的请求时 SDK 参考费用，改写组含 Refine＋
 
 ## 本地证据与复核（A 批次）
 
-沿用前轮约定，原始实验数据和脚本位于 `.git/info/exclude` 排除的本地目录，不纳入 Git：
+原始数据和脚本仅存于实验者的本地目录，仓库 `.gitignore` 已排除该目录；以下命令不是公开检出的测试入口：
 
 `docs/experiments/ifeval-20261109/conservative-policy/`
 
@@ -103,7 +105,7 @@ Cost 为成功计划调用的请求时 SDK 参考费用，改写组含 Refine＋
 
 ```sh
 PYTHONPATH=/tmp/pi-ifeval-20261109/python-deps:/tmp/pi-ifeval-20261109/upstream \
-  /home/jjr/pyenvs/vllm-py312/.venv/bin/python \
+  python3 \
   docs/experiments/ifeval-20261109/conservative-policy/audit_random12.py \
   docs/experiments/ifeval-20261109/conservative-policy/random-12/20261109T090921Z
 ```
@@ -186,7 +188,7 @@ PYTHONPATH=/tmp/pi-ifeval-20261109/python-deps:/tmp/pi-ifeval-20261109/upstream 
 
 ```sh
 PYTHONPATH=/tmp/pi-ifeval-20261109/python-deps:/tmp/pi-ifeval-20261109/upstream \
-  /home/jjr/pyenvs/vllm-py312/.venv/bin/python \
+  python3 \
   docs/experiments/ifeval-20261109/conservative-policy/score_terra12.py \
   docs/experiments/ifeval-20261109/conservative-policy/terra-12/20261109T115331Z
 ```

@@ -10,7 +10,7 @@
 - `test/benchmarks/`：保留原有显式启用的性能实验，不混同功能正确性。
 - `test/support/`：每测试独立的 Harness、Terminal 和异步辅助；`fixtures/` 仅存数据。
 
-本次不改变既有 live/benchmark 的环境变量或默认启用策略。正常检查仍使用 `npm run typecheck` 和 `npm test`，不升级依赖或引入新的检查工具。
+默认用 `npm run typecheck` 和 `npm test` 检查行为，不设置 live/benchmark 环境变量。发包另跑 `npm run check:pack` 和 tarball 试装（步骤见[发布清单](release.md)）；打包清单不能证明 TypeScript 入口能在 Pi 中加载，单元测试也不能证明 starter JSON 已随包分发。
 
 按层或单项运行：
 
@@ -101,7 +101,7 @@ Web 子包在 `packages/pi-web/` 单独 `npm ci --ignore-scripts --omit=optional
 5. 检查 package/config/历史协议未变化，且用户既有未跟踪文件未被纳入修改。
 6. 自动化验收不等于真实 Provider、实体终端、视觉效果或中文 IME 验收；未进行的检查必须明确说明。
 
-## 本次重构验收
+## 历史重构验收（非当前发布基线）
 
 基线为 `f41e969`。三个阶段分别完成测试重组、应用流程提取、TUI 页面提取，均运行类型检查和全量测试；最终由父会话独立核查，而不是仅依据子任务报告。
 
