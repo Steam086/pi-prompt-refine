@@ -2,7 +2,6 @@ import { parseKey, SelectList, type SelectItem } from "@earendil-works/pi-tui";
 import { getSupportedThinkingLevels, type Api, type Model, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { modelKey, type ModelRef, type RefineConfig } from "../config.js";
-import { REFINE_SYSTEM_PROMPT } from "../context.js";
 import { renderOverlayModelPicker } from "../model-picker.js";
 import { REFINE_OVERLAY_OPTIONS } from "../workspace-overlay.js";
 import type { RefineController } from "../controller.js";
@@ -41,7 +40,7 @@ interface ModelSelectionDependencies {
   controller: Pick<RefineController,
     "getGeneration" | "getHistory" | "getModel" | "getOriginalRecord" | "getRecord" | "getSessionId" |
     "getState" | "getTaskModels">;
-  config: Pick<RefineConfig, "model" | "modelThinkingLevels" | "thinkingLevel" | "favorites" | "systemPrompt">;
+  config: Pick<RefineConfig, "model" | "modelThinkingLevels" | "thinkingLevel" | "favorites">;
   useContext(ctx: ExtensionContext): void;
   setCompletionContext(ctx: ExtensionContext): void;
   persistConfig(ctx: ExtensionContext): Promise<boolean>;
@@ -267,26 +266,6 @@ export function createModelSelection({ controller, config, useContext, setComple
     }
   }
 
-  async function editSystemPrompt(ctx: ExtensionContext): Promise<void> {
-    const original = config.systemPrompt ?? REFINE_SYSTEM_PROMPT;
-    const sessionId = controller.getSessionId();
-    const generation = controller.getGeneration();
-    const isCurrent = () => controller.getSessionId() === sessionId &&
-      controller.getGeneration() === generation && (config.systemPrompt ?? REFINE_SYSTEM_PROMPT) === original;
-    const edited = await ctx.ui.editor("Optimization prompt · Edit (cancel keeps original)", original);
-    if (edited === undefined || edited === original || !isCurrent()) return;
-    if (!edited.trim()) {
-      notify(ctx, "Optimization prompt cannot be empty. Original kept.", "warning");
-      return;
-    }
-    const confirmed = await ctx.ui.confirm("Apply optimization prompt changes?",
-      "Use the edited instructions for the next round and save them to prompt-refine.json? Existing results and running requests are unchanged. The fixed refiner role, JSON output contract and session title rules are added automatically.");
-    if (!confirmed || !isCurrent()) return;
-    config.systemPrompt = edited;
-    const persisted = await persistConfig(ctx);
-    notify(ctx, persisted ? "Optimization prompt saved · Applies to next round." : "Optimization prompt applied · Not persisted.");
-  }
-
   function modelSwitchBlocked(ctx: ExtensionContext): boolean {
     const state = controller.getState();
     if (!state.pendingSend) return false;
@@ -318,5 +297,5 @@ export function createModelSelection({ controller, config, useContext, setComple
     notifyCurrent(`Optimizer model switched to ${displayModel(next)}; the main session model is unchanged.`, "info");
   }
 
-  return { selectModel, editSystemPrompt, cycleModel, modelSwitchBlocked, registeredModels, rememberThinking };
+  return { selectModel, cycleModel, modelSwitchBlocked, registeredModels, rememberThinking };
 }

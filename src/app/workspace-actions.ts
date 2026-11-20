@@ -1,6 +1,7 @@
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { RefineConfig } from "../config.js";
+import { REFINE_SYSTEM_PROMPT } from "../context.js";
 import type { PreferenceStore } from "../preference-store.js";
 import type { RefineController } from "../controller.js";
 import type { CandidateToken, RefineRequestInput, TriggerResult } from "../request-types.js";
@@ -19,7 +20,7 @@ interface WorkspaceActionsDependencies {
     "applyResult" | "deleteRecords" | "getAppliedRecordId" | "getCandidate" |
     "getCandidateToken" | "getGeneration" | "getHistory" | "getModel" | "getOriginalRecord" | "getRecord" |
     "getSessionId" | "getState" | "hasWorkspaceContent" | "updateDraftPreferences">;
-  config: Pick<RefineConfig, "preferencesKey" | "maxDraftChars" | "projectContext" | "context" | "maxOutputTokens" | "timeoutMs" | "thinkingLevel">;
+  config: Pick<RefineConfig, "preferencesKey" | "maxDraftChars" | "projectContext" | "context" | "maxOutputTokens" | "timeoutMs" | "thinkingLevel" | "systemPrompt">;
   setCompletionContext(ctx: ExtensionContext): void;
   persistConfig(ctx: ExtensionContext): Promise<boolean>;
   saveOptimizer(model: RefineRequestInput["model"], thinking: NonNullable<RefineRequestInput["thinkingLevel"]> | "inherit"): Promise<boolean>;
@@ -175,7 +176,28 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
         };
       },
       chooseModel: () => openModelPicker(),
-      editSystemPrompt: (context) => finish({ action: "system-prompt", generation: controller.getGeneration(), settingsContext: context }),
+      editSystemPrompt: () => {
+        const inSession = () => !isClosed() && ctx.sessionManager.getSessionId() === sessionId && controller.getSessionId() === sessionId;
+        if (!inSession()) return undefined;
+        const generation = controller.getGeneration();
+        const original = config.systemPrompt;
+        return {
+          text: original ?? REFINE_SYSTEM_PROMPT,
+          save: async (text) => {
+            // Opening the editor captures authority; confirming after a session,
+            // generation or policy change must not overwrite the new state.
+            if (!inSession() || controller.getGeneration() !== generation || config.systemPrompt !== original) {
+              return { message: "Not persisted · Context or policy changed. Reopen to edit.", persisted: false };
+            }
+            if (!text.trim()) return { message: "Not persisted · Prompt cannot be empty.", persisted: false };
+            if (text === (original ?? REFINE_SYSTEM_PROMPT)) return { message: "No optimization prompt changes.", persisted: true };
+            config.systemPrompt = text;
+            const persisted = await persistConfig(ctx);
+            return { message: persisted ? "Optimization prompt saved · Applies next round"
+              : "Not persisted · Policy applied in this process only", persisted };
+          },
+        };
+      },
       cycleThinking: async () => {
         if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId) return { message: "Session changed; settings not saved.", persisted: false };
         const ref = controller.getModel();

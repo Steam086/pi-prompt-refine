@@ -54,7 +54,7 @@ describe("workspace terminal rendering", () => {
       },
       context: () => ({ instructions: "always" as const, tree: true, skills: false }), contextEnabled: () => true,
       optimizer: () => ({ model: "provider/long-model-identifier-with-extra-details", thinking: "high · Extension setting", thinkingEnabled: true }),
-      chooseModel() {}, editSystemPrompt() {}, history: () => records,
+      chooseModel() {}, editSystemPrompt: () => undefined, history: () => records,
       historyStorage: () => ({ state: "save-error", path: "/项目/会话中文😀.jsonl.prompt-refine.json", savedIds: [1], memoryOnlyIds: [2], omittedIds: [2] }),
       tasks: { records: () => records, appliedId: () => records[1]!.id,
         activate: (id) => !!records.find((record) => record.id === id)?.candidate, run, stop() {} },

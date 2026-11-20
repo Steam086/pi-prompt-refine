@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import { type RefineConfig } from "../../src/config.js";
+import { REFINE_SYSTEM_PROMPT } from "../../src/context.js";
 import { workspaceHeight } from "../../src/workspace-overlay.js";
 import { extensionHarnessEnvironment, shortcut, trigger } from "../support/extension-harness.js";
 import { flushPromises } from "../support/helpers.js";
@@ -209,37 +210,120 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
   it.each([true, false, undefined, "unchanged", "empty"] as const)("edits the optimization prompt with confirmation: %s", async (choice) => {
     const original = "Original optimization instructions";
     const harness = await makeHarness({ config: { systemPrompt: original } });
-    const edited = choice === undefined ? undefined : choice === "unchanged" ? original : choice === "empty" ? " \n " : "Custom optimization instructions";
-    vi.mocked(harness.context.ui.editor).mockResolvedValue(edited);
-    vi.mocked(harness.context.ui.confirm).mockImplementation(async () => {
-      const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
-      expect(saved.systemPrompt).toBe(original);
-      return choice === true;
-    });
+    const { panelInput: input } = harness;
+    const path = join(harness.agentDir, "prompt-refine.json");
+    const before = await readFile(path, "utf8");
+    const frame = () => stripVTControlCharacters(harness.panelLines(120).join("\n"));
+    const edited = "Custom optimization instructions\nKeep 中文😀";
     harness.holdPanel();
     const view = harness.command("view", harness.context);
-    harness.panelInput("\x1b[D");
-    harness.panelInput(" ");
-    harness.panelInput("\t");
-    for (let i = 0; i < 2; i++) harness.panelInput("\x1b[B");
-    expect(harness.panelLines().join("\n")).toContain("› Optimization prompt");
-    expect(harness.panelLines().join("\n")).toContain("Enter: Change");
-    harness.panelInput("\r");
-    await vi.waitFor(() => expect(harness.customCalls()).toBe(2));
-    expect(harness.context.ui.editor).toHaveBeenCalledWith(expect.any(String), original);
-    expect(harness.context.ui.confirm).toHaveBeenCalledTimes(typeof choice === "boolean" ? 1 : 0);
-    expect(harness.panelLines().join("\n")).toContain("Unsaved settings changes");
-    harness.panelInput("\x1b");
-    harness.panelInput("q");
-    await view;
-    const expected = choice === true ? edited : original;
-    const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
-    expect(saved.systemPrompt).toBe(expected);
+    input("\x1b[D"); input(" "); // Stage a change to project instructions.
+    input("\t"); input("\x1b[B"); input("\x1b[B");
+    expect(frame()).toContain("› Optimization prompt");
+    expect(frame()).toContain("Enter: Change");
+    input("\r");
+    expect(frame()).toContain(original);
+    expect(frame()).toContain("Refine only · Applies next round");
+    if (choice !== "unchanged") {
+      input("\x15"); // Clear the prefilled line.
+      if (choice === "empty") { input(" "); input("\r"); input(" "); }
+      else { input("Custom optimization instructions"); input("\r"); input("Keep 中文😀"); }
+    }
+    if (choice === undefined) input("\x1b");
+    else input("\x13");
+    if (choice === "empty") {
+      expect(frame()).toContain("Prompt cannot be empty.");
+      expect(frame()).not.toContain("Save optimization prompt?");
+      input("\x1b");
+    } else if (typeof choice === "boolean") {
+      expect(frame()).toContain("Save optimization prompt?");
+      expect(await readFile(path, "utf8")).toBe(before);
+      input("\r"); input("q"); input("\t"); input("\x1b[D");
+      expect(frame()).toContain("Save optimization prompt?");
+      if (choice) {
+        input("y"); input("y"); input("\x1b"); // A pending write consumes further keys.
+        await vi.waitFor(() => expect(frame()).toContain("Optimization prompt saved"));
+      } else {
+        input("\x1b");
+        expect(frame()).toContain("Custom optimization instructions");
+        expect(frame()).toContain("Keep 中文😀");
+        expect(frame()).not.toContain("Save optimization prompt?");
+        input("\x1b");
+      }
+    }
+    expect(frame()).toContain("› Optimization prompt");
+    expect(frame()).toContain("Unsaved settings changes");
+    input("\x1b[D");
+    expect(frame()).toMatch(/› Project instructions +First only · inactive/);
+    input("\t");
+    expect(frame()).toContain("› Optimization prompt");
+    expect(harness.customCalls()).toBe(1);
+    expect(harness.context.ui.editor).not.toHaveBeenCalled();
+    expect(harness.context.ui.confirm).not.toHaveBeenCalled();
+    expect(harness.complete).not.toHaveBeenCalled();
+    expect(harness.getEditor()).toBe("Draft A");
     expect(harness.editorWrites).toEqual([]);
+    expect(harness.sent).toEqual([]);
+    const after = await readFile(path, "utf8");
+    const expected = choice === true ? edited : original;
+    expect(JSON.parse(after).systemPrompt).toBe(expected);
+    expect(JSON.parse(after).projectContext).toEqual(JSON.parse(before).projectContext);
+    if (choice !== true) expect(after).toBe(before);
+    input("\x1b"); input("q"); await view;
     await harness.reload();
     await harness.command("optimize", harness.context);
     await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledOnce());
     expect((harness.complete.mock.calls[0]?.[1] as { systemPrompt: string }).systemPrompt).toContain(expected);
+  });
+
+  it("prefills the built-in policy and applies edits only to the next round, with the fixed protocol", async () => {
+    const harness = await makeHarness();
+    await trigger(harness);
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    const { panelInput: input } = harness;
+    input("\x1b[D"); input("\t"); input("\x1b[B"); input("\x1b[B"); input("\r");
+    const frame = () => harness.panelLines(120).join("\n");
+    expect(frame()).toContain(REFINE_SYSTEM_PROMPT.split("\n").at(-1)!.slice(-37));
+    input("\r"); input("Prefer direct phrasing."); input("\x13"); input("y");
+    await vi.waitFor(() => expect(frame()).toContain("Optimization prompt saved"));
+    expect(harness.complete).toHaveBeenCalledOnce();
+    expect(harness.getEditor()).toBe("Draft A");
+    input("\x1b"); input("q"); await view;
+    const policy = (index: number) => (harness.complete.mock.calls[index]?.[1] as { systemPrompt: string }).systemPrompt;
+    await harness.command("optimize Same-round draft", harness.context);
+    await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(2));
+    expect(policy(1)).toBe(policy(0));
+    harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "New round" } }, harness.context);
+    await harness.command("optimize Next-round draft", harness.context);
+    await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(3));
+    expect(policy(2)).toBe(policy(0).replace(REFINE_SYSTEM_PROMPT, () => `${REFINE_SYSTEM_PROMPT}\nPrefer direct phrasing.`));
+  });
+
+  it.each(["write failure", "stale generation"])("reports a policy that was not persisted after %s", async (scenario) => {
+    const original = "Original rewrite policy";
+    const harness = await makeHarness({ config: { systemPrompt: original } });
+    const path = join(harness.agentDir, "prompt-refine.json");
+    const before = await readFile(path, "utf8");
+    harness.holdPanel();
+    const view = harness.command("view", harness.context);
+    const { panelInput: input } = harness;
+    input("\x1b[D"); input("\t"); input("\x1b[B"); input("\x1b[B"); input("\r");
+    input(" Updated"); input("\x13");
+    const frame = () => harness.panelLines(120).join("\n");
+    expect(frame()).toContain("Save optimization prompt?");
+    if (scenario === "write failure") { await rm(path); await mkdir(path); }
+    else harness.handlers.get("session_tree")?.[0]?.({ type: "session_tree" }, harness.context);
+    input("y");
+    await vi.waitFor(() => expect(frame()).toContain("Not persisted"));
+    expect(frame()).not.toContain("Optimization prompt saved");
+    expect(frame()).toContain("› Optimization prompt");
+    expect(harness.customCalls()).toBe(1);
+    if (scenario === "stale generation") expect(await readFile(path, "utf8")).toBe(before);
+    input("\r");
+    expect(frame()).toContain(scenario === "write failure" ? `${original} Updated` : original);
+    if (scenario === "stale generation") expect(frame()).not.toContain("Updated");
+    input("\x1b"); input("\x1b"); input("q"); await view;
   });
 
   it.each(["main", "settings"])("returns to %s after confirming the optimizer model without starting refinement", async (origin) => {

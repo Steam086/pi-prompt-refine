@@ -24,6 +24,7 @@ To choose Preferences before the first rewrite, open `/refine`, press `n`, and s
 - Use `/refine model` to choose the default rewrite model. Your main agent's model does not change, and Pi still manages provider authentication.
 - In **Settings**, use `Tab` to switch between **Context** and **Optimizer**. **Draft character limit** is the last Optimizer setting, or the last Context setting if Optimizer is unavailable. Select a row to read its full details; use `PgUp` / `PgDn` if they span multiple pages.
 - `Enter` stages a numeric edit; `Ctrl+S` back in Settings saves it. Context changes apply to the next round, not the current round. The model, thinking level, and optimization prompt save separately.
+- In **Optimizer → Optimization prompt**, press `Enter` to edit Refine’s rewrite policy without leaving Settings. Press `Ctrl+S`, then `y` to confirm. `Esc` from confirmation returns to your draft; `Esc` from the editor discards your edits. The policy applies only to Refine, starting with the next round.
 - The config file is `prompt-refine.json` in your Pi agent directory. See the [example config](../examples/prompt-refine.json); its model entry is illustrative. After editing the file, run `/reload` in Pi.
 
 ## What the rewrite provider receives
