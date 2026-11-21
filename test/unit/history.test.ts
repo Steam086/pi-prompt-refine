@@ -29,6 +29,25 @@ describe("runtime request journal", () => {
     expect(history.list("session").map((record) => record.taskId)).toEqual([2]);
     expect(history.list("other")).toHaveLength(1);
   });
+  it("projects detached task rows without copying frozen request background", () => {
+    const history = new RefineHistory();
+    const source = record(1);
+    history.restore([source, { ...record(2), input: { ...input, sessionId: "other" } }]);
+    history.captureInput(1, "Prepared packet", { referencedDirectoryCount: 2, warnings: ["Directory limit reached"] });
+    const rows = history.listForDisplay("session");
+    expect(rows).toHaveLength(1);
+    const row = rows[0]!;
+    expect(row.input.draft).toBe(source.input.draft);
+    expect(row.candidate).toEqual({ text: source.candidate!.text });
+    expect(row.input.projectDiagnostics?.warnings).toEqual(["Directory limit reached"]);
+    expect(row).not.toHaveProperty("originalInput");
+    for (const key of ["systemPrompt", "preparedInput", "history"]) expect(row.input).not.toHaveProperty(key);
+    row.input.model.id = "changed";
+    row.input.projectDiagnostics!.warnings.pop();
+    row.usage!.totalTokens = 0;
+    expect(history.get(1, "session")).toMatchObject({ input: { model: input.model, preparedInput: "Prepared packet",
+      projectDiagnostics: { warnings: ["Directory limit reached"] } }, usage: source.usage });
+  });
   it("never evicts unsent, queued or running work and archives only the matching round/session", () => {
     const history = new RefineHistory(3);
     history.start(1, input, undefined, "refine", "unsent");

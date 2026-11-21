@@ -2,6 +2,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { RefineHistory } from "../../src/history.js";
 import { workspaceHeight } from "../../src/workspace-overlay.js";
 import { extensionHarnessEnvironment, trigger } from "../support/extension-harness.js";
 import { flushPromises } from "../support/helpers.js";
@@ -26,6 +27,23 @@ describe("native overlay workspace", () => {
     expect(h.customOptions).toEqual([expected]);
     h.panelInput("q"); await view;
     expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
+  });
+
+  it("browses pages with left and right without cloning the session journal", async () => {
+    const h = await makeHarness();
+    await trigger(h);
+    h.holdPanel();
+    const view = h.command("view", h.context);
+    const list = vi.spyOn(RefineHistory.prototype, "list");
+    for (const arrow of ["\x1b[C", "\x1b[D"]) {
+      for (let step = 0; step < 4; step++) {
+        h.panelInput(arrow);
+        expect(h.panelLines(100).length).toBeGreaterThan(0);
+      }
+    }
+    expect(list).not.toHaveBeenCalled();
+    h.panelInput("q");
+    await view;
   });
 
   describe.each(["regular", "fullscreen"] as const)("model transitions with the native %s renderer", (mode) => {

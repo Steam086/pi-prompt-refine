@@ -1,7 +1,7 @@
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ModelRef } from "./config.js";
 import type { BudgetReport } from "./budget.js";
-import { RefineHistory, type RefineRecord } from "./history.js";
+import { RefineHistory, type RefineRecord, type TaskDisplayRecord } from "./history.js";
 import { composeRevision, preferenceKey, preferenceValidation, uniquePreferences, PREFERENCE_SELECTION_LIMIT, type SelectedPreference } from "./revision-preferences.js";
 
 import type {
@@ -96,7 +96,12 @@ export class RefineController {
   getAccepted(): Candidate | undefined { return this.accepted ? structuredClone(this.accepted) : undefined; }
   getViewedAccepted(): Candidate | undefined { return this.viewedAccepted ? structuredClone(this.viewedAccepted) : undefined; }
   getHistory(): RefineRecord[] {
-    const records = this.journal.list(this.sessionId ?? "");
+    return this.withElapsed(this.journal.list(this.sessionId ?? ""));
+  }
+  getTaskDisplayRecords(): TaskDisplayRecord[] {
+    return this.withElapsed(this.journal.listForDisplay(this.sessionId ?? ""));
+  }
+  private withElapsed<T extends { id: number; elapsedSeconds?: number }>(records: T[]): T[] {
     const running = new Map([...this.active.values()].map((run) => [run.request.recordId, run]));
     for (const record of records) {
       const run = running.get(record.id);
@@ -325,10 +330,9 @@ export class RefineController {
 
   /** Comparisons always start from the original, including when invoked on a revision/edit. */
   getOriginalRecord(id: number): RefineRecord | undefined {
-    const record = this.getRecord(id);
-    if (!record) return undefined;
-    const source = this.getHistory().find((item) => item.taskId === record.taskId && !item.input.revision) ?? record;
-    return { ...source, input: source.originalInput ?? source.input };
+    const source = this.journal.getOriginal(id, this.sessionId ?? "");
+    if (source) this.withElapsed([source]);
+    return source;
   }
   runOriginal(id: number, model: ModelRef, thinkingLevel?: ModelThinkingLevel): TriggerResult {
     const source = this.getOriginalRecord(id);

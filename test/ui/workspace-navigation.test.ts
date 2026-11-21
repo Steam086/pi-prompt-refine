@@ -1,5 +1,5 @@
 import { frameHeader } from "../support/panel-chrome.js";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { Text, visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import { selectHistory } from "../../src/context.js";
@@ -80,6 +80,27 @@ describe("shared refine workspace", () => {
     expect(workspace.render(100)).toEqual(preview);
     expect(actions.submit).not.toHaveBeenCalled();
     expect(actions.saveContext).not.toHaveBeenCalled();
+  });
+
+  it("reuses Usage wrapping across page arrows and updates it when the draft changes", () => {
+    const { workspace, actions } = create(40, "dark", true);
+    const input = { draft: "章节一\n".repeat(800), model: { provider: "p", id: "m" }, sessionId: "session",
+      branchLeafId: null, systemPrompt: "Policy", history: selectHistory([], 12, 100) };
+    actions.history.mockReturnValue([{ id: 1, taskId: 1, kind: "refine", createdAt: 1, status: "unsent", input }]);
+    const wrap = vi.spyOn(Text.prototype, "render");
+    try {
+      workspace.handleInput("\x1b[C");
+      const frame = workspace.render(100);
+      expect(wrap).toHaveBeenCalled();
+      workspace.handleInput("\x1b[C"); // Usage → Settings → Usage
+      workspace.handleInput("\x1b[D");
+      wrap.mockClear();
+      expect(workspace.render(100)).toEqual(frame);
+      expect(wrap).not.toHaveBeenCalled();
+      input.draft = "更新后的原稿";
+      expect(textOf(workspace.render(100))).toContain(input.draft);
+      expect(wrap).toHaveBeenCalled();
+    } finally { wrap.mockRestore(); workspace.dispose(); }
   });
 
   it.each(["dark", "light"])("bounds every top-level page and retains compact active tabs in %s", (name) => {

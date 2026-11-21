@@ -18,7 +18,7 @@ type WorkspaceOptions = ConstructorParameters<typeof RefineWorkspace>[4];
 interface WorkspaceActionsDependencies {
   controller: Pick<RefineController,
     "applyResult" | "deleteRecords" | "getAppliedRecordId" | "getCandidate" |
-    "getCandidateToken" | "getGeneration" | "getHistory" | "getModel" | "getOriginalRecord" | "getRecord" |
+    "getCandidateToken" | "getGeneration" | "getTaskDisplayRecords" | "getModel" | "getOriginalRecord" | "getRecord" |
     "getSessionId" | "getState" | "hasWorkspaceContent" | "updateDraftPreferences">;
   config: Pick<RefineConfig, "preferencesKey" | "maxDraftChars" | "projectContext" | "context" | "maxOutputTokens" | "timeoutMs" | "thinkingLevel" | "systemPrompt">;
   setCompletionContext(ctx: ExtensionContext): void;
@@ -125,12 +125,12 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
           else inputDrafts.delete(sessionId);
         },
       },
-      history: () => controller.getHistory(),
+      history: () => controller.getTaskDisplayRecords(),
       historyStorage: () => historyStorage(ctx, sessionId),
       taskPosition: position,
       usagePosition,
       tasks: {
-        records: () => controller.getHistory(),
+        records: () => controller.getTaskDisplayRecords(),
         launchModel: () => controller.getModel() ? displayModel(controller.getModel()!) : "No model",
         showOptimizerQuota,
         appliedId: () => controller.getAppliedRecordId(),

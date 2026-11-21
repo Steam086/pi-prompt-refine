@@ -23,6 +23,17 @@ export interface RefineRecord {
   sentAt?: number;
 }
 
+/** Detached fields used to browse tasks. Execution background can be much larger than the visible text. */
+export interface TaskDisplayRecord extends Omit<RefineRecord, "input" | "originalInput" | "candidate"> {
+  input: Pick<RefineRequestInput, "draft" | "model" | "thinkingLevel" | "roundId" | "contextUnavailable" |
+    "editingInstruction" | "revision" | "budget"> & {
+    preferences?: Pick<SelectedPreference, "name">[];
+    projectDiagnostics?: { warnings: string[] };
+    project?: { snapshot: { warnings: string[] } };
+  };
+  candidate?: Pick<Candidate, "text">;
+}
+
 /** Bounded runtime journal; history-store persists only a minimal projection. Never model context. */
 export class RefineHistory {
   private sequence = 0;
@@ -76,6 +87,14 @@ export class RefineHistory {
   get(id: number, sessionId: string): RefineRecord | undefined {
     const record = this.records.find((item) => item.id === id && item.input.sessionId === sessionId);
     return record ? structuredClone(record) : undefined;
+  }
+
+  getOriginal(id: number, sessionId: string): RefineRecord | undefined {
+    const record = this.records.find((item) => item.id === id && item.input.sessionId === sessionId);
+    if (!record) return undefined;
+    const source = this.records.find((item) =>
+      item.input.sessionId === sessionId && item.taskId === record.taskId && !item.input.revision) ?? record;
+    return structuredClone({ ...source, input: source.originalInput ?? source.input });
   }
 
   archive(sessionId: string, roundId: number): void {
@@ -165,6 +184,27 @@ export class RefineHistory {
     this.touchRun(id);
     record.input.budget = structuredClone(budget);
     record.input.sentInput = sentInput;
+  }
+
+  listForDisplay(sessionId: string): TaskDisplayRecord[] {
+    return this.records.filter((record) => record.input.sessionId === sessionId).map((record) => {
+      const { input, candidate, usage } = record;
+      const warnings = input.projectDiagnostics?.warnings ?? input.project?.snapshot.warnings;
+      return {
+        id: record.id, taskId: record.taskId, kind: record.kind, status: record.status, parentId: record.parentId,
+        createdAt: record.createdAt, archivedAt: record.archivedAt, appliedAt: record.appliedAt,
+        acceptedAt: record.acceptedAt, sentAt: record.sentAt, elapsedSeconds: record.elapsedSeconds, error: record.error,
+        usage: usage && structuredClone(usage),
+        candidate: candidate && { text: candidate.text },
+        input: {
+          draft: input.draft, model: { ...input.model }, thinkingLevel: input.thinkingLevel,
+          roundId: input.roundId, contextUnavailable: input.contextUnavailable, editingInstruction: input.editingInstruction,
+          revision: input.revision && { ...input.revision }, budget: input.budget && structuredClone(input.budget),
+          preferences: input.preferences?.map(({ name }) => ({ name })),
+          projectDiagnostics: warnings && { warnings: [...warnings] },
+        },
+      };
+    });
   }
 
   list(sessionId: string, taskId?: number): RefineRecord[] {

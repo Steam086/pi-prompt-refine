@@ -1,12 +1,12 @@
 import { Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import type { RefineRecord } from "../history.js";
+import type { TaskDisplayRecord } from "../history.js";
 import { formatKeyHint } from "../key-hints.js";
 import { sanitizeTerminalText } from "../presentation.js";
 import { cacheHitRate, formatReferenceCost, formatRunUsage, totalInputTokens, truncatedOutputHint } from "../usage.js";
 
-export interface TaskRow { record: RefineRecord; original: boolean; records: RefineRecord[] }
-export const pending = (record: RefineRecord) => record.status === "queued" || record.status === "generating";
+export interface TaskRow { record: TaskDisplayRecord; original: boolean; records: TaskDisplayRecord[] }
+export const pending = (record: TaskDisplayRecord) => record.status === "queued" || record.status === "generating";
 
 // The Tasks summary stays a single pane; only its prose gets a shorter measure.
 const TASK_PREVIEW_READING_WIDTH = 88;
@@ -34,7 +34,7 @@ export interface TaskPane {
 export class TaskContent {
   private cache = new Map<string, readonly string[]>();
   constructor(private readonly theme: Theme) {}
-  preferenceSummary(record: RefineRecord): string {
+  preferenceSummary(record: TaskDisplayRecord): string {
     const selected = record.input.preferences ?? [];
     return `Preferences: ${selected.length ? `${selected.length} · ${selected.map((entry) => entry.name).join(", ")}` : "None"}`;
   }
@@ -43,15 +43,15 @@ export class TaskContent {
     const labels = ["May use optimizer quota or incur charges", "May use optimizer quota", "May use quota", "Quota"];
     return this.theme.fg("warning", labels.find((label) => visibleWidth(label) <= width) ?? "⚠");
   }
-  badge(record: RefineRecord): string {
+  badge(record: TaskDisplayRecord): string {
     const warning = record.input.budget && (record.input.budget.status !== "ok" || record.input.budget.message) ? "⚠ " : "";
     return warning + this.statusBadge(record);
   }
-  styledBadge(record: RefineRecord): string {
+  styledBadge(record: TaskDisplayRecord): string {
     const warning = this.badge(record).startsWith("⚠") ? this.theme.fg("warning", "⚠ ") : "";
     return warning + this.theme.fg(this.color(record), this.statusBadge(record));
   }
-  private statusBadge(record: RefineRecord): string {
+  private statusBadge(record: TaskDisplayRecord): string {
     if (record.status === "unsent") return "○ Unsent";
     if (record.status === "queued") return "… Queued";
     if (record.status === "generating") return "◌ Running";
@@ -62,7 +62,7 @@ export class TaskContent {
     if (record.acceptedAt !== undefined) return "✓ Accepted";
     return record.kind === "edit" ? "✓ Edited" : record.kind === "revise" ? "✓ Revised" : "✓ Done";
   }
-  color(record: RefineRecord): "error" | "warning" | "accent" | "success" {
+  color(record: TaskDisplayRecord): "error" | "warning" | "accent" | "success" {
     return record.status === "error" ? "error" : record.status === "unsent" || record.status === "cancelled" || record.status === "interrupted" ? "warning"
       : pending(record) ? "accent" : "success";
   }

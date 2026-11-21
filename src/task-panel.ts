@@ -1,7 +1,7 @@
 import { stripVTControlCharacters } from "node:util";
 import { matchesKey, parseKey, sliceByColumn, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager, type KeyId } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import type { RefineRecord } from "./history.js";
+import type { TaskDisplayRecord } from "./history.js";
 import { taskGroups } from "./app/queries.js";
 import type { HistoryStorageStatus } from "./history-store.js";
 import { fittingHints, panelHeader, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
@@ -14,7 +14,7 @@ import { renderTaskDocument } from "./ui/task-documents.js";
 import { renderInactivePreferences, renderTaskPreferences } from "./ui/task-preferences.js";
 
 export interface TaskPanelActions {
-  records(): RefineRecord[];
+  records(): TaskDisplayRecord[];
   appliedId(): number | undefined;
   activate(id: number): boolean;
   run(id: number): void;
@@ -64,7 +64,6 @@ export class TaskPanel {
   private navigationDirection = 1;
   private notice = "";
   private noticeColor: "muted" | "warning" | "error" = "muted";
-  private readonly content: TaskContent;
   // Keep requested anchors separate from effective offsets. A taller viewport
   // may reveal earlier lines near the end, but must not erase the compact anchor.
   private renderedScrolls = new Map<string, number>();
@@ -81,7 +80,8 @@ export class TaskPanel {
     private readonly position: TaskPanelPosition = {},
     private readonly layout: PanelLayoutProvider = (width) => panelLayout(width, this.rows()),
     private readonly expansionHint?: () => KeyHint | undefined,
-  ) { this.content = new TaskContent(theme); }
+    private readonly content = new TaskContent(theme),
+  ) {}
   canExpand(): boolean { return !this.referenceOnly && !this.deletion && !this.document &&
     (!this.preferenceFocus || this.actions.inlinePreferences?.hints !== "search"); }
   /** Initial tree/summary demand only. Never select, render or clamp a live pane. */
@@ -117,8 +117,8 @@ export class TaskPanel {
     panel.notice = this.notice; panel.noticeColor = this.noticeColor;
     return panel;
   }
-  private entries(allRounds = false): Row[] {
-    return taskGroups(this.actions.records(), allRounds || this.usage).flatMap((records) => {
+  private entries(allRounds = false, history = this.actions.records()): Row[] {
+    return taskGroups(history, allRounds || this.usage).flatMap((records) => {
       const source = records.find((r) => !r.input.revision) ?? records[0]!;
       const children = records.filter((r) => r.status !== "unsent").sort((a, b) => b.id - a.id);
       return [{ record: source, original: true, records },
@@ -426,7 +426,8 @@ export class TaskPanel {
       return chrome.render(body, (text) => this.theme.fg("borderMuted", text));
     }
     const tabs = workspaceTabs(layout, this.usage ? "Usage" : "Preview", this.theme);
-    const rows = this.entries();
+    const history = this.actions.records();
+    const rows = this.entries(false, history);
     const selected = this.selected(rows);
     const inline = this.inline(selected);
     this.actions.inlinePreferences?.setTarget(inline ? selected!.record.id : undefined, this.preferenceFocus);
@@ -522,7 +523,7 @@ export class TaskPanel {
       ? this.content.muted(layout.innerWidth < 32 ? "Earlier → Usage" : layout.innerWidth < 72
         ? "Earlier · Usage → · Esc current" : "Earlier · kept open · Esc returns to current · History in Usage →") : this.inspecting
       ? inspectionSubtitle : browseStatus;
-    const earlier = this.usage ? [] : this.actions.records().filter((record) => record.archivedAt !== undefined);
+    const earlier = this.usage ? [] : history.filter((record) => record.archivedAt !== undefined);
     const earlierPending = earlier.filter(pending).length;
     const earlierCount = new Set(earlier.map((record) => record.taskId)).size;
     const earlierLabel = `${earlierCount} earlier prompt${earlierCount === 1 ? "" : "s"}`;

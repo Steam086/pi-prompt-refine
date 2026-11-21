@@ -6,8 +6,9 @@ import { workspaceFrame, workspaceLayout, workspaceViewport } from "./workspace-
 import { fittingKeyHints } from "./key-hints.js";
 import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
+import { TaskContent } from "./ui/task-content.js";
 import { TaskPanel, type TaskPanelActions, type TaskPanelPosition } from "./task-panel.js";
-import type { RefineRecord } from "./history.js";
+import type { TaskDisplayRecord } from "./history.js";
 import type { HistoryStorageStatus } from "./history-store.js";
 import { PreferencePanel } from "./preference-panel.js";
 import { InlinePreferences } from "./inline-preferences.js";
@@ -27,7 +28,7 @@ interface WorkspaceActions {
   /** Session-owned text, independent of request snapshots and revision feedback. */
   inputDraft?: { text: string; save(text: string): void };
   inputCaptureOnly?(): boolean;
-  history?(): RefineRecord[];
+  history?(): TaskDisplayRecord[];
   historyStorage?(): HistoryStorageStatus;
   tasks?: TaskPanelActions;
   taskPosition?: TaskPanelPosition;
@@ -51,6 +52,7 @@ interface WorkspaceActions {
 export class RefineWorkspace implements Component, Focusable {
   private mode: "main" | "result" | "context" | "input" | "usage" = "main";
   private historyPanel?: TaskPanel;
+  private readonly usageContent: TaskContent;
   private taskPanel?: TaskPanel;
   private returnToTasks = false;
   private inputReturnMode: "main" | "result" | "usage" = "main";
@@ -82,6 +84,7 @@ export class RefineWorkspace implements Component, Focusable {
     private readonly keys: KeybindingsManager,
     private readonly actions: WorkspaceActions,
   ) {
+    this.usageContent = new TaskContent(theme);
     this.panel.setLayoutProvider(this.layout);
     this.preferencesKey = actions.preferences?.key;
     if (this.preferencesKey && Object.values(keys.getResolvedBindings()).some((binding) =>
@@ -289,7 +292,7 @@ export class RefineWorkspace implements Component, Focusable {
       revise: (id) => this.openRevision(id),
       preferences: this.actions.preferences ? (id, original) => this.openDraftPreferences(id, original) : undefined,
       preferencesKey: this.preferencesKey,
-    }, this.theme, () => this.tui.terminal.rows, this.keys, true, position, this.layout);
+    }, this.theme, () => this.tui.terminal.rows, this.keys, true, position, this.layout, undefined, this.usageContent);
     this.switchMode("usage");
   }
 

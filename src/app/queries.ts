@@ -18,8 +18,10 @@ export function immutable<T>(value: T): T {
 }
 const action = (reason?: FailureCode): Availability => reason ? { enabled: false, reason } : { enabled: true };
 /** Shared ordering, independent of focus, completion order and the presentation clock. */
-export function taskGroups(records: readonly RefineRecord[], all = false): RefineRecord[][] {
-  const groups = new Map<number, RefineRecord[]>();
+export function taskGroups<T extends { id: number; taskId: number; archivedAt?: number; input: { roundId?: number } }>(
+  records: readonly T[], all = false,
+): T[][] {
+  const groups = new Map<number, T[]>();
   for (const record of records) {
     if (!all && record.archivedAt !== undefined) continue;
     const group = groups.get(record.taskId) ?? [];
