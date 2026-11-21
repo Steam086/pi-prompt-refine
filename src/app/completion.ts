@@ -9,24 +9,25 @@ import { budgetRequest } from "../budget.js";
 import { assembleProjectContext, collectDirectoryContext, type TreeSnapshot } from "../project-context.js";
 import { readRunUsage } from "../usage.js";
 import { displayModel, sameModel } from "./model-utils.js";
-import type { Notify, NotifyIfSameSession } from "./contracts.js";
 import { directoryJobKeys, type createContextJobs } from "./context-jobs.js";
 
-interface CompletionDependencies {
+type CompletionContext = { sessionManager: Pick<ExtensionContext["sessionManager"], "getSessionId">;
+  modelRegistry: Pick<ExtensionContext["modelRegistry"], "find" | "getAvailable" | "isUsingOAuth" | "streamSimple"> };
+interface CompletionDependencies<Context extends CompletionContext> {
   config: Pick<RefineConfig, "maxOutputTokens" | "projectContext">;
-  getContext(): ExtensionContext | undefined;
+  getContext(): Context | undefined;
   getSessionId(): string | undefined;
   directorySnapshot: ReturnType<typeof createContextJobs>["directorySnapshot"];
   capturePreparedInput: RefineController["capturePreparedInput"];
   captureBudget: RefineController["captureBudget"];
   onOptimizerRequest(): void;
-  reportProject(ctx: ExtensionContext, request: RefineRequest, warnings: string[], referencedDirectoryCount: number): void;
-  notify: Notify;
-  notifyIfSameSession: NotifyIfSameSession;
+  reportProject(ctx: Context, request: RefineRequest, warnings: string[], referencedDirectoryCount: number): void;
+  notify(ctx: Context, message: string, type?: "info" | "warning" | "error"): void;
+  notifyIfSameSession(sessionId: string, message: string): void;
 }
 
-export function createCompletion({ config, getContext, getSessionId, directorySnapshot,
-  capturePreparedInput, captureBudget, onOptimizerRequest, reportProject, notify, notifyIfSameSession }: CompletionDependencies) {
+export function createCompletion<Context extends CompletionContext>({ config, getContext, getSessionId, directorySnapshot,
+  capturePreparedInput, captureBudget, onOptimizerRequest, reportProject, notify, notifyIfSameSession }: CompletionDependencies<Context>) {
   return async (request: RefineRequest, signal: AbortSignal): Promise<RefineCompletion> => {
     const ctx = getContext();
     if (!ctx || ctx.sessionManager.getSessionId() !== request.sessionId || getSessionId() !== request.sessionId) {

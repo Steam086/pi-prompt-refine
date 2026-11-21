@@ -47,7 +47,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
   const openHint = config.shortcuts.view ?? config.shortcuts.optimize ?? "/refine view";
   const setCompletionContext = (ctx: ExtensionContext) => { completionContext = ctx; };
   const presentation = () => updatePresentation(controller.getState());
-  const controller = new RefineController({
+  const controller: RefineController = new RefineController({
     get timeoutMs() { return config.timeoutMs; },
     get maxDraftChars() { return config.maxDraftChars; },
     get maxOutputChars() { return Math.max(config.maxDraftChars, config.maxOutputTokens * 32); },
@@ -60,7 +60,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
   }, config.model);
 
   const contextJobs = createContextJobs(() => controller.getHistory());
-  const complete = createCompletion({
+  const complete = createCompletion<ExtensionContext>({
     config, getContext: () => completionContext, getSessionId: () => controller.getSessionId(),
     directorySnapshot: contextJobs.directorySnapshot,
     capturePreparedInput: (...args) => controller.capturePreparedInput(...args),
