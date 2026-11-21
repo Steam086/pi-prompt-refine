@@ -1,5 +1,5 @@
 import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { buildSessionProjection, type SessionEntry, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, TuiAltScreen, TuiMainScreen, type OverlayHandle, type OverlayOptions, type Terminal } from "@earendil-works/pi-tui";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { EventEmitter } from "node:events";
@@ -148,7 +148,18 @@ export function extensionHarnessEnvironment() {
       getSessionFile: () => options.persistHistory ? join(agentDir, "session.jsonl") : undefined,
       getLeafId: () => "leaf-one",
       getEntries: () => sessionEntries,
-      getBranch: () => [
+      buildSessionProjection() {
+        // Branch fixtures are linear; supply the links Pi needs to project the active path.
+        let parentId: string | null = null;
+        const entries = (this.getBranch() as SessionEntry[]).map((entry, i) => {
+          const id = entry.id ?? `branch-${i}`;
+          const linked = { ...entry, id, parentId };
+          parentId = id;
+          return linked;
+        });
+        return buildSessionProjection(entries);
+      },
+      getBranch: (): unknown[] => [
         { type: "message", message: { role: "user", content: "earlier requirement" } },
         { type: "message", message: { role: "assistant", content: [{ type: "thinking", thinking: "secret" }, { type: "text", text: "visible answer" }] } },
         { type: "message", message: { role: "toolResult", content: [{ type: "text", text: "not context" }] } },

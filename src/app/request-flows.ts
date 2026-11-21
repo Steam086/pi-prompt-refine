@@ -58,8 +58,15 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
     return undefined;
   }
 
+  function captureHistory(ctx: ExtensionContext): HistorySnapshot {
+    // Read text only from projected messages. The source entry still holds the unedited original.
+    const entries = ctx.sessionManager.buildSessionProjection().entries.flatMap(({ sourceEntry, messages }) =>
+      sourceEntry.type === "message" ? messages.map((message) => ({ type: "message", id: sourceEntry.id, message })) : []);
+    return selectHistory(entries, config.context.maxMessages, config.context.maxChars);
+  }
+
   function draftInput(ctx: ExtensionContext, draft: string): RefineRequestInput {
-    const history = selectHistory(ctx.sessionManager.getBranch(), config.context.maxMessages, config.context.maxChars);
+    const history = captureHistory(ctx);
     const project = config.projectContext.enabled ? captureProjectContext(ctx, config.projectContext, draft) : undefined;
     const generateTitle = canNameSession(ctx);
     return {
@@ -97,12 +104,7 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
     const model = ctx.modelRegistry.find(selected.provider, selected.id)!;
 
     setCompletionContext(ctx);
-    const branch = ctx.sessionManager.getBranch();
-    const history = selectHistory(
-      branch,
-      config.context.maxMessages,
-      config.context.maxChars,
-    );
+    const history = captureHistory(ctx);
     const previousContext = { historySnapshot, projectLabel, projectWarnings };
     historySnapshot = history;
     const project = config.projectContext.enabled ? captureProjectContext(ctx, config.projectContext, draft) : undefined;

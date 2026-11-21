@@ -103,6 +103,23 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.notifications.join(" ")).not.toContain("failed");
   });
 
+  it.each(["shortcut", "api"])('respects prior Pi omissions and replacements in the %s optimizer request', async (entry) => {
+    const h = await makeHarness({ mode: entry === "api" ? "rpc" : "tui" });
+    vi.spyOn(h.context.sessionManager, "getBranch").mockReturnValue([
+      { type: "message", id: "a", message: { role: "user", content: "omitted-original" } },
+      { type: "message", id: "b", message: { role: "user", content: "replaced-original" } },
+      { type: "context_edit", targetId: "a", replacement: null },
+      { type: "context_edit", targetId: "b", replacement: { content: "public alias" } },
+    ] as any);
+    if (entry === "api") await h.commands.get("refine-api")!("optimize -- clarify", h.context);
+    else await trigger(h);
+    await vi.waitFor(() => expect(h.complete).toHaveBeenCalledTimes(1));
+    const request = h.complete.mock.calls[0]![1];
+    expect(JSON.stringify(request)).not.toMatch(/omitted-original|replaced-original/);
+    const packet = JSON.parse(request.messages[0].content[0].text);
+    expect(packet.conversation.items).toEqual([{ id: "b", role: "user", status: "complete", text: "public alias" }]);
+  });
+
   it("sends the selected user correction and omission metadata to the optimizer, not just the UI", async () => {
     const harness = await makeHarness({ config: { context: { maxMessages: 1, maxChars: 100 } } });
     vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([
