@@ -11,7 +11,7 @@
 
 ### 发布前待裁决
 
-- [ ] **依赖审计**：本次公共 registry 的 `npm audit --omit=dev` 为 0；含开发依赖的审计为 1 high / 2 moderate，涉及锁定的 Pi SDK 1.4.0 及 `undici`、`minimatch`。这些不打入 tarball，但使用者运行的 Pi 宿主版本仍有关系。发布前复查公告与兼容版本，批准后再更新依赖并重跑；不要直接 `audit fix --force`。
+- [ ] **依赖审计**：根开发依赖升级到 Pi SDK 1.6.0 后，公共 npm registry 审计在仅生产依赖和包含开发依赖两种口径下均为 0，旧锁定版本的 `undici`、`minimatch` 告警已消失。发布前仍需复查最终锁文件和目标 Pi 宿主版本；根包审计不涵盖用户实际安装的宿主。
 
 ## 改写质量与体验
 

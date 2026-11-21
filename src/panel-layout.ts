@@ -83,15 +83,15 @@ export function panelHeader(base: PanelLayout, headings: string[], tabs: string[
     bodyHeight: base.height - base.topSeparatorHeight - base.separatorHeight - header.length };
   return {
     layout,
-    render: (body: string[], border: (text: string) => string) =>
+    render: (body: readonly string[], border: (text: string) => string) =>
       panelFrame(layout, header, body, [], border, { footerAfterBodyRows: 0 }),
   };
 }
 
 /** Optionally lift action hints above content, after the body's leading tab rows. */
-export function panelFrame(layout: PanelLayout, header: string[], body: string[], footer: string[], border: (text: string) => string,
+export function panelFrame(layout: PanelLayout, header: string[], body: readonly string[], footer: string[], border: (text: string) => string,
   options: { footerAfterBodyRows?: number } = {}): string[] {
-  const reserve = (lines: string[], count: number) => Array.from({ length: count }, (_, i) => lines[i] ?? "");
+  const reserve = (lines: readonly string[], count: number) => Array.from({ length: count }, (_, i) => lines[i] ?? "");
   const content = reserve(body, layout.bodyHeight);
   const hints = reserve(footer, layout.footerHeight);
   const separator = layout.separatorHeight ? [border("─".repeat(layout.innerWidth))] : [];

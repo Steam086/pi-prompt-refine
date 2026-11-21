@@ -32,7 +32,7 @@ export interface TaskPane {
 
 /** Literal task documents and their bounded wrapping cache; never owns a selected identity. */
 export class TaskContent {
-  private cache = new Map<string, string[]>();
+  private cache = new Map<string, readonly string[]>();
   constructor(private readonly theme: Theme) {}
   preferenceSummary(record: RefineRecord): string {
     const selected = record.input.preferences ?? [];
@@ -68,7 +68,7 @@ export class TaskContent {
   }
   heading(text: string): string { return this.theme.fg("text", this.theme.bold(sanitizeTerminalText(text))); }
   muted(text: string): string { return this.theme.fg("muted", sanitizeTerminalText(text)); }
-  wrapped(document: string, width: number): string[] {
+  wrapped(document: string, width: number): readonly string[] {
     const key = JSON.stringify([document, width]);
     let lines = this.cache.get(key);
     if (!lines) {
