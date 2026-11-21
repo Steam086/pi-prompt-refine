@@ -1,6 +1,6 @@
 # 维护架构
 
-根 npm 包通过 `pi.extensions` 暴露 TypeScript 入口，不是独立 CLI 或 Web 服务。Pi 提供 SDK 与 TUI；`ignore` 用于目录过滤。`examples/prompt-refine-preferences.json` 虽在 examples 下，却是首次初始化全局偏好库的运行时资源。历史设计取舍见 [DESIGN](../DESIGN.md)，行为说明见 [使用说明](usage.md)。
+根 npm 包通过 `pi.extensions` 暴露 TypeScript 入口，不是独立 CLI 或 Web 服务。Pi 提供 SDK 与 TUI；`ignore` 用于目录过滤。`examples/prompt-refine-preferences.json` 虽在 examples 下，却是首次初始化全局偏好库的运行时资源。长期取舍见[设计原则](design.md)，行为说明见 [使用说明](usage.md)。
 
 ## 跟随一次改写
 

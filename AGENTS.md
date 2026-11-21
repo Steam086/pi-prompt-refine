@@ -26,7 +26,7 @@ Pi Prompt Refine 是 TypeScript 编写的 Pi 扩展，入口由根 `package.json
 | 公开文档、中英文维护范围 | [文档语言约定](CONTRIBUTING.md#documentation-languages) |
 | Web 构建、安装、宿主能力与重启边界 | [Web 子包说明](packages/pi-web/README.md) |
 
-当前操作见 [README](README.md) / [使用说明](docs/usage.md)，长期设计见 [DESIGN](DESIGN.md)。多入口实施进度与实测证据见 [进度记录](docs/multi-surface-progress.md) / [隔离验收记录](docs/multi-surface-acceptance.md)；历史设计或离线通过不能代替当前部署、人工 IME、认证或真实 Provider 验收。
+当前操作见 [README](README.md) / [使用说明](docs/usage.md)，长期取舍见[设计原则](docs/design.md)，近期工作见[路线图](docs/roadmap.md)。多入口实施进度与实测证据见 [进度记录](docs/multi-surface-progress.md) / [隔离验收记录](docs/multi-surface-acceptance.md)；历史设计或离线通过不能代替当前部署、人工 IME、认证或真实 Provider 验收。
 
 ## 架构核心
 

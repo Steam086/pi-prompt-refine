@@ -21,7 +21,7 @@ npm audit --omit=dev --registry=https://registry.npmjs.org/
 npm audit --registry=https://registry.npmjs.org/
 ```
 
-Install and registry audits require network access; the default tests and pack check do not need a provider or npm login. Inspect audit findings separately for runtime dependencies, Pi's host-provided peers, and the development lockfile. Do not automatically upgrade with `npm audit fix --force`. See [open release decisions](../TODO.md). CI checks the root package on Linux with the minimum Node version and Node 24; a workflow definition is not a passing external CI run.
+Install and registry audits require network access; the default tests and pack check do not need a provider or npm login. Inspect audit findings separately for runtime dependencies, Pi's host-provided peers, and the development lockfile. Do not automatically upgrade with `npm audit fix --force`. See the [remaining native TUI release checks](roadmap.md#原生-tui-首发). CI checks the root package on Linux with the minimum Node version and Node 24; a workflow definition is not a passing external CI run.
 
 Build one artifact outside the checkout. Review its contents, then install **that file** in isolation:
 

@@ -4,7 +4,7 @@
 > 后续更新：已实现 JSON 元数据与 rewrite / task 分类；曾有的条件自动改造项现已取消，旧库自动配置兼容读取为手动项。现在可显式设置项目默认，并逐次取消／清空选择，当前行为见[项目默认与单次选择](preference-selection.md#项目默认与单次选择)。本文“类型待讨论”和不提供默认项等内容属于首版历史记录；保存／带回不请求模型，固定角色与输出协议不受模板控制。
 > 实施顺序：状态设计 → 一致性 review → 代码与测试 → 提交、推送。实体终端与 IME 仍需实际验收。
 
-相关文档：[设计原则与演进方向](../DESIGN.md#手动保存修订要求与模板复用)、[现有使用说明](usage.md#inputrevise-与-settings)。
+当前操作见 [Preferences 选择与保存](preference-selection.md)及 [Input、Revise 与 Settings](usage.md#inputrevise-与-settings)。
 
 ## 1. 目标与边界
 
