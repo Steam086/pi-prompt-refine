@@ -441,7 +441,11 @@ export class TaskPanel {
     const run = selected && !selected.original ? selected.record : undefined;
     const stop = run && pending(run);
     const back: KeyHint = ["Esc", "Back"];
-    const editorHint = layout.innerWidth < 20 ? "→editor" : "Editor only";
+    // Reading the original does not change the action target. Name the result
+    // explicitly here, even when the selected result itself is off screen.
+    const editorHint = this.original && run?.candidate
+      ? (layout.innerWidth < 40 ? "Result→editor" : "Result to editor only")
+      : layout.innerWidth < 20 ? "→editor" : "Editor only";
     const compact = (hints: KeyHint[]): KeyHint[] => hints.map(([key, label]) => [key === "Enter" ? "↵" : key, label === "Send to Pi" ? "Send" : label]);
     let footer: string[];
     if (passiveHints) {

@@ -60,11 +60,17 @@ describe("multi-model preview and unified Usage", () => {
     harness.panelInput("\x1b[A"); harness.panelInput("\r");
     expect(harness.panelLines().join("\n")).toContain("Second candidate");
     expect(harness.panelLines().join("\n")).toContain("Prompt details");
+    harness.panelInput("o"); // The narrow pane now shows the original, not the action target.
+    const reference = harness.panelLines(24).join("\n");
+    expect(reference).toContain("Draft A");
+    expect(reference).not.toContain("Second candidate");
+    expect(reference).toContain("a Result→editor");
     expect(harness.editorWrites).toEqual([]);
     expect(harness.sent).toEqual([]);
     harness.panelInput("a");
     await view;
     expect(harness.getEditor()).toBe("Second candidate");
+    expect(harness.sent).toEqual([]);
     expect(harness.complete).toHaveBeenCalledTimes(2);
   });
   it("opens history/usage commands without calls, and retains records after submission", async () => {

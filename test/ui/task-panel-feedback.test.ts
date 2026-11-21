@@ -92,6 +92,10 @@ describe("short and narrow feedback", () => {
     size.rows = 8;
     expect(text(40)).toContain("a Editor only"); expect(text(40)).toContain("s Send");
     expect(text(40)).toContain("? Help"); expect(text(40)).not.toContain("Enter Inspect");
+    panel.handleInput("o");
+    size.rows = 24;
+    expect(text(20)).toContain("Original prompt");
+    expect(text(20)).toContain("a Result→editor");
     panel.handleInput("a"); expect(actions.accept).toHaveBeenCalledWith(1);
   });
 
