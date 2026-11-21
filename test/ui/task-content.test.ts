@@ -41,9 +41,9 @@ describe("Tasks preview hierarchy", () => {
     expect(pane.lines.join("\n")).toContain(theme.fg("text", "# Literal heading 中文😀").replace(/\x1b\[39m$/u, ""));
     expect(pane.lines.slice(4).join("\n")).not.toContain("\x1b[1m");
     const renderedRun = content.pane({ ...row, original: false }, 105, 30, previewOptions).lines.join("\n");
-    expect(renderedRun).toContain(theme.fg("muted", "23s"));
+    expect(stripVTControlCharacters(renderedRun).split("\n").map(line => line.trimEnd())).toEqual([run.input.model.id, ...run.candidate!.text.split("\n")]);
     expect(renderedRun).not.toContain(theme.bold("23s"));
-    expect(renderedRun).toContain(theme.fg("success", "✓ Done"));
+    expect(renderedRun).not.toContain(theme.fg("success", "✓ Done"));
   });
 
   it.each(["dark", "light"])("wraps without editing paragraphs, code, paths or long strings in %s", (name) => {

@@ -73,7 +73,7 @@ describe("explicit candidate revision", () => {
     expect(sourceLines(harness.panelLines(100))).toEqual(sourceLines(before));
     const referenceHeader = frameHeader(harness.panelLines(100)).join("\n");
     expect(referenceHeader).toContain("Read-only reference");
-    for (const hint of ["↑↓ scroll", "a Accept", "s Send to Pi", "p Preferences", "i Edit original", "f Revise"]) {
+    for (const hint of ["↑↓ scroll", "a Editor only", "s Send to Pi", "p Preferences", "i Edit original", "f Revise"]) {
       expect(referenceHeader).not.toContain(hint);
     }
     expect(harness.panelLines(100).join("\n")).toMatch(/Revise(?: current result)? · #1 · /);

@@ -112,12 +112,18 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         expect(hintStrip, name).toContain(`${theme.fg("muted", `${action[0]}:`)} ${theme.fg("muted", action[1])}`);
         expect(bodyText(lines[divider + 1]!), name).not.toBe("");
         expect(strip(hintStrip), name).not.toMatch(/\s(?:Space|←|→|↑↓|b|d|p|m|f): /);
-        if (active === "Preview") expect(hintStrip).toContain(`${theme.fg("muted", "a:")} ${theme.fg("muted", "Accept")}`);
+        if (active === "Preview") expect(hintStrip).toContain(`${theme.fg("muted", "a:")} ${theme.fg("muted", "Editor only")}`);
         if (active !== "Settings") expect(strip(hintStrip)).toContain("?: Help");
         if (columns >= 100) {
           expect(hints, name).toHaveLength(1);
-          expect(strip(line), name).toContain(`${action[0]}: ${action[1]}`);
-          expect(visibleWidth(strip(line).replace(/│$/, "").trimEnd()), name).toBe(widthOfContent(lines[divider]!));
+          if (columns === 100 && active === "Preview") {
+            // The explicit editor destination makes the hint strip one row of its own.
+            expect(strip(lines[row + 1]!), name).toContain(`${action[0]}: ${action[1]}`);
+            expect(divider).toBe(row + 2);
+          } else {
+            expect(strip(line), name).toContain(`${action[0]}: ${action[1]}`);
+            expect(visibleWidth(strip(line).replace(/│$/, "").trimEnd()), name).toBe(widthOfContent(lines[divider]!));
+          }
         }
         return lines;
       }
@@ -211,7 +217,7 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         expect(position.selectedId).toBe(1);
         input("\r");
         const details = frame("Result details").join("\n");
-        operationHint(details, "a", "Accept");
+        operationHint(details, "a", "Editor only");
         operationHint(details, "Esc", "Back");
         expect(details).toContain(theme.getFgAnsi("text") + "Literal **正文** 中文😀");
         expect(details).not.toContain("\x1b[31m");
@@ -225,7 +231,7 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         operationHint(revision, "Ctrl+S", "Revise");
         expect(revision).toContain(theme.fg("text", theme.bold(columns === 60 ? "Revise" : "Revise current result"))
           + theme.fg("muted", " · #1 · model-1"));
-        expect(strip(revision)).not.toMatch(/\b(?:Accept|Send)\b/);
+        expect(strip(revision)).not.toMatch(/\b(?:a:? Editor only|Accept|Send)\b/);
         input("\t"); input("\r"); // Revise's Preferences control owns Enter, not the editor underneath.
         await vi.waitFor(() => {
           tui.renderNow();

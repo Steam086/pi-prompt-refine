@@ -98,7 +98,7 @@ describe("Tasks shortcut hierarchy", () => {
       expect(f.position.selectedId).toBe(1);
       panel.handleInput("?");
       const help = strip(panel.render(100).join("\n"));
-      for (const action of ["a Accept", "d Delete", "f Revise", "b History storage status and file location", "← / → Switch Preview, Usage and Settings"]) expect(help).toContain(action);
+      for (const action of ["a Accept selected result into Pi editor without sending", "d Delete", "f Revise", "b History storage status and file location", "← / → Switch Preview, Usage and Settings"]) expect(help).toContain(action);
       panel.handleInput("\x1b");
       panel.handleInput("b");
       expect(strip(panel.render(100).join("\n"))).toContain("Confirmed saved runs");
@@ -138,7 +138,7 @@ describe("Tasks shortcut hierarchy", () => {
     for (const usage of [false, true]) for (const status of ["queued", "generating"] as const) {
       const f = create(name, usage, [{ ...record(), status, candidate: undefined }]);
       expect(f.panel.render(100).join("\n")).toContain(formatKeyHint(["x", "Stop"], f.theme, 1, "secondary"));
-      expect(f.text()).not.toContain("a: Accept");
+      expect(f.text()).not.toContain("a: Editor only");
       expect(f.text()).not.toContain("Refine model:");
       f.size.rows = 8;
       const short = f.text(32);

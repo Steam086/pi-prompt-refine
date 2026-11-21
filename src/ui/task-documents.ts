@@ -76,7 +76,7 @@ export function renderTaskDocument(
       if (!row.record.input.contextUnavailable) hints.push(["m", "Run model"]);
       if (!row.original && pending(row.record)) hints.push(["x", "Stop"]);
       if (!row.original && row.record.candidate) {
-        hints.push(["a", "Accept"]);
+        hints.push(["a", "Accept selected result into Pi editor without sending"]);
         if (!row.record.input.contextUnavailable && options.revise) hints.push(["f", "Revise"]);
         if (options.inspecting) {
           hints.push(["e", "Edit result"], ["s", "Send to Pi"], ["o", "Switch result/reference"]);

@@ -124,7 +124,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\r");
     await flushPromises();
     expect(harness.complete).toHaveBeenCalledTimes(1); // Same captured input is not a new request.
-    expect(harness.panelLines().join("\n")).toContain("Original 中文");
+    expect(harness.panelLines().join("\n")).toMatch(/Original…[^\n]*sted line/); // Compact summary shows both ends; payload above is exact.
     harness.panelInput("q");
     await view;
     expect(harness.getEditor()).toBe(mainDraft);

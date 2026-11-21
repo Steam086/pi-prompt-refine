@@ -5,8 +5,8 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 ╭────────────────────────────────────────────────────────╮
 │  Prompt refine · Tasks   1 prompt · 2 runs             │
 │   Preview    Usage    Settings                         │
-│  a: Accept  Enter: Inspect  Tab: Read    Esc: Back     │
-│  ?: Help                                               │
+│  a: Editor only  Enter: Inspect  Tab: Read             │
+│  Esc: Back  ?: Help                                    │
 │  ────────────────────────────────────────────────────  │
 │    ▾ 本项目的原始要求                                  │
 │    ├─ model-2                                  ✓ Done  │
@@ -131,7 +131,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 ╭────────────────────────────────────────────────────────╮
 │  Prompt details   Selected: #1 model-1 · o Reference   │
 │   Preview    Usage    Settings                         │
-│  a Accept · s Send · p Preferences · i Edit original   │
+│  a Editor only · s Send · p Preferences · m Run model  │
 │  Esc Back · ? Help · c Compare · e Edit result         │
 │  ────────────────────────────────────────────────────  │
 │  model-1 · ✓ Done                                      │
@@ -152,7 +152,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 ╭────────────────────────────────────────────────────────╮
 │  Compare results   Selected: #1 model-1 · ↑↓ scroll    │
 │   Preview    Usage    Settings                         │
-│  a Accept · s Send · p Preferences · i Edit original   │
+│  a Editor only · s Send · p Preferences · m Run model  │
 │  Esc Back · ? Help · c Next comparison · f Revise      │
 │  ────────────────────────────────────────────────────  │
 │  A · #1 · Tab B · #2                                   │

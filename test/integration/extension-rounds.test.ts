@@ -237,7 +237,7 @@ describe("round workspace integration", () => {
 
     view = shortcut(harness, "ctrl+\\")(harness.context);
     expect(harness.panelLines().join("\n")).toContain("Accepted B result");
-    expect(harness.panelLines().join("\n")).toContain("a: Accept");
+    expect(harness.panelLines().join("\n")).toContain("a: Editor only");
     expect(harness.panelLines().join("\n")).toContain("2 prompts");
     expect(harness.complete).toHaveBeenCalledTimes(2);
     harness.panelInput("q"); await view;

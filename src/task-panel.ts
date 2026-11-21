@@ -1,5 +1,5 @@
 import { stripVTControlCharacters } from "node:util";
-import { matchesKey, parseKey, truncateToWidth, visibleWidth, type KeybindingsManager, type KeyId } from "@earendil-works/pi-tui";
+import { matchesKey, parseKey, sliceByColumn, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager, type KeyId } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { RefineRecord } from "./history.js";
 import { taskGroups } from "./app/queries.js";
@@ -441,12 +441,13 @@ export class TaskPanel {
     const run = selected && !selected.original ? selected.record : undefined;
     const stop = run && pending(run);
     const back: KeyHint = ["Esc", "Back"];
+    const editorHint = layout.innerWidth < 20 ? "→editor" : "Editor only";
     const compact = (hints: KeyHint[]): KeyHint[] => hints.map(([key, label]) => [key === "Enter" ? "↵" : key, label === "Send to Pi" ? "Send" : label]);
     let footer: string[];
     if (passiveHints) {
       const primary: KeyHint[] = !selected ? [["n", "New"]] : [["Enter", action]];
       if (stop) primary.unshift(["x", "Stop"]);
-      if (run?.candidate && !this.usage) primary.unshift(["a", "Accept"]);
+      if (run?.candidate && !this.usage) primary.unshift(["a", editorHint]);
       // Reserve both focus labels so a focus change never moves or hides other hints.
       const focus: KeyHint[] = inline ? [["Tab", "Preferences"], ["o", (this.reading ? "Select" : "Read original").padEnd("Read original".length)]]
         : selected ? [["Tab", (this.reading ? "Select" : "Read").padEnd("Select".length)]] : [];
@@ -461,7 +462,7 @@ export class TaskPanel {
       ];
       if (this.canOpenPreferences()) primary.splice(this.inspecting ? 0 : 1, 0, ["p", "Preferences"]);
       if (stop) primary.unshift(["x", "Stop"]);
-      if (run?.candidate) primary.unshift(["a", "Accept"], ...(this.inspecting ? [["s", "Send to Pi"] as const] : []));
+      if (run?.candidate) primary.unshift(["a", editorHint], ...(this.inspecting ? [["s", "Send to Pi"] as const] : []));
       if (selected && this.actions.deleteRecords) primary.push(["d", "Delete"]);
       const secondary: KeyHint[] = [back, ["?", layout.innerWidth < 56 ? "Help" : "Actions"]];
       if (this.usage && this.actions.historyStorage) secondary.push(["b", "Storage"]);
@@ -574,10 +575,19 @@ export class TaskPanel {
       const continuation = children.length > 0 && (row.original || !lastChild) ? "  │" : "   ";
       const prefix = `${active ? "›" : " "} ${lastChild ? "└─" : "├─"} `;
       const badge = this.content.badge(record);
-      const model = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(record.input.model.id), Math.max(1, leftWidth - visibleWidth(prefix + badge) - 1), "…"));
+      const ambiguous = !row.original && rowHeight === 1 && row.records.some(({ input }) => input.model.id === record.input.model.id && input.model.provider !== record.input.model.provider);
+      const identity = ambiguous ? `#${record.id} ${record.input.model.id} · ${record.input.model.provider}` : record.input.model.id;
+      const model = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(identity), Math.max(1, leftWidth - visibleWidth(prefix + badge) - 1), "…"));
       const draft = record.input.draft.replace(/\s+/g, " ") || "Empty prompt";
+      const selectedParent = row.original && !this.usage && selected && !selected.original && record.taskId === selected.record.taskId;
+      // In a one-line tree keep the end of the selected prompt too: similar
+      // requests often share their opening words but differ in the subject.
+      const cleanDraft = selectedParent ? sanitizeTerminalText(draft) : draft;
+      const summaryWidth = Math.max(1, leftWidth - 4);
+      const excerpt = selectedParent && rowHeight === 1 && visibleWidth(cleanDraft) > summaryWidth
+        ? stripVTControlCharacters(truncateToWidth(cleanDraft, Math.ceil(summaryWidth / 2), "…") + sliceByColumn(cleanDraft, visibleWidth(cleanDraft) - Math.floor(summaryWidth / 2), Math.floor(summaryWidth / 2))) : draft;
       const label = row.original
-        ? `${active ? "›" : " "} ${record.status === "unsent" ? `○ Unsent ·${record.input.preferences?.length ? ` P:${record.input.preferences.length} ·` : ""}` : "▾"} ${old ? "Earlier · " : ""}${rowHeight > 1 ? "Original prompt" : draft}`
+        ? `${active ? "›" : " "} ${record.status === "unsent" ? `○ Unsent ·${record.input.preferences?.length ? ` P:${record.input.preferences.length} ·` : ""}` : "▾"} ${old ? "Earlier · " : ""}${rowHeight > 1 ? "Original prompt" : excerpt}`
         : `${prefix}${model}${" ".repeat(Math.max(1, leftWidth - visibleWidth(prefix + model + badge)))}${badge}`;
       const clean = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(label), leftWidth, "…"));
       const emphasize = (text: string) => active && rowHeight > 1 ? this.theme.bold(text) : text;
@@ -602,6 +612,15 @@ export class TaskPanel {
       const highlight = (line: string) => active
         ? this.theme.bg("selectedBg", line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line)))) : line;
       if (rowHeight === 1) return [highlight(text)];
+      // Use the existing spacer for a second summary line without moving the run rows.
+      if (selectedParent) {
+        const columns = leftWidth - 4;
+        const excerpt = truncateToWidth(sanitizeTerminalText(draft), columns * 2, "…");
+        const lines = wrapTextWithAnsi(excerpt, columns);
+        const guide = this.content.muted(continuation) + " ";
+        return [text, guide + this.theme.fg("text", lines[0] ?? ""), lines[1]
+          ? guide + this.theme.fg("text", truncateToWidth(lines.slice(1).join(" "), columns, "…")) : this.content.muted(continuation.trimEnd())];
+      }
       const detail = row.original ? this.theme.fg("text", sanitizeTerminalText(draft))
         : this.content.muted(`#${record.id} · ${record.input.model.provider}${record.elapsedSeconds !== undefined ? ` · ${record.elapsedSeconds}s` : ""}`);
       // Keep the parent/sibling spine through secondary lines and spacing,

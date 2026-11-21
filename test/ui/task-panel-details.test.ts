@@ -157,7 +157,7 @@ describe("prompt tree and inspection", () => {
       expect(output).toContain(theme.fg("text", label));
       expect(output).not.toContain(theme.bold(label));
     }
-    for (const [key, label] of [["↑↓", "scroll result"], ["o", "Reference"], ["i", "Edit original"], ["a", "Accept"], ["s", "Send to Pi"]] as const) {
+    for (const [key, label] of [["↑↓", "scroll result"], ["o", "Reference"], ["i", "Edit original"], ["a", "Editor only"], ["s", "Send to Pi"]] as const) {
       expect(output).toContain(heading(key));
       expect(output).toContain(muted(label));
       expect(output).not.toContain(theme.bold(label));
@@ -295,9 +295,9 @@ describe("prompt tree and inspection", () => {
     const { panel, records, theme, text } = create(name);
     const result = records[0]!;
     const output = panel.render(100).join("\n");
-    expect(output).toContain(theme.fg("muted", "23s"));
-    expect(text()).toContain("↑2.3k ↓670 · Cost —");
-    expect(text()).toContain("Thinking xhigh");
+    expect(output).not.toContain(theme.fg("muted", "23s"));
+    expect(text()).not.toContain("↑2.3k ↓670 · Cost —");
+    expect(text()).not.toContain("Thinking xhigh");
     const usage = create(name, true).panel.render(100).join("\n");
     expect(usage).toContain(theme.fg("text", theme.bold("23s"))); // Other pages retain their existing emphasis.
     for (const hidden of ["Branch", "Frozen context", "Applied", "Round 1", "Cache read"]) expect(text()).not.toContain(hidden);
@@ -386,7 +386,7 @@ describe("prompt tree and inspection", () => {
     text();
     panel.handleInput("\t"); panel.handleInput("\x1b[6~");
     const scrolled = text();
-    expect(scrolled).toContain("23s");
+    expect(scrolled.split("\n").some(line => line.split(" │ ").at(-1)?.trim() === "model-1")).toBe(true);
     expect(scrolled).not.toContain("Result 1");
     panel.handleInput("\t"); panel.handleInput("\x1b[A");
     expect(text()).toContain("Result 2");

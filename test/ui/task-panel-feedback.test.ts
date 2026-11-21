@@ -69,12 +69,13 @@ describe("short and narrow feedback", () => {
     panel.handleInput("\r");
     for (const width of [20, 40, 80, 100]) {
       const output = text(width);
-      expect(output).toContain("a Accept");
+      const destination = width === 20 ? "→editor" : "Editor only";
+      expect(output).toContain(`a ${destination}`);
       expect(output).toMatch(/s Send(?: to Pi)?/);
       expect(output).toMatch(/\? (Help|Actions)/);
       expect(output).toContain("Esc Back");
       const styled = panel.render(width).join("\n");
-      for (const [key, label] of [["a", "Accept"], ["s", width < 60 ? "Send" : "Send to Pi"], ["Esc", "Back"]]) {
+      for (const [key, label] of [["a", destination], ["s", width < 60 ? "Send" : "Send to Pi"], ["Esc", "Back"]]) {
         expect(styled).toContain(theme.fg("text", theme.bold(key!)) + " " + theme.fg("muted", label!));
         expect(styled).not.toContain(theme.bold(label!));
       }
@@ -89,7 +90,7 @@ describe("short and narrow feedback", () => {
     expect(position.selectedId).toBe(1);
     panel.handleInput("\x1b");
     size.rows = 8;
-    expect(text(40)).toContain("a Accept"); expect(text(40)).toContain("s Send");
+    expect(text(40)).toContain("a Editor only"); expect(text(40)).toContain("s Send");
     expect(text(40)).toContain("? Help"); expect(text(40)).not.toContain("Enter Inspect");
     panel.handleInput("a"); expect(actions.accept).toHaveBeenCalledWith(1);
   });
