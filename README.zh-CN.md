@@ -28,7 +28,7 @@ Pi Prompt Refine 是 Pi Coding Agent 的提示词改写扩展，**主要面向�
 
 ## 安装
 
-当前发布范围是 Pi 的**原生 TUI 扩展**。需要 **Node.js 22.19+**，并在 Pi 中配置模型和认证。
+当前发布范围是 Pi 的**原生 TUI 扩展**。首版用 Pi Coding Agent **1.6.0** 验证，需要 **Node.js 22.19+**，并在 Pi 中配置模型和认证。
 
 首版上架 npm 后，用 `pi install npm:pi-prompt-refine` 安装。上架前可从 Git 试用：
 
@@ -49,6 +49,8 @@ pi install git:github.com/Steam086/pi-prompt-refine
 pi install git:github.com/Steam086/pi-prompt-refine --local
 ```
 
+Pi 在该项目被设为受信任后加载项目安装的扩展。
+
 仅为一次运行加载，不保存安装配置：
 
 ```bash
@@ -60,12 +62,12 @@ pi --extension git:github.com/Steam086/pi-prompt-refine
 ## 第一次使用
 
 1. **选模型**：在 Pi 中运行 `/refine model`，选择负责改写的模型。这不会更换主 Agent 的模型。
-2. **写草稿并改写**：在 Pi 输入框写下需求，例如「看看刚才说的错误处理，先给建议，别改代码。」按 `Ctrl+\` 直接启动当前轮次的第一次改写。向 Pi 发送消息前，再按快捷键处理另一份新草稿只会打开 **Unsent**，需按 `Enter` 才改写。改写会把草稿和选中的上下文发给优化模型，可能消耗额度或产生费用。
+2. **写草稿并改写**：在 Pi 输入框写下需求，例如「看看刚才说的错误处理，先给建议，别改代码。」按 `Ctrl+\` 直接启动当前轮次的第一次改写。改写默认把草稿和选中的近期对话发给优化模型，可能消耗额度或产生费用。向 Pi 发送消息前，再按快捷键处理另一份新草稿只会打开 **Unsent**，需按 `Enter` 才改写。
 3. **检查结果**：选中满意的结果，按 `a` 放回 Pi 输入框，**不会发送**。你可以继续编辑，再自行提交给主 Agent；那是另一次模型请求。
 
 **日常改写不需要选偏好。** Refine 保留语气，只澄清上下文能确定的指代，必要时将并列要求分点、将已有顺序整理为步骤。它保留原稿对主 Agent 的要求，默认不新增答复格式或行为约束。
 
-唯一的官方偏好是 **Translate Prompt to English**：翻译 prompt，不改动字面材料或要求的回答语言。首次加载 TUI 时，仅在全局库文件不存在时复制该项，默认不勾选。已有库（包括空库）、自定义偏好和项目默认保持不变。如果想在首次改写前选偏好，用 `/refine` 打开工作台，按 `n` 新建并保存草稿，不会调用模型。选中 Unsent 草稿后按 `Tab`、用 `Space` 勾选，再按 `Enter` 请求改写。
+随包附带的偏好是 **Translate Prompt to English**：翻译 prompt，不改动字面材料或要求的回答语言。首次加载 TUI 时，仅在全局库文件不存在时复制该项，默认不勾选。已有库（包括空库）、自定义偏好和项目默认保持不变。如果想在首次改写前选偏好，用 `/refine` 打开工作台，按 `n` 新建并保存草稿，不会调用模型。选中 Unsent 草稿后按 `Tab`、用 `Space` 勾选，再按 `Enter` 请求改写。
 
 如果 `Ctrl+\` 被终端拦截，可以在 Pi 中用 `/refine <文本>` 直接请求改写。其他操作见[中文使用说明](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/usage.md)或[英文 TUI 指南](docs/tui-guide.md)。在 macOS 上试装可参考[验收清单](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/macos-smoke-test.md)（英文）。
 
@@ -148,4 +150,4 @@ Refine 默认在 Pi 会话文件旁保存已提交改写的原稿、改写结果
 - 普通问题请提交到 [GitHub Issues](https://github.com/Steam086/pi-prompt-refine/issues)。请用虚构草稿复现，并遮盖截图或日志里的敏感信息；不要附上凭据、原始对话或 Refine 历史文件。
 - 安全问题请按[安全报告流程](SECURITY.md)（英文）私下报告。如果私密报告入口不可用，公开 issue 中只请求私下报告渠道，不要贴出漏洞细节。
 - 本地检查和提交说明见[贡献指南](https://github.com/Steam086/pi-prompt-refine/blob/main/CONTRIBUTING.md)（英文），其中也记录了文档语言约定。
-- 开发参考：[一次改写的实现流程](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/architecture.md#跟随一次改写) · [应用接口](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/application-api.md) · [设计原则](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/design.md)。Web 集成暂不发布，仅供本地开发和验证，见 [Web 子包说明](https://github.com/Steam086/pi-prompt-refine/tree/main/packages/pi-web#readme)。
+- 开发参考：[一次改写的实现流程](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/architecture.md#跟随一次改写) · [应用接口](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/application-api.md) · [设计原则](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/design.md)。[Pi Web](https://github.com/Steam086/pi-prompt-refine/tree/main/packages/pi-web#readme) 和 [T3 Code](https://github.com/Steam086/pi-prompt-refine/tree/main/packages/t3-code#readme) 集成通过仓库提供各自的开发和试用说明。

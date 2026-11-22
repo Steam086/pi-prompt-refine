@@ -4,9 +4,11 @@
 
 Turn a rough draft into a clearer prompt using the current conversation, before you send it to your main agent. Refine uses a separate model to rewrite the text. It does not run the task, and you decide whether to use the result.
 
+Compare rewrites from different models against the same draft and conversation context. You can revise a candidate with follow-up instructions and put the result back in the editor for review.
+
 ## Install
 
-Requires **Node.js 22.19+**, [Pi Coding Agent](https://pi.dev/) in its interactive TUI, and a model configured in Pi.
+The initial release is tested with [Pi Coding Agent](https://pi.dev/) **1.6.0** and requires **Node.js 22.19+**. Use Pi's interactive TUI with a model configured in Pi.
 
 Once the first npm version is published, install the Pi package with `pi install npm:pi-prompt-refine`. To try the repository before then:
 
@@ -16,12 +18,12 @@ pi install git:github.com/Steam086/pi-prompt-refine
 
 Use one source, not both. `npm install -g` does not register the extension in Pi.
 
-Start Pi, or run `/reload` in an existing session. Extensions run with your Pi process's permissions; install only from sources you trust. The [experimental Web integration](https://github.com/Steam086/pi-prompt-refine/tree/main/packages/pi-web#readme) is not part of this release.
+Start Pi, or run `/reload` in an existing session. Extensions run with your Pi process's permissions. Install only from sources you trust. The npm release contains the native Pi extension. The repository also hosts separate [Pi Web and T3 Code integrations](https://github.com/Steam086/pi-prompt-refine/tree/main/packages).
 
 ## Quick start
 
 1. **Choose a model.** Run `/refine model` and pick the model that will rewrite your drafts. This does not change your main agent's model.
-2. **Write and refine.** Type a draft in the Pi editor, such as “Explain why the second option might be faster. Don't change any code yet.” Press `Ctrl+\` to start the first rewrite of the round. Until you send a message to Pi, another new draft opens as **Unsent**; press `Enter` to rewrite it. Rewriting can use quota or incur charges.
+2. **Write and refine.** Type a draft in the Pi editor, such as “Explain why the second option might be faster. Don't change any code yet.” Press `Ctrl+\` to start the first rewrite of the round. Rewrites include recent conversation text by default and can use quota or incur charges. Until you send a message to Pi, another new draft opens as **Unsent**. Press `Enter` to rewrite it.
 3. **Review the result.** Select the result and press `a` to put it back in the Pi editor **without sending it**. Edit it if needed, then submit it yourself to the main agent. That is a separate model request.
 
 `/refine` opens the workspace without running a model. `/refine <text>` requests a rewrite directly. If the shortcut is intercepted by your terminal, see [shortcut troubleshooting](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/tui-guide.md#if-the-shortcut-does-not-work).
