@@ -1,0 +1,87 @@
+name: Publish native Pi package
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: ${{ !github.event.deleted }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['22.19.0', '24.x']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - name: Verify the release tag
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
+            printf 'Expected tag v%s for package.json, got %s\n' "$version" "$GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run check:pack
+      - name: Pack and smoke-test the tarball
+        run: |
+          release_dir="$RUNNER_TEMP/npm-release"
+          mkdir "$release_dir"
+          npm pack --ignore-scripts --json --pack-destination "$release_dir" > "$release_dir/pack.json"
+          sh scripts/smoke-pack.sh "$release_dir/pi-prompt-refine-${GITHUB_REF_NAME#v}.tgz"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: matrix.node == '24.x'
+        with:
+          name: npm-package
+          path: ${{ runner.temp }}/npm-release/
+          if-no-files-found: error
+          overwrite: true
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    concurrency:
+      group: npm-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.x'
+          registry-url: https://registry.npmjs.org/
+          package-manager-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm-package
+          path: ${{ runner.temp }}/npm-release
+      - name: Publish the tested tarball with npm OIDC
+        working-directory: ${{ runner.temp }}/npm-release
+        run: |
+          archive="./pi-prompt-refine-${GITHUB_REF_NAME#v}.tgz"
+          node --input-type=module - "$archive" <<'JS'
+          import assert from 'node:assert/strict';
+          import { createHash } from 'node:crypto';
+          import { readFileSync } from 'node:fs';
+          import { basename } from 'node:path';
+
+          const archive = process.argv[2];
+          const [pack] = JSON.parse(readFileSync('pack.json', 'utf8'));
+          assert.equal(pack.name, 'pi-prompt-refine');
+          assert.equal(`v${pack.version}`, process.env.GITHUB_REF_NAME);
+          assert.equal(pack.filename, basename(archive));
+          const digest = createHash('sha512').update(readFileSync(archive)).digest('base64');
+          assert.equal(`sha512-${digest}`, pack.integrity, 'Tarball integrity changed after verification');
+          JS
+          npm publish "$archive" --ignore-scripts --registry=https://registry.npmjs.org/ --access public --tag latest

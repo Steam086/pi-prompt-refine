@@ -7,7 +7,7 @@ Publish **the repository root**. The `pi-package` keyword makes the public npm p
 - Work from a clean checkout of the exact candidate commit. Check `git status --short`, the root version, lockfile, [changelog](../CHANGELOG.md), MIT notice, repository and issue URLs. Mark the first release as available in both READMEs only when it is available. Pin a version when testing upgrades or rollback.
 - Review tracked files and public history, including screenshots, fixtures, experiments, personal paths, session IDs, exports, sidecars, local settings and credentials. Git exposes its history independently of npm's `files` list. Use synthetic examples and keep private experiment output outside the checkout. Run secret scans locally with redacted output. If a credential was exposed, revoke or rotate it at the issuer first. Coordinate any history rewrite with the owner.
 - Recheck package name, version, dist-tag, account ownership and 2FA on the public registry. Use `npm view pi-prompt-refine versions --json --registry=https://registry.npmjs.org/` to check whether the name has a visible record. A 404 leaves ownership and availability unverified. Confirm the public npm publisher and copyright attribution. [npm public package publishing](https://docs.npmjs.com/creating-and-publishing-unscoped-public-packages/)
-- Choose interactive publication with 2FA or a separately approved workflow using npm trusted publishing. For the interactive route, confirm the active account with `npm whoami --registry=https://registry.npmjs.org/`. For CI, configure the trusted publisher and the matching workflow, and decide whether the workflow should stage for approval or publish directly. The repository's verification workflow is read-only. [npm trusted publishing and provenance](https://docs.npmjs.com/trusted-publishers/)
+- Choose interactive publication with 2FA or the tag-triggered workflow using npm trusted publishing. For the interactive route, confirm the active account with `npm whoami --registry=https://registry.npmjs.org/`. [npm trusted publishing and provenance](https://docs.npmjs.com/trusted-publishers/)
 
 ## 2. Verify without a model account
 
@@ -73,10 +73,16 @@ The pack check compares npm's file list with Git-tracked TypeScript and a short 
    npm publish "$archive" --ignore-scripts --registry=https://registry.npmjs.org/ --access public --tag latest
    ```
 
+### Publish a stable release from GitHub Actions
+
+1. In the npm package settings, add a GitHub Actions trusted publisher for user `Steam086`, repository `pi-prompt-refine`, and workflow filename `publish.yml`. Leave Environment name blank and select **Allow npm publish**. Complete the first successful publish within two days of creating the configuration. [npm trusted publishing setup](https://docs.npmjs.com/trusted-publishers/#configuring-trusted-publishing)
+2. Set the root package and lockfile to the next version and update the changelog. Review the release commit and confirm its checks pass. Pushing the matching stable tag, such as `v0.1.1`, authorizes publication to npm's `latest` channel.
+3. The [publish workflow](../.github/workflows/publish.yml) checks the tag against the manifest, runs the native checks and tarball smoke test on both Node targets, then publishes the Node 24 artifact. Its publish job compares the tarball with the recorded integrity before authenticating through OIDC. Download `npm-package` from the workflow run for its `pack.json` and tarball.
+
 ### Verify the public package
 
-1. Compare `npm view pi-prompt-refine@0.1.0 dist.integrity --registry=https://registry.npmjs.org/` with the retained pack integrity and confirm `latest` points to `0.1.0`.
-2. In a fresh profile, run `pi install npm:pi-prompt-refine@0.1.0`, start Pi, verify `/refine` and the starter Preference, and remove that exact source. Use an isolated native Pi session for this check.
+1. Compare `npm view pi-prompt-refine@<version> dist.integrity --registry=https://registry.npmjs.org/` with the retained pack integrity and confirm `latest` points to the released version.
+2. In a fresh profile, run `pi install npm:pi-prompt-refine@<version>`, start Pi, verify `/refine` and the starter Preference, and remove that exact source. Use an isolated native Pi session for this check.
 3. Verify the install command, description, repository URL, license and README in the [Pi catalog entry](https://pi.dev/packages/pi-prompt-refine) after indexing. Once the npm version is available, update install instructions in both READMEs. Record the matching tag or GitHub Release if the owner approves creating it.
 
 ### Recover from a bad release
