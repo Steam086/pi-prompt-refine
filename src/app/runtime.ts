@@ -19,6 +19,7 @@ import { createApplication } from "./application.js";
 import { createApplicationEvents } from "./events.js";
 import { createModelService } from "./model-service.js";
 import { createTuiOperations } from "../adapters/tui-operations.js";
+import { createRpcSlash } from "../adapters/rpc-slash.js";
 import type { ModelIdentity, Thinking } from "./api.js";
 
 /** Composes bounded services; request execution, UI hosting and session state have separate owners. */
@@ -135,10 +136,21 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     acknowledge: (sessionId) => { backgroundStatus.update(sessionId, controller.getHistory(), true, openHint); },
     workspaceActions, editor, models, requests, notify, notifyCurrent,
   });
+  const rpc = createRpcSlash({
+    api: application.api, currentBinding: application.currentBinding,
+    optimize: (binding, text, ctx) => {
+      setCompletionContext(ctx);
+      return application.local({ method: "optimizeText", text }, binding);
+    },
+  });
   const commands = createCommands({
     controller, taskPositions, useContext, host, requests, models, editor,
-    clearHistory: lifecycle.clearHistory, showOptimizerQuota, notify,
+    rpcCommand: rpc.command, clearHistory: lifecycle.clearHistory, showOptimizerQuota, notify,
   });
+  function invalidateBinding(): void {
+    rpc.clearTracking();
+    application.invalidate();
+  }
 
   events.subscribe(() => updatePresentation(controller.getState()), true);
 
@@ -209,6 +221,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
   return {
     shortcuts: config.shortcuts,
     ...commands,
+    setRpcPromptActive: rpc.setHostPromptActive,
     input(ctx: ExtensionContext, text: string, source: string, streamingBehavior?: "steer" | "followUp") {
       useContext(ctx);
       controller.onSubmittedInput(text, source, streamingBehavior);
@@ -223,24 +236,24 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
       ...lifecycle,
       async start(event: { reason: string }, ctx: ExtensionContext) {
         const sequence = ++lifecycleSequence;
-        application.invalidate();
+        invalidateBinding();
         await lifecycle.start(event, ctx);
         if (sequence === lifecycleSequence) application.bind(ctx.sessionManager.getSessionId());
       },
       beforeTransition(ctx: ExtensionContext) {
         lifecycleSequence++;
-        application.invalidate();
+        invalidateBinding();
         lifecycle.beforeTransition(ctx);
       },
       tree(ctx: ExtensionContext) {
         lifecycleSequence++;
-        application.invalidate();
+        invalidateBinding();
         lifecycle.tree(ctx);
         application.bind(ctx.sessionManager.getSessionId());
       },
       async shutdown(ctx: ExtensionContext) {
         lifecycleSequence++;
-        application.invalidate();
+        invalidateBinding();
         await lifecycle.shutdown(ctx);
         if (progressTimer) clearInterval(progressTimer);
         progressTimer = undefined;

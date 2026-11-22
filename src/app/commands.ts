@@ -17,13 +17,14 @@ interface CommandDependencies {
   requests: Pick<ReturnType<typeof createRequestFlows>, "triggerOptimize">;
   models: Pick<ReturnType<typeof createModelSelection>, "selectModel" | "cycleModel">;
   editor: Pick<ReturnType<typeof createEditorActions>, "restoreDraft">;
+  rpcCommand(args: string, ctx: ExtensionContext): Promise<void>;
   clearHistory(ctx: ExtensionContext): Promise<void>;
   showOptimizerQuota(): boolean;
   notify: Notify;
 }
 
 export function createCommands({ controller, taskPositions, useContext, host, requests,
-  models, editor, clearHistory, showOptimizerQuota, notify }: CommandDependencies) {
+  models, editor, rpcCommand, clearHistory, showOptimizerQuota, notify }: CommandDependencies) {
   const { showPreview, isInteracting } = host;
   const { triggerOptimize } = requests;
   const { selectModel, cycleModel } = models;
@@ -79,6 +80,7 @@ export function createCommands({ controller, taskPositions, useContext, host, re
   };
 
   async function command(args: string, ctx: ExtensionContext): Promise<void> {
+    if (ctx.mode === "rpc") return rpcCommand(args, ctx);
     const text = args.trim();
     const action = text.toLocaleLowerCase();
     if (action === "history clear") { await clearHistory(ctx); return; }

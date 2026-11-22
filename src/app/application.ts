@@ -191,10 +191,11 @@ export function createApplication(deps: {
   };
   return {
     api,
-    /** Native synchronous UI events use the same guards/use cases, not a remote retry ledger. */
-    local(requested: Mutation): Reply<Receipt> {
-      if (!current) return reject("not-ready");
-      const failure = guard(current);
+    currentBinding: (): Binding | undefined => current && !guard(current) ? { ...current } : undefined,
+    /** Local UI events use the same guards/use cases, not a remote retry ledger. */
+    local(requested: Mutation, binding = current): Reply<Receipt> {
+      if (!binding) return reject("not-ready");
+      const failure = guard(binding);
       if (failure) return failure;
       const mutation = parseMutation(requested);
       return mutation ? commit(mutation) : reject("invalid-input");

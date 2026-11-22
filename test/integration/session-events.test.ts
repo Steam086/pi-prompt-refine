@@ -113,6 +113,8 @@ describe("session-local application transport", () => {
     expect(h.complete).not.toHaveBeenCalled();
     expect(h.notifications.at(-1)).not.toContain("Body With CASE");
     await h.command("api prose must remain prose", h.context);
-    expect(h.notifications.at(-1)).toContain("only available in TUI");
+    expect(h.notifications.at(-1)).toMatch(/^Usage:/);
+    expect(h.complete).not.toHaveBeenCalled();
+    expect(h.context.ui.editor).not.toHaveBeenCalled();
   });
 });

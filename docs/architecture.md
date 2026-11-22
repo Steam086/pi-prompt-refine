@@ -48,6 +48,7 @@ src/
     session-events.ts          Pi session-local 事件传输与有界临时文本
     json-output.ts             白名单 DTO 的惰性 JSON 编码，按需输出单页
     slash.ts                   /refine-api 解析与非 transcript 输出
+    rpc-slash.ts               RPC /refine 回执、临时完成追踪和显式结果查看
     tui-operations.ts          原生同步 UI 到共享用例的受限适配
   ui/
     settings-page.ts           Settings 与数值编辑、保存反馈
@@ -121,7 +122,7 @@ test/
 
 | 要修改的行为 | 首先查看 |
 | --- | --- |
-| 旧 `/refine` 和快捷键路由 | extension / app commands |
+| `/refine` 和快捷键路由 | extension / app commands；RPC 手动查看见 [RPC 验收记录](rpc-slash-verification.md) |
 | `/refine-api` 解析、命名冲突与输出 | extension / adapters slash |
 | 共享用例、Binding、版本与重试 | app application、history、idempotency、model-service |
 | 查询 DTO、排序与通知 | app queries / events；原生同步、远端合并 |
