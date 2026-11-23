@@ -222,7 +222,6 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     shortcuts: config.shortcuts,
     ...commands,
     setRpcPromptActive: rpc.setHostPromptActive,
-    rpcHostSettled: rpc.hostSettled,
     input(ctx: ExtensionContext, text: string, source: string, streamingBehavior?: "steer" | "followUp") {
       useContext(ctx);
       controller.onSubmittedInput(text, source, streamingBehavior);

@@ -46,7 +46,6 @@ export default async function promptRefineExtension(pi: ExtensionAPI): Promise<v
   });
   pi.on("ui_prompt_start", (_event, ctx) => { if (ctx.mode === "rpc") app.setRpcPromptActive(true); });
   pi.on("ui_prompt_end", (_event, ctx) => { if (ctx.mode === "rpc") app.setRpcPromptActive(false); });
-  pi.on("agent_settled", (_event, ctx) => { if (ctx.mode === "rpc") app.rpcHostSettled(); });
   // Only user message_start commits a round boundary; input is preflight.
   pi.on("message_start", (event, ctx) => app.messageStarted(event.message, ctx));
   pi.on("session_start", async (event, ctx) => {

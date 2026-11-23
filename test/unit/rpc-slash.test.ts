@@ -40,7 +40,9 @@ it.each(["generated", "error"] as const)("observes a run already %s at receipt t
   expect(ui.editor).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(250);
   if (status === "generated") {
-    expect(ui.setStatus).toHaveBeenCalledWith("prompt-refine", "Refine · run-1 ready");
+    expect(ui.setStatus).toHaveBeenCalledWith("prompt-refine", `Refine · Ready: /refine result run-1@${binding.runtimeId}.1`);
+    expect(ui.editor).not.toHaveBeenCalled();
+    await rpc.command(`result run-1@${binding.runtimeId}.1`, ctx);
     expect(ui.editor).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("run-1"), "Candidate");
   } else {
     expect(ui.setStatus).toHaveBeenCalledWith("prompt-refine", "Refine · run-1 · Run timed out.");
