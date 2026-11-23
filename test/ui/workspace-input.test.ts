@@ -40,7 +40,7 @@ describe("shared refine workspace", () => {
     expect(textOf(workspace.render(100))).toContain(formatKeyHint(["Enter", "Refine"], theme));
   });
 
-  it.each([[24, 23], [32, 30], [40, 38], [60, 57]])("budgets %i terminal rows as %i panel rows", (rows, height) => {
+  it.each([[24, 18], [32, 24], [40, 30], [60, 45]])("budgets %i terminal rows as %i panel rows", (rows, height) => {
     expect(panelLayout(80, rows).height).toBe(height);
     expect(panelLayout(80, rows).bodyHeight).toBe(height - 7);
   });

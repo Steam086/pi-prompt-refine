@@ -455,9 +455,10 @@ export class SettingsPage {
     const details = focusedDetail ? wrapTextWithAnsi(sanitizeTerminalText(focusedDetail), innerWidth) : [];
     const usualDetailHeight = contentHeight >= 12 ? 2 : contentHeight >= 3 ? 1 : 0;
     const fitDetails = group === "Optimizer" || this.cursor === 12;
-    // Keep at least the selected row and, when possible, its neighbors. Long
-    // values use more detail lines on resize or can be read a page at a time.
-    const detailCapacity = Math.max(0, contentHeight - Math.min(3, Math.ceil(contentHeight / 2)));
+    // In the shortest viewports, keep the selected row rather than spend a
+    // detail or paging-hint row on its neighbors.
+    const listReserve = contentHeight <= 3 ? 1 : Math.min(3, Math.ceil(contentHeight / 2));
+    const detailCapacity = Math.max(0, contentHeight - listReserve);
     const detailHeight = fitDetails ? Math.min(details.length, detailCapacity) : usualDetailHeight;
     const paged = fitDetails && detailHeight > 0 && details.length > detailHeight;
     const pageHint = paged && detailHeight >= 2 && innerWidth >= 13;

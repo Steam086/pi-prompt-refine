@@ -39,7 +39,7 @@ describe("model picker layout", () => {
       title: "Choose optimizer model", subtitle: "", query: "中文😀\x1b[2J", run: false,
       thinkingKeys: "Shift+Tab", thinkingStatus: "Thinking level: high · Last used for this model" };
     try {
-      for (const [width, rows] of [[160, 40], [60, 20], [32, 9], [160, 40]] as const) {
+      for (const [width, rows] of [[160, 40], [60, 20], [40, 12], [32, 9], [160, 40]] as const) {
         const lines = renderOverlayModelPicker(options, width, rows, theme);
         const output = lines.join("\n");
         expect(lines.map(visibleWidth)).toEqual(Array<number>(workspaceHeight(rows)).fill(width));
@@ -47,7 +47,8 @@ describe("model picker layout", () => {
         expect(output).toContain(formatKeyHint(["Enter", "Save"], theme));
         expect(output).toContain(theme.fg("text", "中文😀�[2J"));
         expect(output).toContain(theme.fg("text", theme.bold(item.description)));
-        expect(output).toContain(theme.fg("muted", `  ${item.value}`));
+        // At 32×9 there is only one list row after the search field.
+        if (rows >= 12) expect(output).toContain(theme.fg("muted", `  ${item.value}`));
         expect(output).not.toContain("\x1b[2J");
         if (rows >= 20) {
           expect(output).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Settings "))));

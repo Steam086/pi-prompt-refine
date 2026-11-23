@@ -6,6 +6,8 @@ For installation and your first rewrite, start with the [README](../README.md). 
 
 The workspace has three tabs: **Preview** for the current round, **Usage** for current and earlier records, and **Settings** for configuration. Use the Left and Right arrow keys to switch tabs and `?` to see the actions available for your current selection.
 
+The centered workspace uses about 96% of the terminal width and 75% of its height, leaving the Pi session visible above and below. Switching tabs or opening a long result does not resize it; scroll within the page to read more.
+
 | To… | Do this |
 | --- | --- |
 | Refine from the Pi editor | With an optimizer selected, type a new draft and press `Ctrl+\`. The first rewrite of the round starts immediately with your project defaults. Later new drafts open as **Unsent**. |

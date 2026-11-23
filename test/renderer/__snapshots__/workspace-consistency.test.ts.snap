@@ -2,233 +2,189 @@
 
 exports[`workspace consistency (regular) > dark theme > keeps shared chrome and action hierarchy at 60×20 > compact workspace flow 1`] = `
 "=== Preview ===
-╭────────────────────────────────────────────────────────╮
-│  Prompt refine · Tasks   1 prompt · 2 runs             │
-│   Preview    Usage    Settings                         │
-│  a: Editor only  Enter: Inspect  Tab: Read             │
-│  Esc: Back  ?: Help                                    │
-│  ────────────────────────────────────────────────────  │
-│    ▾ 本项目的原始要求                                  │
-│    ├─ model-2                                  ✓ Done  │
-│  › └─ model-1                                  ✓ Done  │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-╰────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────╮
+│  Prompt refine · Tasks   1 prompt · 2 runs            │
+│   Preview    Usage    Settings                        │
+│  a: Editor only  Enter: Inspect  Tab: Read            │
+│  Esc: Back  ?: Help                                   │
+│  ───────────────────────────────────────────────────  │
+│    ▾ 本项目的原始要求                                 │
+│    ├─ model-2                                 ✓ Done  │
+│  › └─ model-1                                 ✓ Done  │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+╰───────────────────────────────────────────────────────╯
 
 === Usage ===
-╭────────────────────────────────────────────────────────╮
-│  Usage · All rounds   1 prompt · 2 runs                │
-│   Preview    Usage    Settings                         │
-│  Enter: Inspect  Tab: Read    Esc: Back  ?: Help       │
-│  ────────────────────────────────────────────────────  │
-│    ▾ 本项目的原始要求                                  │
-│    ├─ model-2                                  ✓ Done  │
-│  › └─ model-1                                  ✓ Done  │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-╰────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────╮
+│  Usage · All rounds   1 prompt · 2 runs               │
+│   Preview    Usage    Settings                        │
+│  Enter: Inspect  Tab: Read    Esc: Back  ?: Help      │
+│  ───────────────────────────────────────────────────  │
+│    ▾ 本项目的原始要求                                 │
+│    ├─ model-2                                 ✓ Done  │
+│  › └─ model-1                                 ✓ Done  │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+╰───────────────────────────────────────────────────────╯
 
 === Settings ===
-╭────────────────────────────────────────────────────────╮
-│  Settings   Context changes take effect next round     │
-│   Preview    Usage    Settings                         │
-│  Ctrl+S: Save  Enter: Change  Tab: Group  Esc: Back    │
-│  ────────────────────────────────────────────────────  │
-│   Context    Optimizer                                 │
-│    Project context: [x] On                             │
-│  › Project instructions: Always ›                      │
-│    Directory tree: [ ] Off                             │
-│    Skill metadata: [ ] Off                             │
-│    Directory references: [x] On                        │
-│    History messages: 12 messages ›                     │
-│    History characters: 16000 characters ›              │
-│                                                        │
-│  Pi-loaded rules (e.g. AGENTS.md) may go to the        │
-│  optimizer, even in Revise. Main agent unchanged.      │
-│                                                        │
-│                                                        │
-╰────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────╮
+│  Settings   Context changes take effect next round    │
+│   Preview    Usage    Settings                        │
+│  Ctrl+S: Save  Enter: Change  Tab: Group  Esc: Back   │
+│  ───────────────────────────────────────────────────  │
+│   Context    Optimizer                                │
+│    Project context: [x] On                            │
+│  › Project instructions: Always ›                     │
+│    Directory tree: [ ] Off                            │
+│    Skill metadata: [ ] Off                            │
+│    Directory references: [x] On                       │
+│    History messages: 12 messages ›                    │
+│    History characters: 16000 characters ›             │
+│  Pi-loaded rules (e.g. AGENTS.md) may go to the…      │
+╰───────────────────────────────────────────────────────╯
 
 === Settings / Optimizer ===
-╭────────────────────────────────────────────────────────╮
-│  Settings                                              │
-│   Preview    Usage    Settings                         │
-│  Ctrl+S: Save  Enter: Edit  Tab: Group  Esc: Back      │
-│  ────────────────────────────────────────────────────  │
-│   Context    Optimizer                                 │
-│    Default model: provider/rewrite-model ›             │
-│    Thinking: high ›                                    │
-│    Optimization prompt ›                               │
-│    Output token limit: 8192 tokens ›                   │
-│    Request timeout: 60 seconds ›                       │
-│  › Draft character limit: 16000 characters ›           │
-│                                                        │
-│  Oversized drafts and revision instructions are        │
-│  rejected, not truncated. Existing work is kept.       │
-│                                                        │
-│                                                        │
-│                                                        │
-╰────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────╮
+│  Settings                                             │
+│   Preview    Usage    Settings                        │
+│  Ctrl+S: Save  Enter: Edit  Tab: Group  Esc: Back     │
+│  ───────────────────────────────────────────────────  │
+│   Context    Optimizer                                │
+│    Default model: provider/rewrite-model ›            │
+│    Thinking: high ›                                   │
+│    Optimization prompt ›                              │
+│    Output token limit: 8192 tokens ›                  │
+│    Request timeout: 60 seconds ›                      │
+│  › Draft character limit: 16000 characters ›          │
+│  Oversized drafts and revision instructions are       │
+│  rejected, not truncated. Existing work is kept.      │
+╰───────────────────────────────────────────────────────╯
 
 === Settings / number ===
-╭────────────────────────────────────────────────────────╮
-│  History characters   0–100000 characters              │
-│   Preview    Usage    Settings                         │
-│  Esc: Cancel  Enter: Stage  Tab: Preset                │
-│  ────────────────────────────────────────────────────  │
-│  › 16000                                               │
-│                                                        │
-│  Ctrl+S in Settings saves staged changes.              │
-│  Either limit set to 0 turns off history. Counts role  │
-│  labels as well as message text.                       │
-│  Presets: 0 / 8000 / 16000 / 32000 / 64000 / 100000    │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-╰────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────╮
+│  History characters   0–100000 characters             │
+│   Preview    Usage    Settings                        │
+│  Esc: Cancel  Enter: Stage  Tab: Preset               │
+│  ───────────────────────────────────────────────────  │
+│  › 16000                                              │
+│                                                       │
+│  Ctrl+S in Settings saves staged changes.             │
+│  Either limit set to 0 turns off history. Counts      │
+│  role labels as well as message text.                 │
+│  Presets: 0 / 8000 / 16000 / 32000 / 64000 / 100000   │
+│                                                       │
+│                                                       │
+│                                                       │
+╰───────────────────────────────────────────────────────╯
 
 === Settings / validation ===
-╭────────────────────────────────────────────────────────╮
-│  History characters                                    │
-│   Preview    Usage    Settings                         │
-│  Enter 0–100000 characters (whole numbers).            │
-│  Esc: Cancel  Enter: Stage  Tab: Preset                │
-│  ────────────────────────────────────────────────────  │
-│  › -1                                                  │
-│                                                        │
-│  Ctrl+S in Settings saves staged changes.              │
-│  Either limit set to 0 turns off history. Counts role  │
-│  labels as well as message text.                       │
-│  Presets: 0 / 8000 / 16000 / 32000 / 64000 / 100000    │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-╰────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────╮
+│  History characters                                   │
+│   Preview    Usage    Settings                        │
+│  Enter 0–100000 characters (whole numbers).           │
+│  Esc: Cancel  Enter: Stage  Tab: Preset               │
+│  ───────────────────────────────────────────────────  │
+│  › -1                                                 │
+│                                                       │
+│  Ctrl+S in Settings saves staged changes.             │
+│  Either limit set to 0 turns off history. Counts      │
+│  role labels as well as message text.                 │
+│  Presets: 0 / 8000 / 16000 / 32000 / 64000 / 100000   │
+│                                                       │
+│                                                       │
+╰───────────────────────────────────────────────────────╯
 
 === Result details ===
-╭────────────────────────────────────────────────────────╮
-│  Prompt details   Selected: #1 model-1 · o Reference   │
-│   Preview    Usage    Settings                         │
-│  a Editor only · s Send · p Preferences · m Run model  │
-│  Esc Back · ? Help · c Compare · e Edit result         │
-│  ────────────────────────────────────────────────────  │
-│  model-1 · ✓ Done                                      │
-│  openai-codex · Thinking xhigh · 23s · ↑2.3k ↓670 ·    │
-│  Cost —                                                │
-│                                                        │
-│  Result                                                │
-│                                                        │
-│  Result 1                                              │
-│  Literal **正文** 中文😀                               │
-│  Another line�[31m                                     │
-│                                                        │
-│                                                        │
-│                                                        │
-╰────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────╮
+│  Prompt details   Selected: #1 model-1 · o Reference  │
+│   Preview    Usage    Settings                        │
+│  a Editor only · s Send · p Preferences               │
+│  Esc Back · ? Help · c Compare · e Edit result        │
+│  ───────────────────────────────────────────────────  │
+│  model-1 · ✓ Done                                     │
+│  openai-codex · Thinking xhigh · 23s · ↑2.3k ↓670 ·   │
+│  Cost —                                               │
+│                                                       │
+│  Result                                               │
+│                                                       │
+│  Result 1                                             │
+│  Literal **正文** 中文😀                              │
+╰───────────────────────────────────────────────────────╯
 
 === Compare ===
-╭────────────────────────────────────────────────────────╮
-│  Compare results   Selected: #1 model-1 · ↑↓ scroll    │
-│   Preview    Usage    Settings                         │
-│  a Editor only · s Send · p Preferences · m Run model  │
-│  Esc Back · ? Help · c Next comparison · f Revise      │
-│  ────────────────────────────────────────────────────  │
-│  A · #1 · Tab B · #2                                   │
-│  model-1                                       ✓ Done  │
-│  openai-codex · Thinking xhigh                         │
-│  23s · ↑2.3k ↓670 · Cost —                             │
-│                                                        │
-│  Result                                                │
-│                                                        │
-│  Result 1                                              │
-│  Literal **正文** 中文😀                               │
-│  Another line�[31m                                     │
-│                                                        │
-│  Original prompt                                       │
-╰────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────╮
+│  Compare results   Selected: #1 model-1 · ↑↓ scroll   │
+│   Preview    Usage    Settings                        │
+│  a Editor only · s Send · p Preferences               │
+│  Esc Back · ? Help · c Next comparison · f Revise     │
+│  ───────────────────────────────────────────────────  │
+│  A · #1 · Tab B · #2                                  │
+│  model-1                                      ✓ Done  │
+│  openai-codex · Thinking xhigh                        │
+│  23s · ↑2.3k ↓670 · Cost —                            │
+│                                                       │
+│  Result                                               │
+│                                                       │
+│  Result 1                                             │
+╰───────────────────────────────────────────────────────╯
 
 === Revise ===
-╭────────────────────────────────────────────────────────╮
-│  Prompt details   Read-only reference                  │
-│   Preview    Usage    Settings                         │
-│  ────────────────────────────────────────────────────  │
-│  model-1 · ✓ Done                                      │
-│  openai-codex · Thinking xhigh · 23s · ↑2.3k ↓670 ·    │
-│                                                        │
-│  Revise · #1 · model-1   Revision not submitted        │
-│  Ctrl+S Revise · Enter Newline                         │
-│  Esc Back      · Tab Focus     · Ctrl+E Editor only    │
-│  ────────────────────────────────────────────────────  │
-│  Preferences: None · Review full requirements          │
-│  › Additional requirements:                            │
-│  Keep 中文😀                                           │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-╰────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────╮
+│  Revise · #1 · model-1   Revision not submitted       │
+│  Ctrl+S Revise · Enter Newline                        │
+│  Esc Back      · Tab Focus                            │
+│  ───────────────────────────────────────────────────  │
+│  Preferences: None · Review full requirements         │
+│  › Additional requirements:                           │
+│  Keep 中文😀                                          │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+╰───────────────────────────────────────────────────────╯
 
 === Preferences / library ===
-╭────────────────────────────────────────────────────────╮
-│  Preferences                                           │
-│  Focus: Library · 0 selected · 9/16000 chars           │
-│  Alt+Enter Bring back · Space Select                   │
-│  Esc Cancel selection · Tab / Shift+Tab Focus          │
-│  ────────────────────────────────────────────────────  │
-│  Search:                                               │
-│    n Add             e Edit            d Delete        │
-│  Library 1/1 · s Selected                              │
-│  Unclassified                                          │
-│  › [ ] Preserve 中文😀                         Global  │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-╰────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────╮
+│  Preferences                                          │
+│  Focus: Library · 0 selected · 9/16000 chars          │
+│  Alt+Enter Bring back · Space Select                  │
+│  Esc Cancel selection · Tab / Shift+Tab Focus         │
+│  ───────────────────────────────────────────────────  │
+│  Search:                                              │
+│    n Add            e Edit           d Delete         │
+│  Library 1/1 · s Selected                             │
+│  Unclassified                                         │
+│  › [ ] Preserve 中文😀                        Global  │
+│                                                       │
+│                                                       │
+│                                                       │
+╰───────────────────────────────────────────────────────╯
 
 === Preferences / read ===
-╭────────────────────────────────────────────────────────╮
-│  Full revision instruction   Read-only                 │
-│  Esc Back · ↑↓ / PgUp / PgDn Scroll                    │
-│  ────────────────────────────────────────────────────  │
-│  Preserve 中文😀                                       │
-│  global · literal                                      │
-│  Library entry                                         │
-│                                                        │
-│  Keep literals                                         │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-│                                                        │
-╰────────────────────────────────────────────────────────╯"
+╭───────────────────────────────────────────────────────╮
+│  Full revision instruction   Read-only                │
+│  Esc Back · ↑↓ / PgUp / PgDn Scroll                   │
+│  ───────────────────────────────────────────────────  │
+│  Preserve 中文😀                                      │
+│  global · literal                                     │
+│  Library entry                                        │
+│                                                       │
+│  Keep literals                                        │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+╰───────────────────────────────────────────────────────╯"
 `;

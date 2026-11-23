@@ -7,9 +7,11 @@ import { workspaceHeight, workspaceLayout, workspaceViewport } from "../../src/w
 
 describe("overlay geometry", () => {
   it("uses the terminal budget rather than initial content demand", () => {
-    expect(workspaceHeight(60)).toBe(57);
-    expect(workspaceLayout(100, 60)).toEqual(workspaceLayout(100, 60));
-    expect(workspaceLayout(100, 60).bodyHeight).toBeGreaterThan(40);
+    expect(workspaceHeight(60)).toBe(45);
+    expect(workspaceHeight(23)).toBe(17);
+    expect(workspaceHeight(1)).toBe(1);
+    expect(workspaceLayout(100, 60).height).toBe(43);
+    expect(workspaceLayout(100, 60).bodyHeight).toBe(38);
     expect(workspaceLayout(100, 80).bodyHeight).toBeGreaterThan(workspaceLayout(100, 60).bodyHeight);
   });
 

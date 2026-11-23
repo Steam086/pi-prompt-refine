@@ -14,7 +14,7 @@ describe("native overlay workspace", () => {
   it("uses the same overlay shell for Refine and model selection without stacking", async () => {
     const h = await makeHarness(); h.holdPanel();
     const view = h.command("view", h.context);
-    const expected = { overlay: true, overlayOptions: { anchor: "center", width: "98%", maxHeight: "96%", margin: 0 } };
+    const expected = { overlay: true, overlayOptions: { anchor: "center", width: "96%", maxHeight: "75%", margin: 0 } };
     expect(h.customOptions).toEqual([expected]);
     const initial = h.panelLines();
     h.panelInput("m");
@@ -90,7 +90,7 @@ describe("native overlay workspace", () => {
           for (const [columns, rows] of [[28, 12], [160, 60], [100, 40]] as const) {
             Object.assign(r.terminal, { columns, rows });
             r.tui.renderNow();
-            const width = Math.floor(columns * 0.98);
+            const width = Math.floor(columns * 0.96);
             const lines = h.panelLines(width);
             expect(lines).toHaveLength(workspaceHeight(rows));
             expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);

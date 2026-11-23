@@ -94,6 +94,30 @@ describe("Revise visual hierarchy and feedback", () => {
     w.handleInput(ctrlS); expect(f.submit).toHaveBeenCalledTimes(1);
   });
 
+  it("pages full revision requirements without skipping rows before or after resize", () => {
+    const { workspace, terminal, submit } = setup("dark", 24, 80);
+    try {
+      workspace.handleInput("f");
+      const requirements = Array.from({ length: 90 }, (_, i) => `Req-${i} 中文😀`).join("\n");
+      workspace.handleInput(`\x1b[200~${requirements}\x1b[201~`);
+      workspace.handleInput(tab); workspace.handleInput(tab); workspace.handleInput("\r");
+      const numbers = () => [...strip(output(workspace, terminal.columns)).matchAll(/Req-(\d+) 中文😀/g)].map((match) => Number(match[1]));
+      const first = numbers();
+      expect(first[0]).toBe(0);
+      workspace.handleInput("\x1b[6~");
+      const next = numbers();
+      expect(next[0]).toBe(first.at(-1)! + 1);
+      Object.assign(terminal, { rows: 12, columns: 40 });
+      const resized = numbers();
+      expect(resized[0]).toBe(next[0]);
+      workspace.handleInput("\x1b[6~");
+      expect(numbers()[0]).toBe(resized.at(-1)! + 1);
+      workspace.handleInput("\x1b[5~");
+      expect(numbers()).toEqual(resized);
+      expect(submit).not.toHaveBeenCalled();
+    } finally { workspace.dispose(); }
+  });
+
   it.each(["dark", "light"])("only advertises available layout transitions (%s)", (name) => {
     const f = setup(name); const w = f.workspace;
     w.handleInput("f");

@@ -2,13 +2,17 @@ import { truncateToWidth, visibleWidth, type OverlayOptions } from "@earendil-wo
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { panelGeometry } from "./panel-layout.js";
 
+const HEIGHT_PERCENT = 75;
+
 /** One native modal, not a replacement terminal or a stack of child overlays. */
 export const REFINE_OVERLAY_OPTIONS = {
-  anchor: "center", width: "98%", maxHeight: "96%", margin: 0,
+  anchor: "center", width: "96%", maxHeight: `${HEIGHT_PERCENT}%`, margin: 0,
 } satisfies OverlayOptions;
 
 export function workspaceHeight(rows: number): number {
-  return Math.max(1, Math.floor(rows * 0.96));
+  // Pi's maxHeight only clips; render exactly this many rows, including the border.
+  // Match Pi's percentage rounding and minimum of one cell.
+  return Math.max(1, Math.floor((rows * HEIGHT_PERCENT) / 100));
 }
 
 export function workspaceViewport(width: number, rows: number) {

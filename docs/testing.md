@@ -33,6 +33,7 @@ npm test -- test/renderer/workspace-consistency.test.ts
 ```
 
 - 在同一个原生 overlay 中走过 Preview / Usage / Settings（含数值编辑与校验），以及结果详情、Compare、Revise、Preferences 库和全文阅读。使用 Pi regular / fullscreen 渲染器的合成帧，而不是分别渲染各页再比较。覆盖暗／亮主题和 60×20、100×30、160×45，另检查数值校验在缩到 32×9 后仍能显示警告与取消键。
+- [浮窗尺寸回归](../test/renderer/workspace-height-renderer.test.ts) 另在 160×48、120×40、80×24、60×20、40×12 上验证 96% × 75% 居中外框、主会话上下可见，以及切页、运行状态和缩放期间的阅读焦点与滚动。
 - 比较外框几何、主 Tab 的位置和选中项的背景高亮。检查宽屏时快捷键与 Tab 同行右对齐，窄屏时完整按键提示按需换行，分隔线紧随顶栏。浏览页提示保持低强调，操作页保留加粗按键和中性正文。取消子页后应恢复原画面和任务目标，且不触发提交。关闭 overlay 后焦点回到 Pi 输入框。
 - 只提交一份 [60×20 文本基准](../test/renderer/__snapshots__/workspace-consistency.test.ts.snap)，方便审阅各页的间距、换行与截断。颜色、字重和选中态由两主题的实际 ANSI 断言检查，不靠文本快照。预期内的界面改动才使用 `npm test -- test/renderer/workspace-consistency.test.ts --update`，并逐帧审阅 diff；不要用更新基准来消除未知回归。
 

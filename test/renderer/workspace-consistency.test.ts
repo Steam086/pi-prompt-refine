@@ -68,8 +68,8 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
       let tabOrigin: readonly [row: number, column: number] | undefined;
       function frame(name: string, snapshot = true) {
         tui.renderNow();
-        const width = Math.floor(terminal.columns * 0.98);
-        const height = Math.floor(terminal.rows * 0.96);
+        const width = Math.floor(terminal.columns * 0.96);
+        const height = Math.floor(terminal.rows * 0.75);
         const expected = { col: Math.floor((terminal.columns - width) / 2), row: Math.floor((terminal.rows - height) / 2), width, height };
         expect(overlay.getBounds(), name).toEqual(expected);
         expect(overlay.isFocused(), name).toBe(true);
@@ -208,7 +208,7 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         expect(frame("Settings / validation").join("\n")).toContain(theme.fg("warning", "Enter 0–100000 characters (whole numbers)."));
         Object.assign(terminal, { columns: 32, rows: 9 }); workspace.invalidate();
         const short = frame("Settings / validation after resize", false).join("\n");
-        expect(short).toContain(`${theme.fg("muted", "Esc:")} ${theme.fg("muted", "Cancel")}`);
+        expect(short).toContain(`${theme.fg("muted", "Esc")} ${theme.fg("muted", "Cancel")}`);
         expect(short).toContain(theme.getFgAnsi("warning") + "Enter 0–100000");
         expect(short).toContain(theme.fg("muted", "› ") + theme.getFgAnsi("text") + "-1");
         Object.assign(terminal, { columns, rows }); workspace.invalidate();

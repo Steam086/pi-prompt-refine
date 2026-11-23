@@ -186,7 +186,18 @@ describe("shared refine workspace", () => {
         if (cursor !== 3) expect(row).not.toContain("…");
         else if (width >= 80) expect(row).toContain(model);
         else expect(plain.slice(plain.indexOf(row) + 1).join("")).toContain(model);
-        expect(plain.join(" ").replace(/ +/g, " ")).toContain(detail);
+        const detailText = (lines: string[]) => lines.slice(lines.findIndex((line) => line === row) + 1)
+          .filter((line) => !line.startsWith("PgUp/PgDn") && !line.endsWith("›") && !line.startsWith("╰")).join(" ");
+        const pages = Number(plain.find((line) => line.startsWith("PgUp/PgDn"))?.split("/").at(-1) ?? 1);
+        const detailPages = [detailText(plain)];
+        for (let page = 2; page <= pages; page++) {
+          workspace.handleInput("\x1b[6~");
+          const lines = workspace.render(width).map((line) => stripVTControlCharacters(line).replace(/^│|│$/g, "").trim());
+          expect(lines).toContain(row);
+          expect(lines.join(" ")).toContain(`${page}/${pages}`);
+          detailPages.push(detailText(lines));
+        }
+        expect(detailPages.join(" ").replace(/ +/g, " ")).toContain(detail);
         expect(plain.join(" ")).not.toMatch(/Advanced|Choose the prompt refinement model|Set refinement reasoning effort/);
         expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
       }

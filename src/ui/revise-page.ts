@@ -25,6 +25,7 @@ export class RevisePage {
   private revisionFocus: "input" | "preferences" | "requirements" = "input";
   private reviewingRequirements = false;
   private requirementsScroll = 0;
+  private requirementsViewport = 1;
   private requirementsCache?: { text: string; width: number; lines: string[] };
   private revisionSource?: { render(width: number): string[] };
   private inputError = "";
@@ -36,7 +37,7 @@ export class RevisePage {
     private readonly revisionDrafts: Map<string, RevisionDraft>,
     private readonly makeInput: () => PromptInput,
     private readonly layout: PanelLayoutProvider,
-    private readonly tui: { terminal: { rows: number; columns: number }; requestRender(): void },
+    private readonly tui: { terminal: { columns: number }; requestRender(): void },
   ) { this.revisionInput = makeInput(); }
   set focused(value: boolean) {
     this.hasFocus = value;
@@ -78,8 +79,8 @@ export class RevisePage {
     if (this.reviewingRequirements) {
       if (this.keys.matches(data, "tui.select.cancel") || key === "ctrl+\\") {
         this.reviewingRequirements = false; this.revisionFocus = "input"; this.focused = this.hasFocus;
-      } else if (key === "up" || key === "down" || key === "pageup" || key === "pagedown") {
-        const delta = key === "up" ? -1 : key === "down" ? 1 : (key === "pageup" ? -1 : 1) * Math.max(1, this.tui.terminal.rows - 8);
+      } else if (key === "up" || key === "down" || key === "pageUp" || key === "pageDown") {
+        const delta = key === "up" ? -1 : key === "down" ? 1 : (key === "pageUp" ? -1 : 1) * this.requirementsViewport;
         this.requirementsScroll = Math.max(0, this.requirementsScroll + delta);
       }
       this.tui.requestRender(); return true;
@@ -132,8 +133,9 @@ export class RevisePage {
     const hints = fittingKeyHints([["Esc", "Back"], ["↑↓ / PgUp/PgDn", "Scroll"]], layout.innerWidth, this.theme);
     const chrome = panelHeader(layout, [this.theme.fg("text", this.theme.bold("Full revision requirements")),
       this.theme.fg("muted", `${text.length} chars`)], [], [hints]);
-    this.requirementsScroll = Math.min(this.requirementsScroll, Math.max(0, this.requirementsCache.lines.length - chrome.layout.bodyHeight));
-    const body = this.requirementsCache.lines.slice(this.requirementsScroll, this.requirementsScroll + chrome.layout.bodyHeight)
+    this.requirementsViewport = chrome.layout.bodyHeight;
+    this.requirementsScroll = Math.min(this.requirementsScroll, Math.max(0, this.requirementsCache.lines.length - this.requirementsViewport));
+    const body = this.requirementsCache.lines.slice(this.requirementsScroll, this.requirementsScroll + this.requirementsViewport)
       .map((line) => this.theme.fg("text", line));
     return chrome.render(body, (line) => this.theme.fg("borderMuted", line));
   }
