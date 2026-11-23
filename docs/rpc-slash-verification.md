@@ -1,4 +1,6 @@
-# RPC `/refine` verification
+# RPC `/refine` in unmodified T3 Code
+
+Install the root Refine extension in the Pi instance used by the T3 Code server, and configure its optimizer in native Pi with `/refine model` using the same Pi agent directory. Use a T3 Code thread backed by that Pi instance. There is no separate T3 Code package or build step.
 
 In Pi RPC mode, enter `/refine optimize <draft>` once. Refine reports background progress, queueing, and completion near the composer on hosts that render Pi extension status. The progress status tells you the result will open automatically. Refine waits for Pi to be idle and for any active Pi dialog to close, then opens the result in the originating session. Pi cannot detect typing in the T3 composer: even when Pi is idle, a preview can interrupt typing.
 

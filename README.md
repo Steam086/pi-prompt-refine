@@ -18,7 +18,7 @@ pi install git:github.com/Steam086/pi-prompt-refine
 
 Use one source, not both. `npm install -g` does not register the extension in Pi.
 
-Start Pi, or run `/reload` in an existing session. Extensions run with your Pi process's permissions. Install only from sources you trust. The npm release contains the native Pi extension. The repository also hosts separate [Pi Web and T3 Code integrations](https://github.com/Steam086/pi-prompt-refine/tree/main/packages).
+Start Pi, or run `/reload` in an existing session. Extensions run with your Pi process's permissions. Install only from sources you trust. The npm release contains the Pi extension. The repository documents an experimental [Pi Web integration](https://github.com/Steam086/pi-prompt-refine/tree/main/packages/pi-web#readme) and [RPC slash commands for unmodified T3 Code](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/rpc-slash-verification.md).
 
 ## Quick start
 
