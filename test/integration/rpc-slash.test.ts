@@ -5,15 +5,24 @@ import { extensionHarnessEnvironment, refinement, type Harness } from "../suppor
 import { deferred, flushPromises } from "../support/helpers.js";
 
 const { makeHarness } = extensionHarnessEnvironment();
+const receiptText = {
+  started: "Refine started a background rewrite.",
+  queued: "Refine queued a background rewrite.",
+  duplicate: "Refine already has a rewrite run for this draft.",
+};
 
-async function admit(h: Harness, args: string, outcome = "started"): Promise<string> {
+async function admit(h: Harness, args: string, outcome: keyof typeof receiptText = "started"): Promise<string> {
   await h.command(args, h.context);
   const notice = h.notifications.at(-1)!;
-  expect(notice).toContain(`Refine ${outcome}. Manual viewing: /refine result `);
-  return notice.split("/refine result ")[1]!;
+  const prefix = `${receiptText[outcome]} Refine will open the result when ready. `;
+  expect(notice.startsWith(prefix)).toBe(true);
+  const id = notice.slice(prefix.length);
+  expect(id).toMatch(/^run-\d+@[a-f0-9-]{36}\.\d+$/);
+  return id;
 }
 
 const show = (h: Harness, id: string) => h.command(`result ${id}`, h.context);
+const nextPreview = () => vi.advanceTimersByTimeAsync(250);
 const rawId = (id: string) => id.split("@")[0]!;
 const hello = async (h: Harness) => requireValue(await wireRequest<Hello>(h.events, { action: "hello", clientId: "rpc-check" }));
 
@@ -67,31 +76,33 @@ describe("/refine RPC", () => {
     expectNoWrites(h);
   });
 
-  it("returns before completion, then reopens the entire candidate without adopting edits or cancellation", async () => {
+  it("reports progress and automatically opens the entire candidate without adopting edits or cancellation", async () => {
     const h = await makeHarness({ mode: "rpc", config: { maxOutputTokens: 65_536 } });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const pending = deferred<ReturnType<typeof refinement>>();
     h.complete.mockReturnValueOnce(pending.promise);
     const editor = vi.mocked(h.context.ui.editor);
     const draft = "  Explain this literally.\n\n  ";
     const id = await admit(h, `optimize ${draft}`);
+    expect(h.statuses.at(-1)).toBe("Refine · Rewriting in background");
     await show(h, id);
-    expect(h.notifications.at(-1)).toContain("Still running.");
+    expect(h.notifications.at(-1)).toContain("Background rewrite still running.");
     expect(editor).not.toHaveBeenCalled();
 
     const start = "  中文 😀\n\n````markdown\n```ts\nlet x = 1;\n```\n````\nhttps://example.invalid/";
     const tail = "\n最后一行  \n";
     const result = `${start}${"字".repeat(65_536 * 32 - start.length - tail.length)}${tail}`;
     h.setEditorText("A later composer draft");
+    editor.mockResolvedValueOnce("Host-edited text").mockResolvedValueOnce(undefined);
     pending.resolve(refinement(result));
     await flushPromises();
-    expect(editor).not.toHaveBeenCalled(); // Background completion is deliberately manual-only.
-
-    editor.mockResolvedValueOnce("Host-edited text").mockResolvedValueOnce(undefined);
-    await show(h, id);
+    expect(h.statuses.at(-1)).toBe(`Refine · ${rawId(id)} ready`);
+    await nextPreview();
+    expect(editor).toHaveBeenCalledTimes(1);
     await show(h, id);
     expect(editor).toHaveBeenCalledTimes(2);
     for (const [title, text] of editor.mock.calls) {
-      expect(title).toBe(`Refine ${id} · Copy, then close`);
+      expect(title).toBe(`Refine ready · ${rawId(id)} · Select all and copy, then submit to close`);
       expect(text === result).toBe(true);
     }
     expect(h.complete).toHaveBeenCalledTimes(1);
@@ -100,10 +111,14 @@ describe("/refine RPC", () => {
     expectNoWrites(h);
   });
 
-  it("distinguishes queued and duplicate receipts and reopens an exact run after out-of-order completions", async () => {
+  it("reports queued and duplicate receipts and presents out-of-order completions one at a time", async () => {
     const h = await makeHarness({ mode: "rpc" });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const pending = Array.from({ length: 5 }, () => deferred<ReturnType<typeof refinement>>());
     for (const result of pending) h.complete.mockReturnValueOnce(result.promise);
+    const editor = vi.mocked(h.context.ui.editor);
+    const open = deferred<string | undefined>();
+    editor.mockReturnValueOnce(open.promise);
     const first = await admit(h, "optimize 1st original");
     const second = await admit(h, "optimize 2nd original");
     await admit(h, "optimize 3rd original");
@@ -112,24 +127,30 @@ describe("/refine RPC", () => {
     expect(await admit(h, "optimize 5th original", "duplicate")).toBe(fifth);
     expect(await admit(h, "optimize 1st original", "duplicate")).toBe(first);
     await show(h, fifth);
-    expect(h.notifications.at(-1)).toContain("Still queued.");
+    expect(h.notifications.at(-1)).toContain("Background rewrite still queued.");
     expect(h.complete).toHaveBeenCalledTimes(4);
+    expect(h.statuses.at(-1)).toBe("Refine · 4 rewrites in progress · 1 queued");
 
     pending[1]!.resolve(refinement("Second result"));
     await vi.waitFor(() => expect(h.complete).toHaveBeenCalledTimes(5));
+    await nextPreview();
+    expect(editor).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(rawId(second)), "Second result");
     pending[0]!.resolve(refinement("First result"));
     pending[4]!.resolve(refinement("Fifth result"));
     await flushPromises();
-    expect(h.context.ui.editor).not.toHaveBeenCalled();
-    await show(h, second);
-    await show(h, first);
-    await show(h, fifth);
-    expect(vi.mocked(h.context.ui.editor).mock.calls.map(([, text]) => text)).toEqual(["Second result", "First result", "Fifth result"]);
+    await nextPreview();
+    expect(editor).toHaveBeenCalledTimes(1);
+    open.resolve(undefined);
+    await flushPromises();
+    await nextPreview();
+    await nextPreview();
+    expect(editor.mock.calls.map(([, text]) => text)).toEqual(["Second result", "First result", "Fifth result"]);
     expect(h.complete).toHaveBeenCalledTimes(5);
   });
 
   it("does not stack result editors or replace a pending Pi dialog", async () => {
     const h = await makeHarness({ mode: "rpc" });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const id = await admit(h, "optimize Test");
     await flushPromises();
     const ui = vi.mocked(h.context.ui.editor);
@@ -151,8 +172,45 @@ describe("/refine RPC", () => {
     expect(h.notifications.at(-1)).toBe("Refine: the host could not open the result editor.");
     await show(h, id);
     expect(ui).toHaveBeenCalledTimes(3);
+    await nextPreview();
+    expect(ui).toHaveBeenCalledTimes(3);
     expect(h.complete).toHaveBeenCalledTimes(1);
     expectNoWrites(h);
+  });
+
+  it("keeps a ready result visible in status while Pi is busy and opens it after the Agent and dialogs settle", async () => {
+    const h = await makeHarness({ mode: "rpc" });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const idle = vi.spyOn(h.context, "isIdle").mockReturnValue(false);
+    const id = await admit(h, "optimize Wait for the host");
+    await flushPromises();
+    expect(h.statuses.at(-1)).toBe(`Refine · ${rawId(id)} ready`);
+    await nextPreview();
+    expect(h.context.ui.editor).not.toHaveBeenCalled();
+
+    const event = (name: string) => h.handlers.get(name)![0]!({}, h.context);
+    idle.mockReturnValue(true);
+    await event("ui_prompt_start");
+    await event("ui_prompt_start");
+    await event("agent_settled");
+    await event("ui_prompt_end");
+    await nextPreview();
+    expect(h.context.ui.editor).not.toHaveBeenCalled();
+    await event("ui_prompt_end");
+    await nextPreview();
+    expect(h.context.ui.editor).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(rawId(id)), "Refined prompt");
+  });
+
+  it("does not reopen a cancelled preview when the host settles again", async () => {
+    const h = await makeHarness({ mode: "rpc" });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await admit(h, "optimize Existing candidate");
+    await nextPreview();
+    expect(h.context.ui.editor).toHaveBeenCalledTimes(1);
+    await h.handlers.get("agent_settled")![0]!({}, h.context);
+    await nextPreview();
+    expect(h.context.ui.editor).toHaveBeenCalledTimes(1);
+    expect(h.complete).toHaveBeenCalledTimes(1);
   });
 
   it("reports failure and cancellation once, ignores late completions, and never opens an empty result", async () => {
@@ -196,11 +254,14 @@ describe("/refine RPC", () => {
 
   it("rejects an unknown or expired receipt even when the same domain run ID is still present", async () => {
     const h = await makeHarness({ mode: "rpc", persistHistory: true });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const id = await admit(h, "optimize First binding");
     await flushPromises();
     await show(h, id.replace(/^run-\d+/, "run-999999"));
     expect(h.notifications.at(-1)).toContain("Unknown Refine result");
     await h.handlers.get("session_tree")![0]!({}, h.context);
+    await nextPreview();
+    expect(h.statuses.at(-1)).toBeUndefined();
     await show(h, id);
     expect(h.notifications.at(-1)).toContain("expired");
     await h.reload();
@@ -223,6 +284,7 @@ describe("/refine RPC", () => {
     pending.reject(new Error("old run"));
     await flushPromises();
     expect(h.notifications).toEqual(before);
+    expect(h.statuses.at(-1)).toBeUndefined();
     expect(h.context.ui.editor).not.toHaveBeenCalled();
   });
 });
