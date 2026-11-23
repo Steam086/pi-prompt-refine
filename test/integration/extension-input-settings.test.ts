@@ -92,9 +92,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.panelLines()).toHaveLength(height);
     harness.panelInput("q");
     await view;
-    const footer = vi.mocked(harness.context.ui.setFooter);
-    expect((footer.mock.calls[0]![0] as any)().render(80)).toEqual([]);
-    expect(footer).toHaveBeenLastCalledWith(undefined);
+    expect(harness.context.ui.setFooter).not.toHaveBeenCalled();
   });
 
   it.each(["", "Main editor stays independent"])("retains exact Input text across close/reopen with main editor %j", async (mainDraft) => {
@@ -479,7 +477,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\r");
     expect(harness.complete).not.toHaveBeenCalled();
     expect(harness.customCalls()).toBe(1);
-    expect(harness.context.ui.setFooter).toHaveBeenLastCalledWith(undefined);
+    expect(harness.context.ui.setFooter).not.toHaveBeenCalled();
   });
 
   it("reports settings persistence failure without claiming a successful save", async () => {

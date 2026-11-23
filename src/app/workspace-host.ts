@@ -61,11 +61,9 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
   async function showPreview(ctx: ExtensionContext, initialPage?: "usage", resultView = false): Promise<void> {
     if (interacting || ctx.mode !== "tui") return;
     interacting = true;
-    ctx.ui.setFooter(() => ({ render: () => [], invalidate() {} }));
     try { await showPreviewContent(ctx, initialPage, resultView); }
     finally {
       interacting = false;
-      ctx.ui.setFooter(undefined);
       updatePresentation();
     }
   }

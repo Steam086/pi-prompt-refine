@@ -1,6 +1,7 @@
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { Text, visibleWidth } from "@earendil-works/pi-tui";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import { RefineHistory } from "../../src/history.js";
 import { workspaceHeight } from "../../src/workspace-overlay.js";
@@ -44,6 +45,41 @@ describe("native overlay workspace", () => {
     expect(list).not.toHaveBeenCalled();
     h.panelInput("q");
     await view;
+  });
+
+  it.each(["regular", "fullscreen"] as const)("leaves the host footer in the background (%s)", async (mode) => {
+    const h = await makeHarness({ renderer: { mode, theme: "dark" } });
+    const { tui, terminal, input } = h.renderer!;
+    const footer = ["Pi working directory", "Pi model and usage", "Pi extension status"];
+    tui.addChild(new Text("Pi conversation\n".repeat(48), 0, 0));
+    tui.addChild(new Text(footer.join("\n"), 0, 0));
+    function screen() {
+      tui.renderNow();
+      if (tui.mode === "fullscreen") return tui.getScreenLines().map(stripVTControlCharacters);
+      const { previousLines, previousViewportTop, previousHeight } = tui.captureRenderState();
+      return previousLines.slice(previousViewportTop, previousViewportTop + previousHeight).map(stripVTControlCharacters);
+    }
+    Object.assign(terminal, { columns: 80, rows: 24 });
+    expect(screen().slice(-3).map((line) => line.trimEnd())).toEqual(footer);
+    h.holdPanel();
+    const view = h.command("view", h.context);
+    try {
+      await vi.waitFor(() => expect(tui.hasOverlay()).toBe(true));
+      expect(screen().slice(-3).map((line) => line.trimEnd())).toEqual(footer);
+      Object.assign(terminal, { columns: 40, rows: 12 });
+      const compact = screen();
+      expect(compact.slice(-2).map((line) => line.trimEnd())).toEqual(footer.slice(1));
+      expect(compact.join("\n")).not.toContain(footer[0]); // The centered overlay, not setFooter, covers this line.
+      expect(h.context.ui.setFooter).not.toHaveBeenCalled();
+      input("q");
+      expect(tui.hasOverlay()).toBe(false);
+      await view;
+      expect(screen().slice(-3).map((line) => line.trimEnd())).toEqual(footer);
+      expect(h.context.ui.setFooter).not.toHaveBeenCalled();
+    } finally {
+      await h.handlers.get("session_shutdown")?.[0]?.({ type: "session_shutdown" }, h.context);
+      await view;
+    }
   });
 
   describe.each(["regular", "fullscreen"] as const)("model transitions with the native %s renderer", (mode) => {
