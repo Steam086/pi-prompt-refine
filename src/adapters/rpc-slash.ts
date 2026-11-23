@@ -2,7 +2,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ApplicationApi, Binding, Receipt, Reply, RunDetail } from "../app/api.js";
 import { STATUS_KEY } from "../app/contracts.js";
 
-const usage = "Usage: /refine optimize <draft>. When ready, use the /refine result command shown in the status.";
+const usage = "Usage: /refine optimize <draft>. The result opens automatically when ready.";
 const scope = (binding: Binding) => `${binding.runtimeId}.${binding.lifecycleEpoch}`;
 const resultArgs = /^result\s+(run-[1-9][0-9]{0,14})@([a-f0-9-]{36}\.[1-9][0-9]*)\s*$/i;
 const resultCommand = (binding: Binding, runId: string) => `/refine result ${runId}@${scope(binding)}`;
@@ -16,6 +16,7 @@ interface Presentation {
   binding: Binding;
   ctx: ExtensionContext;
   pending: Set<string>;
+  ready: Set<string>;
   unsubscribe?: () => void;
   feedback?: string;
   status?: string;
@@ -39,10 +40,16 @@ export function createRpcSlash(deps: {
 }) {
   const { api } = deps;
   let tracking: Presentation | undefined;
+  let previewTimer: ReturnType<typeof setTimeout> | undefined;
   let previewOpen = false;
   let hostPrompts = 0;
 
+  function clearPreviewTimer() {
+    clearTimeout(previewTimer);
+    previewTimer = undefined;
+  }
   function clearTracking() {
+    clearPreviewTimer();
     const watch = tracking;
     tracking = undefined;
     watch?.unsubscribe?.();
@@ -65,6 +72,7 @@ export function createRpcSlash(deps: {
       if (run?.status === "queued") { queued++; continue; }
       watch.pending.delete(id);
       if (run?.status === "generated" && run.text !== undefined) {
+        watch.ready.add(id);
         finished.push(`Ready: ${resultCommand(watch.binding, id)}`);
       } else if (run) {
         finished.push(`${id} · ${statusMessage(run)}`);
@@ -79,17 +87,19 @@ export function createRpcSlash(deps: {
     const parts: string[] = [];
     if (running) parts.push(running === 1 ? "Rewriting in background" : `${running} rewrites in progress`);
     if (queued) parts.push(`${queued} queued`);
+    if (running || queued) parts.push("Results open automatically");
     if (watch.feedback) parts.push(watch.feedback);
     const status = parts.length ? `Refine · ${parts.join(" · ")}` : undefined;
     if (status !== watch.status) {
       watch.status = status;
       watch.ctx.ui.setStatus(STATUS_KEY, status);
     }
+    schedulePreview();
   }
 
   function track(binding: Binding, runId: string, ctx: ExtensionContext) {
     if (tracking && !api.isCurrentBinding(tracking.binding)) clearTracking();
-    const watch = tracking ??= { binding, ctx, pending: new Set() };
+    const watch = tracking ??= { binding, ctx, pending: new Set(), ready: new Set() };
     if (!watch.pending.size) watch.feedback = undefined;
     watch.pending.add(runId);
     if (!watch.unsubscribe) {
@@ -107,14 +117,34 @@ export function createRpcSlash(deps: {
     return !previewOpen && !hostPrompts && ctx.isIdle();
   }
 
+  function schedulePreview() {
+    const watch = tracking;
+    if (!watch?.ready.size || previewTimer !== undefined || !canOpen(watch.ctx)) return;
+    // Let the host finish its slash/turn UI transition before presenting the next question.
+    previewTimer = setTimeout(() => {
+      previewTimer = undefined;
+      if (tracking !== watch || !api.isCurrentBinding(watch.binding) || !canOpen(watch.ctx)) return;
+      for (const id of watch.ready) {
+        watch.ready.delete(id);
+        const run = queryRun(watch.binding, id);
+        if (run?.status === "generated" && run.text !== undefined) {
+          void openEditor(watch.ctx, watch.binding, id, run.text);
+          return;
+        }
+      }
+    }, 250);
+    previewTimer.unref?.();
+  }
+
   async function openEditor(ctx: ExtensionContext, binding: Binding, runId: string, text: string) {
     previewOpen = true;
     try {
-      await ctx.ui.editor(`Refine ready · ${runId} · Select all and copy, then submit to close`, text);
+      await ctx.ui.editor(`Rewrite result · ${runId} · Select all to copy · Submit closes without sending`, text);
     } catch {
       if (api.isCurrentBinding(binding)) ctx.ui.notify("Refine: the host could not open the result editor.", "warning");
     } finally {
       previewOpen = false;
+      schedulePreview();
     }
   }
 
@@ -131,12 +161,19 @@ export function createRpcSlash(deps: {
       return;
     }
     if (!api.isCurrentBinding(binding)) return;
+    tracking?.ready.delete(runId);
     await openEditor(ctx, binding, runId, run.text);
   }
   return {
     clearTracking,
+    hostSettled() {
+      clearPreviewTimer();
+      schedulePreview();
+    },
     setHostPromptActive(active: boolean) {
       hostPrompts = Math.max(0, hostPrompts + (active ? 1 : -1));
+      if (active) clearPreviewTimer();
+      else schedulePreview();
     },
     async command(source: string, ctx: ExtensionContext): Promise<void> {
       const args = source.trimStart();
@@ -159,7 +196,7 @@ export function createRpcSlash(deps: {
       const { value } = receipt;
       if (value.outcome !== "started" && value.outcome !== "queued" && value.outcome !== "duplicate") return;
       const message = rewriteReceipt[value.outcome];
-      ctx.ui.notify(value.runId ? `${message} When ready, use ${resultCommand(binding, value.runId)}` : message, "info");
+      ctx.ui.notify(value.runId ? `${message} The result opens automatically. To reopen, use ${resultCommand(binding, value.runId)}` : message, "info");
       if (value.runId) track(binding, value.runId, ctx);
     },
   };

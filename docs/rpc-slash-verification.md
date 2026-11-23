@@ -1,6 +1,6 @@
 # RPC `/refine` verification
 
-In Pi RPC mode, enter `/refine optimize <draft>` once. Refine reports background progress, queueing, and completion near the composer on hosts that render Pi extension status. When the rewrite finishes, Refine leaves the composer alone and shows the full `/refine result <runId>` command in the ready status. Run that command in the originating session when you want to view the candidate. If another turn or dialog is active, retry after it closes.
+In Pi RPC mode, enter `/refine optimize <draft>` once. Refine reports background progress, queueing, and completion near the composer on hosts that render Pi extension status. The progress status tells you the result will open automatically. Refine waits for Pi to be idle and for any active Pi dialog to close, then opens the result in the originating session. Pi cannot detect typing in the T3 composer: even when Pi is idle, a preview can interrupt typing.
 
 In unmodified T3 Code, the candidate opens as a prefilled `Question`. Click inside the text, select all with Ctrl+A or Cmd+A, and copy with Ctrl+C or Cmd+C. Use `Submit` to close the preview and return to the previous draft. T3 uses the composer for the preview while it is open. Refine discards the editor response, including any edits. The red Stop control is part of the host UI. The slash command and preview are handled independently of the main Agent.
 
@@ -16,7 +16,7 @@ T3 routes the Pi RPC `editor` to its original thread and uses the composer for t
 ## Evidence and outstanding checks
 
 - **Pi RPC 1.6.0, Linux x86_64, isolated profile:** Before implementation, a synthetic slash probe returned `handled` before emitting a delayed editor request. The prefill survived RPC byte for byte. After implementation, a separate process loaded the real extension and a synthetic optimizer. Invalid slash input returned usage, one optimization produced one request with the exact draft, and explicit viewing and reopening delivered all 262,144 UTF-16 code units unchanged. Confirming edited text and cancelling did not change the candidate or add Pi transcript messages.
-- **Root regression tests** cover progress and ready status, explicit viewing from the ready command, no automatic editor on completion, guards during Pi turns and dialogs, queueing, duplicates, out-of-order and immediate completion, failures, timeout, cancellation, and invalidated results. The mocked editor received the full 2,097,152-code-unit result, including leading and trailing whitespace, Chinese, blank lines, a URL, and nested code fences.
+- **Root regression tests** cover progress and ready status, automatic preview of the candidate text alone, explicit reopening from the ready command, deferral during Pi turns and dialogs, queueing, duplicates, out-of-order and immediate completion, failures, timeout, cancellation, and invalidated results. The mocked editor received the full 2,097,152-code-unit result, including leading and trailing whitespace, Chinese, blank lines, a URL, and nested code fences.
 - **T3 Code desktop, user report:** A short rewrite was available through the receipt's result command. The user opened, copied, and closed the prefilled `Question` editor. The installed build was unrecorded.
 
 ## Synthetic probe in unmodified T3 Code
@@ -31,6 +31,6 @@ The Linux test used T3 Code `0.1.12-nightly.20261120.4994`, Pi `1.6.0`, and Chro
 | Closing a very long result | The 262,144-code-unit fixture took about 10 seconds to return to the normal composer after Submit in the measured run. |
 | Status without an editor | Pi `setStatus` showed working and ready beside the composer. The ready update left the draft and keyboard focus intact. Explicit viewing then opened the candidate. |
 
-## Historical check: automatic preview (since removed)
+## Earlier host check: automatic preview (before the current status and title wording)
 
 An isolated run with the same T3, Pi, and Chrome versions loaded the actual Refine extension and a deterministic loopback optimizer. A delayed `/refine optimize` showed `Rewriting in background` and `run-1 ready`, then opened its result automatically in the same thread. At 460 × 570, the 4,700-code-unit candidate scrolled to its last line, copied exactly, and restored a new unsent draft after Submit. An immediate response at 1120 × 780 also opened automatically and copied its 51-code-unit fixture exactly. An independent Pi input dialog stayed open when a rewrite finished, and Refine opened the result after that dialog closed. The three rewrites each issued one tool-free request and emitted no Pi `agent_start` event. The 2,097,152-code-unit check uses the mocked editor. Manual IME remains open.

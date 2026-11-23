@@ -14,7 +14,7 @@ const receiptText = {
 async function admit(h: Harness, args: string, outcome: keyof typeof receiptText = "started"): Promise<string> {
   await h.command(args, h.context);
   const notice = h.notifications.at(-1)!;
-  const prefix = `${receiptText[outcome]} When ready, use /refine result `;
+  const prefix = `${receiptText[outcome]} The result opens automatically. To reopen, use /refine result `;
   expect(notice.startsWith(prefix)).toBe(true);
   const id = notice.slice(prefix.length);
   expect(id).toMatch(/^run-\d+@[a-f0-9-]{36}\.\d+$/);
@@ -76,7 +76,7 @@ describe("/refine RPC", () => {
     expectNoWrites(h);
   });
 
-  it("reports a usable result command without interrupting typing; explicit viewing never adopts edits or cancellation", async () => {
+  it("announces automatic preview, opens only the candidate text, and reopens without adopting edits or cancellation", async () => {
     const h = await makeHarness({ mode: "rpc", config: { maxOutputTokens: 65_536 } });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const pending = deferred<ReturnType<typeof refinement>>();
@@ -84,7 +84,7 @@ describe("/refine RPC", () => {
     const editor = vi.mocked(h.context.ui.editor);
     const draft = "  Explain this literally.\n\n  ";
     const id = await admit(h, `optimize ${draft}`);
-    expect(h.statuses.at(-1)).toBe("Refine · Rewriting in background");
+    expect(h.statuses.at(-1)).toBe("Refine · Rewriting in background · Results open automatically");
     await show(h, id);
     expect(h.notifications.at(-1)).toContain("Background rewrite still running.");
     expect(editor).not.toHaveBeenCalled();
@@ -99,14 +99,12 @@ describe("/refine RPC", () => {
     const ready = h.statuses.at(-1)!;
     expect(ready).toBe(`Refine · Ready: /refine result ${id}`);
     await nextPreview();
-    expect(editor).not.toHaveBeenCalled();
+    expect(editor).toHaveBeenCalledTimes(1);
     expect(h.getEditor()).toBe("A later composer draft");
     await h.command(ready.split("/refine ")[1]!, h.context);
-    expect(editor).toHaveBeenCalledTimes(1);
-    await show(h, id);
     expect(editor).toHaveBeenCalledTimes(2);
     for (const [title, text] of editor.mock.calls) {
-      expect(title).toBe(`Refine ready · ${rawId(id)} · Select all and copy, then submit to close`);
+      expect(title).toBe(`Rewrite result · ${rawId(id)} · Select all to copy · Submit closes without sending`);
       expect(text === result).toBe(true);
     }
     expect(h.complete).toHaveBeenCalledTimes(1);
@@ -115,7 +113,7 @@ describe("/refine RPC", () => {
     expectNoWrites(h);
   });
 
-  it("reports queued and duplicate receipts and allows explicit viewing of out-of-order completions", async () => {
+  it("reports queued and duplicate receipts and previews out-of-order completions one at a time", async () => {
     const h = await makeHarness({ mode: "rpc" });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const pending = Array.from({ length: 5 }, () => deferred<ReturnType<typeof refinement>>());
@@ -133,14 +131,12 @@ describe("/refine RPC", () => {
     await show(h, fifth);
     expect(h.notifications.at(-1)).toContain("Background rewrite still queued.");
     expect(h.complete).toHaveBeenCalledTimes(4);
-    expect(h.statuses.at(-1)).toBe("Refine · 4 rewrites in progress · 1 queued");
+    expect(h.statuses.at(-1)).toBe("Refine · 4 rewrites in progress · 1 queued · Results open automatically");
 
     pending[1]!.resolve(refinement("Second result"));
     await vi.waitFor(() => expect(h.complete).toHaveBeenCalledTimes(5));
     await nextPreview();
     expect(h.statuses.at(-1)).toContain(`/refine result ${second}`);
-    expect(editor).not.toHaveBeenCalled();
-    const viewing = show(h, second);
     expect(editor).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(rawId(second)), "Second result");
     pending[0]!.resolve(refinement("First result"));
     pending[4]!.resolve(refinement("Fifth result"));
@@ -148,11 +144,9 @@ describe("/refine RPC", () => {
     await nextPreview();
     expect(editor).toHaveBeenCalledTimes(1);
     open.resolve(undefined);
-    await viewing;
+    await flushPromises();
     await nextPreview();
-    expect(editor).toHaveBeenCalledTimes(1);
-    await show(h, first);
-    await show(h, fifth);
+    await nextPreview();
     expect(editor.mock.calls.map(([, text]) => text)).toEqual(["Second result", "First result", "Fifth result"]);
     expect(h.complete).toHaveBeenCalledTimes(5);
   });
@@ -187,7 +181,7 @@ describe("/refine RPC", () => {
     expectNoWrites(h);
   });
 
-  it("keeps a ready result in status without opening it when Pi and nested dialogs become idle", async () => {
+  it("keeps the ready command visible and defers opening until Pi and nested dialogs become idle", async () => {
     const h = await makeHarness({ mode: "rpc" });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const idle = vi.spyOn(h.context, "isIdle").mockReturnValue(false);
@@ -199,6 +193,7 @@ describe("/refine RPC", () => {
 
     const event = (name: string) => h.handlers.get(name)![0]!({}, h.context);
     idle.mockReturnValue(true);
+    await event("agent_settled");
     await event("ui_prompt_start");
     await event("ui_prompt_start");
     await show(h, id);
@@ -207,18 +202,14 @@ describe("/refine RPC", () => {
     expect(h.context.ui.editor).not.toHaveBeenCalled();
     await event("ui_prompt_end");
     await nextPreview();
-    expect(h.context.ui.editor).not.toHaveBeenCalled();
-    await show(h, id);
     expect(h.context.ui.editor).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(rawId(id)), "Refined prompt");
   });
 
   it("does not reopen a cancelled preview when the host settles again", async () => {
     const h = await makeHarness({ mode: "rpc" });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const id = await admit(h, "optimize Existing candidate");
+    await admit(h, "optimize Existing candidate");
     await nextPreview();
-    expect(h.context.ui.editor).not.toHaveBeenCalled();
-    await show(h, id);
     expect(h.context.ui.editor).toHaveBeenCalledTimes(1);
     for (const handler of h.handlers.get("agent_settled") ?? []) await handler({}, h.context);
     await nextPreview();
