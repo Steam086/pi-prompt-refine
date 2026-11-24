@@ -84,6 +84,11 @@ export class RefineHistory {
 
   has(sessionId: string): boolean { return this.records.some((record) => record.input.sessionId === sessionId); }
 
+  hasDraft(sessionId: string, draft: string, lastCapturedId?: number): boolean {
+    return this.records.some((record) => record.input.sessionId === sessionId && record.input.draft === draft &&
+      (record.archivedAt === undefined || record.id === lastCapturedId));
+  }
+
   get(id: number, sessionId: string): RefineRecord | undefined {
     const record = this.records.find((item) => item.id === id && item.input.sessionId === sessionId);
     return record ? structuredClone(record) : undefined;

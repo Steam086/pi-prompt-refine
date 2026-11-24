@@ -43,7 +43,8 @@ export class RefineController {
   private roundSequence = 0;
   private taskSequence = 0;
   private taskId?: number;
-  private lastCapturedDraft?: string;
+  // Captures follow the journal record through edits. Accept and Restore remember the literal editor write.
+  private lastCapture?: { recordId?: number; editorText?: string };
   private foregroundId?: number;
   private sessionId?: string;
   private currentModel?: ModelRef;
@@ -113,7 +114,8 @@ export class RefineController {
   getRecord(id: number): RefineRecord | undefined { return this.journal.get(id, this.sessionId ?? ""); }
   hasWorkspaceContent(): boolean { return !!(this.journal.has(this.sessionId ?? "") || this.candidate || this.accepted || this.requestSource); }
   hasCapturedDraft(draft: string): boolean {
-    return draft === this.lastCapturedDraft || this.getCurrentRecords().some((record) => record.input.draft === draft);
+    return draft === this.lastCapture?.editorText ||
+      this.journal.hasDraft(this.sessionId ?? "", draft, this.lastCapture?.recordId);
   }
   shouldOpenPanel(draft: string): boolean { return !draft.trim() || this.hasWorkspaceContent(); }
   getTaskInput(): RefineRequestInput | undefined {
@@ -196,7 +198,7 @@ export class RefineController {
     return !!r && r.id === token.id && r.generation === token.generation && r.sessionId === token.sessionId &&
       r.generation === this.generation && r.sessionId === this.sessionId;
   }
-  setSession(sessionId: string): void { this.invalidateLifecycle(true); this.sessionId = sessionId; this.lastCapturedDraft = undefined; }
+  setSession(sessionId: string): void { this.invalidateLifecycle(true); this.sessionId = sessionId; this.lastCapture = undefined; }
   restoreHistory(records: RefineRecord[]): void {
     if (this.active.size) return;
     const own = records.filter((record) => record.input.sessionId === this.sessionId && record.input.contextUnavailable);
@@ -281,7 +283,7 @@ export class RefineController {
     if (!this.journal.canStart()) return { kind: "busy" };
     const frozen = this.freezeRound(input);
     const recordId = this.journal.start(++this.taskSequence, frozen, undefined, "refine", "unsent");
-    this.lastCapturedDraft = input.draft;
+    this.lastCapture = { recordId };
     this.emitState();
     return { kind: "captured", recordId };
   }
@@ -367,7 +369,7 @@ export class RefineController {
     const taskId = (input.revision || options.sameTask) ? this.taskId! : ++this.taskSequence;
     const previous = (input.revision || options.sameTask) ? this.getCandidate() : undefined;
     const recordId = this.journal.start(taskId, frozen, input.revision ? this.candidate?.recordId : undefined);
-    this.lastCapturedDraft = input.draft;
+    this.lastCapture = { recordId };
     if (frozen.roundId !== this.round?.id) this.journal.update(recordId, { archivedAt: Date.now() });
     return this.launch(recordId, !options.sameTask, previous);
   }
@@ -479,7 +481,7 @@ export class RefineController {
         : { phase: "idle", requestId: this.requestSequence, pendingSend: false };
     }
     // Accepted/restore snapshots describe actual editor writes, independent of the journal.
-    this.lastCapturedDraft = undefined;
+    this.lastCapture = undefined;
     this.pump();
     this.emitState();
     return true;
@@ -503,7 +505,7 @@ export class RefineController {
     try { writeEditor(candidate.text); } catch { return false; }
     this.clearPendingSend();
     this.restoreAccepted = this.accepted;
-    this.lastCapturedDraft = candidate.text;
+    this.lastCapture = { editorText: candidate.text };
     this.accepted = structuredClone(candidate);
     this.viewedAccepted = structuredClone(candidate);
     if (candidate.recordId) this.journal.update(candidate.recordId, { acceptedAt: Date.now() });
@@ -519,7 +521,7 @@ export class RefineController {
     const restore = this.restore!;
     if (currentDraft !== restore.applied && !confirmedOverwrite) return false;
     try { writeEditor(restore.before); } catch { return false; }
-    this.lastCapturedDraft = restore.before;
+    this.lastCapture = { editorText: restore.before };
     this.accepted = this.restoreAccepted;
     this.viewedAccepted = this.accepted;
     this.restore = undefined;
