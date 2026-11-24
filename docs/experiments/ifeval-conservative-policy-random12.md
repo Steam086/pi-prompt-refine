@@ -84,31 +84,9 @@ Cost 为成功计划调用的请求时 SDK 参考费用，改写组含 Refine＋
 
 这仍只有 12 个独立题目，每组两次采样，并非 24 个独立题目；样本含三道复述题，且禁逗号、段落、附言等检查较集中。不做统计显著性、普遍有效性或完整语义质量推断。官方 scorer 主要衡量列出的显式约束，也不会检查所有原文模板、内容质量和隐含意图。本轮保留失败边界，没有围绕这批题修改生产策略或检查器。
 
-## 本地证据与复核（A 批次）
+## 证据范围（A 批次）
 
-原始数据和脚本仅存于实验者的本地目录，仓库 `.gitignore` 已排除该目录；以下命令不是公开检出的测试入口：
-
-`docs/experiments/ifeval-20261109/conservative-policy/`
-
-- `run_random12.py`：随机抽样、预检、调用原有三组 PTY runner；新运行产生新目录，不使用前轮回答。
-- `continue_random12.py`：此次零评分状态下的失败恢复；固定样本并核验既有结果哈希，只运行缺失项目。
-- `audit_random12.py`：离线重算、会话／模型／配置／源码核验、配对结果、用量及改写 diff，不调用模型。
-- `random-12/20261109T090921Z/sample.jsonl`、`sampling.json`：完整原题、原 kwargs、随机种子、排除项与数据哈希。
-- 同目录 `metadata.json`：新旧完整策略、与前轮版本的差异、配置及源码／scorer／runner 哈希。
-- `repeat-{0,1}/{original,old,new}/`：结果、接受后的 sidecar、会话导出、终端捕获和各组配置。导出的会话移除了 thinking 正文。
-- `failed-attempts/repeat-0-old-1546/`：失败终端和操作记录；`continuation.json` 记录恢复前 31 份成功结果的哈希及恢复策略。
-- `summary.json`、`audit.json`、`completed.json`：官方逐题判定、配对变化、成功调用用量、失败调用说明与完整性检查。
-
-官方评分已离线重算，重算前后 summary SHA-256 均为 `e072ebd7a7060fc8a513c4bbf5924fc7d7b2982e052fcaf4ec8c3885f67ac6d9`；配置、源文件、scorer 哈希和全部会话核验通过，新增 Python 脚本通过编译检查。临时认证仅从本地配置复制到私有临时目录，退出时已清理，实验目录不含凭据。没有修改生产代码，因此本轮未另跑 TypeScript 全套测试。
-
-仅重新核验和评分已有输出，不请求模型：
-
-```sh
-PYTHONPATH=/tmp/pi-ifeval-20261109/python-deps:/tmp/pi-ifeval-20261109/upstream \
-  python3 \
-  docs/experiments/ifeval-20261109/conservative-policy/audit_random12.py \
-  docs/experiments/ifeval-20261109/conservative-policy/random-12/20261109T090921Z
-```
+正式批次 `20261109T090921Z` 固定样本并保留失败续跑记录。重新评分后 `summary.json` 的 SHA-256 为 `e072ebd7a7060fc8a513c4bbf5924fc7d7b2982e052fcaf4ec8c3885f67ac6d9`。原始输出、runner、样本清单与审计日志属于本地实验材料。
 
 ## B 批次：Terra high / medium 新增随机 12 题
 
@@ -165,30 +143,8 @@ PYTHONPATH=/tmp/pi-ifeval-20261109/python-deps:/tmp/pi-ifeval-20261109/upstream 
 
 240 次成功调用合计 **239,039 token**、参考费用 **$0.18332498**，不含失败请求未知开销。只有 medium 的旧／当前 Refine 组记录了缓存读取，分别为 **1,152／2,816 token**；其他读取及所有写入为零，估价已按缓存价格计算。reasoning 已包含于 output 和总 token，不重复相加。
 
-### 本地证据、复核与结论
+### 证据与结论（B 批次）
 
-本批次原始记录仍仅本地保存、由 `.git/info/exclude` 排除：
+正式批次 `20261109T115331Z` 的 144 份结果哈希未变。离线重算的 `summary.json` SHA-256 为 `139af0601a59c25b14bee348010acf26baf378e042337bd1dc88398b0a2ca0b1`。评分保留了上文的源码一致性例外，完整源码树一致性检查未通过。原始输出与审计脚本属于本地实验材料。
 
-`docs/experiments/ifeval-20261109/conservative-policy/terra-12/20261109T115331Z/`
-
-- `sample.jsonl`、`sampling.json`、`metadata.json`：原题与原 kwargs、种子、排除项、完整策略、模型／配置、源码／评分器／价格目录哈希及价格快照。
-- `{high,medium}/repeat-{0,1}/{original,old,new}/`：144 份结果和会话、96 份接受后的 sidecar、配置；`attempts/<key>/attempt-{1,2}/` 包含每次终端、去除 thinking 正文的会话和失败细节。临时认证副本均已清理，证据目录不含认证文件。
-- `generation-runner.py`、`generation.log`：实际生成脚本的原始快照与源码全等检查失败日志；脚本哈希与初始 metadata 一致。
-- `source-drift-audit.json`：仅限不活跃模型选择 UI 的源码例外及其证明材料，明确 `strict_global_source_equality_failed: true`。
-- `summary.json`、`audit.json`、`completed.json`：官方逐题判定、配对变化、全部改写 diff、失败、成本和限定的完整性核验。
-- `comparison.json`、`comparison-table.md`：A/B 统一对比数据及本页表格。
-
-脚本位于上述 `conservative-policy/` 父目录：`run_terra12.py` 用于新生成，`score_terra12.py` 只做此次特定源码例外的离线评分，`report_terra12.py` 只从已保存输出生成对比表。生成完成后，仅为评分函数增加显式源码例外参数；原始生成脚本另存，适配 diff 可审计，没有重新请求模型。新增脚本通过 Python 编译检查。
-
-官方结果已独立离线重算，前后 summary SHA-256 均为 **`139af0601a59c25b14bee348010acf26baf378e042337bd1dc88398b0a2ca0b1`**。144 份结果哈希未变；模型、thinking、配置、接受／提交、系统提示、scorer 及 SDK 估价重算均通过核查，但完整源码树一致性不通过，不能写作无例外全通过。
-
-**结论：本批次没有观察到当前策略的官方分数退步；medium 已全通过，high 没有额外检查收益。** 仅 12 个独立题目、13 项检查约束，检查类型和难度与 A 不同，不能据此声称 Terra 全面优于 Luna、Refine 稳定提升，或当前编辑策略已无保真风险。A 的失败结论仍保留。本任务没有据分数调整生产策略或 scorer。
-
-仅离线复核已有输出，不请求模型：
-
-```sh
-PYTHONPATH=/tmp/pi-ifeval-20261109/python-deps:/tmp/pi-ifeval-20261109/upstream \
-  python3 \
-  docs/experiments/ifeval-20261109/conservative-policy/score_terra12.py \
-  docs/experiments/ifeval-20261109/conservative-policy/terra-12/20261109T115331Z
-```
+本批次未观察到官方分数下降，medium 已全通过，high 没有额外检查收益。A／B 的题目、类型与难度不同，结果只适用于各自样本。本次未据分数调整生产策略或 scorer。

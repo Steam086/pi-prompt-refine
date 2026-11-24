@@ -1,63 +1,26 @@
-# 项目定位
+# AGENTS.md
 
-Pi Prompt Refine 是 TypeScript 编写的 Pi 扩展，入口由根 `package.json` 的 `pi.extensions` 指向 `src/extension.ts`。它主要服务于用户在聊天／Agent 窗口中的交互：结合当前对话快速整理思路、表达意图、减少主 Agent 的初始误解，由用户检查后决定是否接受或发送。它是后台文本改写器，不是执行任务的 Agent，也不以批量 prompt 优化、数据集改写或通用 benchmark 为设计目标。
+## Repository principles
 
-原生 TUI、`/refine-api` 和暂不发布的 Web 实验子包复用同一应用用例；多入口和并行模型比较不改变以用户检查和选择为中心的定位。只有同一 hosted session runtime 的客户端共享状态，不跨进程或原生终端共享 controller。优化模型独立于主模型，可优先选择快速、低成本且足以理解当前对话的模型；不要求能力强于主模型，也不把较弱模型能理解视为主模型必然理解的保证。
+- Read the relevant entry point, implementation, and tests before changing behavior. Source code defines current behavior.
+- Document intent, constraints, contracts, and design decisions. Link to source for implementation details and prefer runnable examples or tests for behavior. Keep documentation short and easy to find.
+- Prefer readable code. Comments explain why a decision or guard exists.
 
-## 默认改写策略
+## Read before changing
 
-- 优先结合相关上下文理解当前讨论对象、问题和希望采取的动作，再主动整理表达：理顺口语和松散结构、纠正病句、去除重复；上下文明确时补清指代，保留自然语气。
-- 以忠实、清楚、减少误解为目标，不以改动字符最少为目标；不默认整篇原样返回，也不强制每次换词或套用独立任务模板。确实没有有用改进时允许不改。
-- 保留原意、明确约束、不确定性和授权范围；不编造上下文，不把讨论变成执行，不擅自添加任务。输出仍是返回原聊天的消息，不必扩写为脱离上下文的完整任务书。
-- 路径、URL、命令、代码、TUI、日志及引用等字面材料默认原样保留，只有明确的编辑授权才可在指定范围内修改。保护材料不等于冻结周围的自然语言请求；条件式偏好不适用时仅跳过该项，不停止其他有用改写。
-- 内置策略更新不覆盖用户保存的自定义 `systemPrompt`，也不追溯修改已有 round 的冻结模板。保留固定角色、字面保护和输出协议，以及严重 TUI 材料遗漏的程序兜底。
-
-## 按修改范围必读
-
-下列文档中的维护规则仍是项目约束；移出本文件不意味着可忽略。修改相关模块前阅读对应文档：
-
-| 范围 | 文档 |
+| Area | Start here |
 | --- | --- |
-| 模块职责、状态所有者、依赖与修改定位 | [维护架构](docs/architecture.md) |
-| application、适配器、DTO、Binding、重试与传输 | [多入口应用接口](docs/application-api.md) |
-| 原生 TUI、布局、样式、按键、Preferences/Revise | [界面维护约束](docs/ui-conventions.md) |
-| 测试设施、回归不变量与验收 | [测试与重构验收](docs/testing.md) |
-| npm 清单、打包试装、发布与隐私核查 | [发布清单](docs/release.md)、[用户数据边界](docs/tui-guide.md#what-the-rewrite-provider-receives) |
-| 公开文档、中英文维护范围 | [文档语言约定](CONTRIBUTING.md#documentation-languages) |
-| Web 构建、安装、宿主能力与重启边界 | [Web 子包说明](packages/pi-web/README.md) |
+| Extension registration and state ownership | [`src/extension.ts`](src/extension.ts), [`src/controller.ts`](src/controller.ts), [architecture](docs/architecture.md) |
+| Rewrite policy, context, and model requests | [`src/context.ts`](src/context.ts), [context and protocol](docs/context.md) |
+| Application API, slash, and RPC | [application contracts](docs/application-api.md), [RPC host behavior](docs/rpc-slash-verification.md) |
+| Native TUI and Preferences | [UI conventions](docs/ui-conventions.md) |
+| Tests, packaging, and public docs | [testing](docs/testing.md), [release checklist](docs/release.md), [documentation languages](CONTRIBUTING.md#documentation-languages) |
 
-当前操作见 [README](README.md) / [使用说明](docs/usage.md)，长期取舍见[设计原则](docs/design.md)，近期工作见[路线图](docs/roadmap.md)。多入口实施进度与实测证据见 [进度记录](docs/multi-surface-progress.md) / [隔离验收记录](docs/multi-surface-acceptance.md)；历史设计或离线通过不能代替当前部署、人工 IME、认证或真实 Provider 验收。
+See the [documentation index](docs/index.md) for other topics.
 
-## 架构核心
+## Guardrails and checks
 
-| 模块 | 边界 |
-| --- | --- |
-| `src/extension.ts`、`src/app/runtime.ts` | 注册与组装；现有 commands、request-flows、completion、lifecycle、editor-actions 等保留受限能力和局部状态，不把入口闭包整体搬家 |
-| `src/controller.ts`、`history.ts`、`request-types.ts` | controller 是 round、调度、候选及接受/恢复事务的唯一协调者；history 持有领域版本，请求类型独立于实现，history/UI 不反向依赖 controller 类型 |
-| `src/app/api.ts`、`ports.ts`、`application.ts` 等 | DTO/受限端口、共享用例、Binding 与领域守卫、查询投影、通知、幂等回执和模型配置；不建立第二套任务状态、队列或持久化层 |
-| `src/adapters/` | TUI 本地操作、独立 `/refine-api` 命令、纯 JSON wire 校验和 session-local 事件传输；core 持有有界输入暂存及按需输出分页 |
-| `src/workspace.ts`、`src/ui/`、`task-panel.ts` 等 | 页面、焦点、阅读位置和唯一原生 overlay；UI 不直接调用模型或写 Pi |
-| `src/context.ts`、`project-context.ts`、`config.ts`、偏好/历史存储 | 协议与输出校验、宿主背景采集、配置和白名单持久化；保留原有格式与所有权 |
-| `packages/pi-web/` | 仅供本地开发与隔离验证，不随根包发布；独立 browser/server 构建与依赖；server 仅经公开 `pi-web.host / pi-session-events / v1` 连接宿主，不读 sidecar、不调用模型、不导入业务 runtime；核心不依赖 pi-web |
-
-## 不可破坏的不变量
-
-- round 首份输入冻结系统模板、历史及项目资源，同 round 草稿共用背景。每个运行通过 Pi `streamSimple()` 发起一次无工具改写；不继承主 Agent 工具，不执行原稿中的任务。只有 Pi 用户消息 `message_start` 才自动归档旧 round。
-- 保留去重、最大并发、FIFO 排队、启动后超时、独立取消、晚到用量和过期操作守卫。关闭视图/断线不取消运行；后台完成不抢焦点、不改变阅读或操作目标。
-- 保存、勾选偏好、阅读、配置和连接本身不提交模型请求。优化快捷键只在本轮还未提交过运行时直接启动新原稿，后续新原稿为 Unsent；Unsent 的 Enter、Revise 的 Ctrl+S 和 API 显式运行等提交动作不受此限。Apply 仅切换 Refine 当前结果；接受/发送/恢复仍须明确动作及 session/candidate/编辑器确认守卫。Web 当前不提供 accept/send/restore。
-- Binding 为 `{ runtimeId, sessionId, lifecycleEpoch }`，任务/运行 ID 必须与其一起使用。生命周期失效、领域版本冲突、未知/过期重试不得静默迁移或重新执行；丢失回执先查原 lease/operation，不能换 nonce 盲目重试。本地 TUI 复用用例和守卫，不强行套远端账本；高级原生流程保留兼容边界。
-- 原生展示同步更新，远端 invalidation 合并通知；时钟读取不增加领域版本。浏览器表单、回执和运行目标绑定原 scope，不覆盖后续本地编辑，不因下拉选项迟到而丢失目标。
-- `project_context` 自动生成的目录列表、规则来源与告警不带宿主绝对路径；规则来源只标项目相对路径或 `external rule`。不要用全局字符串替换来处理路径，草稿、历史和规则正文中的字面内容保持原样。
-- 对外只暴露脱离内部记录的白名单 DTO，不泄露完整背景、prepared input、凭据、原始 Provider 响应或内部路径。sidecar 仍是最小白名单；恢复记录没有可重跑的旧背景，只能显式复制到当前 round。读取与传输必须有界，超额明确拒绝，不截断为假成功。
-- 保留旧 `/refine` 和快捷键；`/refine-api` 不求值 shell、不写模型 transcript，错误或命名冲突不能退化为 Agent 请求。Web 只按宿主权威 workspace/session 路由，不接受客户端文件路径；事件总线和 Host/Origin 检查都不是身份认证。
-- 原生 TUI 保持唯一稳定 overlay、每个视图唯一水平分割所有者，阅读焦点与动作目标分离。复用主题 token、`key-hints.ts` 和 ANSI-aware 列宽工具；正文可读、错误可见、输入不泄漏到外层动作。详细样式及子页规则见必读界面文档。
-
-## 修改与验证
-
-- 除用户明确要求的行为变更外，保持既有行为与导入兼容；不擅自升级依赖、改发布配置或引入框架。获准进行的发布整理限于文档、清单、锁文件来源和验收设施；涉及请求、存储、权限或界面行为的修复须先取得批准。策略调整应同步更新对应测试断言，不将旧策略的措辞当作不可变行为；不得借此删除回归覆盖。不要为行数压缩代码，或把整个可变应用状态传给所有新模块。
-- 发包从根目录操作。Pi 直接加载 TypeScript；保留 `pi-package`、`pi.extensions`、宿主 peers 和 `preference-store.ts` 运行时读取的 starter JSON。不在安装 hook 中运行构建或测试。用 `npm run check:pack` 核对白名单，不以 `.gitignore` 代替 npm 清单。不要提交真实 session、sidecar、凭据或含本机身份的实验输出；不要自行推送 tag、发布或改写 Git 历史。
-- 根检查：`npm run typecheck`、`npm test`。`test/` 按 unit/integration/ui/renderer/live/benchmarks 分层，support 每测试独立且可销毁，fixtures 只存数据；保持原用例身份和默认跳过策略。
-- 改写质量围绕真实交互验收：有价值的表达整理是否完成、上下文指代是否准确、字面材料是否保留、任务和授权是否越界；不以原样率、改写率或 benchmark 分数本身为目标。静态模板断言和离线测试仅证明协议／代码覆盖，不能证明模型实际理解或改写质量。
-- Web 修改另在 `packages/pi-web/` 执行 `npm run typecheck`、`npm test`（先安装该子包依赖）；根检查不覆盖它，也不得依赖它才能运行。保持 browser/server 构建图隔离，不把 Node 或业务 runtime 引入浏览器。
-- 修改视图需覆盖明暗、窄/短与宽屏、Unicode/ANSI、resize、焦点、滚动和确认；原生保留 regular/fullscreen 渲染覆盖。自动截图不替代人工视觉或 IME。
-- 真实 Provider 调用和宿主部署/重启分别需要明确授权；live/benchmark 保持显式环境变量启用策略，不因普通测试或构建擅自启用。隔离实例使用独立 data/socket/port/agent profile，不复制凭据、不继承当前宿主的 live state；重启 session daemon 会中断活动会话和终端，须先告知。
+- Keep rewrites tool-free. Accepting, sending, and restoring require explicit user action. Preserve existing session, retry, and data boundaries.
+- Run `npm run typecheck` and `npm test` from the root. Run `npm run check:pack` for packaging changes.
+- Get separate approval for real provider calls, host deployment or restart, publishing, pushing tags, and rewriting Git history. Release-preparation approval covers documentation, manifests, lockfile sources, and verification. Behavior fixes require separate approval.
+- Keep live tests and benchmarks opt-in. Keep real sessions, sidecars, credentials, and identifying experiment output out of Git.

@@ -2,7 +2,7 @@
 
 历史实验：本页的“新策略”指当时被测的保守编辑模板，不是本版默认策略。当前行为见[上下文与 Prompt 协议](../context.md)。
 
-后续结果见[扩展实测与费用对比](ifeval-conservative-policy-random12.md)：新增 Luna medium 的 12 题中，当前策略 Strict 为 19/24、原稿为 23/24；再新增的另一批 12 题中，Terra high／medium 的当前策略均为 24/24。批次不同，不能跨样本排名模型；本页六题结果也不能外推为无损保证。版本差异、失败调用及 Terra 批次的不活跃 UI 源码变更例外已在报告单列。
+后续随机抽样出现了退步。见[扩展实测与费用对比](ifeval-conservative-policy-random12.md)。
 
 ## 改动范围
 
@@ -71,25 +71,8 @@
 
 六个独立题目、每组两次采样不足以建立统计非劣效性，重复不等于新增题目。IFEval 主要检查显式格式约束，不证明内容质量或真实草稿改写收益；人工语义核查也不替代原始官方分数。此次结论只适用于这组小样本回归。
 
-## 本地证据与复现
+## 证据范围
 
-以下路径指实验者的本地材料，已由仓库 `.gitignore` 排除，不能从公开检出直接复跑：
+正式批次 `20261109T033630Z` 的 `summary.json` 经离线重算，SHA-256 为 `938e3fdf169a0597a32253597c61430c644bc88f33989927b5f11c40c5a140db`。原始数据及 PTY runner 属于本地实验材料。完整复跑需要取得固定的样本、runner、scorer 与当时的策略。
 
-- `docs/experiments/ifeval-20261109/conservative-policy/run_regression.py`：复用前次 PTY runner；每次启动生成新目录，不读取旧回答。
-- `.../20261109T033630Z/metadata.json`：新旧完整策略、源文件／评分器／抽样哈希、配置与版本。
-- `.../20261109T033630Z/repeat-{0,1}/{original,old,new}/`：各组配置、实际输入输出、插件 sidecar、会话、终端捕获。
-- `.../20261109T033630Z/summary.json`：官方逐题 strict／loose 结果与累计用量。
-- `.../20261109T033630Z/audit.json`：输入／配置核验、配对变化、人工保真审查及离线重算哈希。重算前后 summary 的 SHA-256 均为 `938e3fdf169a0597a32253597c61430c644bc88f33989927b5f11c40c5a140db`。
-- `.../20261109T033041Z/excluded.json`：先行运行被排除的原因；该目录也保存六项 SDK 检查的 `safeguards.jsonl`。
-
-临时认证文件仅从本地已配置 Pi 认证复制到私有临时目录，完成后删除；实验输出不含凭据。临时依赖或前次本地记录缺失时，应先按前次 README 恢复固定评分器与 runner，不把缺失记录视为通过。
-
-重新执行真实模型实验（会产生调用）：
-
-```sh
-PYTHONPATH=/tmp/pi-ifeval-20261109/python-deps:/tmp/pi-ifeval-20261109/upstream \
-  python3 \
-  docs/experiments/ifeval-20261109/conservative-policy/run_regression.py
-```
-
-六项 SDK 检查的 opt-in 命令见[语义验收说明](../optimizer-evaluation.md#保守策略的显式编辑防退化检查)。
+仓库内提供[独立 SDK 用例](../optimizer-evaluation.md#保守策略的显式编辑防退化检查)，适合复验改写协议。

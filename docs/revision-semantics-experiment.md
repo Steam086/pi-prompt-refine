@@ -4,9 +4,7 @@
 
 在同一个工作区内先加载 Unsent 内联库，再经结果的 Revise → Preferences 提交 Add / Edit / Delete，关闭子页后原内联库没有刷新。即使取消子页的**选择**，之前提交的**库写入**也已生效，因此取消路径同样必须刷新。
 
-修复：`src/workspace.ts` 的 Revise Preferences 关闭回调调用已有 `inlinePreferences.refresh()`，与原稿入口一致。不替换已选快照、不自动提交、不改变原稿和 session 守卫。加载期间沿用内联组件已有的隔离逻辑，不把旧库条目当成可新选的当前库。
-
-原 `test/extension.test.ts`（重构后位于 `test/integration/extension-preferences.test.ts`）新增 6 个真实跨入口交互回归：Add / Edit / Delete × Cancel / Bring back。修复前 3 种操作均在返回内联列表时失败；修复后验证新增可见、旧快照来源警告、删除后不再可重选、重新勾选采用编辑后的正文，以及管理/选择不发模型请求、不写宿主编辑器、不发送消息。
+刷新可用条目时保留已选快照和当前操作目标。Add／Edit／Delete 经取消选择与带回返回的边界由[跨入口测试](../test/integration/extension-preferences.test.ts)覆盖。
 
 ## 问题 2：目标风险尚未证实，不删除历史依据
 

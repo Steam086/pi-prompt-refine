@@ -1,123 +1,35 @@
 # 测试与重构验收
 
-## 测试分层
-
-- `test/unit/`：协议、预算、存储、controller 等逻辑；用可控的 provider、时钟和异步结果验证边界。
-- `test/integration/`：通过独立 extension harness 验证命令、session 事件和宿主副作用。不需要网络或真实认证。
-- `test/ui/`：组件输入、焦点、确认边界和实际样式输出。
-- `test/renderer/`：真实 Pi regular/fullscreen 渲染器与模拟 Terminal 的输出捕获。
-- `test/live/`：仅环境变量明确启用时请求真实模型；只能提供特定样例的质量观察。
-- `test/benchmarks/`：保留原有显式启用的性能实验，不混同功能正确性。
-- `test/support/`：每测试独立的 Harness、Terminal 和异步辅助；`fixtures/` 仅存数据。
-
-默认用 `npm run typecheck` 和 `npm test` 检查行为，不设置 live/benchmark 环境变量。发包另跑 `npm run check:pack` 和 tarball 试装（步骤见[发布清单](release.md)）；打包清单不能证明 TypeScript 入口能在 Pi 中加载，单元测试也不能证明 starter JSON 已随包分发。
-
-按层或单项运行：
-
-```sh
-npm test -- test/unit
-npm test -- test/integration
-npm test -- test/ui test/renderer
-npm test -- test/integration/extension-editor-actions.test.ts
-npm test -- --sequence.shuffle --sequence.seed=20261109
-```
-
-可选的离线性能实验：`REFINE_BENCHMARK=1 npm test -- test/benchmarks/settings-performance.test.ts`。真实模型实验位于 `test/live/`，启用方法和费用边界见对应实验文档；普通验收不启用它们。
-
-## 原生 TUI 跨页一致性
-
-修改共享布局、主题或按键提示时，除单页用例外，运行 [工作台跨页回归](../test/renderer/workspace-consistency.test.ts)：
-
-```sh
-npm test -- test/renderer/workspace-consistency.test.ts
-```
-
-- 在同一个原生 overlay 中走过 Preview / Usage / Settings（含数值编辑与校验），以及结果详情、Compare、Revise、Preferences 库和全文阅读。使用 Pi regular / fullscreen 渲染器的合成帧，而不是分别渲染各页再比较。覆盖暗／亮主题和 60×20、100×30、160×45，另检查数值校验在缩到 32×9 后仍能显示警告与取消键。
-- [浮窗尺寸回归](../test/renderer/workspace-height-renderer.test.ts) 另在 160×48、120×40、80×24、60×20、40×12 上验证 96% × 75% 居中外框、主会话上下可见，以及切页、运行状态和缩放期间的阅读焦点与滚动。
-- 比较外框几何、主 Tab 的位置和选中项的背景高亮。检查宽屏时快捷键与 Tab 同行右对齐，窄屏时完整按键提示按需换行，分隔线紧随顶栏。浏览页提示保持低强调，操作页保留加粗按键和中性正文。取消子页后应恢复原画面和任务目标，且不触发提交。关闭 overlay 后焦点回到 Pi 输入框。
-- 只提交一份 [60×20 文本基准](../test/renderer/__snapshots__/workspace-consistency.test.ts.snap)，方便审阅各页的间距、换行与截断。颜色、字重和选中态由两主题的实际 ANSI 断言检查，不靠文本快照。预期内的界面改动才使用 `npm test -- test/renderer/workspace-consistency.test.ts --update`，并逐帧审阅 diff；不要用更新基准来消除未知回归。
-
-这层默认随 `npm test` 运行，不启动外部 Pi 进程，不需要凭据、真实模型或截图依赖。若后续需要验证进程级按键冲突或像素观感，再单独用隔离 profile 录制截图；文本基准不替代实体终端、人工视觉或 IME 验收。
-
-## 多入口第一切片检查
-
-根检查仍只需根依赖，默认不启用真实 Provider/benchmark，也不导入 Web 子包：
+在仓库根运行：
 
 ```sh
 npm run typecheck
 npm test
 ```
 
-新增 `application-idempotency`、`application-contract`、`session-events`、`slash-api` 测试覆盖不可变白名单、原生/远端版本冲突、稳定 started/queued/duplicate ID、丢回执重放、生命周期失效、RPC/print 无编辑器/主会话写入、Unicode 分块、原生输出样式与清理。`json-output` 与 `output-paging` 进一步验证惰性编码、surrogate/转义等价性、单页回放、Binding/连接/顺序守卫和配额释放。
+默认套件以离线方式运行。真实 Provider 与性能实验各有显式环境开关，普通验收保持关闭。根检查独立于 Web 子包。修改 Web 时按[子包说明](../packages/pi-web/README.md)单独运行类型检查和测试。发包再执行[打包检查与实际 tarball 试装](release.md#2-verify-without-a-model-account)。
 
-Web 子包在 `packages/pi-web/` 单独 `npm ci --ignore-scripts --omit=optional` 后运行 `npm run typecheck` 和 `npm test`。其 Node 测试使用实际 browser client/server peer/core events adapter + fake public capability/application，并审计 emitted import graph；不需要启动服务，也不等同真实浏览器或实际 host capability 加载。
+## 按变更定位
 
-已完成的隔离宿主/双客户端自动化及其边界见 [隔离验收记录](multi-surface-acceptance.md)；部署要求与仍待验收的人工视觉/IME、生产认证及真实 Provider 项见 [子包说明](../packages/pi-web/README.md)。未授权时不得为验收重启承载当前会话的 daemon。
+| 要验证的边界 | 起点 |
+| --- | --- |
+| 冻结背景、排队、取消、会话切换 | [controller 生命周期](../test/unit/controller-lifecycle.test.ts)、[扩展 round](../test/integration/extension-rounds.test.ts) |
+| 编辑器写入、发送和异步确认 | [编辑器事务](../test/integration/extension-editor-actions.test.ts) |
+| Binding、对象版本、回执丢失和作用域 | [应用契约](../test/integration/application-contract.test.ts)、[幂等账本](../test/unit/application-idempotency.test.ts) |
+| RPC 结果预览、纯查询和完整文本 | [RPC slash 集成](../test/integration/rpc-slash.test.ts)、[人工宿主复验](rpc-slash-v1.md) |
+| 传输完整性、配额和断线恢复 | [分页](../test/unit/output-paging.test.ts)、[桥接测试](../packages/pi-web/test/bridge.test.mjs) |
+| 原生主题、布局、输入隔离和焦点 | [界面维护约束](ui-conventions.md)、[跨页渲染](../test/renderer/workspace-consistency.test.ts)、[浮窗](../test/integration/extension-overlay.test.ts) |
+| 实际改写是否保留意图和授权 | [语义验收](optimizer-evaluation.md) |
+
+可用 `npm test -- <测试文件或目录>` 跑相关层。改共享布局时查看实际 regular／fullscreen 输出和 ANSI 断言。预期视觉变化才更新[文本快照](../test/renderer/__snapshots__/workspace-consistency.test.ts.snap)，并审阅 diff。
 
 ## 测试设施约束
 
-- 每个 harness 拥有独立的临时目录、事件处理器、编辑器、provider 和销毁流程；不得导出跨测试共享的可变实例。
-- 清理应包括 session_shutdown、renderer.stop、计时器和环境变量恢复。不要在共享 agent-dir 环境下新增 concurrent 测试。
-- 真实 Terminal fixture 可以复用构造逻辑，不得把所有测试变成隐藏大量默认动作的通用脚本引擎。
-- 优先等待显式完成信号或可观察状态。已有 microtask flush 可以作为兼容辅助，不因拆分随意增加等待次数或定时 sleep。
-- 访问 Pi 内部测试 API 的导入集中在兼容辅助模块；它不成为生产依赖，也不冒充公开 SDK。
-- 参数化消除同一行为的重复设置，但保留有意义的领域名称。不要为了减行数删除跨层回归或把长操作序列变成不可读的参数。
-
-## 不允许变化的行为
-
-### 请求与会话
-
-- 模型请求仍是一次无工具改写，不继承主 Agent 的工具，不自动执行任务。
-- 同 round 草稿共享冻结背景；模型比较从共同原稿开始，不承接另一模型的结果。
-- 保留最大并发、FIFO 排队、启动后超时、独立取消和晚到用量处理。
-- 关闭工作台不停止后台请求；后台完成不抢焦点、不改变选中目标或列表顺序。
-- 只有 Pi 用户消息 message_start 才归档 round；input 和 before_agent_start 不是提交确认。
-- session/branch 切换和销毁保持原有失效及清理行为。
-
-### 用户副作用
-
-- Apply 只切换 Refine 当前结果；接受才写编辑器，发送需明确操作。
-- 异步确认返回后重新检查 session、candidate token、编辑器内容和恢复身份。
-- 取消/超时后的迟到结果不能复活；新的候选不能被旧的确认或编辑覆盖。
-- 发送不清空主编辑器；忙时 followUp；未获确认不提前归档。
-- 恢复记录不能直接以不存在的旧背景请求模型，只能显式复制到当前 round。
-- sidecar 格式、权限、白名单、容量、保存暂停和错误反馈不变，不新增完整背景落盘。
-
-### TUI 与偏好
-
-修改视图前阅读 [界面维护约束](ui-conventions.md)；以下是测试侧的核心不变量，不替代完整样式与输入规则。
-
-- 唯一 overlay、稳定终端几何、焦点和来源快照保持不变。
-- 原稿/内联 Preferences 用 Enter 提交，Revise 用 Ctrl+S。工作台外的优化快捷键仅能为当前轮次的首个请求自动提交新原稿；后续新原稿为 Unsent。浏览、Space 勾选、库保存和带回不提交。
-- 搜索、全文阅读、编辑、确认与子页面消费其输入，不泄漏到外层动作。
-- 保留暗/亮主题、窄/短和宽屏、ANSI/中文/emoji、resize、滚动、取消和确认的断言。
-- 正文、参考、辅助元数据、标题与按键维持现有语义主题样式；警告不被短布局吞掉。
+- 每个 harness 独立拥有临时目录、事件处理器、终端、provider 和清理流程。销毁 session、renderer 和定时器，恢复环境变量。共享 agent-dir 的用例勿并发。
+- fixtures 只存数据。复用构造和观测辅助，保留各用例的明确动作；等待可观察的完成信号，避免靠增加定时等待消除竞态。
+- Pi 内部测试 API 仅从兼容辅助模块引入。参数化减少重复设置，保留用例名称和失败时的可诊断性。
+- 重构前后核对用例身份、状态和覆盖的副作用，不用通过数量替代覆盖检查。保留既有导入和[项目不变量](../AGENTS.md#guardrails-and-checks)。
 
 ## 验收方式
 
-1. 重构前记录完整测试结果和展开后的用例名称/状态，不只比较测试文件数量。
-2. 每个阶段运行 typecheck 和相关测试，完成阶段后运行全套测试。
-3. 最终比较原用例身份与状态：移动文件不应减少通过用例，不新增跳过。新增边界测试另行记录。
-4. 检查 runtime imports 的环、剩余大闭包、无用兼容层、`git diff --check` 和工作区状态。
-5. 检查 package/config/历史协议未变化，且用户既有未跟踪文件未被纳入修改。
-6. 自动化验收不等于真实 Provider、实体终端、视觉效果或中文 IME 验收；未进行的检查必须明确说明。
-
-## 历史重构验收（非当前发布基线）
-
-基线为 `f41e969`。三个阶段分别完成测试重组、应用流程提取、TUI 页面提取，均运行类型检查和全量测试；最终由父会话独立核查，而不是仅依据子任务报告。
-
-| 项目 | 重构前 | 重构后 |
-| --- | --- | --- |
-| 默认测试文件 | 37 通过 / 4 跳过 | 64 通过 / 4 跳过 |
-| 展开用例 | 1127 通过 / 33 跳过 | 1142 通过 / 33 跳过 |
-| 类型检查 | 通过 | 通过 |
-
-- 原有 1160 个展开用例的名称、状态和出现次数全部保留；静态比较原测试及辅助设施中的 expect 调用表达式，没有丢失原有表达式。12 个原测试声明因示例路径、内部 API 导入或 Terminal 辅助设施提取而发生源码变化，不是删除用例。
-- 新增 15 个展开用例：Harness 隔离和清理 5 项、共享目录采集 4 项、页面输入/焦点和任务阅读边界 6 项。跳过项仍为三个 live 文件和一个可选性能文件。
-- 默认全量测试和随机顺序测试（seed `20261109`）均通过。
-- 对照原始源码，controller 转译后的可执行代码完全一致；没有运行时循环导入。package、依赖、配置格式、历史白名单与源码中的协议实现均未改变。
-- 额外使用临时原版本源码副本进行 10 组 old/new TUI 对照：暗/亮主题 × 20×12、40×24、80×40、100×40、180×80，逐步比较原始 ANSI 帧、输入消费结果、动作效果、选中身份和滚动位置。包含详情、比较、Settings/数值校验、Revise/要求阅读、Preferences、归档、resize 和每组 60 次固定种子的组合输入；全部一致。
-- 离线性能实验的 18 个场景在两轮 old/new 对照中，输出字节数和变化行数一致，均为 0 次全屏重绘。独立进程测量出现过 Preview 的 P95 尾延迟波动；同进程交替顺序的三轮对照未复现稳定差异。不据此宣称性能提升，也不将这些时延值作为保证或阈值。
-- 临时 old/new 对照测试和源码副本在验收后移除，不给日常测试增加旧版本历史依赖。`git diff --check` 通过；用户原有 `foundations.md` 未改动。
-
-没有调用真实 Provider，也没有进行实体终端、真人视觉或中文 IME 验收。上述结果证明已覆盖行为的自动化回归保持，不是对所有可能输入的形式化等价证明。
+自动化覆盖已断言的协议、行为与渲染。实体终端、中文 IME、真实 Provider 和生产认证需要专门验收。 [macOS 检查](macos-smoke-test.md) · [Web 隔离证据](multi-surface-acceptance.md) · [历史验收](history.md)

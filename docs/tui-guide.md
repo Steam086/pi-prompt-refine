@@ -6,7 +6,7 @@ For installation and your first rewrite, start with the [README](../README.md). 
 
 The workspace has three tabs: **Preview** for the current round, **Usage** for current and earlier records, and **Settings** for configuration. Use the Left and Right arrow keys to switch tabs and `?` to see the actions available for your current selection.
 
-The centered workspace uses about 96% of the terminal width and 75% of its height, leaving the Pi session visible above and below. Switching tabs or opening a long result does not resize it; scroll within the page to read more. Pi still renders its footer behind the workspace, but on short terminals the overlay can cover part of it.
+Scroll within the workspace to read long results. The frame stays stable as you switch pages and may cover part of the Pi footer in a short terminal.
 
 | To… | Do this |
 | --- | --- |
@@ -26,7 +26,7 @@ Select **In Your Own Words** in Preferences to see how the rewrite model underst
 ## Settings
 
 - Use `/refine model` to choose the default rewrite model. Your main agent's model does not change, and Pi still manages provider authentication.
-- In **Settings**, use `Tab` to switch between **Context** and **Optimizer**. **Draft character limit** is the last Optimizer setting, or the last Context setting if Optimizer is unavailable. Select a row to read its full details; use `PgUp` / `PgDn` if they span multiple pages.
+- In **Settings**, use `Tab` to switch between **Context** and **Optimizer**. Select a row for details and use `PgUp` / `PgDn` to read more.
 - `Enter` stages a numeric edit; `Ctrl+S` back in Settings saves it without leaving the current group or selection. `Esc` returns to Preview. Context changes apply to the next round, not the current round. The model, thinking level, and optimization prompt save separately.
 - In **Optimizer → Optimization prompt**, press `Enter` to edit Refine’s rewrite policy without leaving Settings. Press `Ctrl+S`, then `y` to confirm. `Esc` from confirmation returns to your draft; `Esc` from the editor discards your edits. The policy applies only to Refine, starting with the next round.
 - The config file is `prompt-refine.json` in your Pi agent directory. See the [example config](../examples/prompt-refine.json); its model entry is illustrative. After editing the file, run `/reload` in Pi.
