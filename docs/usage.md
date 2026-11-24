@@ -231,6 +231,7 @@ Revise 中按 **Alt+P** 打开 Preferences，或用 **Tab / Shift+Tab** 在补�
 默认 `historyPersistence: true`，在 session 文件旁保存 `<session-file>.prompt-refine.json`，不改写 Pi 对话或叶节点：
 
 - 白名单保存原稿、结果、已提交的首次编辑／修订要求（含组合后的偏好正文）、模型/thinking、round/task/parent ID、状态、时间、用量与参考费用。**不保存完整对话背景、系统模板、项目规则／目录快照、请求 payload、会话标题、编辑器撤销快照或未提交输入。** 原稿／结果本身仍可能含敏感内容。
+- Pi 报告可识别的网络传输故障时，例如连接重置、DNS 解析失败或 TLS 错误，Usage 显示 `Error: network`，恢复会话后仍可查看。历史只保存分类码，原始错误文本和堆栈不会落盘。
 - 原子替换、文件权限 `0600`，每 session 最多 **100 条、2 MiB（UTF-8）**。优先保留完整的新记录；超容量或单条过大时省略整条并提示，不截断可接受的正文。此磁盘上限独立于运行期内存上限。
 - 恢复记录全部归档，标注 `Restored history · background not saved`，保留原 Accepted / Sent 时间；这不代表编辑器现在仍有该结果。只恢复可查看记录，不恢复运行队列、当前候选、接受／发送动作或一次撤销状态。未完成调用标为 `Interrupted`。
 - 可以查看、比较、显式接受、手工编辑或发送已有结果。**缺少背景时禁止原背景重跑／Revise**；选中条目按 `i Copy to current` 复制原稿，保存后再显式运行，使用当前 round 背景。

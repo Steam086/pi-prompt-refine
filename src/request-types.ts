@@ -8,7 +8,7 @@ import type { SelectedPreference } from "./revision-preferences.js";
 
 interface RequestProjectContext { cwd: string; snapshot: ProjectSnapshot; revisionSnapshot?: ProjectSnapshot; config?: ProjectContextConfig }
 export type RefinePhase = "idle" | "generating" | "ready" | "error";
-export type RefineStopReason = "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred" | "pending" | "budget";
+export type RefineStopReason = "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred" | "pending" | "budget" | "network";
 export interface RefineRequestInput {
   draft: string;
   revision?: RevisionInput;
@@ -68,7 +68,7 @@ export interface ControllerState {
   recordId?: number;
   model?: ModelRef;
   thinkingLevel?: ModelThinkingLevel;
-  error?: "timeout" | "failed" | "empty" | "truncated" | "tool-call" | "invalid-output" | "budget";
+  error?: "timeout" | "failed" | "empty" | "truncated" | "tool-call" | "invalid-output" | "budget" | "network";
   budget?: BudgetReport;
   pendingSend: boolean;
   runningCount?: number;

@@ -48,7 +48,7 @@ const text = (value: unknown): value is string => typeof value === "string" && v
 const statuses: RefineRecord["status"][] = ["unsent", "queued", "generating", "generated", "error", "cancelled", "interrupted"];
 const kinds: RefineRecord["kind"][] = ["refine", "revise", "edit"];
 const thinking = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-const errors = ["timeout", "failed", "empty", "truncated", "tool-call", "invalid-output", "budget"];
+const errors = ["timeout", "failed", "empty", "truncated", "tool-call", "invalid-output", "budget", "network"];
 
 function savedUsage(value: unknown): TokenUsage | undefined {
   if (!object(value)) return undefined;

@@ -1,8 +1,11 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import type { Api, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import type { Hello, RunDetail } from "../../src/app/api.js";
 import { extensionHarnessEnvironment, refinement, shortcut, trigger, type Harness } from "../support/extension-harness.js";
 import { flushPromises } from "../support/helpers.js";
+import { requireValue, wireRequest } from "../support/application-wire.js";
 
 const { makeHarness } = extensionHarnessEnvironment();
 
@@ -41,6 +44,55 @@ describe("persistent session-local Refine history", () => {
     await view;
     expect(h.getEditor()).toBe("Saved result");
     expect(h.sent).toEqual([]);
+  });
+
+  it.each([
+    { label: "TLS reset", httpStatus: undefined, message: "fetch failed: Client network socket disconnected before secure TLS connection was established (ECONNRESET)", error: "network" },
+    { label: "socket closure while reading a successful HTTP response", httpStatus: 200, message: "terminated: other side closed (UND_ERR_SOCKET)", error: "network" },
+    { label: "HTTP failure whose body mentions a closed socket", httpStatus: 503, message: "other side closed (UND_ERR_SOCKET)", error: "failed" },
+  ])("persists the classified failure and restores it for $label", async ({ httpStatus, message, error }) => {
+    const h = await makeHarness({ persistHistory: true });
+    const privateDetail = "internal.service.example:443";
+    const usage = { input: 100, output: 10, totalTokens: 110 };
+    h.complete.mockImplementationOnce(async (model: Model<Api>, _context: unknown, options: SimpleStreamOptions) => {
+      if (httpStatus !== undefined) await options.onResponse?.({ status: httpStatus, headers: {} }, model);
+      return { content: [{ type: "text", text: '{"prompt":"Partial output"}' }],
+        stopReason: "error", errorMessage: `${message} ${privateDetail}`, usage };
+    });
+    await trigger(h);
+    await h.reload("resume");
+    const saved = await readFile(path(h), "utf8");
+    expect(JSON.parse(saved).records).toEqual([expect.objectContaining({ status: "error", error, usage: expect.objectContaining(usage) })]);
+    expect(saved).not.toContain(privateDetail);
+    expect(saved).not.toContain("Partial output");
+    expect(h.complete).toHaveBeenCalledTimes(1);
+
+    const hello = requireValue(await wireRequest<Hello>(h.events, { action: "hello", clientId: "reader" }));
+    const run = requireValue(await wireRequest<RunDetail>(h.events, {
+      action: "query", binding: hello.binding, query: { method: "run", runId: "run-1" },
+    }));
+    expect(run).toMatchObject({ status: "error", hasOutput: false, archived: true });
+    expect(run.diagnostic).toBe(error === "network" ? "Network transport failed." : "Run error; inspect local diagnostics for details.");
+    expect(JSON.stringify(run)).not.toContain(privateDetail);
+
+    h.holdPanel();
+    const view = h.command("history", h.context);
+    h.panelInput("\x1b[B");
+    expect(h.panelLines(100).join("\n")).toContain(`Error: ${error}`);
+    h.panelInput("q"); h.panelInput("q");
+    await view;
+  });
+
+  it("persists a structured DNS error when the model call rejects", async () => {
+    const h = await makeHarness({ persistHistory: true });
+    const cause = Object.assign(new Error("getaddrinfo ENOTFOUND internal.service.example"), { code: "ENOTFOUND" });
+    h.complete.mockRejectedValueOnce(new TypeError("fetch failed", { cause }));
+    await trigger(h);
+    await h.reload("resume");
+    const saved = await readFile(path(h), "utf8");
+    expect(JSON.parse(saved).records[0]).toMatchObject({ status: "error", error: "network" });
+    expect(saved).not.toContain("internal.service.example");
+    expect(h.complete).toHaveBeenCalledTimes(1);
   });
 
   it("copies a restored original into a fresh round and captures current background only on explicit run", async () => {

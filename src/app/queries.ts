@@ -83,7 +83,8 @@ export function runSummary(record: RefineRecord, version: number, elapsedSeconds
     usage: usageDto(record.usage),
     // Provider diagnostics can contain credentials or paths. Only publish classified status.
     diagnostic: record.error === "timeout" ? "Run timed out." :
-      record.error ? `Run ${record.status}; inspect local diagnostics for details.` : undefined,
+      record.error === "network" ? "Network transport failed." :
+        record.error ? `Run ${record.status}; inspect local diagnostics for details.` : undefined,
     actions: { stop: action(["queued", "generating"].includes(record.status) ? undefined : "not-editable") },
   };
 }

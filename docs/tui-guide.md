@@ -47,6 +47,7 @@ To exclude both conversation history and project context, set either history lim
 
 By default, when Pi uses a session file, Refine stores submitted drafts, results, submitted initial and revision instructions, and run metadata alongside it in `<session-file>.prompt-refine.json`. It does not store unsent drafts, the full captured context, or the provider request payload. Drafts and results can still contain sensitive text. In **Usage**, press `b` to see the storage status and file path.
 
+- **Usage** shows `Error: network` when Pi reports a recognizable transport failure, such as a connection reset, DNS lookup failure, or TLS error. History stores the category alone. The provider's error text and stack are excluded.
 - To stop loading and saving history, set `"historyPersistence": false` in the config and run `/reload`. This does **not** delete existing files.
 - These are plaintext files, not encrypted storage. The sidecar writer requests owner-only permissions (`0600` on POSIX) and limits each session to 100 runs / 2 MiB. Accepting or sending a result can also set a previously unnamed Pi session's title. Clearing Refine history does not clear Pi metadata, the provider's records, or backups.
 - To remove the saved history for the current session, run `/refine history clear` and confirm. This leaves the Pi conversation and in-memory Refine records intact, and pauses saving until the next reload.

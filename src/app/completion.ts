@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { UserMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { RefineConfig } from "../config.js";
 import type { RefineController } from "../controller.js";
 import type { RefineRequest, RefineCompletion } from "../request-types.js";
@@ -10,7 +10,7 @@ import { assembleProjectContext, collectDirectoryContext, type TreeSnapshot } fr
 import { readRunUsage } from "../usage.js";
 import { displayModel, sameModel } from "./model-utils.js";
 import { directoryJobKeys, type createContextJobs } from "./context-jobs.js";
-import { finalResponseText } from "./provider-response.js";
+import { finalResponseText, isTransportError } from "./provider-response.js";
 
 type CompletionContext = { sessionManager: Pick<ExtensionContext["sessionManager"], "getSessionId">;
   modelRegistry: Pick<ExtensionContext["modelRegistry"], "find" | "getAvailable" | "isUsingOAuth" | "streamSimple"> };
@@ -93,17 +93,26 @@ export function createCompletion<Context extends CompletionContext>({ config, ge
       subscription: ctx.modelRegistry.isUsingOAuth(model),
     };
     onOptimizerRequest();
-    const response = await ctx.modelRegistry.streamSimple(
-      model,
-      { systemPrompt, messages: [userMessage], tools: [] },
-      {
-        signal,
-        maxTokens: budget.maxTokens,
-        ...(budget.thinkingBudgets ? { thinkingBudgets: budget.thinkingBudgets } : {}),
-        ...(request.thinkingLevel && request.thinkingLevel !== "off" ? { reasoning: request.thinkingLevel } : {}),
-      },
-    ).result();
-    const stopReason = response.content.some((block) => block.type === "toolCall") ? "toolUse" : response.stopReason;
+    let response: AssistantMessage;
+    let httpStatus: number | undefined;
+    try {
+      response = await ctx.modelRegistry.streamSimple(
+        model,
+        { systemPrompt, messages: [userMessage], tools: [] },
+        {
+          signal,
+          onResponse: ({ status }) => { httpStatus = status; },
+          maxTokens: budget.maxTokens,
+          ...(budget.thinkingBudgets ? { thinkingBudgets: budget.thinkingBudgets } : {}),
+          ...(request.thinkingLevel && request.thinkingLevel !== "off" ? { reasoning: request.thinkingLevel } : {}),
+        },
+      ).result();
+    } catch (error) {
+      if (isTransportError(error, httpStatus)) return { text: "", stopReason: "network" };
+      throw error;
+    }
+    const stopReason = response.stopReason === "error" && isTransportError(response.errorMessage, httpStatus) ? "network"
+      : response.content.some((block) => block.type === "toolCall") ? "toolUse" : response.stopReason;
     const parsed = stopReason === "stop" ? parseRefineOutput(finalResponseText(response.content)) : undefined;
     const guarded = parsed && !request.revision ? preserveDroppedTuiReference(request.draft, parsed.text, request.editingInstruction) : undefined;
     if (guarded?.restored && !signal.aborted) notifyIfSameSession(request.sessionId,

@@ -19,6 +19,7 @@ function errorStatus(state: ControllerState): string {
   switch (state.error) {
     case "budget": return `⚠ ${state.budget?.message ?? "Request does not fit the model budget. Draft unchanged."}`;
     case "timeout": return "Refine: timed out. Retry.";
+    case "network": return "Refine: network connection failed. Retry.";
     case "empty": return "Refine: no prompt returned. Retry.";
     case "truncated": return `Refine: ${truncatedOutputHint(state.usage)}`;
     case "tool-call": return "Refine: unexpected tool call. Retry.";

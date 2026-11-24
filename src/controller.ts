@@ -6,7 +6,7 @@ import { composeRevision, preferenceKey, preferenceValidation, uniquePreferences
 
 import type {
   RefineRequestInput, RefineRequest, Candidate, CandidateToken, RestoreSnapshot, RestoreToken,
-  RequestSource, ControllerState, Scheduler, RefineControllerOptions, TriggerResult,
+  RequestSource, ControllerState, Scheduler, RefineControllerOptions, RefineStopReason, TriggerResult,
 } from "./request-types.js";
 export type {
   RefinePhase, RefineStopReason, RefineRequestInput, RefineRequest, RefineCompletion,
@@ -26,6 +26,9 @@ interface PendingSend { token: CandidateToken; text: string; timeout: unknown }
 const defaultScheduler: Scheduler = {
   setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
   clearTimeout: (handle) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>),
+};
+const stopErrors: Partial<Record<RefineStopReason, ControllerState["error"]>> = {
+  budget: "budget", length: "truncated", toolUse: "tool-call", network: "network",
 };
 function sameModel(a: ModelRef | undefined, b: ModelRef | undefined): boolean { return a?.provider === b?.provider && a?.id === b?.id; }
 function fingerprint(input: RefineRequestInput): string {
@@ -560,7 +563,7 @@ export class RefineController {
         return;
       }
       this.journal.update(active.request.recordId, { usage: result.usage });
-      const error = result.stopReason !== "stop" ? (result.stopReason === "budget" ? "budget" : result.stopReason === "length" ? "truncated" : result.stopReason === "toolUse" ? "tool-call" : "failed")
+      const error = result.stopReason !== "stop" ? stopErrors[result.stopReason] ?? "failed"
         : result.invalidOutput ? "invalid-output" : !result.text.trim() ? "empty"
           : result.text.length > active.maxOutputChars! ? "truncated" : undefined;
       if (error) { this.finishError(active, error); return; }
