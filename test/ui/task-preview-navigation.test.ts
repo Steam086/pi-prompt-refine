@@ -25,6 +25,7 @@ describe.each(["dark", "light"])("run preview navigation (%s)", theme => {
     expect(frame()).toMatch(/›[^\n]*#3[^\n]*✓ Done/);
     expect(frame()).toContain("billing");
     expect(frame()).toContain("#3 · alpha");
+    expect(panel.render(84).join("\n")).toContain(f.theme.fg("text", "#3") + f.theme.fg("muted", " · alpha"));
     expect(frame()).toContain("Result 3");
     expect(frame()).toContain("a: Editor only");
     expect(frame()).not.toContain("Thinking xhigh");

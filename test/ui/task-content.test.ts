@@ -41,9 +41,44 @@ describe("Tasks preview hierarchy", () => {
     expect(pane.lines.join("\n")).toContain(theme.fg("text", "# Literal heading 中文😀").replace(/\x1b\[39m$/u, ""));
     expect(pane.lines.slice(4).join("\n")).not.toContain("\x1b[1m");
     const renderedRun = content.pane({ ...row, original: false }, 105, 30, previewOptions).lines.join("\n");
-    expect(stripVTControlCharacters(renderedRun).split("\n").map(line => line.trimEnd())).toEqual([run.input.model.id, ...run.candidate!.text.split("\n")]);
+    expect(stripVTControlCharacters(renderedRun).split("\n").map(line => line.trimEnd())).toEqual([run.input.model.id, "", ...run.candidate!.text.split("\n")]);
     expect(renderedRun).not.toContain(theme.bold("23s"));
     expect(renderedRun).not.toContain(theme.fg("success", "✓ Done"));
+  });
+
+  it.each(["dark", "light"])("uses the same document spacing and palette while running and after completion in %s", (name) => {
+    const theme = getThemeByName(name)!;
+    vi.spyOn(theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
+    const content = new TaskContent(theme);
+    const run = record();
+    run.input.draft = "第一段 中文😀 **literal**\n\n第二段\x1b[2J";
+    run.candidate!.text = run.input.draft;
+    const running = { ...run, status: "generating" as const, candidate: undefined };
+    const plain = (line: string) => stripVTControlCharacters(line).trimEnd();
+    for (const width of [40, 105]) {
+      for (const current of [running, run]) {
+        const row = { record: current, original: false, records: [current] };
+        const { lines } = content.pane(row, width, 24, previewOptions);
+        expect(lines[0]).toContain(theme.fg("text", run.input.model.id));
+        expect(lines[0]).not.toContain("\x1b[1m");
+        const start = lines.findIndex((line) => plain(line).startsWith("第一段"));
+        expect(plain(lines[start - 1]!)).toBe("");
+        expect(plain(lines[start - 2]!)).toBe(current === running ? "Original prompt" : run.input.model.id);
+        expect(lines.slice(start).map(plain).join("\n")).toBe(sanitizeTerminalText(run.input.draft));
+        expect(lines[start]).toContain(theme.getFgAnsi("text") + "第一段");
+        expect(lines.at(-1)).toContain(theme.getFgAnsi("text") + "第二段");
+        expect(lines.slice(start).join("\n")).not.toMatch(/\x1b\[(?:1m|2J)/u);
+        expect(lines.map(plain).slice(0, start).join("\n")).not.toContain("─");
+        if (current === running) {
+          expect(lines[0]).toContain(theme.fg("accent", "◌ Running"));
+          expect(lines[1]).toContain(theme.fg("muted", "openai-codex · Thinking xhigh"));
+          expect(lines[2]).toContain(theme.fg("muted", "23s"));
+        }
+        const short = content.pane(row, width, start + 1, previewOptions);
+        expect(short.lines[start - 1]).toContain(theme.getFgAnsi("text") + "第一段");
+        expect(short.lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+      }
+    }
   });
 
   it.each(["dark", "light"])("wraps without editing paragraphs, code, paths or long strings in %s", (name) => {

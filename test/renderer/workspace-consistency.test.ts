@@ -133,6 +133,30 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
       try {
         tui.start();
         const previewFrame = passivePage("Preview", "Preview", ["Enter", "Inspect"]);
+        input("\t");
+        const selectedRun = records[0]!;
+        const result = selectedRun.candidate!;
+        const summaryText = (lines: string[]) => lines.map((line) => strip(line).slice(1, -1).split(" │ ").at(-1)!.trim());
+        selectedRun.status = "generating";
+        selectedRun.candidate = undefined;
+        const runningFrame = frame("Preview / running", false);
+        const runningSummary = summaryText(runningFrame);
+        const originalAt = runningSummary.indexOf(selectedRun.input.draft);
+        expect(originalAt).toBeGreaterThan(1);
+        expect(runningSummary.slice(originalAt - 2, originalAt)).toEqual(["Original prompt", ""]);
+        expect(runningFrame.join("\n")).toContain(theme.fg("accent", "◌ Running"));
+        selectedRun.status = "generated";
+        selectedRun.candidate = result;
+        const completedFrame = frame("Preview / completed", false);
+        const completedSummary = summaryText(completedFrame);
+        const resultAt = completedSummary.indexOf("Result 1");
+        expect(resultAt).toBeGreaterThan(1);
+        expect(completedSummary.slice(resultAt - 2, resultAt)).toEqual(["model-1", ""]);
+        expect(completedFrame[resultAt - 2]).toContain(theme.fg("text", "model-1"));
+        expect(completedFrame[resultAt]).toContain(theme.getFgAnsi("text") + "Result 1");
+        expect(completedFrame.join("\n")).toContain("↑↓ scroll");
+        expect(position.selectedId).toBe(1);
+        input("\t");
         input("\x1b[C");
         const usageFrame = passivePage("Usage", "Usage", ["Enter", "Inspect"]);
         for (const browse of [previewFrame, usageFrame]) {

@@ -91,12 +91,13 @@ export class TaskContent {
     const status = row.original && record.status !== "unsent"
       ? this.muted(`${records.filter((r) => r.status !== "unsent").length} runs · ${records.filter(pending).length} active`)
       : this.styledBadge(record);
-    const titleText = previewDetails ? this.theme.fg("text", sanitizeTerminalText(title)) : this.heading(title);
-    const resultPreview = options.taskPreview && !row.original && record.status === "generated" && !!record.candidate;
+    const runPreview = options.taskPreview && !row.original;
+    const titleText = previewDetails || runPreview ? this.theme.fg("text", sanitizeTerminalText(title)) : this.heading(title);
+    const resultPreview = runPreview && record.status === "generated" && !!record.candidate;
     // A compact tree can truncate same-name runs before the provider. Keep
     // that distinction in the preview without repeating the whole run header.
     const previewIdentity = resultPreview && records.some(({ input }) => input.model.id === record.input.model.id && input.model.provider !== record.input.model.provider)
-      ? this.heading(`#${record.id} · ${record.input.model.provider}`) : titleText;
+      ? this.theme.fg("text", `#${record.id}`) + this.muted(` · ${record.input.model.provider}`) : titleText;
     const header = resultPreview ? [truncateToWidth(previewIdentity, width, "…")] : visibleWidth(titleText) + visibleWidth(status) + 3 <= width
       ? [titleText + (previewDetails ? this.muted(" · ") : " ".repeat(width - visibleWidth(titleText) - visibleWidth(status))) + status]
       : [truncateToWidth(titleText, width, "…"), status];
@@ -139,8 +140,11 @@ export class TaskContent {
     const header = this.paneHeader(row, width, options, previewDetails);
     if (previewDetails) return this.previewDetails(row, width, height, header, options);
     const original = row.original || options.original || !record.candidate;
+    const runPreview = options.taskPreview && !row.original;
+    const bodyWidth = options.taskPreview ? Math.min(width, TASK_PREVIEW_READING_WIDTH) : width;
+    if (runPreview && original) header.push(...this.wrapped(this.heading("Original prompt"), bodyWidth));
     const body = [
-      ...(!row.original && !(options.taskPreview && !original) ? [this.heading(original ? "Original prompt" : record.kind === "revise" ? "Revised result" : "Result"), ""] : []),
+      ...(!row.original && !runPreview ? [this.heading(original ? "Original prompt" : record.kind === "revise" ? "Revised result" : "Result"), ""] : []),
       original && !record.input.draft ? this.muted("Empty prompt · ") + formatKeyHint(["i", "Edit original"], this.theme)
         : this.theme.fg("text", sanitizeTerminalText(original ? record.input.draft : record.candidate!.text)),
     ];
@@ -194,13 +198,9 @@ export class TaskContent {
       if (record.sentAt !== undefined) body.push(this.muted(`Pi started send: ${new Date(record.sentAt).toLocaleTimeString()}`));
     }
     const fixed = header.slice(0, Math.max(0, height - 2));
-    const bodyWidth = options.taskPreview ? Math.min(width, TASK_PREVIEW_READING_WIDTH) : width;
-    // Keep title + metadata compact, then separate the literal document with one
-    // muted rule and one reading gap. Short panes keep their existing body space.
-    if (!options.taskPreview || original) {
-      if (options.taskPreview && height >= header.length + 5) fixed.push(this.muted("─".repeat(bodyWidth)), "");
-      else if (height > fixed.length + 2 || (row.original && height === fixed.length + 2)) fixed.push("");
-    }
+    // Run previews use a single reading gap when space permits.
+    if (options.taskPreview && row.original && height >= header.length + 5) fixed.push(this.muted("─".repeat(bodyWidth)), "");
+    else if (height > fixed.length + 2 || (row.original && height === fixed.length + 2)) fixed.push("");
     const available = Math.max(1, height - fixed.length);
     // Overflow diagnostics belong to the scrollable document, never a clipped header.
     const lines = this.wrapped([...header.slice(Math.max(0, height - 2)), ...body].join("\n"), bodyWidth);
