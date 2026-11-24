@@ -2,13 +2,11 @@
 
 ## 范围与隔离
 
-操作者明确批准了独立临时实例。使用 `env` 白名单等价的干净子进程环境：单独 HOME、Pi agent/session 目录、PI WEB config/data 目录、Unix socket、随机 loopback 端口和 Chrome profile；不继承生产凭据或 daemon 连接。
+在授权的独立临时实例中验收。使用单独的 Pi 与宿主数据、Unix socket、随机 loopback 端口和 Chrome profile。模型请求只到确定性 stub。
 
 - 实际启动安装的 pi-web **1.202611.1**，显式选择 Pi SDK **1.5.2**，Node **24.18.0**。
 - Chrome **156.0.8078.47**，使用已有浏览器的 CDP，无新增 browser runner/依赖。
-- Web 安装候选仅含 manifest 和双构建 `dist`，没有 node_modules；核心使用候选源码与既有 `ignore` 运行依赖。两者通过正常宿主加载，不替换 capability。
-- 配置仅提供 loopback OpenAI-compatible **确定性 stub**，没有真实 Provider、真实密钥或任务执行。正常验收调用均为 Refine 请求且 tools 数为 0。
-- 初始环境排查发现核心源码需要 `ignore`；补齐隔离部署依赖。测试 stub 也调整为接收 SDK 的 text-block 数组。一次准备阶段误将内置 `/reload` 发给 raw prompt 路由，被本地 stub 拒绝；后续重载改用已注册的仅测试扩展命令 `ctx.reload()`。它们不是产品回归修复，也没有访问真实 Provider。
+- Web 候选经真实宿主加载，沿用公开 session-events capability。Refine 请求的 tools 数为 0。重载通过测试扩展调用 `ctx.reload()`。
 
 ## 自动化/浏览器证据
 
@@ -38,13 +36,9 @@
 
 ### 浏览器实测发现并修复的缺陷
 
-启动回执可能早于 snapshot 中的下拉选项。直接给 `<select>.value` 赋新 run ID 会被浏览器清空，随后 Read result 无目标，仍显示初次读取的 generating 内容。
+启动回执先于下拉选项时，浏览器会清空未匹配的选择值。为保留运行目标，将 run ID 与原 Binding 独立保存。补充[桥接回归](../packages/pi-web/test/bridge.test.mjs)后，实际浏览器闭环复验通过。
 
-现在独立保留所选 run ID 及 Binding，选项到达后恢复显示；Binding 更换时清除旧目标，不把其身份带入新作用域。增加 Node 回归测试模拟原生 select 的未匹配值行为，再重跑真实浏览器闭环通过。Web 离线测试增至 **8/8**。
-
-另外，根据准备阶段未知斜杠可能进入普通 prompt 路径的观察，为命名冲突导致不可用的 `/refine-api` 补充 input handled 兜底，避免短名称退化为 Agent 请求。该错误分支由根集成回归覆盖，未另做真实宿主命名冲突注入。
-
-一次后台页面截图超时后，显式将目标页置前再截图；最终四种尺寸/主题组合全部通过。截图检查不代替人工视觉或 IME 验收。
+命令命名冲突进入普通 prompt 的风险由[根集成测试](../test/integration/slash-api.test.ts)覆盖。该分支未在真实宿主注入。截图覆盖两种尺寸和主题，人工视觉和 IME 仍需复验。
 
 ## 未验收/不在本次授权内
 
@@ -54,11 +48,9 @@
 - 当前生产实例的插件部署/重启；未触碰其配置、凭据、会话或终端。
 - Web accept/send/restore，以及设计中后续完整 Settings/Preferences 能力，不属于本片。
 
-因此结论是：**首片离线回归和授权范围内的隔离真实宿主/浏览器自动化通过；不标记全部三端/生产验收完成。**
-
 ## 证据与清理
 
-证据保存在隔离环境的临时目录，不随仓库或 npm 包分发。保留 `acceptance.json`、`host-checks.json`、`browser-final.json`、配对诊断、脚本、日志与截图；临时进程、socket、浏览器 profile、agent/auth/session/project/data 状态及候选副本均已清理。测试脚本未作为默认 CI 或新测试框架引入。
+记录、脚本、日志与截图保存在当次隔离环境的本地证据中。临时运行状态和候选副本已清理。
 
 最终候选实际配对 revision：`sha256:a7e309478c1184bd97e379f3e889f77f7b2c6f15da954f2930c55e37184eeab7`（宿主包内容摘要，不是 Git commit）。
 

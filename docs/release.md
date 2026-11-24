@@ -1,6 +1,6 @@
 # Publish the native Pi package
 
-Publish **the repository root**. The `pi-package` keyword makes the public npm package eligible for discovery in Pi's package catalog as a third-party extension. Pi documents this route without a separate catalog submission. The package already declares `src/extension.ts` in `pi.extensions`. Pi loads the TypeScript source, supplies the Pi peers and installs `ignore`. Keep both reviewed example JSON files because the global starter library reads `examples/prompt-refine-preferences.json` at runtime. The repository documents the experimental [Pi Web integration](../packages/pi-web/README.md) and [RPC slash commands for unmodified T3 Code](rpc-slash-verification.md). T3 Code uses the same Pi extension and needs no host patch. [Pi package format](https://docs.pi.dev/latest/packages) · [Pi package catalog](https://pi.dev/packages) · [Implementation walkthrough](architecture.md)
+Publish the repository root as the native Pi package. Keep the host peers and the bundled starter library JSON required at runtime. Use the [manifest](../package.json) and [pack checker](../scripts/check-pack.mjs) to review the package contents. [Pi package format](https://docs.pi.dev/latest/packages)
 
 ## 1. Review the candidate before making it public
 
@@ -35,16 +35,7 @@ sh scripts/smoke-pack.sh "$archive"
 npm publish "$archive" --dry-run --ignore-scripts --registry=https://registry.npmjs.org/
 ```
 
-The pack check compares npm's file list with Git-tracked TypeScript and a short list of public files, and checks common credential and path patterns with values withheld. The smoke script installs the tarball in a disposable consumer project without Pi peer copies. It registers the package with the locked Pi CLI, starts a session in RPC mode, checks both registered commands, verifies `/refine-api status` leaves the transcript empty, checks the bundled starter JSON and removes the registration. Use the separate manual checks for terminal input and model behavior.
-
-### 0.1.0 review on 2026-11-22
-
-- The November 21 baseline passed both hosted CI jobs. Clean local installs with Pi 1.6.0 on Linux x86-64 passed typecheck and the default suite on Node 22.19.0 and 24.18.0, each with 1,339 passed and 35 opt-in skips. A pinned Git install loaded both commands in an isolated Pi profile and was removed successfully.
-- The 68-file tarball built from the local review changes passed the package allowlist, the updated smoke test on both Node versions, and `npm publish --dry-run`. The dry run reported that a real publish requires login. A Linux pseudo-terminal also opened `/refine` and verified the starter Preference in a new profile without credentials.
-- The maintainer reports that an earlier version underwent manual acceptance on macOS. Record the tested revision and environment if available. Use that run as the baseline when reviewing changes to the native workflow or Pi host for this release.
-- The public-registry audits for the production and full root trees reported zero advisories. The registry lookup and Pi catalog page both returned 404 for `pi-prompt-refine`. Pi 1.6.0 was the npm `latest` host at review time.
-- A redacted Gitleaks scan of local Git refs flagged a T3 keybinding identifier as a generic key. Source review confirmed it is a command identifier. A history review found old local paths in earlier versions of documentation and a test fixture. The release tree already uses public examples in those places.
-- GitHub private vulnerability reporting was disabled at review time. The existing security policy supplies a fallback for requesting a private channel. [GitHub private vulnerability reporting settings](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository)
+Use the [pack checker](../scripts/check-pack.mjs) for contents and the [tarball smoke script](../scripts/smoke-pack.sh) for isolated install, load and removal. Manual checks cover terminal input and model behavior. [Earlier candidate evidence](history.md)
 
 ## 3. Owner decisions and final acceptance
 
@@ -77,7 +68,7 @@ The pack check compares npm's file list with Git-tracked TypeScript and a short 
 
 1. In the npm package settings, add a GitHub Actions trusted publisher for user `Steam086`, repository `pi-prompt-refine`, and workflow filename `publish.yml`. Leave Environment name blank and select **Allow npm publish**. Complete the first successful publish within two days of creating the configuration. [npm trusted publishing setup](https://docs.npmjs.com/trusted-publishers/#configuring-trusted-publishing)
 2. Set the root package and lockfile to the next version and update the changelog. Review the release commit and confirm its checks pass. Pushing the matching stable tag, such as `v0.1.1`, authorizes publication to npm's `latest` channel.
-3. The [publish workflow](../.github/workflows/publish.yml) checks the tag against the manifest, runs the native checks and tarball smoke test on both Node targets, then publishes the Node 24 artifact. Its publish job compares the tarball with the recorded integrity before authenticating through OIDC. Download `npm-package` from the workflow run for its `pack.json` and tarball.
+3. Use the [publish workflow](../.github/workflows/publish.yml) for the exact build and publishing steps. Retain its `npm-package` artifact and `pack.json` for public verification.
 
 ### Verify the public package
 
