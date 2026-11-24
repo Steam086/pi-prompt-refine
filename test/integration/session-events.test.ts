@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import type { Hello, Receipt, RunDetail, Snapshot, TaskDetail } from "../../src/app/api.js";
 import { INVALIDATION_EVENT, REQUEST_EVENT, RESPONSE_EVENT } from "../../src/adapters/wire.js";
 import { extensionHarnessEnvironment } from "../support/extension-harness.js";
@@ -32,6 +32,46 @@ describe("session-local application transport", () => {
     expect(h.internalMessages).toEqual([]);
     expect(h.sessionWrites).toEqual([]);
     expect(h.customCalls()).toBe(0);
+  });
+
+  it.each([
+    { action: "keep", name: "returns the existing Unsent draft when capturing the same text again" },
+    { action: "discard", name: "captures the same text as a new draft after discarding the original" },
+    { action: "edit", name: "captures the original text as a new draft while keeping the edited draft" },
+  ] as const)("$name", async ({ action }) => {
+    const h = await makeHarness({ mode: "rpc" });
+    const hello = requireValue(await wireRequest<Hello>(h.events, { action: "hello", clientId: "capture" }));
+    const capture = () => wireMutation<Receipt>(h.events, hello, { method: "captureDraft", text: "A" });
+    const first = requireValue(await capture());
+    assert(first.outcome === "captured");
+    const target = { taskId: first.taskId, expectedVersion: first.version };
+
+    if (action === "discard") {
+      const removed = requireValue(await wireMutation<Receipt>(h.events, hello, { method: "discardDraft", ...target }));
+      expect(removed).toMatchObject({ outcome: "removed", taskId: first.taskId });
+    } else if (action === "edit") {
+      const updated = requireValue(await wireMutation<Receipt>(h.events, hello, { method: "updateDraft", ...target, text: "B" }));
+      expect(updated).toMatchObject({ outcome: "updated", taskId: first.taskId });
+    }
+
+    const second = requireValue(await capture());
+    const snapshot = requireValue(await wireRequest<Snapshot>(h.events, {
+      action: "query", binding: hello.binding, query: { method: "snapshot", scope: "current" },
+    }));
+    expect(h.complete).not.toHaveBeenCalled();
+    expect(snapshot.runs).toEqual([]);
+    if (action === "keep") {
+      expect(second).toEqual({ outcome: "duplicate", taskId: first.taskId, runId: null });
+    } else {
+      expect(second).toMatchObject({ outcome: "captured", taskId: expect.any(String) });
+    }
+    assert("taskId" in second && second.taskId !== null);
+    if (action !== "keep") expect(second.taskId).not.toBe(first.taskId);
+    expect(snapshot.tasks).toHaveLength(action === "edit" ? 2 : 1);
+    expect(snapshot.tasks).toContainEqual(expect.objectContaining({ id: second.taskId, excerpt: "A" }));
+    if (action === "edit") {
+      expect(snapshot.tasks).toContainEqual(expect.objectContaining({ id: first.taskId, excerpt: "B" }));
+    }
   });
 
   it("shares mutations with native TUI, but does not accept another runtime's binding", async () => {
