@@ -8,6 +8,37 @@ import { flushPromises } from "../support/helpers.js";
 
 const { makeHarness } = extensionHarnessEnvironment();
 
+describe("provider output phases", () => {
+  function phased(phase: "commentary" | "final_answer", text: string) {
+    return { type: "text", text, textSignature: JSON.stringify({ v: 1, id: `msg_${phase}`, phase }) };
+  }
+
+  it.each(["final_answer", "unphased"] as const)("reads %s output without including commentary", async (phase) => {
+    const h = await makeHarness();
+    const final = '{"prompt":"Usable rewrite"}';
+    h.complete.mockResolvedValueOnce({ stopReason: "stop", content: [
+      phased("commentary", "I’ll look at the draft."),
+      ...(phase === "final_answer" ? [{ type: "text", text: "An unphased preamble." }, phased(phase, final)]
+        : [{ type: "text", text: final, textSignature: "legacy-message-id" }]),
+    ] });
+    await trigger(h);
+    await panelAction(h, "a");
+    expect(h.editorWrites).toEqual(["Usable rewrite"]);
+    expect(h.complete).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["missing", "malformed"] as const)("rejects %s final output even if commentary contains JSON", async (failure) => {
+    const h = await makeHarness();
+    h.complete.mockResolvedValueOnce({ stopReason: "stop", content: [
+      phased("commentary", '{"prompt":"Not a final answer"}'),
+      ...(failure === "malformed" ? [phased("final_answer", "Not JSON")] : []),
+    ] });
+    await trigger(h);
+    expect(h.widgetLines().join("\n")).toContain("1 failed");
+    expect(h.editorWrites).toEqual([]);
+  });
+});
+
 describe("source preservation in the provider path", () => {
   it("retains the complete draft and warns when a model discards a pasted TUI reference", async () => {
     const h = await makeHarness({ persistHistory: true });

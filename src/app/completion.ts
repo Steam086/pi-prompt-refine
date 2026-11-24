@@ -10,6 +10,7 @@ import { assembleProjectContext, collectDirectoryContext, type TreeSnapshot } fr
 import { readRunUsage } from "../usage.js";
 import { displayModel, sameModel } from "./model-utils.js";
 import { directoryJobKeys, type createContextJobs } from "./context-jobs.js";
+import { finalResponseText } from "./provider-response.js";
 
 type CompletionContext = { sessionManager: Pick<ExtensionContext["sessionManager"], "getSessionId">;
   modelRegistry: Pick<ExtensionContext["modelRegistry"], "find" | "getAvailable" | "isUsingOAuth" | "streamSimple"> };
@@ -102,12 +103,8 @@ export function createCompletion<Context extends CompletionContext>({ config, ge
         ...(request.thinkingLevel && request.thinkingLevel !== "off" ? { reasoning: request.thinkingLevel } : {}),
       },
     ).result();
-    const text = response.content
-      .filter((block): block is { type: "text"; text: string } => block.type === "text")
-      .map((block) => block.text)
-      .join("\n");
     const stopReason = response.content.some((block) => block.type === "toolCall") ? "toolUse" : response.stopReason;
-    const parsed = stopReason === "stop" ? parseRefineOutput(text) : undefined;
+    const parsed = stopReason === "stop" ? parseRefineOutput(finalResponseText(response.content)) : undefined;
     const guarded = parsed && !request.revision ? preserveDroppedTuiReference(request.draft, parsed.text, request.editingInstruction) : undefined;
     if (guarded?.restored && !signal.aborted) notifyIfSameSession(request.sessionId,
       `Refine #${request.recordId} omitted most of a pasted TUI reference. Original draft kept; review the result before accepting.`);
