@@ -191,13 +191,9 @@ export class RefineWorkspace implements Component, Focusable {
     if (!options || this.preferencePanel) return;
     const draft = this.revise.preferenceDraft();
     this.preferencePanel = new PreferencePanel(this.tui, this.theme, this.keys, options.repository,
-      draft.selected, draft.freeText, options.maxChars, (selected) => {
-        this.preferencePanel?.dispose(); this.preferencePanel = undefined;
-        // Library writes are committed independently of bringing back selections.
-        void this.inlinePreferences?.refresh();
-        this.revise.bringBackPreferences(selected);
-        this.focused = this.hasFocus;
-        if (!this.disposed) this.tui.requestRender();
+      draft.selected, draft.freeText, options.maxChars, {
+        updateSelection: draft.updateSelection,
+        back: () => { this.revise.focusRequirementsInput(); this.closePreferences(); },
       }, "revise", this.layout);
     this.focused = this.hasFocus;
     this.tui.requestRender();
@@ -212,23 +208,25 @@ export class RefineWorkspace implements Component, Focusable {
       parent?.setNotice("Preferences target changed; reopen Preferences.", "warning");
       return;
     }
+    const save = target.save;
     this.preferencePanel = new PreferencePanel(this.tui, this.theme, this.keys, options.repository,
-      target.selected, "", options.maxChars, (selected) => {
-        if (selected) {
-          const error = target.save?.(selected);
-          // Keep the child's working snapshots available on stale/over-limit failure.
-          if (error) return error;
-        }
-        this.preferencePanel?.dispose(); this.preferencePanel = undefined;
-        void this.inlinePreferences?.refresh();
-        // The live per-original summary is the feedback; a sticky notice could
-        // incorrectly advertise this selection after navigating to another task.
-        if (selected) parent?.setNotice("", "muted");
-        this.focused = this.hasFocus;
-        if (!this.disposed) this.tui.requestRender();
-      }, target.save ? "refine" : "manage", this.layout);
+      target.selected, "", options.maxChars, {
+        updateSelection: save && ((selected) => {
+          const error = save(selected);
+          if (!error) parent?.setNotice("", "muted");
+          return error;
+        }),
+        back: () => this.closePreferences(),
+      }, save ? "refine" : "manage", this.layout);
     this.focused = this.hasFocus;
     this.tui.requestRender();
+  }
+
+  private closePreferences(): void {
+    this.preferencePanel?.dispose(); this.preferencePanel = undefined;
+    void this.inlinePreferences?.refresh();
+    this.focused = this.hasFocus;
+    if (!this.disposed) this.tui.requestRender();
   }
 
   private openOriginal(id?: number): void {

@@ -18,11 +18,12 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
       name: "Default 中文😀\x1b]52;c;unsafe\x07", body: "Keep literal task requirements.\n".repeat(40) };
     let enabled = false;
     const library = () => ({ entries: [entry], errors: {}, projectDefaults: enabled ? ["global:default"] : [] });
+    const updateSelection = vi.fn();
     const setProjectDefault = vi.fn(async (_entry, value) => { enabled = value; return library(); });
     const close = vi.fn();
     const panel = new PreferencePanel(tui, theme, getKeybindings(), {
       load: async () => library(), setProjectDefault, save: vi.fn(), remove: vi.fn(),
-    }, [selectPreference(entry)], "", 16000, close);
+    }, [selectPreference(entry)], "", 16000, { back: close, updateSelection });
     const settle = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); };
     const render = () => {
       tui.renderNow();
@@ -34,16 +35,19 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
     };
     try {
       tui.addChild(panel); tui.setFocus(panel); tui.start(); await settle(); render();
-      input("g"); await settle(); expect(render()).toContain("Project default enabled");
+      input("l"); input("g"); await settle(); expect(render()).toContain("Project default enabled");
       expect(panel.render(100).join("\n")).toContain(theme.fg("muted", "* "));
-      input(" "); expect(render()).toContain("[ ] * Default");
+      input(" "); expect(render()).toContain("[x] * Default");
+      expect(updateSelection).not.toHaveBeenCalled();
+      input("\x1b"); input(" "); expect(render()).toContain("[ ] * Default");
       input("\r"); input("\x1b[6~"); render(); input("\x1b[5~"); input("\x1b");
       for (const [columns, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [100, 40]]) {
         Object.assign(terminal, { columns, rows }); panel.invalidate(); render();
         input("\t"); render(); input("\x1b[Z"); render();
       }
-      input(" "); input("c"); input("\x1b[13;3u");
-      expect(close).toHaveBeenCalledWith([]); expect(enabled).toBe(true);
+      input(" "); input("c");
+      expect(updateSelection).toHaveBeenLastCalledWith([]);
+      input("\x1b"); expect(close).toHaveBeenCalledExactlyOnceWith(); expect(enabled).toBe(true);
       expect(setProjectDefault).toHaveBeenCalledTimes(1);
       expect(writes.join("")).not.toContain("\x1b]52;c;unsafe");
     } finally { panel.dispose(); tui.stop(); vi.useRealTimers(); }
@@ -64,7 +68,7 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
     const close = vi.fn();
     const panel = new PreferencePanel(tui, theme, getKeybindings(), {
       load: async () => ({ errors: {}, entries: [structuredClone(current)] }), save, remove: async () => {},
-    }, [], "", 16000, close);
+    }, [], "", 16000, { back: close }, "manage");
     tui.addChild(panel); tui.setFocus(panel);
     const render = () => {
       tui.renderNow();
@@ -117,7 +121,7 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
     const first: RevisionPreference = { id: "first", version: 1, scope: "project", name: "Keep 中文😀 \x1b]52;c;payload\x07", body: "Original snapshot" };
     const second: RevisionPreference = { id: "second", version: 1, scope: "global", name: "Second", body: "Another snapshot" };
     const entries = [first, second, { ...first, id: "duplicate", scope: "global" as const, name: "Copy 中文😀" }];
-    const close = vi.fn();
+    const close = vi.fn(); const updateSelection = vi.fn();
     let panel = new PreferencePanel(tui, theme, getKeybindings(), {
       load: async () => ({ errors: {}, entries: structuredClone(entries) }),
       save: async (scope, value) => {
@@ -125,7 +129,7 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
         entries.unshift(saved); // Reveal must use identity, not an assumed append position.
         return saved;
       }, remove: async () => {},
-    }, [selectPreference(second), selectPreference(first)], "Reusable 中文 body", 16000, close);
+    }, [selectPreference(second), selectPreference(first)], "Reusable 中文 body", 16000, { back: close, updateSelection });
     tui.addChild(panel); tui.setFocus(panel);
     const render = () => {
       tui.renderNow();
@@ -146,7 +150,7 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
         expect(panel.render(columns!).join("\n")).toContain(theme.fg("warning", "⚠").split("⚠")[0] + "⚠");
       }
       input("/"); input("\x15"); input("Second"); input("\r"); input("s");
-      expect(render()).toContain("Preferences · Selected only");
+      expect(render()).toContain("Selected only ");
       const full = render();
       expect(full.indexOf("[x] Second")).toBeLessThan(full.indexOf("[x] Keep"));
       const initialRedraws = tui.fullRedraws;
@@ -168,7 +172,7 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
         const focused = lines.find((line) => stripVTControlCharacters(line).includes("› [x]"))!;
         expect(focused).toContain(theme.bg("selectedBg", "").split("\x1b[49m")[0]);
       }
-      input("n"); input("Saved 中文😀");
+      input("l"); input("n"); input("Saved 中文😀");
       for (const field of ["Name", "Instruction", "Scope", "Type", "Description", "Save"]) {
         Object.assign(terminal, { columns: 100, rows: 40 }); panel.invalidate();
         expect(render()).toContain(`Focus: ${field}`);
@@ -189,9 +193,10 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
         kind: "task", description: "Saved 中文😀", activation: "manual",
       });
       input("\r"); expect(render()).toContain("project · returned-identity");
-      input("\x1b"); input("\x1b[13;3u");
-      expect(close).toHaveBeenCalledWith([selectPreference(second), selectPreference(first)]);
-      // The same real renderer hosts management-only access with frozen snapshots.
+      input("\x1b"); input("\x1b");
+      expect(render()).toContain("2 selected");
+      expect(updateSelection).not.toHaveBeenCalled();
+      input("\x1b"); expect(close).toHaveBeenCalledExactlyOnceWith();
       panel.dispose(); tui.removeChild(panel);
       const manageClose = vi.fn();
       let current = [{ ...first, version: 2, body: "Current library 中文😀" }];
@@ -204,10 +209,10 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
           current = [saved]; return saved;
         },
         remove: async () => { current = []; },
-      }, [selectPreference(first)], "", 16000, manageClose, "manage");
+      }, [selectPreference(first)], "", 16000, { back: manageClose }, "manage");
       tui.addChild(panel); tui.setFocus(panel); await Promise.resolve();
-      expect(render()).toContain("1 frozen snapshots");
-      expect(render()).not.toContain("Bring back"); expect(render()).not.toContain("Space Select");
+      expect(render()).toContain("1 selected (read-only)");
+      expect(render()).not.toContain("Bring back"); expect(render()).not.toContain("Space Toggle");
       input(" "); input("\x1b[13;3u"); expect(manageClose).not.toHaveBeenCalled();
       input("s"); input("\r");
       expect(render()).toContain("Selected snapshot"); expect(render()).toContain("Current library entry");

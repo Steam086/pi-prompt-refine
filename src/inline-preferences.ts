@@ -263,7 +263,7 @@ export class InlinePreferences {
     const entry = this.highlighted(target.selected, position);
     const entries = this.entries(target.selected, position);
     if (!entry) {
-      if (result.length < height) result.push(muted(this.loading ? "Loading preferences…" : position.search.getValue() ? "No matches · / Search" : errors.length ? "Selected snapshots remain available." : "No preferences · p Add / manage"));
+      if (result.length < height) result.push(muted(this.loading ? "Loading preferences…" : position.search.getValue() ? "No matches · / Search" : errors.length ? "Selected snapshots remain available." : "No preferences · p More"));
       return result;
     }
     const available = height - result.length;

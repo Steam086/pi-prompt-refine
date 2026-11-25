@@ -48,4 +48,42 @@ describe.each(["dark", "light"])("run preview navigation (%s)", theme => {
     expect(wide[at + 1]).toContain("#1 · alpha");
     expect(wide.slice(0, at).join("\n")).toContain("privacy");
   });
+
+  it("keeps the original's wide Preview excerpt stable on its run, without changing Usage", () => {
+    const run = record(3);
+    run.input.draft = "先检查这个显示问题，再区分原稿摘要和请求结果。😀\x1b[2J ".repeat(5);
+    run.input.draft = `原稿开头 ${run.input.draft} 原稿结尾`;
+    for (const usage of [false, true]) {
+      const f = create(theme, usage, [run]);
+      f.position.selectedTaskId = run.taskId;
+      const panel = new TaskPanel(f.actions, f.theme, () => f.size.rows, getKeybindings(), usage, f.position,
+        width => workspaceLayout(width, f.size.rows));
+      for (const [columns, rows, spacious] of [[160, 50, true], [100, 24, false], [118, 40, true], [160, 50, true]] as const) {
+        f.size.rows = rows;
+        const split = f.theme.fg("muted", " │ ");
+        const left = () => panel.render(columns).filter(line => line.includes(split)).map(line => line.split(split)[0]!);
+        const parent = left();
+        panel.handleInput("\x1b[B");
+        const child = left();
+        panel.handleInput("\x1b[A");
+        expect(left()).toEqual(parent);
+        const plain = (lines: string[]) => lines.map(line => stripVTControlCharacters(line).trim());
+        const first = plain(parent), second = plain(child);
+        for (const row of [...parent, ...child]) expect(row).not.toContain("\x1b[2J");
+        const runAt = spacious ? 3 : 1;
+        expect(first[runAt]).toContain("model-3");
+        expect(second[runAt]).toMatch(/^› └─ model-3/);
+        if (!spacious) continue;
+        expect(first[0]).toMatch(/^› ▾ Original prompt/);
+        expect(first.slice(1, 3)).toEqual(second.slice(1, 3));
+        if (usage) expect(first[2]).toBe("│");
+        else {
+          expect(first[2]).toMatch(/^│ \S/);
+          expect(parent[2]).toContain(f.theme.bg("selectedBg", "probe").split("probe")[0]);
+        }
+      }
+      expect(f.actions.run).not.toHaveBeenCalled();
+      expect(f.actions.activate).not.toHaveBeenCalled();
+    }
+  });
 });

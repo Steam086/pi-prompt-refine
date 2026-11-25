@@ -4,7 +4,7 @@
 
 在同一个工作区内先加载 Unsent 内联库，再经结果的 Revise → Preferences 提交 Add / Edit / Delete，关闭子页后原内联库没有刷新。即使取消子页的**选择**，之前提交的**库写入**也已生效，因此取消路径同样必须刷新。
 
-刷新可用条目时保留已选快照和当前操作目标。Add／Edit／Delete 经取消选择与带回返回的边界由[跨入口测试](../test/integration/extension-preferences.test.ts)覆盖。
+刷新可用条目时保留已选快照和当前操作目标。库管理不改变当前选择、Esc 返回保留勾选的行为由[跨入口测试](../test/integration/extension-preferences.test.ts)覆盖。
 
 ## 问题 2：目标风险尚未证实，不删除历史依据
 

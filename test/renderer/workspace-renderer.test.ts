@@ -155,7 +155,7 @@ describe("workspace terminal rendering", () => {
       expect(inlineFrame.every((line) => visibleWidth(line) <= columns)).toBe(true);
       input("\x1b"); input("p"); await Promise.resolve();
       const callsBefore = run.mock.calls.length;
-      for (const key of [" ", "s", "\r", "\x1b[6~", "\x1b[5~", "\x1b", "s", "\x13", "\x1b[13;3u"]) {
+      for (const key of [" ", "s", "\r", "\x1b[6~", "\x1b[5~", "\x1b", "s", "\x13", "\x1b"]) {
         input(key); tui.renderNow();
         const lines = workspace.render(columns);
         expect(lines).toHaveLength(initialHeight);
@@ -173,8 +173,8 @@ describe("workspace terminal rendering", () => {
       taskPosition.selectedTaskId = undefined; taskPosition.selectedId = 2;
       workspace.openResult(); input("f"); input("\x1bp");
       await Promise.resolve();
-      for (const key of [" ", "\r", "\x1b[6~", "\x1b", "\t", "\x1b[C", "\x1b[D", "\t", "\t", "n", "Saved name", "\t", "\r", "中文",
-        "\t", "\t", "\r", "\t", "中文😀 description", "\t", "\r", "\t", "\x13", "\x1b", "n", "\x1b", "y", "\x1b[13;3u"]) {
+      for (const key of [" ", "\r", "\x1b[6~", "\x1b", "l", "\t", "\x1b[C", "\x1b[D", "\t", "\t", "n", "Saved name", "\t", "\r", "中文",
+        "\t", "\t", "\r", "\t", "中文😀 description", "\t", "\r", "\t", "\x13", "\x1b", "n", "\x1b", "y", "\x1b", "\x1b"]) {
         input(key); tui.renderNow();
         expect(workspace.render(columns)).toHaveLength(initialHeight);
       }

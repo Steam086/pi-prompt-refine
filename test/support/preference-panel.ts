@@ -37,9 +37,10 @@ export function setup(selected: SelectedPreference[] = [], free = "Extra", theme
   const theme = getThemeByName(themeName)!;
   const keys = new KeybindingsManager(TUI_KEYBINDINGS);
   const { repo, library } = repository(entries); const close = vi.fn();
-  const panel = new PreferencePanel(tui, theme, keys, repo, selected, free, 16000, close, purpose);
+  const updateSelection = vi.fn<NonNullable<ConstructorParameters<typeof PreferencePanel>[7]["updateSelection"]>>();
+  const panel = new PreferencePanel(tui, theme, keys, repo, selected, free, 16000, { back: close, updateSelection }, purpose);
   panel.focused = true;
-  return { panel, repo, library, close, terminal, tui, theme, keys };
+  return { panel, repo, library, close, updateSelection, terminal, tui, theme, keys };
 }
 
 export const text = (panel: { render(width: number): string[] }, width = 100) => stripVTControlCharacters(panel.render(width).join("\n"));
@@ -80,7 +81,12 @@ export function unsentWorkspaceSetup(key: KeyId | null = "alt+p", conflict = fal
       if (id !== undefined && !source) return undefined;
       const selected = source?.input.preferences ?? [];
       if (!source || !original || source.status !== "unsent" || source.input.contextUnavailable) return { selected };
-      return { selected, save: (selected) => controller.updateDraftPreferences(source, selected) };
+      let expected = source;
+      return { selected, save: (selected) => {
+        const error = controller.updateDraftPreferences(expected, selected);
+        if (!error) expected = controller.getRecord(source.id) ?? expected;
+        return error;
+      } };
     },
     taskPosition: position,
     history: () => controller.getHistory(),

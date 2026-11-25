@@ -34,7 +34,7 @@ describe("Unsent preference selection", () => {
     await Promise.resolve(); w.dispose();
   });
 
-  it.each(["dark", "light"])("aligns source columns in both Tab's inline list and p's child without merging their save boundaries (%s)", async (theme) => {
+  it.each(["dark", "light"])("aligns source columns in both Tab's inline list and p's chooser (%s)", async (theme) => {
     const f = unsentWorkspaceSetup(null, false, theme); const w = f.workspace;
     f.library.entries[0]!.name = "Long 中文😀\x1b[31m " + "名称".repeat(30);
     f.library.entries[1]!.name = "Short 中文😀";
@@ -61,7 +61,9 @@ describe("Unsent preference selection", () => {
         expect(w.render(width)).toEqual(frame);
         if (child) {
           w.handleInput(" ");
-          expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences ?? []).toEqual([]);
+          expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(f.library.entries[0]!)]);
+          w.handleInput(" ");
+          expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([]);
           w.handleInput(esc);
           await vi.waitFor(() => expect(text(w)).toContain("Short 中文😀"));
         }
@@ -93,7 +95,7 @@ describe("Unsent preference selection", () => {
     await Promise.resolve(); w.dispose();
   });
 
-  it("isolates inline searches and choices by original, caches browsing, and preserves the full panel transaction", async () => {
+  it("isolates inline searches and choices by original, caches browsing, and shares the same selection with the full chooser", async () => {
     const f = unsentWorkspaceSetup(); const w = f.workspace;
     text(w); await vi.waitFor(() => expect(text(w)).toContain(a.name));
     const loads = f.repo.load.mock.calls.length;
@@ -114,10 +116,10 @@ describe("Unsent preference selection", () => {
     w.handleInput(" ");
     expect(f.controller.getRecord(f.originals[1]!.id)!.input.preferences).toEqual([selectPreference(a)]);
     w.handleInput("p"); await loaded(w); w.handleInput(" "); w.handleInput(esc);
-    expect(f.controller.getRecord(f.originals[1]!.id)!.input.preferences).toEqual([selectPreference(a)]);
-    expect(text(w)).toContain("Choose preferences");
-    w.handleInput("p"); await loaded(w); w.handleInput(" "); w.handleInput(bringBack);
     expect(f.controller.getRecord(f.originals[1]!.id)!.input.preferences).toEqual([]);
+    expect(text(w)).toContain("Choose preferences");
+    w.handleInput("p"); await loaded(w); w.handleInput(" "); w.handleInput(esc);
+    expect(f.controller.getRecord(f.originals[1]!.id)!.input.preferences).toEqual([selectPreference(a)]);
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(b)]);
     expect(f.complete).not.toHaveBeenCalled(); w.dispose();
   });
@@ -186,7 +188,7 @@ describe("Unsent preference selection", () => {
     w.dispose();
   });
 
-  it("keeps search and full text isolated from submission and preserves explicit child bring-back", async () => {
+  it("keeps search, full text and immediate selection isolated from submission", async () => {
     const f = unsentWorkspaceSetup(); const w = f.workspace;
     text(w); await vi.waitFor(() => expect(text(w)).toContain(a.name));
     w.handleInput("o"); expect(text(w)).toContain("Original prompt");
@@ -202,7 +204,7 @@ describe("Unsent preference selection", () => {
     w.handleInput(esc); w.handleInput("p"); await loaded(w);
     w.handleInput(" "); w.handleInput(enter); w.handleInput(enter);
     expect(f.run).not.toHaveBeenCalled();
-    w.handleInput(esc); w.handleInput(bringBack);
+    w.handleInput(esc); w.handleInput(esc);
     expect(f.run).not.toHaveBeenCalled();
     expect(text(w)).toContain("Choose preferences");
     w.handleInput(enter);
@@ -230,11 +232,11 @@ describe("Unsent preference selection", () => {
     w.handleInput("p"); await loaded(w);
     expect(text(w)).toContain("Preferences · Unsent original");
     w.handleInput(" "); w.handleInput(ctrlS);
-    expect(text(w)).toContain("press Enter on the Unsent original");
+    expect(text(w)).toContain("press Enter to refine");
     expect(text(w)).not.toContain("Return to Revise");
     w.handleInput(enter); expect(text(w)).toContain("Full editing instruction");
     w.handleInput(ctrlS); expect(f.complete).not.toHaveBeenCalled();
-    w.handleInput(esc); w.handleInput(bringBack);
+    w.handleInput(esc); w.handleInput(esc);
     expect(f.complete).not.toHaveBeenCalled();
     expect(f.repo.save).not.toHaveBeenCalled();
     expect(text(w)).toContain("Preferences · 1 selected");
@@ -251,20 +253,20 @@ describe("Unsent preference selection", () => {
     const f = unsentWorkspaceSetup("alt+p", true); const w = f.workspace;
     w.handleInput(altP); expect(text(w)).not.toContain("Bring back");
     w.handleInput("p"); await loaded(w);
-    w.handleInput("n"); w.handleInput("New entry"); w.handleInput(tab);
-    // Add must not prefill the original task as a reusable editing requirement.
+    w.handleInput("l"); w.handleInput("n"); w.handleInput("New entry"); w.handleInput(tab);
     expect(text(w)).not.toContain(f.originals[0]!.input.draft);
     for (const key of ["p", "i", "f", enter, ctrlS]) w.handleInput(key);
     expect(f.run).not.toHaveBeenCalled(); expect(f.complete).not.toHaveBeenCalled();
     w.handleInput(esc); w.handleInput("y"); w.handleInput(esc);
-    w.handleInput("p"); await loaded(w); w.handleInput(" "); w.handleInput(esc);
-    expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toBeUndefined();
+    expect(text(w)).toContain("Preferences · Unsent original");
+    w.handleInput(" "); w.handleInput(esc);
+    expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(a)]);
     w.dispose();
   });
 
   it("isolates selections by original, preserves deleted-source snapshots, and explicitly clears them", async () => {
     const f = unsentWorkspaceSetup(); const w = f.workspace;
-    w.handleInput(altP); await loaded(w); w.handleInput(" "); w.handleInput(bringBack);
+    w.handleInput(altP); await loaded(w); w.handleInput(" "); w.handleInput(esc);
     f.position.selectedTaskId = f.originals[1]!.taskId;
     expect(text(w)).toContain("Preferences · 0 selected");
     expect(text(w).split("\n")[2]).not.toContain(a.name);
@@ -275,17 +277,16 @@ describe("Unsent preference selection", () => {
     w.handleInput("p"); await loaded(w);
     expect(text(w)).toContain("1 selected");
     expect(text(w)).toContain(a.name);
-    // Filter to the retained deleted snapshot and remove it explicitly.
-    w.handleInput("/"); w.handleInput(a.name); w.handleInput(enter); w.handleInput(" "); w.handleInput(bringBack);
+    w.handleInput("/"); w.handleInput(a.name); w.handleInput(enter); w.handleInput(" "); w.handleInput(esc);
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.editingInstruction).toBeUndefined();
     expect(f.controller.getRecord(f.originals[1]!.id)!.input.preferences).toBeUndefined();
     expect(f.complete).not.toHaveBeenCalled(); w.dispose();
   });
 
-  it("retains over-limit working selections and shows semantic warnings through resize", async () => {
+  it("rejects over-limit changes without undoing earlier choices and shows warnings through resize", async () => {
     const f = unsentWorkspaceSetup(null, false, "light", 90); const w = f.workspace;
     w.handleInput("p"); await loaded(w);
-    w.handleInput(" "); w.handleInput(down); w.handleInput(" "); w.handleInput(bringBack);
+    w.handleInput(" "); w.handleInput(down); w.handleInput(" ");
     expect(text(w)).toContain("Editing requirements exceed 90");
     expect(w.render(100).join("\n")).toContain(f.theme.fg("warning", "⚠ Editing requirements exceed 90 characters; reduce the selection."));
     for (const [width, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [80, 30]]) {
@@ -295,9 +296,10 @@ describe("Unsent preference selection", () => {
       expect(w.render(width!)).toHaveLength(lines.length);
       for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width!);
     }
-    expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toBeUndefined();
-    w.handleInput(" "); w.handleInput(bringBack);
-    expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toHaveLength(1);
+    expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(a)]);
+    expect(text(w)).not.toContain(`[x] ${b.name}`);
+    w.handleInput(esc);
+    expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(a)]);
     expect(f.complete).not.toHaveBeenCalled(); w.dispose();
   });
 
@@ -307,7 +309,7 @@ describe("Unsent preference selection", () => {
     w.openUsage({ id: f.originals[0]!.id, original: true });
     w.handleInput("p"); await loaded(w);
     expect(text(w)).toContain("Preferences · Unsent original");
-    w.handleInput(" "); w.handleInput(bringBack);
+    w.handleInput(" "); w.handleInput(esc);
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(a)]);
     expect(f.complete).not.toHaveBeenCalled();
     w.handleInput(enter);
@@ -316,12 +318,12 @@ describe("Unsent preference selection", () => {
     await Promise.resolve(); w.dispose();
   });
 
-  it("rejects bring-back if an editable original starts while the child is open", async () => {
+  it("rejects a toggle if an editable original starts while the chooser is open", async () => {
     const f = unsentWorkspaceSetup(); const w = f.workspace;
     f.complete.mockImplementationOnce(() => new Promise(() => {}));
-    w.handleInput("p"); await loaded(w); w.handleInput(" ");
+    w.handleInput("p"); await loaded(w);
     f.controller.startRecord(f.originals[0]!.id);
-    w.handleInput(bringBack);
+    w.handleInput(" ");
     expect(text(w)).toContain("already started");
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toBeUndefined();
     w.handleInput(esc); w.handleInput("p"); await loaded(w);
@@ -329,15 +331,15 @@ describe("Unsent preference selection", () => {
     w.dispose(); f.controller.setSession("other");
   });
 
-  it("keeps working snapshots in the child if the original changes before bring-back", async () => {
+  it("rejects further toggles if the original changes after the first toggle", async () => {
     const f = unsentWorkspaceSetup(); const w = f.workspace;
     w.handleInput("p"); await loaded(w); w.handleInput(" ");
     const source = f.originals[0]!;
     f.controller.updateDraft(source.id, source.input.draft, "Changed outside child");
-    w.handleInput(bringBack);
+    w.handleInput(" ");
     expect(text(w)).toContain("Cancel and reopen Preferences");
     w.handleInput(enter); expect(text(w)).toContain("Saved snapshot");
-    expect(f.controller.getRecord(source.id)!.input.preferences).toBeUndefined();
+    expect(f.controller.getRecord(source.id)!.input.preferences).toEqual([selectPreference(a)]);
     expect(f.complete).not.toHaveBeenCalled();
     w.handleInput(esc); w.handleInput(esc); w.dispose();
   });
@@ -347,7 +349,7 @@ describe("workspace preference integration", () => {
   it.each(["dark", "light"])("reviews exact snapshots without submitting, restores input, and fits resized %s views", async (theme) => {
     const f = workspaceSetup("alt+p", false, theme); const w = f.workspace;
     w.handleInput("f"); w.handleInput("补充 中文😀\x1b[2J");
-    w.handleInput(altP); await loaded(w); w.handleInput(" "); w.handleInput(bringBack);
+    w.handleInput(altP); await loaded(w); w.handleInput(" "); w.handleInput(esc);
     expect(text(w)).toContain("Preferences: 1");
     w.handleInput("\t"); w.handleInput("\t"); w.handleInput(enter);
     expect(text(w)).toContain("Full revision requirements");
@@ -376,7 +378,7 @@ describe("workspace preference integration", () => {
     w.handleInput("f"); expect(text(w)).toContain("Preferences key conflicts");
     w.handleInput(altP); expect(text(w)).toContain("Revise current result");
     w.handleInput("\t"); w.handleInput(enter); await loaded(w);
-    expect(text(w)).toContain("Bring back");
+    expect(text(w)).toContain("Space Toggle");
   });
   it("does not let Undo restore another candidate's free input", () => {
     const f = workspaceSetup(); const w = f.workspace;
@@ -392,21 +394,21 @@ describe("workspace preference integration", () => {
     w.handleInput(altP); await loaded(w);
     w.handleInput(" "); w.handleInput(ctrlS); w.handleInput(enter); w.handleInput(ctrlS); w.handleInput(esc);
     expect(f.submit).not.toHaveBeenCalled();
-    w.handleInput(bringBack); w.handleInput("X");
+    w.handleInput(esc); w.handleInput("X");
     w.handleInput(ctrlS); expect(f.submit).toHaveBeenLastCalledWith(composeRevision([selectPreference(a)], "AXB"));
     w.handleInput(esc); f.identity("two"); w.handleInput("f"); w.handleInput("Other"); w.handleInput(ctrlS);
     expect(f.submit).toHaveBeenLastCalledWith("Other");
     w.handleInput(esc); f.identity("one"); w.handleInput("f"); w.handleInput(ctrlS);
     expect(f.submit).toHaveBeenLastCalledWith(composeRevision([selectPreference(a)], "AXB"));
   });
-  it("cancels local selection changes and saves expanded paste instead of placeholders", async () => {
+  it("saves expanded paste to the library without changing the current revision selection", async () => {
     const f = workspaceSetup(); const w = f.workspace;
     const pasted = "中文 😀 command --literal\n".repeat(100);
     w.handleInput("f"); w.handleInput(`\x1b[200~${pasted}\x1b[201~`);
     w.handleInput(altP); await loaded(w);
-    w.handleInput("n"); w.handleInput("Paste"); save(w); await loaded(w);
+    w.handleInput("l"); w.handleInput("n"); w.handleInput("Paste"); save(w); await loaded(w);
     expect(f.repo.save.mock.calls[0]![1].body).toBe(pasted);
-    w.handleInput(" "); w.handleInput(esc); w.handleInput(ctrlS);
+    w.handleInput(" "); w.handleInput(esc); w.handleInput(esc); w.handleInput(ctrlS);
     expect(f.submit).toHaveBeenLastCalledWith(pasted);
   });
   it("offers a focusable Preferences control without a binding and removes result p", async () => {
@@ -414,7 +416,7 @@ describe("workspace preference integration", () => {
     w.openResult(); w.handleInput("p");
     expect(text(w)).toContain("Press f to revise");
     w.handleInput("f"); w.handleInput("\t"); w.handleInput(enter); await loaded(w);
-    expect(text(w)).toContain("Bring back"); w.handleInput(esc);
+    expect(text(w)).toContain("Space Toggle"); w.handleInput(esc);
     w.handleInput("\x1bOQ"); expect(text(w)).toContain("Revise current result");
     w.handleInput(ctrlS); expect(f.submit).not.toHaveBeenCalled();
   });

@@ -17,7 +17,7 @@ describe("project defaults through the extension", () => {
     const output = () => h.panelLines(100).join("\n");
     const packet = (index: number) => JSON.parse((h.complete.mock.calls[index] as any[])[1].messages[0].content[0].text);
     h.panelInput("p"); await vi.waitFor(() => expect(output()).not.toContain("Working…"));
-    h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default disabled"));
+    h.panelInput("l"); h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default disabled"));
     h.panelInput("\x1b[B"); h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default enabled"));
     h.panelInput("\x1b");
     h.panelInput("f"); h.panelInput("Remove the initial requirement.");
@@ -51,10 +51,9 @@ describe("project defaults through the extension", () => {
     h.panelInput("n"); h.panelInput("Existing draft"); h.panelInput("\r");
     const output = () => h.panelLines(100).join("\n");
     h.panelInput("p"); await vi.waitFor(() => expect(output()).not.toContain("Working…"));
-    h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default enabled"));
+    h.panelInput("l"); h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default enabled"));
     expect((await store.load()).projectDefaults).toEqual([preferenceKey(entry)]);
-    // A library/default write remains saved when the child selection is canceled.
-    h.panelInput("\x1b"); expect(output()).toContain("Preferences · 0 selected");
+    h.panelInput("\x1b"); h.panelInput("\x1b"); expect(output()).toContain("Preferences · 0 selected");
     expect(h.complete).not.toHaveBeenCalled(); expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
     h.panelInput("q"); await view;
 
@@ -81,7 +80,7 @@ describe("project defaults through the extension", () => {
     h.panelInput("q"); await view;
   });
 
-  it("loads defaults after resume and keeps full-panel clear/cancel/bring-back boundaries", async () => {
+  it("loads defaults after resume and clears them for the draft without a separate confirmation", async () => {
     const h = await makeHarness(); const store = new PreferenceStore(h.agentDir, h.context.cwd);
     const entry = await store.save("global", { name: "Resumed default", body: "Keep task scope." });
     await store.setProjectDefault(entry, true); await h.reload("resume");
@@ -90,10 +89,8 @@ describe("project defaults through the extension", () => {
     const output = () => h.panelLines(100).join("\n");
     expect(output()).toContain("Preferences · 1 selected");
     h.panelInput("p"); await vi.waitFor(() => expect(output()).not.toContain("Working…"));
-    h.panelInput("c"); h.panelInput("\x1b");
-    expect(output()).toContain("Preferences · 1 selected");
-    h.panelInput("p"); await vi.waitFor(() => expect(output()).not.toContain("Working…"));
-    h.panelInput("c"); h.panelInput("\x1b[13;3u");
+    h.panelInput("c"); expect(output()).toContain("0 selected");
+    h.panelInput("\x1b");
     expect(output()).toContain("Preferences · 0 selected");
     // Reopening and library refresh cannot reapply defaults to this existing draft.
     h.panelInput("p"); await vi.waitFor(() => expect(output()).not.toContain("Working…"));
@@ -131,7 +128,7 @@ describe("project defaults through the extension", () => {
     expect(h.notifications.some((notice) => notice.includes("Project defaults exceed"))).toBe(true);
     h.panelInput("\r"); await flushPromises(); expect(h.complete).not.toHaveBeenCalled();
     h.panelInput("p"); await vi.waitFor(() => expect(output()).toContain("Too long"));
-    h.panelInput("c"); h.panelInput("\x1b[13;3u");
+    h.panelInput("c"); h.panelInput("\x1b");
     h.panelInput("\r"); await flushPromises(); expect(h.complete).toHaveBeenCalledTimes(1);
     h.panelInput("q"); await view;
   });
@@ -144,8 +141,8 @@ describe("project defaults through the extension", () => {
     h.panelInput("n"); h.panelInput("Captured with default"); h.panelInput("\r");
     const output = () => h.panelLines(100).join("\n");
     h.panelInput("p"); await vi.waitFor(() => expect(output()).not.toContain("Working…"));
-    h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default disabled"));
-    h.panelInput("\x1b"); expect(output()).toContain("Preferences · 1 selected");
+    h.panelInput("l"); h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default disabled"));
+    h.panelInput("\x1b"); h.panelInput("\x1b"); expect(output()).toContain("Preferences · 1 selected");
     h.panelInput("\r"); await flushPromises();
     const frozen = JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
     expect(frozen.editing_instruction).toContain(entry.body);

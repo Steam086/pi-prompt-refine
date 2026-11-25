@@ -45,7 +45,7 @@
 
 ## 保存与复用编辑要求（Preferences）
 
-使用[选择与保存指南](preference-selection.md)区分一次选择、项目默认及库管理。勾选和保存可以先完成，再明确启动运行。
+可编辑 Unsent 按 `p`，Revise 按 Alt+P 打开选择器。Space 立即勾选或取消，Esc 返回并保留选择。按 `l` 可单独管理库，不改变已选快照。返回 Unsent 按 Enter，或返回 Revise 按 Ctrl+S，才会提交请求。[项目默认与选择详情](preference-selection.md)
 
 **In Your Own Words** 可显示模型对原稿的理解。可在 Preferences 中选择该内置项，或通过 **Add** 创建自定义附注。[Result notes 使用方式](preference-selection.md#result-notes)
 

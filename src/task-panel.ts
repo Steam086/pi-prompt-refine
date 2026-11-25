@@ -584,12 +584,11 @@ export class TaskPanel {
       const identity = ambiguous ? `#${record.id} ${record.input.model.id} · ${record.input.model.provider}` : record.input.model.id;
       const model = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(identity), Math.max(1, leftWidth - visibleWidth(prefix + badge) - 1), "…"));
       const draft = record.input.draft.replace(/\s+/g, " ") || "Empty prompt";
-      const selectedParent = row.original && !this.usage && selected && !selected.original && record.taskId === selected.record.taskId;
-      // In a one-line tree keep the end of the selected prompt too: similar
-      // requests often share their opening words but differ in the subject.
-      const cleanDraft = selectedParent ? sanitizeTerminalText(draft) : draft;
+      const focusedTaskOriginal = row.original && !this.usage && selected && record.taskId === selected.record.taskId;
+      const summarizeCompact = focusedTaskOriginal && !selected.original && rowHeight === 1;
+      const cleanDraft = summarizeCompact ? sanitizeTerminalText(draft) : draft;
       const summaryWidth = Math.max(1, leftWidth - 4);
-      const excerpt = selectedParent && rowHeight === 1 && visibleWidth(cleanDraft) > summaryWidth
+      const excerpt = summarizeCompact && visibleWidth(cleanDraft) > summaryWidth
         ? stripVTControlCharacters(truncateToWidth(cleanDraft, Math.ceil(summaryWidth / 2), "…") + sliceByColumn(cleanDraft, visibleWidth(cleanDraft) - Math.floor(summaryWidth / 2), Math.floor(summaryWidth / 2))) : draft;
       const label = row.original
         ? `${active ? "›" : " "} ${record.status === "unsent" ? `○ Unsent ·${record.input.preferences?.length ? ` P:${record.input.preferences.length} ·` : ""}` : "▾"} ${old ? "Earlier · " : ""}${rowHeight > 1 ? "Original prompt" : excerpt}`
@@ -617,14 +616,13 @@ export class TaskPanel {
       const highlight = (line: string) => active
         ? this.theme.bg("selectedBg", line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line)))) : line;
       if (rowHeight === 1) return [highlight(text)];
-      // Use the existing spacer for a second summary line without moving the run rows.
-      if (selectedParent) {
+      if (focusedTaskOriginal && children.length) {
         const columns = leftWidth - 4;
         const excerpt = truncateToWidth(sanitizeTerminalText(draft), columns * 2, "…");
         const lines = wrapTextWithAnsi(excerpt, columns);
         const guide = this.content.muted(continuation) + " ";
-        return [text, guide + this.theme.fg("text", lines[0] ?? ""), lines[1]
-          ? guide + this.theme.fg("text", truncateToWidth(lines.slice(1).join(" "), columns, "…")) : this.content.muted(continuation.trimEnd())];
+        return [highlight(text), highlight(guide + this.theme.fg("text", lines[0] ?? "")), lines[1]
+          ? highlight(guide + this.theme.fg("text", truncateToWidth(lines.slice(1).join(" "), columns, "…"))) : this.content.muted(continuation.trimEnd())];
       }
       const detail = row.original ? this.theme.fg("text", sanitizeTerminalText(draft))
         : this.content.muted(`#${record.id} · ${record.input.model.provider}${record.elapsedSeconds !== undefined ? ` · ${record.elapsedSeconds}s` : ""}`);

@@ -10,7 +10,7 @@ import * as presentation from "../../src/presentation.js";
 import * as preferences from "../../src/revision-preferences.js";
 import { composeRevision, selectPreference } from "../../src/revision-preferences.js";
 import { getThemeByName } from "../support/pi-theme.js";
-import { a, b, bringBack, down, enter, esc, highlightedRow, listRows, loaded, repository, save, search, setup, tab, text } from "../support/preference-panel.js";
+import { a, b, down, enter, esc, highlightedRow, listRows, loaded, repository, save, search, setup, tab, text } from "../support/preference-panel.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -66,8 +66,7 @@ describe("preference rendering and responsiveness", () => {
     expect(selected).toContain(f.theme.fg("muted", "Project"));
     f.panel.handleInput(tab);
     expect(f.panel.render(100).join("\n")).toContain(f.theme.fg("muted", "Project"));
-    f.panel.handleInput(bringBack);
-    expect(f.close).toHaveBeenCalledWith(entries.map(selectPreference));
+    expect(f.updateSelection).not.toHaveBeenCalled();
   });
 
   it.each(["dark", "light"])("keeps warnings separate from source labels down to two columns (%s)", async (themeName) => {
@@ -79,7 +78,7 @@ describe("preference rendering and responsiveness", () => {
       const terminal = { rows: 40, columns: 100 };
       const theme = getThemeByName(themeName)!;
       const panel = new PreferencePanel({ terminal, requestRender: vi.fn() } as unknown as TUI, theme,
-        new KeybindingsManager(TUI_KEYBINDINGS), repo, [selectPreference(entry)], "", 16000, vi.fn());
+        new KeybindingsManager(TUI_KEYBINDINGS), repo, [selectPreference(entry)], "", 16000, { back: vi.fn() });
       await loaded(panel); panel.handleInput("s");
       for (const [width, rows] of [[100, 40], [32, 16], [20, 8], [12, 8], [6, 8], [3, 8], [2, 8], [1, 8], [100, 40]]) {
         terminal.rows = rows!;
@@ -136,8 +135,7 @@ describe("preference rendering and responsiveness", () => {
     expect(listRows(f.panel)[0]).toContain("长名称 😀");
     f.panel.handleInput(" ");
     expect(highlightedRow(f.panel)).toContain(b.name);
-    f.panel.handleInput(bringBack);
-    expect(f.close).toHaveBeenCalledWith([selectPreference(b)]);
+    expect(f.updateSelection).toHaveBeenCalledExactlyOnceWith([selectPreference(b)]);
   });
 
   it.each(["dark", "light"])("styles visible actions and footers consistently on all pages (%s)", async (themeName) => {
@@ -151,7 +149,8 @@ describe("preference rendering and responsiveness", () => {
       }
       expect(footer).toContain("\x1b[1m");
     };
-    check(["Alt+Enter", "Bring back"], ["Enter", "Read"], ["Esc", "Cancel selection"], ["Space", "Select"]);
+    check(["l", "Manage library"], ["Enter", "Read"], ["Esc", "Back"], ["Space", "Toggle"]);
+    f.panel.handleInput("l");
     for (const hint of [["n", "Add"], ["e", "Edit"], ["d", "Delete"]] as KeyHint[]) expect(f.panel.render(100).join("\n")).toContain(formatKeyHint(hint, f.theme));
     f.panel.handleInput(enter); check(["↑↓ / PgUp / PgDn", "Scroll"], ["Esc", "Back"]); f.panel.handleInput(esc);
     f.panel.handleInput("n"); check(["Enter", "Next field"], ["Tab / Shift+Tab", "Fields"], ["Esc", "Back"]);
@@ -176,7 +175,7 @@ describe("preference rendering and responsiveness", () => {
       }
       f.terminal.rows = 40;
     };
-    check(); f.panel.handleInput(tab); check(); f.panel.handleInput(tab); check();
+    f.panel.handleInput("l"); check(); f.panel.handleInput(tab); check(); f.panel.handleInput(tab); check();
     expect(f.panel.render(100).join("\n")).toContain(CURSOR_MARKER);
     f.panel.handleInput(enter); f.panel.handleInput(enter); check(); f.panel.handleInput(esc);
     f.panel.handleInput("n"); check(); f.panel.handleInput(tab); check();
@@ -205,7 +204,7 @@ describe("preference rendering and responsiveness", () => {
 
   it.each(["dark", "light"])("keeps load/write/validation failures visible and semantic at short sizes (%s)", async (name) => {
     const f = setup([], "Extra", name); await loaded(f.panel);
-    f.panel.handleInput("n"); save(f.panel);
+    f.panel.handleInput("l"); f.panel.handleInput("n"); save(f.panel);
     expect(f.panel.render(100).join("\n")).toContain(f.theme.fg("warning", "⚠ Name must contain 1–120 characters."));
     f.panel.handleInput(tab); f.panel.handleInput("Name");
     f.repo.save.mockRejectedValueOnce(new Error("Write conflict 中文😀")); save(f.panel); await loaded(f.panel);
@@ -220,7 +219,7 @@ describe("preference rendering and responsiveness", () => {
     }
     const failure = setup([], "Extra", name); await loaded(failure.panel);
     failure.library.errors.project = "Permission denied";
-    failure.panel.handleInput("n"); failure.panel.handleInput("Saved"); save(failure.panel); await loaded(failure.panel);
+    failure.panel.handleInput("l"); failure.panel.handleInput("n"); failure.panel.handleInput("Saved"); save(failure.panel); await loaded(failure.panel);
     expect(failure.panel.render(100).join("\n")).toContain(failure.theme.fg("error", "⚠ Refresh failed after save; not selected. Permission denied"));
   });
 
@@ -229,8 +228,9 @@ describe("preference rendering and responsiveness", () => {
     const lines = f.panel.render(100);
     const chars = composeRevision([selectPreference(a)], "Extra".repeat(4000)).length;
     expect(lines.join("\n")).toContain(f.theme.fg("warning", `⚠ Too long · ${chars}/16000 chars`));
-    f.panel.handleInput(bringBack);
-    expect(f.close).toHaveBeenCalledWith([selectPreference(a)]);
+    expect(listRows(f.panel)[0]).toContain(`[x] ${a.name}`);
+    f.panel.handleInput(esc); expect(f.close).toHaveBeenCalledExactlyOnceWith();
+    expect(f.updateSelection).not.toHaveBeenCalled();
     expect(f.repo.save).not.toHaveBeenCalled();
   });
 
@@ -270,7 +270,7 @@ describe("preference rendering and responsiveness", () => {
     }
     const message = "Write failed 中文😀 " + "conflict ".repeat(6) + unsafe;
     f.repo.save.mockRejectedValueOnce(new Error(message));
-    f.panel.handleInput("n"); f.panel.handleInput("Name"); save(f.panel); await loaded(f.panel);
+    f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput("Name"); save(f.panel); await loaded(f.panel);
     const output = f.panel.render(40).join("\n");
     expect(output).toContain("Write failed"); expect(output).not.toContain("\x1b[2J"); expect(output).not.toContain("\x1b]52");
     const firstLine = truncateToWidth(`⚠ ${presentation.sanitizeTerminalText(message)}`, panelLayout(40, 40).innerWidth, "");

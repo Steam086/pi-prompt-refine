@@ -34,7 +34,7 @@ export function renderTaskPreferences(
   const primary: KeyHint[] = mode === "select" ? [back, submit]
     : mode === "search" ? [back, ["Enter", "Results"]] : [back, ["↑↓", "Scroll"]];
   const secondary: KeyHint[] = mode === "select"
-    ? [["Space", "Toggle"], ["c", "Clear all"], ["Tab", "Back"], ["o", "Read"], ["↑↓", "Choose"], ["/", "Search"], ["p", "Manage"]] : [];
+    ? [["Space", "Toggle"], ["c", "Clear all"], ["Tab", "Back"], ["o", "Read"], ["↑↓", "Choose"], ["/", "Search"], ["p", "More"]] : [];
   if (expansion) secondary.push(expansion);
   const pairFits = visibleWidth(formatKeyHint(primary[0]!, theme) + " · " + formatKeyHint(primary[1]!, theme)) <= width;
   const header = [content.heading("Choose preferences"), mode === "search" ? content.muted("Search") : mode === "read" ? content.muted("Read-only") : ""];
