@@ -37,14 +37,18 @@ const ACTIONS = [
   { id: "delete", key: "d", label: "Delete" },
 ] as const;
 
-/** One transactional child page. It has no model/editor/session mutation capability. */
+type PreferencePanelActions = { back(): void; updateSelection?(selected: SelectedPreference[]): string | undefined };
+
+/** Draft selection and library management have separate controls; neither submits a request. */
 export class PreferencePanel {
   private page: Page = { kind: "list" };
   private library: PreferenceLibrary = { entries: [], errors: {} };
   private allSearch = new Input({ prompt: "Search: " });
   private selectedSearch = new Input({ prompt: "Search: " });
   private get search(): Input { return this.selectedOnly ? this.selectedSearch : this.allSearch; }
-  private readonly working: SelectedPreference[];
+  private selected: SelectedPreference[];
+  private libraryMode = false;
+  private get managing(): boolean { return this.purpose === "manage" || this.libraryMode; }
   private focus = 1;
   private actionIndex = 0;
   private index = 0;
@@ -68,12 +72,12 @@ export class PreferencePanel {
     private readonly tui: TUI, private readonly theme: Theme, private readonly keys: KeybindingsManager,
     private readonly repository: PreferenceRepository, selected: readonly SelectedPreference[],
     private readonly freeText: string, private readonly maxChars: number,
-    private readonly close: (selected?: SelectedPreference[]) => string | void,
+    private readonly actions: PreferencePanelActions,
     private readonly purpose: "revise" | "refine" | "manage" = "revise",
     private readonly layout: PanelLayoutProvider = (width) => panelLayout(width, this.tui.terminal.rows),
   ) {
-    this.working = structuredClone([...selected]);
-    this.requirementsChars = composeRevision(this.working, freeText).length;
+    this.selected = structuredClone([...selected]);
+    this.requirementsChars = composeRevision(this.selected, freeText).length;
     void this.refresh();
   }
 
@@ -102,15 +106,15 @@ export class PreferencePanel {
     if (this.entriesCache?.query === query && this.entriesCache.version === this.contentVersion) return this.entriesCache.entries;
     const keys = new Set(this.library.entries.map(preferenceKey));
     const missingDefaults: RevisionPreference[] = (this.library.projectDefaults ?? []).filter((key) => !keys.has(key) &&
-      !this.working.some((entry) => preferenceKey(entry) === key)).map((key) => {
+      !this.selected.some((entry) => preferenceKey(entry) === key)).map((key) => {
         const [scope, id] = key.split(":") as [RevisionPreference["scope"], string];
         return { scope, id, version: 1, name: `Unavailable default · ${id}`, body: "" };
       });
-    const candidates = this.selectedOnly ? this.working
-      : [...this.library.entries, ...this.working.filter((entry) => !keys.has(preferenceKey(entry))), ...missingDefaults];
+    const candidates = this.selectedOnly ? this.selected
+      : [...this.library.entries, ...this.selected.filter((entry) => !keys.has(preferenceKey(entry))), ...missingDefaults];
     const matches = searchPreferences(candidates, query);
     const matchedKeys = new Set(matches.map(preferenceKey));
-    const entries = this.selectedOnly ? this.working.filter((entry) => matchedKeys.has(preferenceKey(entry)))
+    const entries = this.selectedOnly ? this.selected.filter((entry) => matchedKeys.has(preferenceKey(entry)))
       : matches.sort((a, b) => preferenceGroupOrder(a) - preferenceGroupOrder(b));
     this.entriesCache = { query, version: this.contentVersion, entries };
     return entries;
@@ -136,7 +140,7 @@ export class PreferencePanel {
     }
   }
   private local(entry?: RevisionPreference): SelectedPreference | undefined {
-    return entry && this.working.find((item) => preferenceKey(item) === preferenceKey(entry));
+    return entry && this.selected.find((item) => preferenceKey(item) === preferenceKey(entry));
   }
   private document(document: PreferenceDocument, width: number): string[] {
     const cached = this.documents.find((item) => item.document === document && item.width === width);
@@ -166,29 +170,33 @@ export class PreferencePanel {
     } finally { this.busy = false; this.redraw(); }
   }
   private error(error: unknown): string { return error instanceof Error ? error.message : "Could not access preference library."; }
+  private updateSelection(selected: SelectedPreference[]): boolean {
+    if (!this.actions.updateSelection) return false;
+    const error = this.actions.updateSelection(structuredClone(selected));
+    if (error) { this.setNotice(error, "warning"); return false; }
+    this.selected = selected;
+    this.contentVersion++;
+    this.requirementsChars = composeRevision(selected, this.freeText).length;
+    this.index = Math.min(this.index, Math.max(0, this.entries().length - 1));
+    return true;
+  }
   private toggle(): void {
-    if (this.purpose === "manage") return;
     const entry = this.highlighted();
     if (!entry) return;
-    const index = this.working.findIndex((item) => preferenceKey(item) === preferenceKey(entry));
-    if (index >= 0) this.working.splice(index, 1);
+    const index = this.selected.findIndex((item) => preferenceKey(item) === preferenceKey(entry));
+    if (index >= 0) this.updateSelection(this.selected.filter((_, i) => i !== index));
     else if (!this.source(entry) || this.library.errors[entry.scope]) this.setNotice("Library entry unavailable or deleted; no selection applied.", "warning");
-    else if (this.working.some((item) => preferenceContentKey(item) === preferenceContentKey(entry))) {
+    else if (this.selected.some((item) => preferenceContentKey(item) === preferenceContentKey(entry))) {
       this.setNotice("Same requirements already selected. Use Selected only (s) to inspect or remove them.", "warning");
     }
-    else if (this.working.length >= PREFERENCE_SELECTION_LIMIT) this.setNotice(`Select at most ${PREFERENCE_SELECTION_LIMIT} preferences for one ${this.purpose === "refine" ? "refinement" : "revision"}.`, "warning");
-    else this.working.push(selectPreference(entry));
-    this.contentVersion++;
-    this.requirementsChars = composeRevision(this.working, this.freeText).length;
-    this.index = Math.min(this.index, Math.max(0, this.entries().length - 1));
+    else if (this.selected.length >= PREFERENCE_SELECTION_LIMIT) this.setNotice(`Select at most ${PREFERENCE_SELECTION_LIMIT} preferences for one ${this.purpose === "refine" ? "refinement" : "revision"}.`, "warning");
+    else this.updateSelection([...this.selected, selectPreference(entry)]);
   }
-  private clearSelection(): void {
-    if (this.purpose === "manage") return;
-    this.working.splice(0);
-    this.requirementsChars = composeRevision([], this.freeText).length;
-    this.contentVersion++;
-    this.index = Math.min(this.index, Math.max(0, this.entries().length - 1));
-    this.setNotice("Selection cleared; project defaults unchanged.");
+  private back(): void {
+    if (this.libraryMode) {
+      this.libraryMode = false;
+      this.focus = 1;
+    } else this.actions.back();
   }
   private async toggleProjectDefault(): Promise<void> {
     const entry = this.highlighted();
@@ -322,7 +330,7 @@ export class PreferencePanel {
     try {
       const saved = await this.repository.save(form.scope, value, form.expected);
       if (this.disposed) return;
-      this.page = { kind: "list" }; this.setNotice("Saved to library; not added to selection; no request sent.");
+      this.page = { kind: "list" }; this.setNotice("Saved to library; current selection unchanged.");
       if (form.kind === "new") {
         const reset = this.selectedOnly || !!this.search.getValue().trim();
         this.selectedOnly = false;
@@ -364,12 +372,12 @@ export class PreferencePanel {
     const key = parseKey(data);
     if (key && /(^|\+)f\d+$/.test(key)) return;
     if (key === "ctrl+s") {
-      this.setNotice(this.purpose === "manage" ? "Library management only; no selection or request sent." : this.purpose === "refine" ? "Bring back with Alt+Enter, then press Enter on the Unsent original to refine." : "Return to Revise to request revision with Ctrl+S.");
+      this.setNotice(this.managing ? "Library management only; no request sent." : this.purpose === "refine" ? "Return to the Unsent original and press Enter to refine." : "Return to Revise to request revision with Ctrl+S.");
       this.redraw(); return;
     }
     const cancel = this.keys.matches(data, "tui.select.cancel") || key === "ctrl+\\";
     if (this.busy) {
-      if (cancel && this.page.kind === "list") this.close();
+      if (cancel && this.page.kind === "list") { this.back(); this.redraw(); }
       return;
     }
     const enter = this.keys.matches(data, "tui.input.submit");
@@ -407,22 +415,23 @@ export class PreferencePanel {
       } else if (form.focus === 0) {
         if (enter) form.focus = 1; else form.name.handleInput(data);
       }
-    } else if (cancel) this.close();
-    else if (key === "alt+enter") {
-      if (this.purpose !== "manage") {
-        const error = this.close(structuredClone(this.working));
-        if (error) this.setNotice(error, "warning");
-      }
-    }
-    else if (key === "tab" || key === "shift+tab") this.focus = (this.focus + (key === "tab" ? 1 : 2)) % 3;
-    else if (this.focus === 0) {
+    } else if (cancel) {
+      if (this.focus === 0 && key !== "ctrl+\\") this.focus = 1;
+      else this.back();
+    } else if (key === "alt+enter") return;
+    else if (key === "tab" || key === "shift+tab") {
+      const regions = this.managing ? 3 : 2;
+      this.focus = (this.focus + (key === "tab" ? 1 : regions - 1)) % regions;
+    } else if (this.focus === 0) {
       if (enter || key === "down") this.focus = 1;
       else { this.search.handleInput(data); this.index = 0; this.top = 0; this.navigationDirection = 1; }
     } else if (key === "s") this.toggleView();
-    else if (key === "c") this.clearSelection();
-    else if (key === "g" && this.focus === 1) void this.toggleProjectDefault();
+    else if (key === "c" && !this.managing) {
+      if (this.selected.length && this.updateSelection([])) this.setNotice("Selection cleared; project defaults unchanged.");
+    } else if (key === "g" && this.managing && this.focus === 1) void this.toggleProjectDefault();
     else if (key === "/") this.focus = 0;
-    else if (ACTIONS.some((action) => action.key === key)) {
+    else if (key === "l" && !this.managing) this.libraryMode = true;
+    else if (this.managing && ACTIONS.some((action) => action.key === key)) {
       this.actionIndex = ACTIONS.findIndex((action) => action.key === key);
       this.activate(ACTIONS[this.actionIndex]!.id);
     } else if (this.focus === 1) {
@@ -435,8 +444,8 @@ export class PreferencePanel {
       else if (key === "pagedown") this.index = Math.min(max, this.index + this.viewport);
       else if (key === "home") this.index = 0;
       else if (key === "end") this.index = max;
-      else if (key === "space") this.toggle();
-      else if (enter) { const entry = this.highlighted(); if (entry) this.read(this.purpose === "manage" ? "Preference details" : this.purpose === "refine" ? "Full editing instruction" : "Full revision instruction", this.description(entry)); }
+      else if (key === "space" && !this.managing) this.toggle();
+      else if (enter) { const entry = this.highlighted(); if (entry) this.read(this.managing ? "Preference details" : this.purpose === "refine" ? "Full editing instruction" : "Full revision instruction", this.description(entry)); }
     } else {
       if (key === "left" || key === "up") this.actionIndex = (this.actionIndex + ACTIONS.length - 1) % ACTIONS.length;
       else if (key === "right" || key === "down") this.actionIndex = (this.actionIndex + 1) % ACTIONS.length;
@@ -452,21 +461,25 @@ export class PreferencePanel {
     const clean = (text: string) => sanitizeTerminalText(text);
     const wrap = (text: string, columns = w) => wrapTextWithAnsi(clean(text), columns);
     const button = (text: string, active: boolean) => active ? this.theme.bg("selectedBg", this.theme.fg("text", `› ${clean(text)}`)) : this.theme.fg("muted", `  ${clean(text)}`);
-    let title = this.purpose === "refine" ? "Preferences · Unsent original" : "Preferences";
-    if (this.page.kind === "list" && this.selectedOnly) title = `Preferences · Selected only${this.purpose === "refine" ? " · Unsent original" : ""}`;
+    const managing = this.managing;
+    let title = managing ? "Preferences library" : `Preferences · ${this.purpose === "refine" ? "Unsent original" : "This revision"}`;
     const tooLong = this.requirementsChars > this.maxChars;
-    const managing = this.purpose === "manage";
-    let subtitle = `Focus: ${["Search", "Library", "Actions"][this.focus]} · ${managing ? `${this.working.length} frozen snapshots` : `${this.working.length} selected · ${this.requirementsChars}/${this.maxChars} chars`}`;
+    let subtitle = `Focus: ${["Search", "Library", "Actions"][this.focus]} · ${this.selected.length} selected${managing ? " (read-only)" : ` · ${this.requirementsChars}/${this.maxChars} chars`}`;
     let subtitleColor: DocumentPart["color"] = "muted";
     let renderBody: (height: number) => string[];
-    let hints: KeyHint[][] = [[...(!managing ? [["Alt+Enter", "Bring back"] as KeyHint] : []),
-      ...(this.focus === 1 && !managing ? [["Space", this.selectedOnly ? "Deselect" : "Select"] as KeyHint] : []),
-      ...(this.focus === 1 && this.repository.setProjectDefault ? [["g", "Project default"] as KeyHint] : []),
-      ...(this.focus !== 0 && !managing ? [["c", "Clear all"] as KeyHint] : []),
-      ...(this.focus !== 0 ? [["s", this.selectedOnly ? "All" : w < 60 ? "Selected" : "Selected only"] as KeyHint] : []),
+    const viewHint: KeyHint = ["s", this.selectedOnly ? "All" : w < 60 ? "Selected" : "Selected only"];
+    let hints: KeyHint[][] = [[
+      ...(this.focus !== 0 && this.selectedOnly ? [viewHint] : []),
+      ...(this.focus === 1 && !managing && (!this.selectedOnly || this.selected.length) ? [["Space", this.selectedOnly ? "Deselect" : "Toggle"] as KeyHint] : []),
+      ...(this.focus === 1 && managing && this.repository.setProjectDefault ? [["g", "Project default"] as KeyHint] : []),
       ["Enter", this.focus === 0 ? "Browse" : this.focus === 1 ? "Read" : "Choose"],
-      ...(this.focus === 2 ? [["←→", "Choose action"] as KeyHint] : [])],
-      [["Esc", managing ? "Back" : "Cancel selection"], ["Tab / Shift+Tab", "Focus"], ...(this.focus !== 0 ? [["/", "Search"] as KeyHint] : [])]];
+      ...(this.focus === 2 ? [["←→", "Choose action"] as KeyHint] : []),
+      ...(this.focus !== 0 && !this.selectedOnly ? [viewHint] : []),
+    ], [["Esc", this.focus === 0 ? "End search" : "Back"],
+      ...(this.focus !== 0 && !managing ? [["l", w < 30 ? "Library" : "Manage library"] as KeyHint] : []),
+      [w < 54 ? "Tab" : "Tab / Shift+Tab", "Focus"],
+      ...(this.focus !== 0 ? [["/", "Search"] as KeyHint] : []),
+      ...(this.focus !== 0 && !managing ? [["c", "Clear all"] as KeyHint] : [])]];
     const page = this.page;
     if (page.kind === "read") {
       title = page.title;
@@ -482,8 +495,9 @@ export class PreferencePanel {
       title = page.kind === "discard" ? "Discard unsaved form?" : "Delete library entry?";
       subtitle = "";
       renderBody = () => page.kind === "discard"
-        ? wrap("Unsaved form changes will be discarded. Pending selection and saved library entries stay unchanged.").map((line) => this.theme.fg("warning", line))
-        : [...this.document(this.description(page.entry), w), this.theme.fg("muted", "Selected snapshots stay unchanged")];
+        ? wrap("Unsaved form changes will be discarded. Current selection and saved library entries stay unchanged.").map((line) => this.theme.fg("warning", line))
+        : [...wrap("Selections for this request stay unchanged.").map((line) => this.theme.fg("muted", line)),
+          "", ...this.document(this.description(page.entry), w)];
       hints = [[["y", page.kind === "discard" ? "Discard" : "Delete"]],
         [["n / Esc", page.kind === "discard" ? "Keep editing" : "Cancel"]]];
     } else if (page.kind === "form") {
@@ -509,28 +523,32 @@ export class PreferencePanel {
       const entries = this.entries();
       this.index = Math.min(this.index, Math.max(0, entries.length - 1));
       const errors = Object.values(this.library.errors);
-      const status = errors.length ? errors.join(" · ") : this.selectedOnly && !this.working.length
-        ? "No selections · s All to browse" : !this.library.entries.length && !this.working.length
-          ? "Library is empty · n Add to start" : !entries.length ? "No matches · / Search to change query" : "";
+      const status = errors.length ? errors.join(" · ") : this.selectedOnly && !this.selected.length
+        ? "No selections" : !this.library.entries.length && !this.selected.length
+          ? "Library is empty" : !entries.length ? "No matches" : "";
       renderBody = (h) => {
-        const columns = Math.max(1, Math.min(3, Math.floor(w / 12)));
-        const cellWidth = Math.max(1, Math.floor((w - (columns - 1) * 2) / columns));
+        const splitCandidate = w >= 76;
+        const toolbarWidth = splitCandidate ? Math.floor(w * 0.43) : w;
         const toolbar: string[] = [];
-        for (let start = 0; start < ACTIONS.length; start += columns) {
-          toolbar.push(ACTIONS.slice(start, start + columns).map((action, i) => {
-            const active = this.focus === 2 && start + i === this.actionIndex;
-            const hint = `${active ? "›" : " "} ${formatKeyHint([action.key, action.label], this.theme)}`;
-            const cell = truncateToWidth(hint, cellWidth, "…");
-            const padded = cell + " ".repeat(Math.max(0, cellWidth - visibleWidth(cell)));
-            return active ? this.theme.bg("selectedBg", padded) : padded;
-          }).join("  "));
+        let actionRow = 0;
+        if (managing) {
+          const separator = this.theme.fg("muted", " · ");
+          for (const [i, action] of ACTIONS.entries()) {
+            const active = this.focus === 2 && i === this.actionIndex;
+            const hint = (active ? "› " : "") + formatKeyHint([this.focus === 0 ? "" : action.key, action.label], this.theme);
+            const cell = truncateToWidth(hint, toolbarWidth, "…");
+            const styled = active ? this.theme.bg("selectedBg", cell) : cell;
+            const last = toolbar.at(-1);
+            if (last && visibleWidth(last + separator + styled) <= toolbarWidth) toolbar[toolbar.length - 1] = last + separator + styled;
+            else toolbar.push(styled);
+            if (active) actionRow = toolbar.length - 1;
+          }
         }
-        const chrome = [...this.search.render(w), ...toolbar];
-        const room = h >= chrome.length + 2;
-        const available = Math.max(1, room ? h - chrome.length - 1 : h);
-        this.viewport = available;
-        const split = room && w >= 76;
-        const leftWidth = split ? Math.floor(w * 0.43) : w;
+        const search = this.search.render(w);
+        const room = h >= search.length + toolbar.length + 2;
+        const available = Math.max(1, room ? h - search.length - toolbar.length - 1 : h);
+        const split = room && splitCandidate;
+        const leftWidth = split ? toolbarWidth : w;
         const window = selectionWindow(entries.length, this.index, available, this.top,
           this.selectedOnly ? undefined : (index) => preferenceGroup(entries[index]!), available >= 10 ? 1 : 0, this.navigationDirection);
         this.top = window.start;
@@ -554,28 +572,19 @@ export class PreferencePanel {
         });
         if (!entries.length) list.push(...wrap(status, leftWidth).map((line) => this.theme.fg(errors.length ? "error" : "muted", line)));
         if (!room) {
-          return this.focus === 0 ? this.search.render(w) : this.focus === 2
-            ? toolbar.slice(Math.min(Math.floor(this.actionIndex / columns), Math.max(0, toolbar.length - h))) : list;
-        } else {
-          const rightWidth = split ? w - leftWidth - 3 : w;
-          const detail = split && entries[this.index] ? this.document(this.description(entries[this.index]!, true), rightWidth) : [];
-          const headingText = this.theme.fg("text", this.theme.bold(`${this.selectedOnly ? "Selected" : "Library"} ${entries.length ? this.index + 1 : 0}/${entries.length}`));
-          const viewHint = this.focus !== 0 ? formatKeyHint(["s", this.selectedOnly ? "All" : "Selected"], this.theme) : "";
-          const hintFits = !!viewHint && visibleWidth(headingText) + 3 + visibleWidth(viewHint) <= leftWidth;
-          const count = subtitleColor !== "muted" || this.notice || this.busy || layout.headerHeight < 2
-            ? this.theme.fg("muted", ` · ${this.working.length} selected`) : "";
-          const countFits = visibleWidth(headingText + count) + (hintFits ? 3 + visibleWidth(viewHint) : 0) <= leftWidth;
-          const heading = truncateToWidth(headingText + (countFits ? count : ""), leftWidth, "")
-            + (hintFits ? this.theme.fg("muted", " · ") + viewHint : "");
-          const panes = Array.from({ length: available }, (_, i) => {
-            if (!split) return list[i] ?? "";
-            const left = list[i] ?? "";
-            return left + " ".repeat(Math.max(0, leftWidth - visibleWidth(left))) + this.theme.fg("borderMuted", " │ ") + (detail[i] ?? "");
-          });
-          const section = split ? truncateToWidth(heading, leftWidth, "") + " ".repeat(Math.max(0, leftWidth - visibleWidth(heading)))
-            + this.theme.fg("borderMuted", " │ ") + this.theme.fg("muted", "Preview · Enter reads full text") : heading;
-          return [...chrome, section, ...panes];
+          return this.focus === 0 ? search : this.focus === 2
+            ? toolbar.slice(Math.min(actionRow, Math.max(0, toolbar.length - h))) : list;
         }
+        const rightWidth = split ? w - leftWidth - 3 : w;
+        const detail = split && entries[this.index] ? this.document(this.description(entries[this.index]!, true), rightWidth) : [];
+        const headingText = this.theme.fg("text", this.theme.bold(`${this.selectedOnly ? "Selected only" : "Library"} ${entries.length ? this.index + 1 : 0}/${entries.length}`));
+        const count = subtitleColor !== "muted" || this.notice || this.busy || layout.headerHeight < 2
+          ? this.theme.fg("muted", ` · ${this.selected.length} selected`) : "";
+        const heading = truncateToWidth(headingText + (visibleWidth(headingText + count) <= leftWidth ? count : ""), leftWidth, "");
+        const pair = (left: string, right = "") => split
+          ? left + " ".repeat(Math.max(0, leftWidth - visibleWidth(left))) + this.theme.fg("borderMuted", " │ ") + right : left;
+        const panes = Array.from({ length: available }, (_, i) => pair(list[i] ?? "", detail[i]));
+        return [...search, pair(heading, this.theme.fg("muted", "Preview")), ...toolbar.map((line) => pair(line)), ...panes];
       };
       if (errors.length) { subtitle = `Load failed · ${errors.join(" · ")}`; subtitleColor = "error"; }
       else if (tooLong && !managing) { subtitle = `Too long · ${this.requirementsChars}/${this.maxChars} chars`; subtitleColor = "warning"; }
@@ -586,16 +595,21 @@ export class PreferencePanel {
       subtitle = page.kind === "list" && subtitleColor === "muted" ? `Focus: ${["Search", "Library", "Actions"][this.focus]} · ${this.notice}` : this.notice;
     }
     if (w < 30) {
-      const labels: Record<string, string> = { "Cancel selection": "Cancel", "Keep editing": "Keep", "Next field": "Next",
-        "Save to library": "Save", "Save this revision's edit": "Save edit", "Change scope": "Scope", "Scope fixed": "Fixed" };
+      const labels: Record<string, string> = { "Keep editing": "Keep", "Next field": "Next",
+        "Save to library": "Save", "Change scope": "Scope", "Scope fixed": "Fixed" };
       hints = hints.map((row) => row.map(([key, label]) => [key === "n / Esc" ? "Esc" : key.split(" / ")[0]!, labels[label] ?? label]));
     }
     const footer = page.kind === "read"
       ? [fittingKeyHints([hints[1]![0]!, ...hints[0]!], w, this.theme)]
-      : w < 30
+      : w < 30 || page.kind === "list"
       ? hints.map((row) => fittingKeyHints(row, w, this.theme))
       : alignedKeyHints(hints, w, this.theme);
-    if (layout.footerHeight === 1) footer[0] = fittingKeyHints([hints[1]![0]!, ...hints[0]!], w, this.theme);
+    if (layout.footerHeight === 1) {
+      const [back, ...secondary] = hints[1]!;
+      const primary = page.kind === "list" && !managing && this.focus === 1
+        ? [hints[0]![0]!, ...secondary.slice(0, 1), ...hints[0]!.slice(1), ...secondary.slice(1)] : hints[0]!;
+      footer[0] = fittingKeyHints([back!, ...primary], w, this.theme);
+    }
     const severe = subtitleColor !== "muted";
     const feedback = this.theme.fg(subtitleColor, clean(`${severe ? "⚠ " : ""}${subtitle}`));
     const heading = this.theme.fg("text", this.theme.bold(clean(title)));

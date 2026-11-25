@@ -19,7 +19,7 @@ interface WorkspaceActionsDependencies {
   controller: Pick<RefineController,
     "applyResult" | "deleteRecords" | "getAppliedRecordId" | "getCandidate" |
     "getCandidateToken" | "getGeneration" | "getTaskDisplayRecords" | "getModel" | "getOriginalRecord" | "getRecord" |
-    "getSessionId" | "getState" | "hasWorkspaceContent" | "updateDraftPreferences">;
+    "getSessionId" | "getState" | "hasWorkspaceContent" | "isCandidateCurrent" | "updateDraftPreferences">;
   config: Pick<RefineConfig, "preferencesKey" | "maxDraftChars" | "projectContext" | "context" | "maxOutputTokens" | "timeoutMs" | "thinkingLevel" | "systemPrompt">;
   setCompletionContext(ctx: ExtensionContext): void;
   persistConfig(ctx: ExtensionContext): Promise<boolean>;
@@ -74,11 +74,14 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
         if (id !== undefined && !source) return undefined;
         const selected = source?.input.preferences ?? [];
         if (!source || !original || source.status !== "unsent" || source.input.contextUnavailable || controller.getState().pendingSend) return { selected };
+        let expected = source;
         return {
           selected,
           save: (selected) => {
             if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId || controller.getSessionId() !== sessionId) return "Session changed; no selection applied.";
-            return controller.updateDraftPreferences(source, selected);
+            const error = controller.updateDraftPreferences(expected, selected);
+            if (!error) expected = controller.getRecord(source.id) ?? expected;
+            return error;
           },
         };
       },
@@ -233,6 +236,11 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
         return {
           key: `${token.sessionId}:${controller.getCandidate()?.recordId ?? token.requestId}`,
           label: `#${controller.getCandidate()!.recordId ?? "?"} · ${displayModel(controller.getCandidate()!.model)}`,
+          validateSelection: () => {
+            if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId) return "Session changed; no selection applied.";
+            if (!controller.isCandidateCurrent(token) || controller.getState().pendingSend) return "The result changed or is being sent. Reopen Revise for the current result.";
+            return undefined;
+          },
           submit: (text: string, resultNotes?: RevisionInput["resultNotes"]) => {
             if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId) return "Session changed; no request sent.";
             return reviseCandidate(ctx, token, text, resultNotes);

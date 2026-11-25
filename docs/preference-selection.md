@@ -1,12 +1,12 @@
 # Preferences：检查选择与保存新条目
 
-在 Preview／Usage 按 `p` 打开完整面板，可浏览及管理库。选择只对可编辑 Unsent 和显式 Revise 开放。保存库、浏览和勾选均不会请求模型或写 Pi 编辑器。
+在 Preview／Usage 的可编辑 Unsent 原稿上按 `p` 打开选择器；在空工作区或其他原稿、运行上按 `p` 直接打开库管理，不能更改本次选择。保存库、浏览和勾选均不会请求模型或写 Pi 编辑器。
 
 ## 项目默认与单次选择
 
-在 Library 高亮条目后按 `g` 切换项目默认，`*` 标记已开启。Project、Global 和 Built-in 条目都可设为当前目录的默认项。更改立即保存，从之后的新建或复制原稿生效。已有草稿、重试和 Revise 保持自己的选择。
+在库管理中高亮条目后按 `g` 切换项目默认，`*` 标记已开启。Project、Global 和 Built-in 条目都可设为当前目录的默认项。更改立即保存，从之后的新建或复制原稿生效。已有草稿、重试和 Revise 保持自己的选择。
 
-Space 逐项取消，`c` 清空本次选择（包括被筛选隐藏的项）。完整面板需带回后生效。项目默认正文会随提交发送，可在运行前移除。选择使用快照，后续库写入不会改变已提交要求。
+Space 逐项取消，`c` 清空本次选择（包括被筛选隐藏的项）。更改立即生效，不修改项目默认。项目默认正文会随提交发送，可在运行前移除。选择使用快照，后续库写入不会改变已提交要求。
 
 ## 任务要求如何融入 prompt
 
@@ -28,13 +28,13 @@ Space 逐项取消，`c` 清空本次选择（包括被筛选隐藏的项）。�
 
 ## 完整面板：All 与 Selected only
 
-在 Revise 按 Alt+P，或 Tab 到 Preferences 再按 Enter。Space 暂存选择，Alt+Enter 带回，Esc 放弃暂存选择。已经完成的库写入会保留。返回原稿按 Enter 或返回 Revise 按 Ctrl+S 才提交模型请求。在 Revise 可先打开 **Review full requirements** 检查组合要求。
+在 Revise 按 Alt+P，或 Tab 到 Preferences 再按 Enter。在选择器中，Space 立即更新当前草稿，Enter 阅读全文，Esc 返回并保留选择。Tab 在搜索和列表间切换。按 `l` 进入库管理，Esc 回到选择器；库管理不改变已选快照。返回原稿按 Enter 或返回 Revise 按 Ctrl+S 才提交模型请求。在 Revise 可先打开 **Review full requirements** 检查组合要求。
 
 在 Library 或 Actions 按 `s` 切换 **All**／**Selected only**。后者从空搜索开始，按提交顺序展示已选快照，方便发现被筛选隐藏的项目。搜索匹配名称、描述和正文。Enter 可核对 **Selected snapshot** 和 **Current library entry**，库发生变更时要先取消再勾选才能采用新版。[搜索与排序回归](../test/unit/revision-preferences.test.ts) · [快照回归](../test/ui/preference-panel-audit.test.ts)
 
 ## 新条目保存后定位
 
-用 **Add** 创建、**Edit** 修改、**Delete** 删除。Add 可以带入本次自由输入，保存后面板会尽量定位新条目，需显式勾选才使用。保存失败可修正表单后再试；外部写入冲突时刷新后重试。跨作用域复用可复制正文，再到目标作用域 Add。
+在库管理中用 `n` **Add** 创建、`e` **Edit** 修改、`d` **Delete** 删除。Add 可以带入本次自由输入，保存后面板会尽量定位新条目，需显式勾选才使用。保存失败可修正表单后再试；外部写入冲突时刷新后重试。跨作用域复用可复制正文，再到目标作用域 Add。
 
 ## 库文件与旧版兼容
 

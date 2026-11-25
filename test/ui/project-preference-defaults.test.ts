@@ -4,7 +4,7 @@ import { PreferencePanel } from "../../src/preference-panel.js";
 import { panelLayout } from "../../src/panel-layout.js";
 import { preferenceKey, selectPreference } from "../../src/revision-preferences.js";
 import { formatKeyHint } from "../../src/key-hints.js";
-import { a, b, bringBack, enter, esc, loaded, setup, text } from "../support/preference-panel.js";
+import { a, b, enter, esc, loaded, setup, text } from "../support/preference-panel.js";
 
 describe.each(["dark", "light"])("project default controls (%s)", (themeName) => {
   it("styles defaults independently of selection, keeps only three management actions, and clears hidden selections", async () => {
@@ -15,16 +15,20 @@ describe.each(["dark", "light"])("project default controls (%s)", (themeName) =>
       return structuredClone(f.library);
     });
     Object.assign(f.repo, { setProjectDefault });
-    f.panel.handleInput("g");
+    f.panel.handleInput("l"); f.panel.handleInput("g");
     await vi.waitFor(() => expect(text(f.panel)).toContain("Project default enabled"));
     let lines = f.panel.render(100);
     expect(lines.join("\n")).toContain(f.theme.fg("muted", "* "));
     expect(lines.join("\n")).toContain(f.theme.fg("muted", "Project default: On · future drafts"));
     expect(lines.join("\n")).toContain(formatKeyHint(["g", "Project default"], f.theme));
-    expect(lines.join("\n")).toContain(formatKeyHint(["c", "Clear all"], f.theme));
+    expect(lines.join("\n")).not.toContain(formatKeyHint(["c", "Clear all"], f.theme));
     for (const action of [["n", "Add"], ["e", "Edit"], ["d", "Delete"]] as const) {
       expect(lines.join("\n")).toContain(formatKeyHint(action, f.theme));
     }
+    f.panel.handleInput(" "); expect(text(f.panel)).toContain("[x] * Concise 中文");
+    expect(f.updateSelection).not.toHaveBeenCalled();
+    f.panel.handleInput(esc);
+    expect(f.panel.render(100).join("\n")).toContain(formatKeyHint(["c", "Clear all"], f.theme));
     f.panel.handleInput(" "); expect(text(f.panel)).toContain("[ ] * Concise 中文");
     f.panel.handleInput("/"); f.panel.handleInput("Literal"); f.panel.handleInput(enter);
     f.panel.handleInput("c"); expect(text(f.panel)).toContain("Selection cleared");
@@ -34,7 +38,8 @@ describe.each(["dark", "light"])("project default controls (%s)", (themeName) =>
       expect(lines.every((line) => visibleWidth(line) <= width!)).toBe(true);
       f.panel.handleInput("\x1b[6~"); f.panel.handleInput("\x1b[5~");
     }
-    f.panel.handleInput(bringBack); expect(f.close).toHaveBeenCalledWith([]);
+    expect(f.updateSelection).toHaveBeenLastCalledWith([]);
+    f.panel.handleInput(esc); expect(f.close).toHaveBeenCalledExactlyOnceWith();
     expect(f.library.projectDefaults).toEqual([preferenceKey(a)]);
     expect(setProjectDefault).toHaveBeenCalledTimes(1);
     f.panel.dispose();
@@ -43,7 +48,7 @@ describe.each(["dark", "light"])("project default controls (%s)", (themeName) =>
   it("keeps save failure feedback semantic and visible at narrow/short sizes without changing selection", async () => {
     const f = setup([selectPreference(a)], "", themeName); await loaded(f.panel);
     Object.assign(f.repo, { setProjectDefault: vi.fn(async () => { throw new Error("Disk unavailable 中文😀\x1b[999C"); }) });
-    f.panel.handleInput("g"); await vi.waitFor(() => expect(text(f.panel)).toContain("Project default not saved"));
+    f.panel.handleInput("l"); f.panel.handleInput("g"); await vi.waitFor(() => expect(text(f.panel)).toContain("Project default not saved"));
     for (const [width, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [100, 40]]) {
       f.terminal.rows = rows!;
       const lines = f.panel.render(width!);
@@ -51,7 +56,7 @@ describe.each(["dark", "light"])("project default controls (%s)", (themeName) =>
       expect(lines.join("\n")).toContain(f.theme.fg("error", "⚠").split("⚠")[0] + "⚠");
       expect(lines.join("\n")).not.toContain("\x1b[999C");
     }
-    f.panel.handleInput(bringBack); expect(f.close).toHaveBeenCalledWith([selectPreference(a)]);
+    expect(f.updateSelection).not.toHaveBeenCalled();
     f.panel.dispose();
   });
 
@@ -61,7 +66,7 @@ describe.each(["dark", "light"])("project default controls (%s)", (themeName) =>
     f.panel.handleInput(enter); f.panel.handleInput("g"); f.panel.handleInput("c"); f.panel.handleInput(esc);
     f.panel.handleInput("/"); f.panel.handleInput("g"); f.panel.handleInput("c"); f.panel.handleInput(enter);
     expect(setProjectDefault).not.toHaveBeenCalled();
-    f.panel.handleInput(bringBack); expect(f.close).toHaveBeenCalledWith([selectPreference(a)]);
+    expect(f.updateSelection).not.toHaveBeenCalled();
     f.panel.dispose();
   });
 
@@ -69,7 +74,7 @@ describe.each(["dark", "light"])("project default controls (%s)", (themeName) =>
     const f = setup([], "", themeName); await loaded(f.panel); f.panel.dispose();
     const repo = { ...f.repo, load: vi.fn(async () => ({ entries: [], errors: { defaults: "1 default deleted; skipped" }, projectDefaults: ["global:missing"] })),
       setProjectDefault: vi.fn(async () => ({ entries: [], errors: {}, projectDefaults: [] })) };
-    const panel = new PreferencePanel(f.tui, f.theme, f.keys, repo, [], "", 16000, f.close, "manage");
+    const panel = new PreferencePanel(f.tui, f.theme, f.keys, repo, [], "", 16000, { back: f.close }, "manage");
     await loaded(panel);
     expect(text(panel)).toContain("Unavailable default");
     panel.handleInput("g"); await vi.waitFor(() => expect(text(panel)).toContain("Project default disabled"));

@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatKeyHint } from "../../src/key-hints.js";
 import { PreferencePanel } from "../../src/preference-panel.js";
 import * as presentation from "../../src/presentation.js";
-import { composeRevision, selectPreference, type RevisionPreference } from "../../src/revision-preferences.js";
-import { a, b, backTab, bringBack, ctrlS, down, enter, esc, highlightedRow, listRows, loaded, save, search, setup, tab, text } from "../support/preference-panel.js";
+import { selectPreference, type RevisionPreference } from "../../src/revision-preferences.js";
+import { a, b, ctrlS, down, enter, esc, highlightedRow, listRows, loaded, save, search, setup, tab, text } from "../support/preference-panel.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -68,7 +68,7 @@ describe("selected-only preference audit", () => {
       const current = { ...a, version: 2, name: "Unverified name", body: "UNVERIFIED_BODY" };
       const f = setup([selectPreference(a)], "", themeName); await loaded(f.panel); f.panel.dispose();
       f.repo.load.mockResolvedValueOnce({ entries: cached ? [current] : [], errors: { global: "Offline" } });
-      const panel = new PreferencePanel(f.tui, f.theme, f.keys, f.repo, [selectPreference(a)], "", 16000, f.close);
+      const panel = new PreferencePanel(f.tui, f.theme, f.keys, f.repo, [selectPreference(a)], "", 16000, { back: f.close, updateSelection: f.updateSelection });
       await loaded(panel); panel.handleInput("s"); panel.handleInput(enter);
       const output = text(panel);
       expect(output).toContain("Selected snapshot");
@@ -98,7 +98,7 @@ describe("selected-only preference audit", () => {
     const current = { ...a, version: 2, name: "Current source", body: "Current instruction" };
     const selected = selectPreference(a);
     const f = setup([selected], "", "dark", [current]); await loaded(f.panel); f.panel.handleInput("s");
-    f.panel.handleInput("e"); f.panel.handleInput("\x05");
+    f.panel.handleInput("l"); f.panel.handleInput("e"); f.panel.handleInput("\x05");
     expect(text(f.panel)).toContain("Name: Current source");
     expect(text(f.panel)).toContain(current.body);
     save(f.panel); await loaded(f.panel);
@@ -109,8 +109,9 @@ describe("selected-only preference audit", () => {
     expect(confirmation).toContain("Delete library entry?");
     f.panel.handleInput("y"); await loaded(f.panel);
     expect(f.repo.remove).toHaveBeenCalledWith({ ...current, version: 3 });
-    f.panel.handleInput(bringBack);
-    expect(f.close).toHaveBeenCalledWith([selected]);
+    f.panel.handleInput(esc);
+    expect(text(f.panel)).toContain("1 selected");
+    expect(f.updateSelection).not.toHaveBeenCalled();
   });
 
   it("audits snapshots in composition order regardless of all-view search or library rank", async () => {
@@ -122,7 +123,7 @@ describe("selected-only preference audit", () => {
     search(f.panel, "Literal");
     expect(listRows(f.panel)).toHaveLength(1);
     f.panel.handleInput("s");
-    expect(text(f.panel)).toContain("Preferences · Selected only");
+    expect(text(f.panel)).toContain("Selected only ");
     expect(listRows(f.panel).map((row) => row.trim())).toEqual([
       expect.stringContaining(b.name), expect.stringContaining(a.name), expect.stringContaining(deleted.name),
     ]);
@@ -147,8 +148,8 @@ describe("selected-only preference audit", () => {
     expect(listRows(f.panel)).toHaveLength(2);
     f.panel.handleInput(ctrlS);
     expect(f.close).not.toHaveBeenCalled();
-    f.panel.handleInput(bringBack);
-    expect(f.close).toHaveBeenCalledWith([selected[1], deleted]);
+    expect(f.updateSelection).toHaveBeenCalledExactlyOnceWith([selected[1], deleted]);
+    f.panel.handleInput(esc); expect(f.close).toHaveBeenCalledExactlyOnceWith();
     expect(selected).toEqual([selectPreference(b), selectPreference(a), deleted]);
     expect(f.repo.load).toHaveBeenCalledTimes(1);
     expect(f.repo.save).not.toHaveBeenCalled();
@@ -160,20 +161,18 @@ describe("selected-only preference audit", () => {
     await loaded(f.panel); f.panel.handleInput("s"); search(f.panel, "keep");
     expect(listRows(f.panel)[0]).toContain(first.name);
     expect(listRows(f.panel)[1]).toContain(second.name);
-    f.panel.handleInput(bringBack);
-    expect(composeRevision(f.close.mock.calls[0]![0], "")).toBe(composeRevision([selectPreference(first), selectPreference(second)], ""));
+    expect(f.updateSelection).not.toHaveBeenCalled();
   });
 
-  it("restores the all-view query, highlight and scrolled viewport; cancels transactionally", async () => {
+  it("restores the all-view query, highlight and scrolled viewport without undoing selection", async () => {
     const entries = Array.from({ length: 45 }, (_, i) => ({ ...a, id: `${i}`, name: `Entry ${i}` }));
     const initial = [selectPreference(entries[2]!)];
     const f = setup(initial, "", "dark", entries); await loaded(f.panel);
     f.terminal.rows = 16; search(f.panel, "Entry"); f.panel.handleInput("\x1b[F");
     const before = listRows(f.panel);
     expect(before.at(-1)).toContain("Entry 44");
-    f.panel.handleInput(tab);
-    f.panel.handleInput("s"); expect(text(f.panel)).toContain("Focus: Actions");
-    f.panel.handleInput(backTab); f.panel.handleInput(" ");
+    f.panel.handleInput("s"); f.panel.handleInput(" ");
+    expect(f.updateSelection).toHaveBeenCalledExactlyOnceWith([]);
     expect(text(f.panel)).toContain("No selections");
     f.panel.handleInput("s");
     expect(text(f.panel)).toContain("Search: Entry");
@@ -190,9 +189,9 @@ describe("selected-only preference audit", () => {
     expect(f.panel.render(100).join("\n")).toContain(formatKeyHint(["Space", "Deselect"], f.theme));
     f.panel.handleInput("/"); f.panel.handleInput("s");
     expect(text(f.panel)).toContain("Search: s");
-    expect(text(f.panel)).toContain("Preferences · Selected only");
+    expect(text(f.panel)).toContain("Selected only ");
     expect(f.panel.render(100).slice(-2).join("\n")).not.toContain(formatKeyHint(["s", "All"], f.theme));
-    f.panel.handleInput(enter); f.panel.handleInput("n"); f.panel.handleInput("s");
+    f.panel.handleInput(enter); f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput("s");
     expect(text(f.panel)).toContain("Name: s");
     f.panel.handleInput(tab); f.panel.handleInput("s");
     expect(f.repo.save).not.toHaveBeenCalled();
@@ -205,10 +204,10 @@ describe("new preference save identity and reveal", () => {
     if (mode === "query" || mode === "both") search(f.panel, "No match");
     if (mode === "selected" || mode === "both") f.panel.handleInput("s");
     if (mode === "both") search(f.panel, "Missing snapshot");
-    f.panel.handleInput(tab); f.panel.handleInput("n"); f.panel.handleInput(a.name);
+    f.panel.handleInput("l"); f.panel.handleInput(tab); f.panel.handleInput("n"); f.panel.handleInput(a.name);
     save(f.panel); await loaded(f.panel);
     expect(text(f.panel)).toContain("Focus: Library");
-    expect(text(f.panel)).not.toContain("Preferences · Selected only");
+    expect(text(f.panel)).not.toContain("Selected only ");
     expect(text(f.panel)).not.toContain("Search: No match");
     expect(text(f.panel)).toContain("Saved; not selected.");
     expect(text(f.panel).includes("Filters reset to All.")).toBe(mode !== "none");
@@ -216,15 +215,16 @@ describe("new preference save identity and reveal", () => {
     f.panel.handleInput(enter);
     expect(text(f.panel)).toContain("project · new");
     expect(text(f.panel)).toContain("Extra");
-    f.panel.handleInput(esc); f.panel.handleInput(bringBack);
-    expect(f.close).toHaveBeenCalledWith([selectPreference(b)]);
+    f.panel.handleInput(esc); f.panel.handleInput(esc);
+    expect(text(f.panel)).toContain(`[x] ${b.name}`);
+    expect(f.updateSelection).not.toHaveBeenCalled();
   });
 
   it("keeps a NEW form, filters and snapshots on failure, then reveals a successful retry", async () => {
     const original = [selectPreference(a)]; const f = setup(original); await loaded(f.panel);
     search(f.panel, "Literal"); f.panel.handleInput("s"); search(f.panel, "Concise");
     f.repo.save.mockRejectedValueOnce(new Error("Disk full"));
-    f.panel.handleInput("n"); f.panel.handleInput("Retry me"); save(f.panel); await loaded(f.panel);
+    f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput("Retry me"); save(f.panel); await loaded(f.panel);
     expect(text(f.panel)).toContain("Save new preference");
     expect(text(f.panel)).toContain("Name: Retry me");
     expect(text(f.panel)).toContain("Disk full");
@@ -233,8 +233,9 @@ describe("new preference save identity and reveal", () => {
     f.panel.handleInput(enter); await loaded(f.panel);
     expect(text(f.panel)).toContain("Filters reset to All.");
     expect(highlightedRow(f.panel)).toContain("Retry me");
-    f.panel.handleInput(bringBack);
-    expect(f.close).toHaveBeenCalledWith(original);
+    f.panel.handleInput(esc);
+    expect(text(f.panel)).toContain(`[x] ${a.name}`);
+    expect(f.updateSelection).not.toHaveBeenCalled();
   });
 
   it.each(["throw", "scope"])("reveals the confirmed write but reports %s refresh failure instead of claiming a fresh library", async (failure) => {
@@ -242,34 +243,36 @@ describe("new preference save identity and reveal", () => {
     search(f.panel, "Hidden");
     if (failure === "throw") f.repo.load.mockRejectedValueOnce(new Error("Offline"));
     else f.repo.load.mockResolvedValueOnce({ entries: [a], errors: { project: "Offline" } });
-    f.panel.handleInput("n"); f.panel.handleInput("Saved offline"); save(f.panel); await loaded(f.panel);
+    f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput("Saved offline"); save(f.panel); await loaded(f.panel);
     expect(text(f.panel)).toContain("Refresh failed after save; not selected.");
     expect(text(f.panel)).toContain("Filters reset to All.");
     expect(highlightedRow(f.panel)).toContain("Saved offline");
     f.panel.handleInput(enter);
     expect(text(f.panel)).toContain("Library unavailable");
     expect(text(f.panel)).toContain("project · new");
-    f.panel.handleInput(esc); f.panel.handleInput(bringBack);
-    expect(f.close).toHaveBeenCalledWith([selectPreference(a)]);
+    f.panel.handleInput(esc); f.panel.handleInput(esc);
+    expect(listRows(f.panel).find((row) => row.includes(a.name))).toContain("[x]");
+    expect(f.updateSelection).not.toHaveBeenCalled();
   });
 
   it("reports a concurrently removed saved identity rather than highlighting another same-name entry as it", async () => {
     const f = setup(); await loaded(f.panel);
     f.repo.load.mockResolvedValueOnce({ entries: [a, b], errors: {} });
-    f.panel.handleInput("n"); f.panel.handleInput(a.name); save(f.panel); await loaded(f.panel);
+    f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput(a.name); save(f.panel); await loaded(f.panel);
     expect(text(f.panel)).toContain("Saved entry no longer in library; could not reveal it.");
     expect(text(f.panel)).toContain("0 selected");
   });
 
   it("keeps edit query, selected-only mode and focus semantics while preserving the selected snapshot", async () => {
     const selected = [selectPreference(b), selectPreference(a)]; const f = setup(selected); await loaded(f.panel);
-    f.panel.handleInput("s"); search(f.panel, "Concise"); f.panel.handleInput(tab);
+    f.panel.handleInput("s"); search(f.panel, "Concise"); f.panel.handleInput("l"); f.panel.handleInput(tab);
     f.panel.handleInput("e"); f.panel.handleInput(" renamed"); save(f.panel); await loaded(f.panel);
     expect(text(f.panel)).toContain("Focus: Actions");
-    expect(text(f.panel)).toContain("Preferences · Selected only");
+    expect(text(f.panel)).toContain("Selected only ");
     expect(text(f.panel)).toContain("Search: Concise");
     expect(listRows(f.panel)).toHaveLength(1);
-    f.panel.handleInput(bringBack);
-    expect(f.close).toHaveBeenCalledWith(selected);
+    f.panel.handleInput(esc);
+    expect(highlightedRow(f.panel)).toContain(`[x] ! ${a.name}`);
+    expect(f.updateSelection).not.toHaveBeenCalled();
   });
 });

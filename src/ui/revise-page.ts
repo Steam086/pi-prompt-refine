@@ -7,7 +7,12 @@ import { sanitizeTerminalText } from "../presentation.js";
 import type { RevisionInput } from "../context.js";
 import { composeRevision, promptInstructions, resultNoteRequests, type RevisionDraft, type SelectedPreference } from "../revision-preferences.js";
 
-export interface RevisionTarget { key: string; label?: string; submit(text: string, resultNotes?: RevisionInput["resultNotes"]): string | undefined }
+export interface RevisionTarget {
+  key: string;
+  label?: string;
+  validateSelection?(): string | undefined;
+  submit(text: string, resultNotes?: RevisionInput["resultNotes"]): string | undefined;
+}
 interface RevisePageOptions {
   preferences: boolean;
   preferencesKey?: KeyId | null;
@@ -60,14 +65,22 @@ export class RevisePage {
     this.revisionFocus = "input";
     this.reviewingRequirements = false;
   }
-  preferenceDraft(): RevisionDraft {
-    this.rememberRevision();
-    return { selected: this.revisionSelected, freeText: this.revisionInput.editor.getExpandedText() };
+  preferenceDraft(): RevisionDraft & { updateSelection(selected: SelectedPreference[]): string | undefined } {
+    const target = this.revisionTarget;
+    return {
+      selected: this.revisionSelected, freeText: this.revisionInput.editor.getExpandedText(),
+      updateSelection: (selected) => {
+        if (!target || target !== this.revisionTarget) return "Result changed; reopen Revise to select preferences.";
+        const error = target.validateSelection?.();
+        if (error) return error;
+        this.revisionSelected = selected;
+        this.inputError = "";
+        this.rememberRevision();
+        return undefined;
+      },
+    };
   }
-  bringBackPreferences(selected?: SelectedPreference[]): void {
-    if (selected) { this.revisionSelected = selected; this.rememberRevision(); }
-    this.revisionFocus = "input";
-  }
+  focusRequirementsInput(): void { this.revisionFocus = "input"; }
   private rememberRevision(): void {
     if (!this.revisionTarget) return;
     this.revisionDrafts.set(this.revisionTarget.key, { freeText: this.revisionInput.editor.getExpandedText(), selected: structuredClone(this.revisionSelected) });

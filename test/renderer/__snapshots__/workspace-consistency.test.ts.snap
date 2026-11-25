@@ -171,16 +171,33 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │                                                       │
 ╰───────────────────────────────────────────────────────╯
 
-=== Preferences / library ===
+=== Preferences / choose ===
 ╭───────────────────────────────────────────────────────╮
-│  Preferences                                          │
+│  Preferences · This revision                          │
 │  Focus: Library · 0 selected · 9/16000 chars          │
-│  Alt+Enter Bring back · Space Select                  │
-│  Esc Cancel selection · Tab / Shift+Tab Focus         │
+│  Space Toggle · Enter Read · s Selected               │
+│  Esc Back · l Manage library · Tab Focus · / Search   │
 │  ───────────────────────────────────────────────────  │
 │  Search:                                              │
-│    n Add            e Edit           d Delete         │
-│  Library 1/1 · s Selected                             │
+│  Library 1/1                                          │
+│  Unclassified                                         │
+│  › [ ] Preserve 中文😀                        Global  │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+╰───────────────────────────────────────────────────────╯
+
+=== Preferences / library ===
+╭───────────────────────────────────────────────────────╮
+│  Preferences library                                  │
+│  Focus: Library · 0 selected (read-only)              │
+│  Enter Read · s Selected                              │
+│  Esc Back · Tab Focus · / Search                      │
+│  ───────────────────────────────────────────────────  │
+│  Search:                                              │
+│  Library 1/1                                          │
+│  n Add · e Edit · d Delete                            │
 │  Unclassified                                         │
 │  › [ ] Preserve 中文😀                        Global  │
 │                                                       │

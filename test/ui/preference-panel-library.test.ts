@@ -2,7 +2,7 @@ import { CURSOR_MARKER, visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { panelLayout } from "../../src/panel-layout.js";
-import { composeRevision, selectPreference, type RevisionPreference, type SelectedPreference } from "../../src/revision-preferences.js";
+import { composeRevision, selectPreference, type RevisionPreference } from "../../src/revision-preferences.js";
 import { a, b, backTab, bringBack, ctrlS, down, enter, esc, loaded, right, save, search, setup, tab, text } from "../support/preference-panel.js";
 
 afterEach(() => vi.restoreAllMocks());
@@ -47,8 +47,7 @@ describe("Library purpose groups", () => {
     expect(lines.join("\n")).toContain(f.theme.fg("muted", "Project"));
     expect(lines.join("\n")).toContain(f.theme.fg("muted", " Global"));
     f.panel.handleInput(down); f.panel.handleInput(" "); f.panel.handleInput("\x1b[A"); f.panel.handleInput(" ");
-    f.panel.handleInput(bringBack);
-    const selected = f.close.mock.calls[0]![0] as SelectedPreference[];
+    const selected = f.updateSelection.mock.lastCall![0];
     expect(selected.map((entry) => entry.id)).toEqual(["task", "rewrite"]);
     const composed = composeRevision(selected, "");
     expect(composed.indexOf("Main-agent task requirements")).toBeLessThan(composed.indexOf("Prompt rewriting instructions"));
@@ -56,7 +55,7 @@ describe("Library purpose groups", () => {
 
   it("creates a custom result note and shows its destination while choosing the type", async () => {
     const f = setup([], "Name the unresolved question."); await loaded(f.panel);
-    f.panel.handleInput("n"); f.panel.handleInput("Open question");
+    f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput("Open question");
     for (const key of [tab, tab, tab, enter, enter]) f.panel.handleInput(key);
     expect(text(f.panel)).toContain("Type: Result notes");
     expect(text(f.panel)).toContain("Shown in Result only.");
@@ -70,7 +69,7 @@ describe("Library purpose groups", () => {
   it("wraps arrow navigation across groups and filtered/selected lists", async () => {
     const f = setup([selectPreference(rewrite), selectPreference(task)], "", "dark", [rewrite, task]);
     await loaded(f.panel);
-    const position = () => text(f.panel).match(/(?:Library|Selected) (\d+)\/(\d+)/)?.slice(1);
+    const position = () => text(f.panel).match(/(?:Library|Selected only) (\d+)\/(\d+)/)?.slice(1);
     expect(position()).toEqual(["1", "2"]);
     f.panel.handleInput("\x1b[A"); expect(position()).toEqual(["2", "2"]);
     f.panel.handleInput(down); expect(position()).toEqual(["1", "2"]);
@@ -133,9 +132,9 @@ describe("Preferences management without selection", () => {
     const snapshot = selectPreference(a);
     const f = setup([snapshot], "", themeName, [{ ...a, version: 2, body: "Current library body 中文😀" }], "manage");
     await loaded(f.panel);
-    expect(text(f.panel)).toContain("1 frozen snapshots");
+    expect(text(f.panel)).toContain("1 selected (read-only)");
     expect(text(f.panel)).not.toContain("Bring back");
-    expect(text(f.panel)).not.toContain("Space Select");
+    expect(text(f.panel)).not.toContain("Space Toggle");
     f.panel.handleInput("s");
     f.panel.handleInput(" "); f.panel.handleInput(bringBack); f.panel.handleInput(ctrlS);
     expect(f.close).not.toHaveBeenCalled();
@@ -175,7 +174,7 @@ describe("Preferences management without selection", () => {
     f.panel.handleInput(enter); await loaded(f.panel);
     expect(f.repo.save).toHaveBeenCalledOnce();
     f.panel.handleInput(" ");
-    expect(text(f.panel)).toContain("0 frozen snapshots");
+    expect(text(f.panel)).toContain("0 selected (read-only)");
     f.panel.handleInput(" "); f.panel.handleInput(bringBack); f.panel.handleInput(ctrlS);
     expect(f.close).not.toHaveBeenCalled();
     f.panel.handleInput(esc); expect(f.close.mock.calls).toEqual([[]]);
@@ -197,7 +196,7 @@ describe("three-action preference library", () => {
         if (width === 100) expect(output).toContain(f.theme.fg("text", f.theme.bold("Edit library entry")));
       }
     };
-    f.panel.handleInput("e"); assertSafe();
+    f.panel.handleInput("l"); f.panel.handleInput("e"); assertSafe();
     expect(text(f.panel).replace(/\x1b_pi:[^\x07]*\x07/g, "")).toContain("Name: 中文😀    �[999C�]52;c;name-payload� �C1�");
     f.panel.handleInput(esc);
     expect(text(f.panel)).not.toContain("Discard unsaved form?");
@@ -217,21 +216,22 @@ describe("three-action preference library", () => {
   it.each(["dark", "light"])("saves edited safe names and retains explicit discard boundaries (%s)", async (themeName) => {
     const entry = { ...a, name: "Original \x1b]52;c;name-payload\x07" };
     const f = setup([selectPreference(entry)], "", themeName, [entry]); await loaded(f.panel);
-    f.panel.handleInput("e");
+    f.panel.handleInput("l"); f.panel.handleInput("e");
     f.panel.handleInput("\x05"); f.panel.handleInput("\x15"); f.panel.handleInput("Renamed 中文😀");
     f.panel.handleInput(esc); expect(text(f.panel)).toContain("Discard unsaved form?");
     f.panel.handleInput("n"); expect(text(f.panel)).toContain("Name: Renamed 中文😀");
     expect(f.repo.save).not.toHaveBeenCalled();
     save(f.panel); await loaded(f.panel);
     expect(f.repo.save).toHaveBeenCalledExactlyOnceWith(entry.scope, { name: "Renamed 中文😀", body: entry.body }, entry);
-    f.panel.handleInput(bringBack);
-    expect(f.close).toHaveBeenCalledWith([selectPreference(entry)]);
+    f.panel.handleInput(esc); f.panel.handleInput("s");
+    expect(text(f.panel)).toContain("[x] ! Original");
+    expect(f.updateSelection).not.toHaveBeenCalled();
   });
 
   it.each(["dark", "light"])("sanitizes external metadata before editing while preserving untouched JSON (%s)", async (themeName) => {
     const entry: RevisionPreference = { ...a, metadata: { kind: "rewrite", activation: "manual", description: "Literal \u001b[31m红色\n第二行\t😀" } };
     const f = setup([], "", themeName, [entry]); await loaded(f.panel);
-    f.panel.handleInput("e");
+    f.panel.handleInput("l"); f.panel.handleInput("e");
     const output = f.panel.render(100).join("\n");
     expect(output).not.toContain("\u001b[31m");
     expect(output).toContain("�[31m红色 第二行    😀");
@@ -241,7 +241,7 @@ describe("three-action preference library", () => {
 
   it.each(["dark", "light"])("edits classification/description with manual-only selection and bounds each field (%s)", async (themeName) => {
     const f = setup([], "Preserve existing structure.", themeName); await loaded(f.panel);
-    f.panel.handleInput("n"); f.panel.handleInput("Structure");
+    f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput("Structure");
     f.panel.handleInput(tab); f.panel.handleInput(tab); f.panel.handleInput(tab);
     f.panel.handleInput(enter);
     expect(text(f.panel)).toContain("Type: Prompt rewriting");
@@ -268,8 +268,18 @@ describe("three-action preference library", () => {
 
   it("shows all three actions and cycles just three focus regions", async () => {
     const f = setup(); await loaded(f.panel);
+    expect(text(f.panel)).not.toMatch(/n Add|e Edit|d Delete/);
+    f.panel.handleInput("n"); f.panel.handleInput("e"); f.panel.handleInput("d");
+    expect(text(f.panel)).toContain("Preferences · This revision");
+    f.panel.handleInput("l");
+    expect(text(f.panel)).toContain("Preferences library");
     expect(text(f.panel)).toContain("Focus: Library");
-    for (const label of ["n Add", "e Edit", "d Delete"]) expect(text(f.panel)).toContain(label);
+    const lines = text(f.panel).split("\n");
+    const heading = lines.findIndex((line) => /Library 1\/2.*│ Preview\s*$/.test(line));
+    expect(heading).toBeGreaterThan(0);
+    expect(lines[heading + 1]!.split("│")[0]!.trim()).toBe("n Add · e Edit · d Delete");
+    expect(lines.join("\n").match(/s Selected(?: only)?/g)).toHaveLength(1);
+    expect(lines.join("\n").match(/Enter Read/g)).toHaveLength(1);
     for (const removed of ["Show all selected", "Refresh library", "Save highlighted", "Current actual", "Preview after", "Edit selected for", "Clear search"]) {
       expect(text(f.panel)).not.toContain(removed);
     }
@@ -278,6 +288,8 @@ describe("three-action preference library", () => {
     f.panel.handleInput(right); expect(text(f.panel)).toContain("› e Edit");
     f.panel.handleInput(right); expect(text(f.panel)).toContain("› d Delete");
     f.panel.handleInput(tab); expect(text(f.panel)).toContain("Focus: Search");
+    expect(text(f.panel)).not.toMatch(/n Add|e Edit|d Delete/);
+    expect(text(f.panel)).toContain("Add · Edit · Delete");
     expect(f.panel.render(100).join("\n")).toContain(CURSOR_MARKER);
     f.panel.handleInput(tab); expect(text(f.panel)).toContain("Focus: Library");
     f.panel.handleInput(backTab); expect(text(f.panel)).toContain("Focus: Search");
@@ -287,7 +299,7 @@ describe("three-action preference library", () => {
   });
 
   it("opens Add directly, saves explicitly, and does not auto-select or submit", async () => {
-    const f = setup([], "Reusable full text"); await loaded(f.panel);
+    const f = setup([], "Reusable full text"); await loaded(f.panel); f.panel.handleInput("l");
     f.panel.handleInput("n"); expect(text(f.panel)).toContain("Save new preference");
     f.panel.handleInput("Saved"); f.panel.handleInput(ctrlS);
     expect(f.repo.save).not.toHaveBeenCalled();
@@ -295,13 +307,13 @@ describe("three-action preference library", () => {
     expect(f.repo.save).toHaveBeenCalledWith("project", { name: "Saved", body: "Reusable full text",
       metadata: { kind: "task", description: "Saved", activation: "manual" } }, undefined);
     expect(text(f.panel)).toContain("0 selected");
-    f.panel.handleInput(esc); expect(f.close).toHaveBeenCalledWith();
+    f.panel.handleInput(esc); f.panel.handleInput(esc); expect(f.close).toHaveBeenCalledWith();
     expect(f.library.entries.find((entry) => entry.id === "new")?.body).toBe("Reusable full text");
   });
 
   it("opens the highlighted toolbar action with Enter, without Tab-ing through individual actions", async () => {
     const f = setup(); await loaded(f.panel);
-    f.panel.handleInput(tab); f.panel.handleInput(right); f.panel.handleInput(enter);
+    f.panel.handleInput("l"); f.panel.handleInput(tab); f.panel.handleInput(right); f.panel.handleInput(enter);
     expect(text(f.panel)).toContain("Edit library entry");
     f.panel.handleInput(esc);
     expect(text(f.panel)).toContain("› e Edit");
@@ -312,7 +324,8 @@ describe("three-action preference library", () => {
 
   it("keeps search and form typing isolated from n/e/d shortcuts", async () => {
     const f = setup(); await loaded(f.panel);
-    f.panel.handleInput("/"); f.panel.handleInput("ned");
+    f.panel.handleInput("l"); f.panel.handleInput("/");
+    for (const key of "ned") f.panel.handleInput(key);
     expect(text(f.panel)).toContain("Search: ned");
     expect(text(f.panel)).toContain("No matches");
     expect(text(f.panel)).not.toContain("Save new preference");
@@ -324,32 +337,34 @@ describe("three-action preference library", () => {
 
   it("edits a library entry without silently changing its selected snapshot", async () => {
     const f = setup([selectPreference(a)]); await loaded(f.panel);
-    f.panel.handleInput("e"); f.panel.handleInput(tab); f.panel.handleInput(" Changed");
+    f.panel.handleInput("l"); f.panel.handleInput("e"); f.panel.handleInput(tab); f.panel.handleInput(" Changed");
     f.panel.handleInput(backTab); save(f.panel); await loaded(f.panel);
     expect(f.repo.save).toHaveBeenCalledWith("global", { name: a.name, body: `${a.body} Changed` }, a);
     f.panel.handleInput(enter);
     let all = text(f.panel); f.panel.handleInput("\x1b[6~"); all += text(f.panel);
     expect(all).toContain("Library changed; snapshot kept"); expect(all).toContain("Changed");
-    f.panel.handleInput(esc); f.panel.handleInput(bringBack);
-    expect(f.close).toHaveBeenCalledWith([selectPreference(a)]);
+    f.panel.handleInput(esc); f.panel.handleInput(esc);
+    expect(text(f.panel)).toContain("1 selected");
+    expect(f.updateSelection).not.toHaveBeenCalled();
   });
 
   it("keeps deleted selected snapshots visible and removable; delete still requires y", async () => {
     const f = setup([selectPreference(a)]); await loaded(f.panel);
-    f.panel.handleInput("d"); f.panel.handleInput(enter);
+    f.panel.handleInput("l"); f.panel.handleInput("d"); f.panel.handleInput(enter);
     expect(f.repo.remove).not.toHaveBeenCalled();
     f.panel.handleInput("y"); await loaded(f.panel);
     expect(f.repo.remove).toHaveBeenCalledWith(a);
     expect(text(f.panel)).toContain("deleted");
     f.panel.handleInput(enter); expect(text(f.panel)).toContain("Source deleted"); f.panel.handleInput(esc);
-    f.panel.handleInput(" ");
-    f.panel.handleInput(bringBack); expect(f.close).toHaveBeenCalledWith([]);
+    f.panel.handleInput(" "); expect(f.updateSelection).not.toHaveBeenCalled();
+    f.panel.handleInput(esc); f.panel.handleInput(" ");
+    expect(f.updateSelection).toHaveBeenCalledExactlyOnceWith([]);
   });
 
   it("keeps form text on write conflict and requires explicit discard", async () => {
     const f = setup(); await loaded(f.panel);
     f.repo.save.mockRejectedValueOnce(new Error("Conflict: changed elsewhere"));
-    f.panel.handleInput("n"); f.panel.handleInput("New title"); save(f.panel); await loaded(f.panel);
+    f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput("New title"); save(f.panel); await loaded(f.panel);
     expect(text(f.panel)).toContain("Conflict"); expect(text(f.panel)).toContain("New title");
     f.panel.handleInput(esc); expect(text(f.panel)).toContain("Discard unsaved form?");
     f.panel.handleInput(esc); expect(text(f.panel)).toContain("New title");
@@ -357,19 +372,19 @@ describe("three-action preference library", () => {
     expect(text(f.panel)).toContain("Form discarded"); expect(f.close).not.toHaveBeenCalled();
   });
 
-  it("retains off-search selections and selection order; only Alt+Enter brings them back", async () => {
+  it("updates selections immediately, preserving off-search selections and selection order", async () => {
     const selected = [selectPreference(a)]; const f = setup(selected); await loaded(f.panel);
     f.panel.handleInput(" ");
     search(f.panel, "Literal"); f.panel.handleInput(" ");
     search(f.panel, "Concise"); f.panel.handleInput(" ");
     f.panel.handleInput(ctrlS); f.panel.handleInput(enter); f.panel.handleInput(ctrlS);
     expect(f.close).not.toHaveBeenCalled(); expect(f.repo.save).not.toHaveBeenCalled();
+    expect(f.updateSelection.mock.calls.map(([items]) => items.map((entry) => entry.id))).toEqual([[], ["b"], ["b", "a"]]);
     f.panel.handleInput(esc); f.panel.handleInput(bringBack);
-    expect((f.close.mock.calls[0]![0] as SelectedPreference[]).map((entry) => entry.id)).toEqual(["b", "a"]);
+    expect(f.close).not.toHaveBeenCalled();
+    f.panel.handleInput(esc); expect(f.close).toHaveBeenCalledExactlyOnceWith();
+    expect(f.updateSelection).toHaveBeenCalledTimes(3);
     expect(selected).toEqual([selectPreference(a)]);
-    const cancelled = setup(selected); await loaded(cancelled.panel);
-    cancelled.panel.handleInput(" "); cancelled.panel.handleInput(esc);
-    expect(cancelled.close).toHaveBeenCalledWith(); expect(selected).toEqual([selectPreference(a)]);
   });
 
   it.each(["dark", "light"])("rejects identical cross-scope selections without hiding management entries (%s)", async (themeName) => {
@@ -385,17 +400,17 @@ describe("three-action preference library", () => {
       expect(lines.every((line) => visibleWidth(line) <= width!)).toBe(true);
       expect(stripVTControlCharacters(lines.join("\n"))).toContain("Same requirem");
     }
-    f.panel.handleInput("e"); expect(text(f.panel)).toContain("Edit library entry");
-    f.panel.handleInput(esc); f.panel.handleInput("s"); f.panel.handleInput(" ");
-    f.panel.handleInput("s"); f.panel.handleInput(" "); f.panel.handleInput(bringBack);
-    expect(f.close).toHaveBeenCalledWith([selectPreference(copy)]);
+    f.panel.handleInput("l"); f.panel.handleInput("e"); expect(text(f.panel)).toContain("Edit library entry");
+    f.panel.handleInput(esc); f.panel.handleInput(esc); f.panel.handleInput("s"); f.panel.handleInput(" ");
+    f.panel.handleInput("s"); f.panel.handleInput(" ");
+    expect(f.updateSelection).toHaveBeenLastCalledWith([selectPreference(copy)]);
     expect(f.repo.save).not.toHaveBeenCalled(); expect(f.repo.remove).not.toHaveBeenCalled();
   });
 
   it("shows empty and no-match states, prevents editing missing entries, and ignores function keys", async () => {
     const f = setup([], "Extra", "dark", []); await loaded(f.panel);
     expect(text(f.panel)).toContain("Library is empty");
-    f.panel.handleInput("e"); expect(text(f.panel)).toContain("Select a saved preference");
+    f.panel.handleInput("l"); f.panel.handleInput("e"); expect(text(f.panel)).toContain("Select a saved preference");
     f.panel.handleInput("d"); expect(f.repo.remove).not.toHaveBeenCalled();
     for (const key of ["\x1bOP", "\x1bOQ", "\x1bOR", "\x1b[1;3Q"]) f.panel.handleInput(key);
     expect(text(f.panel)).toContain("Preferences");
@@ -407,7 +422,7 @@ describe("three-action preference library", () => {
     const f = setup(); await loaded(f.panel);
     let finish!: (value: RevisionPreference) => void;
     f.repo.save.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
-    f.panel.handleInput("n"); f.panel.handleInput("Name"); save(f.panel);
+    f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput("Name"); save(f.panel);
     expect(text(f.panel)).toContain("Working…"); f.panel.dispose();
     const renders = vi.mocked(f.tui.requestRender).mock.calls.length;
     finish(a); await Promise.resolve(); await Promise.resolve();

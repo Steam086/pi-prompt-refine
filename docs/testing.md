@@ -19,6 +19,7 @@ npm test
 | RPC 结果预览、纯查询和完整文本 | [RPC slash 集成](../test/integration/rpc-slash.test.ts)、[人工宿主复验](rpc-slash-v1.md) |
 | 传输完整性、配额和断线恢复 | [分页](../test/unit/output-paging.test.ts)、[桥接测试](../packages/pi-web/test/bridge.test.mjs) |
 | 原生主题、布局、输入隔离和焦点 | [界面维护约束](ui-conventions.md)、[跨页渲染](../test/renderer/workspace-consistency.test.ts)、[浮窗](../test/integration/extension-overlay.test.ts) |
+| 偏好选择与库管理 | [交互回归](../test/integration/extension-preferences.test.ts)：Space 即时更新当前草稿，Esc 保留选择；库操作不改已选快照，两者都不提交请求。 |
 | 实际改写是否保留意图和授权 | [语义验收](optimizer-evaluation.md) |
 
 可用 `npm test -- <测试文件或目录>` 跑相关层。改共享布局时查看实际 regular／fullscreen 输出和 ANSI 断言。预期视觉变化才更新[文本快照](../test/renderer/__snapshots__/workspace-consistency.test.ts.snap)，并审阅 diff。

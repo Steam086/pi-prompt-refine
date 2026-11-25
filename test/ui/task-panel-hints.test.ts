@@ -48,7 +48,7 @@ describe("Tasks shortcut hierarchy", () => {
       }
       panel.handleInput("?");
       const help = strip(panel.render(100).join("\n"));
-      for (const action of ["p Manage / more", "i Edit original", "n New", "m Run model", "d Delete"]) expect(help).toContain(action);
+      for (const action of ["p More preferences; l manages the library", "i Edit original", "n New", "m Run model", "d Delete"]) expect(help).toContain(action);
       panel.handleInput("\x1b");
       panel.handleInput("o"); panel.render(100); panel.handleInput("\x1b[6~"); panel.render(100);
       expect(f.position.scroll).toBeGreaterThan(0);

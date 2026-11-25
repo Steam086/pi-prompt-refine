@@ -12,7 +12,7 @@ Tab 切换 **Context**、**Optimizer**，方向键选择设置，必要时用 Pg
 
 - 用 `/refine model` 选择默认优化模型。Pi 管理 Provider 认证，主模型保持独立。模型、thinking 和策略各有保存确认。
 - **Optimizer → Optimization prompt** 按 Enter 编辑，Ctrl+S 后按 `y` 确认。删除文件中的 `systemPrompt` 字段可恢复内置策略。自定义策略保留，固定角色、字面保护和输出协议由程序提供。
-- 默认优化快捷键是 `Ctrl+\`，Preferences 的 `preferencesKey` 默认是 Alt+P。可在配置中用 `null` 关闭对应绑定。面板命令和页内入口见[使用说明](usage.md)及[偏好指南](preference-selection.md)。原生快捷键避免功能键，旧绑定的兼容行为见[配置测试](../test/unit/config.test.ts)。
+- 默认优化快捷键是 `Ctrl+\`，Preferences 的 `preferencesKey` 默认是 Alt+P。可在配置中用 `null` 关闭对应绑定。即使禁用 Alt+P，仍可在 Preview／Usage 按 `p`，或在 Revise 用 Tab 聚焦 Preferences 后按 Enter。完整流程见[使用说明](usage.md)及[偏好指南](preference-selection.md)。原生快捷键避免功能键，旧绑定的兼容行为见[配置测试](../test/unit/config.test.ts)。
 
 ## 历史保存与隐私
 

@@ -21,6 +21,10 @@ The first request counts as soon as Refine queues it, even if you stop it, it fa
 
 To choose Preferences before the first rewrite, open `/refine`, press `n`, and save a draft with `Enter` before choosing Preferences.
 
+For an existing result, press `f` to open **Revise**, then `Alt+P` (or `Tab`, then `Enter`) to choose Preferences for this revision. `Space` toggles a preference on the draft immediately; `Esc` returns without undoing the selection. Only `Ctrl+S` in Revise requests a rewrite. On an Unsent original, `p` opens the full chooser with the same selection behavior; return to the original and press `Enter` to run it.
+
+In the chooser, press `l` to open **Preferences library**. Use `n` to add, `e` to edit, or `d` to delete an entry. These actions don't replace or remove instructions you've already selected. To use an edited entry in your draft, deselect it and select it again. From an already-run item or an empty workspace, `p` opens the library directly; any adopted preferences shown there are read-only.
+
 Select **In Your Own Words** in Preferences to see how the rewrite model understood your draft. The note appears below the rewritten prompt and is not included when you accept or send it. You can also add your own **Result notes** in Preferences.
 
 ## Settings

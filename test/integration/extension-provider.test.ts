@@ -68,7 +68,7 @@ describe("source preservation in the provider path", () => {
     h.panelInput("n"); h.panelInput(screenDraft); h.panelInput("\r");
     h.panelInput("p");
     await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Removal"));
-    h.panelInput(" "); h.panelInput("\x1b[13;3u");
+    h.panelInput(" "); h.panelInput("\x1b");
     h.panelInput("\r"); await advanceMicrotaskTurns();
     const packet = JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
     expect(packet.editing_instruction).toContain("Remove the screenshot.");
