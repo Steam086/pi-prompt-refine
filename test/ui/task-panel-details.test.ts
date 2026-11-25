@@ -28,7 +28,7 @@ describe("prompt tree and inspection", () => {
 
   it.each(["dark", "light"])("identifies both compared runs across narrow layouts and target switches (%s)", (name) => {
     const records = [record(1), record(2)];
-    records[1]!.input.model.id = records[0]!.input.model.id; // Same model, distinct runs.
+    records[1]!.input.model.id = records[0]!.input.model.id;
     const { panel, theme, position, actions, size } = create(name, false, records);
     panel.handleInput("\r"); panel.handleInput("c");
     for (const selected of [1, 2, 1]) {
@@ -83,7 +83,7 @@ describe("prompt tree and inspection", () => {
     panel.handleInput("\r");
     expect(text()).toContain("✓ Revised"); expect(text()).toContain("Revision of run #1");
     expect(text()).toContain("Revised result");
-    if (!usage) panel.handleInput("o"); // Scroll the reference column, not the result.
+    if (!usage) panel.handleInput("o");
     let all = "";
     for (let i = 0; i < 8; i++) { all += text() + "\n"; panel.handleInput("\x1b[6~"); }
     for (const expected of ["Original prompt", revised.input.draft, "Revision instruction", "Keep **literal** commands", "Before revision", "BEFORE_REVISION"]) expect(all).toContain(expected);
@@ -299,7 +299,7 @@ describe("prompt tree and inspection", () => {
     expect(text()).not.toContain("↑2.3k ↓670 · Cost —");
     expect(text()).not.toContain("Thinking xhigh");
     const usage = create(name, true).panel.render(100).join("\n");
-    expect(usage).toContain(theme.fg("text", theme.bold("23s"))); // Other pages retain their existing emphasis.
+    expect(usage).toContain(theme.fg("text", theme.bold("23s")));
     for (const hidden of ["Branch", "Frozen context", "Applied", "Round 1", "Cache read"]) expect(text()).not.toContain(hidden);
     result.status = "generating";
     result.candidate = undefined;
@@ -413,7 +413,6 @@ describe("prompt tree and inspection", () => {
     const { panel, records, text } = create("dark", true);
     records[0]!.usage = { input: 200, cacheRead: 800, cacheWrite: 0, output: 300, cost: { total: 0.012, cacheRead: 0.001 }, subscription: true };
     expect(text()).toContain("↑1k ↓300 · ≈$0.012 (sub)");
-    // The taller browsing viewport can reveal the Usage section, but its fixed summary stays compact.
     expect(text().split("Usage · tokens")[0]).not.toContain("Cache hit");
     panel.handleInput("\r");
     let details = "";
@@ -431,7 +430,7 @@ describe("prompt tree and inspection", () => {
     render.mockClear();
     records[0]!.elapsedSeconds = 24;
     panel.render(100);
-    expect(render).toHaveBeenCalledTimes(1); // Changed metric only.
+    expect(render).toHaveBeenCalledTimes(1);
     render.mockClear();
     panel.handleInput("\t"); panel.handleInput("\x1b[B"); panel.render(100);
     expect(render).not.toHaveBeenCalled();

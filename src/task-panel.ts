@@ -9,7 +9,7 @@ import { alignedKeyHints, fittingKeyHints, formatKeyHint, passiveHintLayout, typ
 import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
 import type { InlinePreferences } from "./inline-preferences.js";
-import { TaskContent, pending, type TaskRow as Row } from "./ui/task-content.js";
+import { TaskContent, hasModelProviderCollision, pending, type TaskRow as Row } from "./ui/task-content.js";
 import { renderTaskDocument } from "./ui/task-documents.js";
 import { renderInactivePreferences, renderTaskPreferences } from "./ui/task-preferences.js";
 
@@ -49,8 +49,6 @@ export class TaskPanel {
   }
   ownsInput(): boolean { return !!this.deletion || !!this.document || this.preferenceFocus; }
   private preferenceFocus = false;
-  // A view opened while current may outlive its round. Keep only that view,
-  // not archived tree rows, until the user explicitly leaves it.
   private viewedRow?: Row;
   private retainedEarlier = false;
   private document?: { kind: "help" | "storage"; scroll: number };
@@ -64,8 +62,6 @@ export class TaskPanel {
   private navigationDirection = 1;
   private notice = "";
   private noticeColor: "muted" | "warning" | "error" = "muted";
-  // Keep requested anchors separate from effective offsets. A taller viewport
-  // may reveal earlier lines near the end, but must not erase the compact anchor.
   private renderedScrolls = new Map<string, number>();
   private rememberRenderedScroll(key: string, offset: number): void {
     if (this.renderedScrolls.size >= 200 && !this.renderedScrolls.has(key)) this.renderedScrolls.delete(this.renderedScrolls.keys().next().value!);
@@ -176,7 +172,6 @@ export class TaskPanel {
   private refineModelLabel(width: number): string {
     const model = sanitizeTerminalText(this.actions.launchModel?.() ?? "selected model").replace(/\n/g, " ");
     const id = model.slice(model.indexOf("/") + 1) || model;
-    // Preserve the qualified identity first, then the full ID before truncating anything.
     const choices = [["Refine model: ", model], ["Model: ", model], ["Model: ", id], ["", id]] as const;
     const [label, name] = choices.find(([label, name]) => visibleWidth(label + name) <= width)
       ?? ["", stripVTControlCharacters(truncateToWidth(id, width, "…"))];
@@ -184,8 +179,6 @@ export class TaskPanel {
   }
   private runOriginal(row: Row): void {
     this.actions.run(row.record.id);
-    // Failed starts retain the original and focus. Successful starts follow only
-    // this explicit target, never whichever candidate completed in the meantime.
     const started = this.entries().find((item) => !item.original && item.record.id === row.record.id);
     if (started) {
       this.preferenceFocus = false; this.reading = false;
@@ -366,7 +359,6 @@ export class TaskPanel {
       return true;
     }
     if (key === "h" || key === "u") return true;
-    // Main actions never leak to a different, previously applied result.
     if (["e", "c", "o", "s", "[", "]", "d", "z", "r", "?", "v"].includes(key ?? "")) {
       this.notice = key === "e" ? "Press i to edit the original, or Enter then e to edit the result"
         : "Action unavailable here · Inspect the selected request with Enter";
@@ -442,8 +434,6 @@ export class TaskPanel {
     const run = selected && !selected.original ? selected.record : undefined;
     const stop = run && pending(run);
     const back: KeyHint = ["Esc", "Back"];
-    // Reading the original does not change the action target. Name the result
-    // explicitly here, even when the selected result itself is off screen.
     const editorHint = this.original && run?.candidate
       ? (layout.innerWidth < 40 ? "Result→editor" : "Result to editor only")
       : layout.innerWidth < 20 ? "→editor" : "Editor only";
@@ -453,7 +443,6 @@ export class TaskPanel {
       const primary: KeyHint[] = !selected ? [["n", "New"]] : [["Enter", action]];
       if (stop) primary.unshift(["x", "Stop"]);
       if (run?.candidate && !this.usage) primary.unshift(["a", editorHint]);
-      // Reserve both focus labels so a focus change never moves or hides other hints.
       const focus: KeyHint[] = inline ? [["Tab", "Preferences"], ["o", (this.reading ? "Select" : "Read original").padEnd("Read original".length)]]
         : selected ? [["Tab", (this.reading ? "Select" : "Read").padEnd("Select".length)]] : [];
       ({ layout, footer } = passiveHintLayout(layout, tabs.length,
@@ -566,8 +555,6 @@ export class TaskPanel {
     const leftWidth = split ? Math.min(layout.innerWidth >= 120 ? 48 : 36, Math.floor(layout.innerWidth / 3)) : layout.innerWidth;
     const rightWidth = split ? layout.innerWidth - leftWidth - 3 : layout.innerWidth;
     const selectedIndex = Math.max(0, rows.findIndex((row) => this.isSelected(row)));
-    // Larger canvases give each identity a readable secondary line and a gap.
-    // Scroll in identities, not physical lines, so resize never changes the target.
     const rowHeight = split && layout.innerWidth >= 100 && height >= 24 ? 3 : 1;
     const capacity = Math.max(1, Math.floor(height / rowHeight));
     this.top = selectionWindow(rows.length, selectedIndex, capacity, this.top, undefined, 0, this.navigationDirection).start;
@@ -580,13 +567,11 @@ export class TaskPanel {
       const continuation = children.length > 0 && (row.original || !lastChild) ? "  │" : "   ";
       const prefix = `${active ? "›" : " "} ${lastChild ? "└─" : "├─"} `;
       const badge = this.content.badge(record);
-      const ambiguous = !row.original && rowHeight === 1 && row.records.some(({ input }) => input.model.id === record.input.model.id && input.model.provider !== record.input.model.provider);
+      const ambiguous = !row.original && rowHeight === 1 && hasModelProviderCollision(row);
       const identity = ambiguous ? `#${record.id} ${record.input.model.id} · ${record.input.model.provider}` : record.input.model.id;
       const model = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(identity), Math.max(1, leftWidth - visibleWidth(prefix + badge) - 1), "…"));
       const draft = record.input.draft.replace(/\s+/g, " ") || "Empty prompt";
       const selectedParent = row.original && !this.usage && selected && !selected.original && record.taskId === selected.record.taskId;
-      // In a one-line tree keep the end of the selected prompt too: similar
-      // requests often share their opening words but differ in the subject.
       const cleanDraft = selectedParent ? sanitizeTerminalText(draft) : draft;
       const summaryWidth = Math.max(1, leftWidth - 4);
       const excerpt = selectedParent && rowHeight === 1 && visibleWidth(cleanDraft) > summaryWidth
@@ -597,8 +582,6 @@ export class TaskPanel {
       const clean = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(label), leftWidth, "…"));
       const emphasize = (text: string) => active && rowHeight > 1 ? this.theme.bold(text) : text;
       const primary = (text: string) => this.theme.fg("text", active ? this.theme.bold(text) : text);
-      // Selection survives a reading-focus change. Accent only the existing
-      // cursor, not model identities, tree guides or semantic status badges.
       const cursor = active && clean.startsWith("›")
         ? this.theme.fg("accent", this.theme.bold("›")) : primary(clean.slice(0, 1));
       let text: string;
@@ -617,7 +600,6 @@ export class TaskPanel {
       const highlight = (line: string) => active
         ? this.theme.bg("selectedBg", line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line)))) : line;
       if (rowHeight === 1) return [highlight(text)];
-      // Use the existing spacer for a second summary line without moving the run rows.
       if (selectedParent) {
         const columns = leftWidth - 4;
         const excerpt = truncateToWidth(sanitizeTerminalText(draft), columns * 2, "…");
@@ -628,22 +610,16 @@ export class TaskPanel {
       }
       const detail = row.original ? this.theme.fg("text", sanitizeTerminalText(draft))
         : this.content.muted(`#${record.id} · ${record.input.model.provider}${record.elapsedSeconds !== undefined ? ` · ${record.elapsedSeconds}s` : ""}`);
-      // Keep the parent/sibling spine through secondary lines and spacing,
-      // but stop after the final child so separate prompts never join together.
       return [highlight(text),
         highlight(truncateToWidth(this.content.muted(continuation) + (row.original ? " " : "  ") + detail, leftWidth, "…")),
         this.content.muted(continuation.trimEnd())];
     });
     let body: string[];
-    // Exactly one layout owns the horizontal split: list + summary, Enter
-    // details (result + reference), or Compare. Never nest detail columns inside
-    // an existing pane, or render an unused pane that clamps its scroll offset.
     if (this.retainedEarlier && !this.inspecting && selected) {
       body = this.pane(selected, layout.innerWidth, height);
     } else if (previewDetails && selected) {
       body = this.pane(selected, layout.innerWidth, height, true, true);
     } else if (other && selected) {
-      // A/B identities stay attached to runs when Tab swaps the action target.
       const letter = (row: Row) => row.record.id === Math.min(selected.record.id, other.record.id) ? "A" : "B";
       const identity = (row: Row) => `${letter(row)} · #${row.record.id}`;
       if (layout.innerWidth >= 72) {

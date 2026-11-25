@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, vi } from "vitest";
 import { DEFAULT_CONFIG, type RefineConfig } from "../../src/config.js";
 import promptRefineExtension from "../../src/extension.js";
-import { flushPromises } from "./helpers.js";
+import { advanceMicrotaskTurns } from "./helpers.js";
 import { getThemeByName } from "./pi-theme.js";
 import { createRecordingTerminal } from "./recording-terminal.js";
 
@@ -59,7 +59,6 @@ class RecordingAltScreen extends TuiAltScreen {
   protected override doRender(): void { this.overlayFrames.push(this.hasOverlay()); super.doRender(); }
 }
 
-// Call once per test file. Vitest isolates the module environment; no agent directory is shared.
 export function extensionHarnessEnvironment() {
   const agentDirs: string[] = [];
   const activeHarnesses: Harness[] = [];
@@ -92,17 +91,13 @@ export function extensionHarnessEnvironment() {
     process.env.PI_CODING_AGENT_DIR = agentDir;
 
     const config = { ...structuredClone(DEFAULT_CONFIG), ...options.config } as RefineConfig;
-    // Existing workflow tests exercise the explicitly supported history-only mode.
-    // Project context (including real asynchronous tree collection) has separate integration cases.
     if (!options.config?.projectContext) config.projectContext = { ...config.projectContext, enabled: false };
     if (options.config?.context) config.context = { ...DEFAULT_CONFIG.context, ...options.config.context };
-    // Keep explicit secondary bindings in the older workflow tests; test defaults separately.
     if (!options.useDefaultShortcuts) config.shortcuts = { ...config.shortcuts, view: "alt+v", selectModel: "alt+m", restore: "alt+z" };
     if (options.config?.shortcuts) config.shortcuts = { ...DEFAULT_CONFIG.shortcuts, ...options.config.shortcuts };
     if (options.configureModel !== false) config.model = { provider: "fake-provider", id: "fake-chat" };
     if (!options.freshInstall) {
       await writeFile(join(agentDir, "prompt-refine.json"), `${JSON.stringify(config)}\n`, "utf8");
-      // Existing-profile workflows control their own library entries. Fresh installs exercise startup seeding.
       await writeFile(join(agentDir, "prompt-refine-preferences.json"), '{"version":1,"entries":[]}\n', "utf8");
     }
 
@@ -253,7 +248,7 @@ export function extensionHarnessEnvironment() {
               for (const key of customAction) component.handleInput?.(key);
             } else {
               if (customAction) component.handleInput?.(customAction);
-              component.handleInput?.("q"); // Close when an action is disabled (e.g. no candidate).
+              component.handleInput?.("q");
             }
           }
         });
@@ -366,7 +361,6 @@ export function extensionHarnessEnvironment() {
       resize: (rows) => { terminal.rows = rows; },
       customCalls: () => customCalls,
     };
-    // Track resources before startup so a failed initialization is still cleaned up.
     activeHarnesses.push(harness);
     await promptRefineExtension(pi);
     harness.command = command;
@@ -385,13 +379,12 @@ export function shortcut(harness: Harness, action: string): (ctx: ExtensionConte
 
 export async function trigger(harness: Harness): Promise<void> {
   await harness.command("optimize", harness.context);
-  await flushPromises();
+  await advanceMicrotaskTurns();
 }
 
 export function projectConfig(tree = false): RefineConfig["projectContext"] {
   const config = structuredClone(DEFAULT_CONFIG.projectContext);
   config.tree.enabled = tree;
-  // Existing resource/budget tests explicitly exercise repeat injection.
   config.instructionsEnabled = true;
   config.instructionsOnFollowUp = true;
   config.skillsEnabled = true;
@@ -409,11 +402,11 @@ export function refinement(prompt: string, title?: unknown) {
 export async function panelAction(harness: Harness, action: string): Promise<void> {
   if (action === "e") {
     vi.mocked(harness.context.ui.editor).mockImplementationOnce(async () => {
-      harness.setCustomAction("q"); // Close the result page reopened after editing.
+      harness.setCustomAction("q");
       return "Edited candidate";
     });
   }
   harness.setCustomAction(action);
   await harness.command("view", harness.context);
-  await flushPromises();
+  await advanceMicrotaskTurns();
 }

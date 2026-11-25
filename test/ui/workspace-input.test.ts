@@ -62,7 +62,7 @@ describe("shared refine workspace", () => {
           for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
         }
         expect(textOf(input)).toContain(CURSOR_MARKER);
-        expect(terminal.rows).toBe(rows); // Editor facade must not mutate the host.
+        expect(terminal.rows).toBe(rows);
         if (width >= 40 && rows >= 16) {
           expect(stripVTControlCharacters(textOf(input))).toContain("Esc Back");
           expect(stripVTControlCharacters(textOf(input))).toContain("Enter Refine");
@@ -96,7 +96,7 @@ describe("shared refine workspace", () => {
     workspace.handleInput("i");
     for (let i = 0; i < 45; i++) {
       workspace.handleInput(`中文 😀 é line ${i}`);
-      workspace.handleInput("\x1b[13;2u"); // Kitty Shift+Enter, not submission.
+      workspace.handleInput("\x1b[13;2u");
     }
     expect(actions.submit).not.toHaveBeenCalled();
     for (const rows of [40, 24, 12, 8, 5, 32, 60]) {
@@ -195,9 +195,9 @@ describe("shared refine workspace", () => {
     expect(actions.inputDraft.save).not.toHaveBeenCalled();
     workspace.handleInput("i");
     expect(textOf(workspace.render(100))).toContain("Retained input");
-    workspace.handleInput("\x15"); // Ctrl+U at end of the single line.
+    workspace.handleInput("\x15");
     expect(actions.inputDraft.save).toHaveBeenLastCalledWith("");
-    workspace.handleInput("\r"); // Validation belongs to the host; even submission keeps the clear.
+    workspace.handleInput("\r");
     workspace.handleInput("i");
     expect(textOf(workspace.render(100))).not.toContain("Retained input");
   });

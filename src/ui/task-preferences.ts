@@ -14,7 +14,6 @@ export function renderInactivePreferences(
   const reserved = height < 9 ? 1 : Math.min(7, Math.max(5, Math.floor(height / 2)));
   const bounded = Math.min(originalHeight, Math.max(0, height - reserved - 1));
   const original = bounded > 0 ? renderOriginal(bounded) : [];
-  // Short originals return their unused rows to the checklist.
   return [...original, ...(original.length ? [""] : []), ...inline.render(width, height - original.length - (original.length ? 1 : 0))];
 }
 
@@ -65,8 +64,6 @@ export function renderTaskPreferences(
     const rightWidth = width - leftWidth - 3;
     const choices = inline.render(leftWidth, height, showInlineWarning, false);
     const feedbackHeight = Math.min(height, Math.max(2, Math.min(5, Math.floor(height * 0.25))));
-    // Bound the original so the highlighted instructions own the reading space.
-    // Short originals return their unused rows; checked names stay compact.
     const originalHeight = Math.min(6, Math.max(0, Math.floor((height - feedbackHeight) / 3)));
     const original = originalHeight ? renderOriginal(rightWidth, originalHeight) : [];
     const preview = inline.renderPreview(rightWidth, Math.max(0, height - feedbackHeight - original.length - (original.length ? 1 : 0) - 1));
@@ -76,7 +73,6 @@ export function renderTaskPreferences(
       - preview.length - (preview.length ? 1 : 0)) - feedback.length;
     if (!selected.length && room > 0) feedback.push(content.muted("None yet"));
     else if (room > 0) {
-      // Keep newly appended selections visible without changing composition order.
       const count = Math.min(selected.length, Math.max(0, room - (selected.length > room ? 1 : 0)));
       if (count < selected.length) feedback.push(content.muted(`… ${selected.length - count} more`));
       for (const item of count ? selected.slice(-count) : []) {
@@ -89,7 +85,6 @@ export function renderTaskPreferences(
       return line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line))) + content.muted(" │ ") + (reference[i] ?? "");
     });
   } else {
-    // Reading uses the full width. Narrow selection prioritizes choices over references.
     const summary = mode !== "read" && height >= 8
       ? [truncateToWidth(content.muted("Original: ") + theme.fg("text", sanitizeTerminalText(row.record.input.draft).replace(/\s+/gu, " ")), width, "…")] : [];
     body = [...summary, ...inline.render(width, height - summary.length, showInlineWarning)];

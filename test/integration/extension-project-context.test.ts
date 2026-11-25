@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_CONFIG } from "../../src/config.js";
 import { extensionHarnessEnvironment, projectConfig, resourcePrompt, shortcut, trigger } from "../support/extension-harness.js";
-import { flushPromises } from "../support/helpers.js";
+import { advanceMicrotaskTurns } from "../support/helpers.js";
 
 const { makeHarness } = extensionHarnessEnvironment();
 
@@ -26,7 +26,6 @@ describe("project context injection", () => {
     const request = (harness.complete.mock.calls[0] as any[])[1];
     const input = request.messages[0].content[0].text;
     expect(JSON.parse(input).project_context).toContain('REFERENCED DIRECTORY: "src"');
-    // Default tree and explicit references are independently frozen scopes.
     expect(input.match(/target\.ts/g)).toHaveLength(!history && tree ? 2 : 1);
     expect(input).toContain("Use the project venv.");
     expect(input).toContain("Extract PDF tables");
@@ -76,7 +75,7 @@ describe("project context injection", () => {
     harness.setEditorText("Explain @src");
     await trigger(harness);
     await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const first = (harness.complete.mock.calls[0] as any[])[1];
     expect(first.messages[0].content[0].text).toContain("original.ts");
     await writeFile(join(harness.agentDir, "src", "new.ts"), "");
@@ -84,7 +83,7 @@ describe("project context injection", () => {
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     harness.panelInput("g");
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.complete).toHaveBeenCalledTimes(2);
     const second = (harness.complete.mock.calls[1] as any[])[1];
     expect(second.messages[0].content).toEqual(first.messages[0].content);
@@ -187,7 +186,7 @@ describe("project context injection", () => {
     harness.setEditorText("Inspect @missing");
     await harness.command("optimize", harness.context);
     await harness.command("cancel", harness.context);
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.complete).not.toHaveBeenCalled();
     expect(harness.widgetLines()).toEqual([]);
     expect(harness.notifications).toEqual([
@@ -240,7 +239,7 @@ describe("project context injection", () => {
         harness.panelInput("f");
         harness.panelInput("Make it shorter");
         harness.panelInput("\x13");
-        await flushPromises();
+        await advanceMicrotaskTurns();
         expect(harness.complete).toHaveBeenCalledTimes(i + 1);
         expect(inputAt(i).includes("Use the project venv.")).toBe(mode === "Always");
         expect(inputAt(i)).toContain("Extract PDF tables");
@@ -248,7 +247,7 @@ describe("project context injection", () => {
       harness.panelInput("q");
       await view;
       await harness.command("optimize A new task", harness.context);
-      await flushPromises();
+      await advanceMicrotaskTurns();
       expect(inputAt(3).includes("Use the project venv.")).toBe(mode !== "Off");
       expect(harness.editorWrites).toEqual([]);
     });
@@ -299,7 +298,6 @@ describe("project context injection", () => {
     expect(input).not.toContain("PROJECT TREE");
     expect(input).not.toContain("prompt-refine.json");
 
-    // After send, the next round captures the latest available history.
     harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Sent" } }, harness.context);
     branch.mockReturnValue([]);
     await trigger(harness);
@@ -385,10 +383,10 @@ describe("project context injection", () => {
     vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
     await harness.command("optimize", harness.context);
     await harness.command("cancel", harness.context);
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.complete).not.toHaveBeenCalled();
     expect(harness.widgetLines()).toEqual([]);
-    expect(harness.notifications).toHaveLength(2); // Startup hint and explicit cancellation only.
+    expect(harness.notifications).toHaveLength(2);
   });
 
   it("freezes host resources before asynchronous tree collection and allows draft edits", async () => {

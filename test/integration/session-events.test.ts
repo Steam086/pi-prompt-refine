@@ -4,7 +4,7 @@ import type { Hello, Receipt, RunDetail, Snapshot, TaskDetail } from "../../src/
 import { INVALIDATION_EVENT, REQUEST_EVENT, RESPONSE_EVENT } from "../../src/adapters/wire.js";
 import { extensionHarnessEnvironment } from "../support/extension-harness.js";
 import { requireValue, wireMutation, wireRequest } from "../support/application-wire.js";
-import { flushPromises } from "../support/helpers.js";
+import { advanceMicrotaskTurns } from "../support/helpers.js";
 
 const { makeHarness } = extensionHarnessEnvironment();
 describe("session-local application transport", () => {
@@ -33,7 +33,7 @@ describe("session-local application transport", () => {
     const started = await wireMutation<Receipt>(h.events, hello, { method: "startRun", taskId: "task-1", expectedVersion: 1 }, "once");
     expect(requireValue(started)).toEqual({ outcome: "started", taskId: "task-1", runId: "run-1" });
     expect(await wireMutation(h.events, hello, { method: "startRun", taskId: "task-1", expectedVersion: 1 }, "once")).toEqual(started);
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(h.complete).toHaveBeenCalledTimes(1);
     expect(h.complete.mock.calls[0]![1]).toHaveProperty("tools", []);
     const run = requireValue(await wireRequest<RunDetail>(h.events, { action: "query", binding: hello.binding, query: { method: "run", runId: "run-1" } }));
@@ -45,7 +45,6 @@ describe("session-local application transport", () => {
     expect(h.sessionWrites).toEqual([]);
     expect(h.customCalls()).toBe(0);
     expect(run.additional).toEqual(mode === "rpc" ? [{ name: "In Your Own Words", text: "Discuss the original goal." }] : undefined);
-    // The configure receipt is pending. Let its asynchronous write finish before fixture teardown.
     await vi.waitFor(async () => {
       const snapshot = requireValue(await wireRequest<Snapshot>(h.events, { action: "query", binding: hello.binding, query: { method: "snapshot", scope: "current" } }));
       expect(snapshot.optimizer.persistence).toBe("persisted");
@@ -102,7 +101,7 @@ describe("session-local application transport", () => {
     a.holdPanel();
     const view = a.command("", a.context);
     a.panelInput("n"); a.panelInput("Native draft"); a.panelInput("\r");
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const snapshot = requireValue(await wireRequest<Snapshot>(a.events, { action: "query", binding: one.binding, query: { method: "snapshot", scope: "current" } }));
     expect(snapshot.tasks).toHaveLength(1);
     const task = snapshot.tasks[0]!;
@@ -141,7 +140,7 @@ describe("session-local application transport", () => {
     const updates = vi.fn();
     const off = h.events.on(INVALIDATION_EVENT, updates);
     await wireMutation(h.events, hello, { method: "optimizeText", text: "running" }, "run-once");
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(updates).toHaveBeenCalled();
     expect((await wireRequest(h.events, { action: "close" })).kind).toBe("ok");
     const reconnect = requireValue(await wireRequest<Hello>(h.events, { action: "hello", clientId: "one", resumeLease: hello.lease.id }, "new-connection"));
@@ -154,7 +153,7 @@ describe("session-local application transport", () => {
     const stop = h.events.on(RESPONSE_EVENT, responses);
     await h.dispose();
     h.events.emit(REQUEST_EVENT, { connectionId: "closed", requestId: "closed", call: { action: "hello", clientId: "one" } });
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(responses).not.toHaveBeenCalled();
     off(); stop();
   });

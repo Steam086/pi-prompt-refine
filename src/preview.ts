@@ -102,8 +102,6 @@ export class PreviewPanel implements Component {
       this.originalVisible = false;
       this.revealOriginal = false;
     }
-    // Elapsed time and notices affect chrome, not document layout. Keep the long
-    // body cached during progress ticks and background refreshes while scrolling.
     const bodyChanged = JSON.stringify(options.additional) !== JSON.stringify(this.options.additional) || textChanged || changed || options.viewKey !== this.options.viewKey ||
       JSON.stringify(options.navigation) !== JSON.stringify(this.options.navigation) || options.state.pendingSend !== this.options.state.pendingSend ||
       options.draftChanged !== this.options.draftChanged || options.sessionTitle !== this.options.sessionTitle ||
@@ -140,11 +138,9 @@ export class PreviewPanel implements Component {
   }
 
   toggleOriginal(): void {
-    // The source is already the main document while generating or after a failed request.
     if (this.options.draft === undefined || this.options.candidateText === undefined) return;
     this.originalVisible = !this.originalVisible;
     this.cachedBody = undefined;
-    // Expansion is an explicit comparison request: reveal the draft, not an off-screen section.
     this.revealOriginal = this.originalVisible;
     if (!this.originalVisible) { this.scroll.scrollToStart(); this.heightAnchor = 0; }
   }
@@ -165,7 +161,6 @@ export class PreviewPanel implements Component {
   page(direction: number): void { this.scrollBy(direction * Math.max(1, this.scroll.viewportHeight - 1)); }
 
   invalidate(): void {
-    // Recreate Markdown's style prefixes on theme changes; never retain old ANSI in state.
     this.rebuildDocument();
   }
 
@@ -265,14 +260,11 @@ export class PreviewPanel implements Component {
       lines.push(theme.fg("text", theme.bold(`${title}${this.sourceVisible ? " · source" : ""}`)) + resultNoteHint(options.additional, theme), "");
       lines.push(...this.document.render(width));
       for (const line of resultNoteLines(options.additional, theme)) lines.push(...wrapTextWithAnsi(line, width));
-      // Revision provenance is part of the result details, not hidden behind Help.
-      // o still jumps straight to the original when a long result pushes it off screen.
       if ((this.originalVisible || revised) && options.draft !== undefined) {
         this.originalLine = lines.length;
         lines.push("", theme.fg("borderMuted", "─".repeat(width)), "");
         paragraph("Original draft · at request time", "muted");
         lines.push("");
-        // Keep the comparison literal and legible, rather than dimming its body.
         lines.push(...this.draftDocument.render(width));
       }
       if ((this.originalVisible || revised) && options.editingInstruction) {
@@ -299,8 +291,6 @@ export class PreviewPanel implements Component {
           : "Editor differs; source below.", "warning");
       }
       if (options.draft !== undefined) {
-        // Literal request snapshot, not a live editor preview or Markdown interpretation.
-        // The existing bounded ScrollView exposes every line without growing the panel.
         const title = options.revisionInstruction !== undefined ? "Original task" : "Submitted original";
         lines.push(theme.fg("text", theme.bold(width >= 40 ? `${title} · ${options.draft.length} chars` : title)));
         lines.push(...this.draftDocument.render(width));
@@ -338,7 +328,6 @@ export class PreviewPanel implements Component {
       : options.state.phase === "idle" ? "" : resultHeading(options, theme, false);
     const header = [theme.fg("text", theme.bold("Prompt refine"))];
     const model = options.state.model;
-    // Keep model/thinking in the same place for idle, requests and saved candidates.
     const metadata = sanitizeTerminalText([
       model ? `${model.provider}/${model.id}` : "No model",
       ...(model && options.thinkingLevel ? [options.thinkingLevel] : []),
@@ -355,8 +344,6 @@ export class PreviewPanel implements Component {
       .filter(Boolean).join(theme.fg("muted", " · "));
     header.push(status());
     if (layout.headerHeight === 1) header[0] = sending || editorChanged || (options.state.phase === "generating" ? heading : header[0]!);
-    // Keep the main decision visible; secondary actions remain available in Help.
-    // Pending/generating states take priority even if a previous candidate is retained.
     const primary: KeyHint[] = options.state.pendingSend
       ? []
       : options.state.phase === "generating"
@@ -369,15 +356,11 @@ export class PreviewPanel implements Component {
     const secondary: KeyHint[] = [["q", "Back"], ["?", this.helpVisible ? "Hide help" : "Help"]];
     const expansion = this.canExpand() && this.expansionHint?.();
     if (expansion) secondary.push(expansion);
-    // Back/Help survive narrow widths; other hints are omitted rather than wrapped.
-    // Empty/error primary actions already expose Input/Model. Tabs own page hints.
     if (!primary.some(([key]) => key === "i")) secondary.push(["i", "Input"]);
     if (options.state.phase !== "generating" && !options.state.pendingSend) {
       if (!primary.some(([key]) => key === "m")) secondary.push(["m", "Model"]);
       if (options.navigation && !options.contextUnavailable) secondary.push(["g", "Same input"]);
     }
-    // Match Tasks/Usage's shared column stops. Very narrow terminals keep rows
-    // independent so long status/action labels cannot crowd out Back/Help.
     const footer = innerWidth < 30
       ? [fittingKeyHints(primary, innerWidth, theme), fittingKeyHints(secondary, innerWidth, theme)]
       : alignedKeyHints([primary, secondary], innerWidth, theme);
@@ -413,7 +396,6 @@ export class PreviewPanel implements Component {
     const start = this.scroll.scrollTop;
     let visible = body.slice(start, start + bodyHeight);
     if (this.isEmptyState() && body.length <= bodyHeight) {
-      // Keep empty-state guidance quiet and centered, away from navigation.
       visible = [
         ...Array<string>(Math.floor((bodyHeight - body.length) / 2)).fill(""),
         ...visible.map((line) => " ".repeat(Math.max(0, Math.floor((innerWidth - visibleWidth(line)) / 2))) + line),

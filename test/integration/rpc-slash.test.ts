@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Hello, RunDetail } from "../../src/app/api.js";
 import { requireValue, wireMutation, wireRequest } from "../support/application-wire.js";
 import { extensionHarnessEnvironment, refinement, type Harness } from "../support/extension-harness.js";
-import { deferred, flushPromises } from "../support/helpers.js";
+import { deferred, advanceMicrotaskTurns } from "../support/helpers.js";
 
 const { makeHarness } = extensionHarnessEnvironment();
 const receiptText = {
@@ -95,7 +95,7 @@ describe("/refine RPC", () => {
     h.setEditorText("A later composer draft");
     editor.mockResolvedValueOnce("Host-edited text").mockResolvedValueOnce(undefined);
     pending.resolve(refinement(result));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const ready = h.statuses.at(-1)!;
     expect(ready).toBe(`Refine · Ready: /refine result ${id}`);
     await nextPreview();
@@ -140,11 +140,11 @@ describe("/refine RPC", () => {
     expect(editor).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(rawId(second)), "Second result");
     pending[0]!.resolve(refinement("First result"));
     pending[4]!.resolve(refinement("Fifth result"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     await nextPreview();
     expect(editor).toHaveBeenCalledTimes(1);
     open.resolve(undefined);
-    await flushPromises();
+    await advanceMicrotaskTurns();
     await nextPreview();
     await nextPreview();
     expect(editor.mock.calls.map(([, text]) => text)).toEqual(["Second result", "First result", "Fifth result"]);
@@ -155,7 +155,7 @@ describe("/refine RPC", () => {
     const h = await makeHarness({ mode: "rpc" });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const id = await admit(h, "optimize Test");
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const ui = vi.mocked(h.context.ui.editor);
     const deferredEditor = deferred<string | undefined>();
     ui.mockReturnValueOnce(deferredEditor.promise);
@@ -186,7 +186,7 @@ describe("/refine RPC", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const idle = vi.spyOn(h.context, "isIdle").mockReturnValue(false);
     const id = await admit(h, "optimize Wait for the host");
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(h.statuses.at(-1)).toBe(`Refine · Ready: /refine result ${id}`);
     await nextPreview();
     expect(h.context.ui.editor).not.toHaveBeenCalled();
@@ -227,7 +227,7 @@ describe("/refine RPC", () => {
     failed.reject(new Error("private provider error"));
     await wireMutation(h.events, await hello(h), { method: "stopRun", runId: rawId(stoppedId) });
     cancelled.resolve(refinement("Do not resurrect"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const failures = h.notifications.filter((text) => text.includes(`${badId}: Run error`));
     expect(failures).toHaveLength(1);
     expect(h.notifications.filter((text) => text.includes(`${stoppedId}: Cancelled`))).toHaveLength(1);
@@ -249,7 +249,7 @@ describe("/refine RPC", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(h.notifications.at(-1)).toContain("Run timed out.");
     pending.resolve(refinement("Too late"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     await show(h, id);
     expect(h.notifications.at(-1)).toContain("Run timed out.");
     expect(h.context.ui.editor).not.toHaveBeenCalled();
@@ -260,7 +260,7 @@ describe("/refine RPC", () => {
     const h = await makeHarness({ mode: "rpc", persistHistory: true });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const id = await admit(h, "optimize First binding");
-    await flushPromises();
+    await advanceMicrotaskTurns();
     await show(h, id.replace(/^run-\d+/, "run-999999"));
     expect(h.notifications.at(-1)).toContain("Unknown Refine result");
     await h.handlers.get("session_tree")![0]!({}, h.context);
@@ -286,7 +286,7 @@ describe("/refine RPC", () => {
     const before = h.notifications.slice();
     await h.handlers.get(event)![0]!({}, h.context);
     pending.reject(new Error("old run"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(h.notifications).toEqual(before);
     expect(h.statuses.at(-1)).toBeUndefined();
     expect(h.context.ui.editor).not.toHaveBeenCalled();

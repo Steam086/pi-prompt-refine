@@ -61,7 +61,7 @@ describe("inline Unsent preferences", () => {
       const choices = f.picker.render(48, 40, true, false);
       const index = choices.findIndex((line) => stripVTControlCharacters(line).includes("[ ] Rewrite"));
       expect(stripVTControlCharacters(choices[index + 1]!).trim()).toBe("");
-      expect(choices.join("\n")).not.toContain("Summary"); // Wide reference owns descriptions.
+      expect(choices.join("\n")).not.toContain("Summary");
       f.picker.handleInput(" ");
       expect(f.state.selected.map((item) => item.id)).toEqual([entry.id]);
       expect(f.save).toHaveBeenCalledTimes(1);
@@ -94,7 +94,6 @@ describe("inline Unsent preferences", () => {
     f.picker.handleInput("\x1b[A"); f.picker.handleInput(" ");
     expect(f.state.selected.map((entry) => entry.id)).toEqual([first.id, second.id]);
     assertOrder();
-    // Both typed entries match; filtering must retain the same purpose order.
     f.picker.handleInput("/"); f.picker.handleInput("description"); f.picker.handleInput("\r");
     const filtered = f.text(60, 16);
     expect(filtered.indexOf("Prompt rewriting")).toBeLessThan(filtered.indexOf("Task requirements"));
@@ -140,7 +139,6 @@ describe("inline Unsent preferences", () => {
     expect(f.state.selected).toEqual([selectPreference(first)]);
     f.picker.handleInput("\x1b[H"); f.picker.handleInput(" ");
     expect(f.state.selected).toEqual([selectPreference(first), selectPreference(second)]);
-    // Toggling does not move the cursor or reorder the remaining library rows.
     expect(f.text()).toContain("› [x] Rewrite");
     f.library({ entries: [{ ...first, version: 2, name: "Renamed source", body: "Updated source" }, second], errors: {} });
     await f.picker.refresh();
@@ -254,7 +252,6 @@ describe("inline Unsent preferences", () => {
       expect(lines.every((line) => visibleWidth(line) <= width!)).toBe(true);
       expect(lines.join("\n")).not.toContain("\x1b[2J");
     }
-    // A legacy entry without metadata still has useful instructions to preview.
     f.library({ entries: [{ ...entry, metadata: undefined, body: "Legacy **literal** body" }], errors: {} });
     await f.picker.refresh();
     expect(f.picker.renderPreview(60, 8)).toEqual([
@@ -387,7 +384,6 @@ describe("inline Unsent preferences", () => {
     const entries = [first, ...Array.from({ length: 400 }, (_, index) => ({ ...second, id: `item-${index}`,
       scope: index < 200 ? "project" as const : "global" as const, body: "Original body 中文😀 ".repeat(40) }))];
     const load = vi.fn(async () => ({ entries: structuredClone(entries), errors: {} }));
-    // Match extension.ts's original-row adapter: each lookup is a detached controller read.
     const target = (id: number) => {
       const source = controller.getOriginalRecord(id);
       return source && { selected: source.input.preferences ?? [], save: source.status === "unsent"
@@ -412,13 +408,11 @@ describe("inline Unsent preferences", () => {
       expect(search).toHaveBeenCalledTimes(1);
       expect(load).toHaveBeenCalledTimes(1);
       const searches = () => search.mock.calls.length;
-      // Same query, new selected content: both filtering and snapshot display must update.
       const source = controller.getOriginalRecord(original.id)!;
       const selected = structuredClone(source.input.preferences!);
       selected[0]!.body = "No longer matches";
       expect(controller.updateDraftPreferences(source, selected)).toBeUndefined();
       picker.render(80, 10); expect(searches()).toBe(2);
-      // Query changes and library refreshes also invalidate the cache.
       picker.handleInput("/"); picker.handleInput(" body"); picker.handleInput("\r");
       picker.render(80, 10); expect(searches()).toBe(3);
       await picker.refresh(); picker.render(80, 10); expect(searches()).toBe(4);
@@ -426,10 +420,9 @@ describe("inline Unsent preferences", () => {
       const next = structuredClone(current.input.preferences!);
       next[0]!.metadata!.description = "Original body from snapshot";
       expect(controller.updateDraftPreferences(current, next)).toBeUndefined();
-      picker.handleInput("\x1b[F"); // Task snapshots follow the rewriting group.
+      picker.handleInput("\x1b[F");
       expect(stripVTControlCharacters(picker.render(80, 10).join("\n"))).toContain("[x] ! Keep 中文😀");
       expect(searches()).toBe(5);
-      // No internal preference array/metadata is exposed by controller reads.
       const detached = target(original.id)!.selected;
       detached[0]!.metadata!.description = "Caller mutation";
       expect(target(original.id)!.selected[0]!.metadata!.description).toBe("Original body from snapshot");
@@ -513,7 +506,7 @@ describe("inline Unsent preferences", () => {
 
   it("recovers its cursor after End on an empty or loading library and enforces the item limit", async () => {
     const f = fixture();
-    f.picker.handleInput("\x1b[F"); // Before the initial asynchronous load settles.
+    f.picker.handleInput("\x1b[F");
     await Promise.resolve(); expect(f.text()).toContain("› [ ] Rewrite");
     f.picker.handleInput(" "); expect(f.state.selected).toHaveLength(1);
     f.state.selected = Array.from({ length: 50 }, (_, index) => selectPreference({ ...first, id: `selected-${index}`, body: `Body ${index}` }));

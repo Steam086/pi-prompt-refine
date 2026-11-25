@@ -1,7 +1,7 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import { extensionHarnessEnvironment, panelAction, refinement, shortcut, trigger } from "../support/extension-harness.js";
-import { flushPromises } from "../support/helpers.js";
+import { advanceMicrotaskTurns } from "../support/helpers.js";
 
 const { makeHarness } = extensionHarnessEnvironment();
 
@@ -27,7 +27,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.setConfirm(false);
     harness.setCustomAction("a");
     await shortcut(harness, "alt+v")(harness.context);
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.getEditor()).toBe("Draft B");
     expect(harness.editorWrites).toEqual(["Refined prompt", "Draft A"]);
     expect(harness.context.ui.confirm).toHaveBeenCalledExactlyOnceWith("Draft changed", expect.stringContaining("Current draft:\n---\nDraft B"));
@@ -78,7 +78,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.setCustomAction("q");
     const panelsBefore = harness.customCalls();
     await shortcut(harness, "ctrl+\\")(harness.context);
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.customCalls()).toBe(panelsBefore + 1);
     expect(harness.complete).toHaveBeenCalledTimes(1);
     expect(harness.panelLines().join("\n")).toContain("Unsent");
@@ -109,7 +109,6 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     else if (phase === "error") harness.complete.mockRejectedValueOnce(new Error("offline"));
     await trigger(harness);
     harness.setEditorText("Draft B");
-    // Viewing is still passive, and always describes the submitted A, not editor B.
     await harness.command("view", harness.context);
     let text = harness.panelLines().join("\n");
     if (phase === "ready") {
@@ -130,18 +129,18 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.panelLines().join("\n")).toContain("Draft A");
     expect(harness.panelLines().join("\n")).toContain("Unsent");
     expect(harness.panelLines(100).join("\n")).toContain("› ○ Unsent · Draft B");
-    harness.panelInput("\r"); // Explicitly start B and automatically follow its model child.
+    harness.panelInput("\r");
     expect(harness.panelLines(100).join("\n")).toMatch(/›\s+└─ fake-chat/);
     const request = (harness.complete.mock.calls[1] as any[])[1];
     expect(JSON.parse(request.messages[0].content[0].text).draft).toBe("Draft B");
     if (phase === "generating") {
       expect((harness.complete.mock.calls[0] as any[])[2].signal.aborted).toBe(false);
       finishA(refinement("Late A result"));
-      await flushPromises();
-      expect(harness.panelLines().join("\n")).not.toContain("Late A result"); // Still viewing B.
+      await advanceMicrotaskTurns();
+      expect(harness.panelLines().join("\n")).not.toContain("Late A result");
     }
     finishB(refinement("Result B"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.panelLines().join("\n")).toContain("Result B");
     expect(harness.panelLines().join("\n")).toContain("Draft B");
     expect(harness.complete).toHaveBeenCalledTimes(2);
@@ -176,7 +175,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.complete).toHaveBeenCalledTimes(1);
     harness.setCustomAction("r");
     await shortcut(harness, "ctrl+\\")(harness.context);
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.complete).toHaveBeenCalledTimes(1);
   });
 
@@ -184,7 +183,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const harness = await makeHarness();
     await trigger(harness);
     await harness.command("optimize", harness.context);
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.complete).toHaveBeenCalledTimes(2);
     expect(harness.customCalls()).toBe(0);
   });
@@ -195,7 +194,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.setEditorText(draft);
     harness.setCustomAction("r");
     await harness.command("view", harness.context);
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.complete).toHaveBeenCalledTimes(1);
     expect(harness.widgetLines()).toEqual([]);
     await panelAction(harness, "q");
@@ -215,7 +214,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Refined prompt" } }, harness.context);
     harness.setEditorText("brand new task");
     await shortcut(harness, "ctrl+\\")(harness.context);
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.complete).toHaveBeenCalledTimes(2);
     expect(harness.panelLines().join("\n")).toContain("brand new task");
     expect(harness.sent).toEqual([]);
@@ -231,7 +230,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.context.ui.confirm).toHaveBeenCalledTimes(1);
     harness.handlers.get("session_before_tree")?.[0]?.({ type: "session_before_tree" }, harness.context);
     harness.resolveConfirm(true);
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.getEditor()).toBe("Draft B");
     expect(harness.editorWrites).toEqual([]);
   });
@@ -243,7 +242,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.setConfirm(true, "Draft C");
     harness.setCustomAction("a");
     await shortcut(harness, "alt+v")(harness.context);
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.getEditor()).toBe("Draft C");
     expect(harness.editorWrites).toEqual([]);
   });
@@ -258,7 +257,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     inputHandler?.({ type: "input", text: "Draft A", source: "interactive" }, harness.context);
     harness.setEditorText("Draft A");
     resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "stale result", title: "Stale task" }) }], stopReason: "stop" });
-    await flushPromises();
+    await advanceMicrotaskTurns();
 
     expect(harness.getEditor()).toBe("Draft A");
     expect(harness.editorWrites).toEqual([]);
@@ -275,7 +274,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const eventName = boundary === "tree" ? "session_before_tree" : "session_shutdown";
     harness.handlers.get(eventName)?.[0]?.({ type: eventName }, harness.context);
     resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "late", title: "Stale task" }) }], stopReason: "stop" });
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.editorWrites).toEqual([]);
     expect(harness.sent).toEqual([]);
   });
@@ -367,7 +366,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const view = harness.command("view", harness.context);
     void Promise.resolve(view).then(() => { closed = true; });
     harness.panelInput("e");
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.context.ui.editor).toHaveBeenCalledWith("Edit candidate (cancel keeps original)", "Refined prompt");
     expect(harness.customCalls()).toBe(2);
     expect(harness.panelLines().join("\n")).toContain(edited || "Refined prompt");
@@ -411,7 +410,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     harness.panelInput("e");
-    await flushPromises();
+    await advanceMicrotaskTurns();
     harness.handlers.get(event)?.[0]?.({ type: event }, harness.context);
     finishEdit(undefined);
     await view;

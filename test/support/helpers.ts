@@ -16,8 +16,7 @@ export function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-export async function flushPromises(): Promise<void> {
-  // Drain shared context preparation, provider completion and queued-run continuations.
+export async function advanceMicrotaskTurns(): Promise<void> {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 

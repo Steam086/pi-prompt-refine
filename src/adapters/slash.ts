@@ -82,7 +82,6 @@ export function parseSlash(source: string): Parsed | undefined {
 }
 
 export function createSlashAdapter(api: ApplicationApi) {
-  // Retain only retry routing, never task bodies/results. Unknown/evicted IDs cannot silently re-execute.
   const retryScopes = new Map<string, MutationMeta>();
   return async (source: string, ctx: ExtensionContext): Promise<void> => {
     const command = parseSlash(source);

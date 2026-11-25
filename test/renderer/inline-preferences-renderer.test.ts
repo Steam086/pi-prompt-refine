@@ -15,7 +15,6 @@ import { getThemeByName } from "../support/pi-theme.js";
 import { createRecordingTerminal } from "../support/recording-terminal.js";
 import { record } from "../support/task-panel.js";
 
-// Actual Pi renderers, not a substitute for human visual/IME verification.
 describe.each(["regular", "fullscreen"] as const)("inline preference rendering (%s)", (mode) => {
   it.each(["dark", "light"])("renders spacious current items and returns to compact cells on resize (%s)", async (themeName) => {
     vi.useFakeTimers();
@@ -62,7 +61,7 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       const tabs = tabStrip(initial);
       expect(stripVTControlCharacters(tabs)).not.toMatch(/[←→]/);
       const redraws = tui.fullRedraws;
-      writes.length = 0; // Exclude the renderer's initial fullscreen clear.
+      writes.length = 0;
       input("\t"); input(" ");
       const selecting = render();
       expect(tabStrip(selecting)).toBe(tabs);
@@ -105,7 +104,6 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
     controller.createDraft({ draft: "ORIGINAL 中文😀\n".repeat(30), model: { provider: "p", id: "m" }, sessionId: "s", branchLeafId: null,
       systemPrompt: "Policy", history: selectHistory([], 0, 0) });
     const original = controller.getHistory()[0]!;
-    // Deliberately load task entries first; the UI must prioritize rewriting.
     const load = vi.fn(async () => ({ entries: [...entries.slice(9), ...entries.slice(0, 9)], errors: {} }));
     const picker = new InlinePreferences({ load, save: vi.fn(), remove: vi.fn() }, (id) => {
       const source = controller.getRecord(id);
@@ -214,12 +212,10 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
         }
       }
       expect(panel.render(100).join("\n")).toContain(theme.fg("text", theme.bold(sanitizeTerminalText(entries[0]!.name))));
-      // Search owns ordinary action keys, including p, and arrows never escape into page navigation.
       input("/"); input("Item 17"); render(); input("\r"); input(" ");
       expect(render()).toContain("› [x] Item 17");
       expect(load).toHaveBeenCalledTimes(1);
       const chosen = controller.getRecord(original.id)!.input.preferences!;
-      // Selected feedback follows selection order, not the library's purpose order.
       const taskFirst = [...entries.slice(9), ...entries.slice(0, 9)];
       expect(controller.updateDraftPreferences(controller.getRecord(original.id)!, taskFirst.map(selectPreference))).toBeUndefined();
       render();
@@ -231,7 +227,6 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       expect(controller.getRecord(original.id)!.input.preferences!.map((entry) => entry.id)).toEqual(taskFirst.map((entry) => entry.id));
       expect(controller.updateDraftPreferences(controller.getRecord(original.id)!, chosen)).toBeUndefined();
       render();
-      // Use the expanded workspace canvas, including wide/short and narrow layouts.
       useWorkspaceLayout = true;
       input("/"); input("\x15"); input("\r"); input("\x1b[H");
       for (const [columns, rows] of [[160, 60], [130, 40], [160, 14], [45, 24], [160, 60]]) {
@@ -259,7 +254,6 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       expect(complete).not.toHaveBeenCalled();
       useWorkspaceLayout = false;
       Object.assign(terminal, { columns: 100, rows: 40 }); view.invalidate(); render();
-      // Refresh failure leaves selected snapshots, a semantic warning and a usable cancel path.
       load.mockRejectedValueOnce(new Error("Permission denied"));
       await picker.refresh();
       for (const [columns, rows] of [[100, 40], [20, 8], [12, 6]]) {

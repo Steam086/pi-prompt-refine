@@ -25,7 +25,6 @@ describe.each(["dark", "light"])("project default controls (%s)", (themeName) =>
     for (const action of [["n", "Add"], ["e", "Edit"], ["d", "Delete"]] as const) {
       expect(lines.join("\n")).toContain(formatKeyHint(action, f.theme));
     }
-    // A future default can be off for this request, with its star still present.
     f.panel.handleInput(" "); expect(text(f.panel)).toContain("[ ] * Concise 中文");
     f.panel.handleInput("/"); f.panel.handleInput("Literal"); f.panel.handleInput(enter);
     f.panel.handleInput("c"); expect(text(f.panel)).toContain("Selection cleared");

@@ -1,4 +1,3 @@
-/** Raw counts exposed by Pi's normalized response; reasoning is a subset of output. */
 export interface ReferenceCost {
   total: number;
   input?: number;

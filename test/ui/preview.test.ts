@@ -1,7 +1,6 @@
 import { frameHeader, frameHints } from "../support/panel-chrome.js";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it, vi } from "vitest";
-// Test-only access to the installed Pi palettes; production uses the injected theme.
 import { Markdown, Text, visibleWidth } from "@earendil-works/pi-tui";
 import { panelLayout } from "../../src/panel-layout.js";
 import { READING_WIDTH } from "../../src/presentation.js";
@@ -130,7 +129,7 @@ describe("result reading panel", () => {
     expect(text).toContain(`${draft.length} chars`);
     expect(text).toContain("## 原文");
     expect(text).toContain("**字面符号**");
-    panel.toggleOriginal(); // Already visible; must not queue a jump on completion.
+    panel.toggleOriginal();
     panel.update({ ...pending, draft: "B" });
     expect(panel.render(80).join("\n")).not.toContain("字面符号");
     panel.update({ ...options, draft, candidateText: "Completed result" });

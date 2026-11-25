@@ -6,7 +6,7 @@ function textPhase(signature: string | undefined): TextSignatureV1["phase"] {
     const value = JSON.parse(signature) as Partial<TextSignatureV1> | null;
     if (value?.v === 1 && typeof value.id === "string" &&
         (value.phase === "commentary" || value.phase === "final_answer")) return value.phase;
-  } catch { /* Treat an unrecognized signature as unphased text. */ }
+  } catch { return undefined; }
   return undefined;
 }
 

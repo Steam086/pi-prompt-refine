@@ -118,7 +118,7 @@ describe.each(["regular", "fullscreen"] as const)("current-round Preview (%s)", 
         if (columns === 120) {
           expect(frame.join("\n")).toContain(theme.fg("muted", "History → Usage · 1 earlier prompt"));
           const empty = frame.find((line) => line.includes("No current prompts."))!;
-          expect(stripVTControlCharacters(empty).match(/│/g)).toHaveLength(2); // Outer shell only, no empty tree split.
+          expect(stripVTControlCharacters(empty).match(/│/g)).toHaveLength(2);
         }
         input("\t"); input("\r"); render();
         expect(run).not.toHaveBeenCalled();
@@ -186,7 +186,6 @@ describe.each(["regular", "fullscreen"] as const)("current-round Preview (%s)", 
       input("\x1b[C"); expect(render()).toContain("Usage");
       expect(render()).toContain("Earlier ·");
       expect(run).not.toHaveBeenCalled();
-      // Resizes may redraw; ordinary archival/navigation must not add screen clearing.
       const settled = tui.fullRedraws;
       writes.length = 0;
       input("\x1b[D"); render(); input("\x1b[C"); render();

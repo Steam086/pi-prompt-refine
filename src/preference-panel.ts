@@ -45,7 +45,7 @@ export class PreferencePanel {
   private selectedSearch = new Input({ prompt: "Search: " });
   private get search(): Input { return this.selectedOnly ? this.selectedSearch : this.allSearch; }
   private readonly working: SelectedPreference[];
-  private focus = 1; // Search, library, actions: three regions, never one stop per action.
+  private focus = 1;
   private actionIndex = 0;
   private index = 0;
   private top = 0;
@@ -100,7 +100,6 @@ export class PreferencePanel {
   private entries(): RevisionPreference[] {
     const query = this.search.getValue();
     if (this.entriesCache?.query === query && this.entriesCache.version === this.contentVersion) return this.entriesCache.entries;
-    // Keep deleted sources visible until their snapshots are explicitly deselected.
     const keys = new Set(this.library.entries.map(preferenceKey));
     const missingDefaults: RevisionPreference[] = (this.library.projectDefaults ?? []).filter((key) => !keys.has(key) &&
       !this.working.some((entry) => preferenceKey(entry) === key)).map((key) => {
@@ -110,7 +109,6 @@ export class PreferencePanel {
     const candidates = this.selectedOnly ? this.working
       : [...this.library.entries, ...this.working.filter((entry) => !keys.has(preferenceKey(entry))), ...missingDefaults];
     const matches = searchPreferences(candidates, query);
-    // Selected snapshots are audited in composeRevision order, never search rank.
     const matchedKeys = new Set(matches.map(preferenceKey));
     const entries = this.selectedOnly ? this.working.filter((entry) => matchedKeys.has(preferenceKey(entry)))
       : matches.sort((a, b) => preferenceGroupOrder(a) - preferenceGroupOrder(b));
@@ -124,7 +122,6 @@ export class PreferencePanel {
       this.allView = { index: this.index, top: this.top, direction: this.navigationDirection, key: entry && preferenceKey(entry) };
       this.navigationDirection = 1;
       this.selectedOnly = true;
-      // Each audit starts unfiltered, including snapshots hidden by the all-view query.
       this.selectedSearch = new Input({ prompt: "Search: " });
       this.index = 0;
       this.top = 0;
@@ -141,7 +138,6 @@ export class PreferencePanel {
   private local(entry?: RevisionPreference): SelectedPreference | undefined {
     return entry && this.working.find((item) => preferenceKey(item) === preferenceKey(entry));
   }
-  /** Only rewrap literal documents when content or width changes, not on Tab/scroll. */
   private document(document: PreferenceDocument, width: number): string[] {
     const cached = this.documents.find((item) => item.document === document && item.width === width);
     if (cached) return cached.lines;
@@ -236,7 +232,6 @@ export class PreferencePanel {
       { text: "", color: "text" }, { text: value.body, color: "text" },
     ];
     let document: PreferenceDocument;
-    // Delete confirmation still describes its current-source operation target.
     if (this.selectedOnly && local && this.page.kind !== "delete") {
       document = [{ text: "Selected snapshot", color: "text", heading: true }, ...details(local, [
         { text: status, color: unavailable || !source || changed ? "warning" : "muted" },
@@ -267,7 +262,6 @@ export class PreferencePanel {
   }
   private formValue(form: Form): PreferenceValue {
     const editedName = form.name.getValue();
-    // Display sanitization must not silently rewrite an untouched saved name.
     const name = editedName === form.initialEditorName ? form.rawName : editedName;
     const edited = form.description.getValue();
     const description = edited === form.initialEditorDescription ? form.rawDescription : edited;
@@ -313,6 +307,13 @@ export class PreferencePanel {
       else this.page = { kind: "delete", entry: structuredClone(source) };
     }
   }
+  private recoverNewEntryAfterRefreshFailure(saved: RevisionPreference): void {
+    if (this.library.errors[saved.scope] && !this.source(saved)) {
+      this.library.entries.push(saved);
+      this.contentVersion++;
+    }
+  }
+
   private async save(form: Form): Promise<void> {
     const value = this.formValue(form);
     const error = preferenceValidation(value);
@@ -330,16 +331,12 @@ export class PreferencePanel {
         this.top = 0;
         this.navigationDirection = 1;
         this.focus = 1;
-        // The write result is authoritative even if the subsequent read fails.
         this.library.entries = this.library.entries.filter((entry) => preferenceKey(entry) !== preferenceKey(saved)).concat(saved);
         this.contentVersion++;
         await this.refresh();
         if (this.disposed) return;
         const errors = Object.values(this.library.errors);
-        if (this.library.errors[saved.scope] && !this.source(saved)) {
-          this.library.entries.push(saved);
-          this.contentVersion++;
-        }
+        this.recoverNewEntryAfterRefreshFailure(saved);
         const index = this.entries().findIndex((entry) => preferenceKey(entry) === preferenceKey(saved));
         this.index = Math.max(0, index);
         const feedback = `Saved; not selected.${reset ? " Filters reset to All." : ""}`;
@@ -372,7 +369,6 @@ export class PreferencePanel {
     }
     const cancel = this.keys.matches(data, "tui.select.cancel") || key === "ctrl+\\";
     if (this.busy) {
-      // A load can be abandoned; writes remain until their result is known.
       if (cancel && this.page.kind === "list") this.close();
       return;
     }
@@ -500,10 +496,7 @@ export class PreferencePanel {
       if (form.metadata?.kind === "result") subtitle = RESULT_NOTE_HINT;
       const description = form.description.render(w);
       const save = button("Save to preference library", form.focus === 5);
-      // Native Editor cannot wrap a wide glyph into a one-column line. The
-      // outer frame clips its minimal safe canvas in extremely narrow terminals.
       const editorWidth = Math.max(4, w);
-      // Tiny viewports show the focused field; the same Tab order remains usable.
       renderBody = (h) => {
         if (h < 9) return form.focus === 0 ? name : form.focus === 5 ? [save] : form.focus === 4 ? description
           : form.focus === 2 ? [scope] : form.focus === 3 ? [type] : form.body.render(editorWidth, Math.max(1, h));

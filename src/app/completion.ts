@@ -40,20 +40,14 @@ export function createCompletion<Context extends CompletionContext>({ config, ge
     if (!available) throw new Error(`Model is not currently available: ${displayModel(request.model)}`);
 
     const systemPrompt = request.systemPrompt;
-    // Freeze runtime limits before asynchronous directory collection. Settings
-    // changes must not alter a request that has already started.
     const outputLimit = config.maxOutputTokens;
     const { notes, promptInstruction } = runInstructions(request.editingInstruction, request.preferences, request.revision);
     let projectText = "";
     let diagnostics = request.projectDiagnostics;
     const projectConfig = structuredClone(request.project?.config ?? config.projectContext);
     if (request.project && request.preparedInput === undefined) {
-      // History gates only the default tree; explicit @directories are independent.
       const project = request.project;
       const { source, baseKey, referenceKey } = directoryJobKeys(request);
-      // Reserve fixed shares so a frozen default tree and prompt-specific references
-      // cannot double the configured per-request listing budgets. Both scopes run
-      // under the same wall-clock collection deadline (in parallel).
       const sharedTreeBudget = !request.history.text && projectConfig.tree.enabled && projectConfig.referencedDirectories.enabled;
       const directoryConfig = sharedTreeBudget ? { ...projectConfig, tree: { ...projectConfig.tree,
         maxChars: Math.max(0, Math.floor((projectConfig.tree.maxChars - 2) / 2)),

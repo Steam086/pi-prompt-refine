@@ -32,8 +32,6 @@ function decode(content: string, scope: PreferenceScope): RevisionPreference[] {
       entry.metadata !== undefined && metadataValidation(entry.metadata, true)) throw new Error("Invalid preference entry; original file kept.");
     ids.add(entry.id);
     const metadata = entry.metadata as PreferenceMetadata | undefined;
-    // Read old auto/match fields for compatibility, but never expose or execute them.
-    // Loading does not rewrite the file; the next explicit mutation writes manual metadata.
     return { id: entry.id, version: entry.version as number, scope, name: entry.name, body: entry.body,
       ...(metadata ? { metadata: { description: metadata.description, kind: metadata.kind, activation: "manual" as const } } : {}) };
   });
@@ -113,20 +111,25 @@ export class PreferenceStore implements PreferenceRepository {
     const readCurrent = async () => await this.read(path, "global") ?? [];
     return this.withLock(path, async (temp) => {
       const existing = await this.read(path, "global");
-      if (existing) return existing; // An existing empty library is intentional too.
+      if (existing) return existing;
       const catalog = decode(await readFile(new URL("../examples/prompt-refine-preferences.json", import.meta.url), "utf8"), "global");
       const entries = starterIds.map((id) => {
         const entry = catalog.find((item) => item.id === id);
         if (!entry?.metadata) throw new Error(`Missing bundled starter preference: ${id}`);
-        // Fresh local identity; a project cannot pre-select a well-known starter ID.
         return { ...entry, id: randomUUID(), version: 1 };
       });
       await this.writeTemp(temp, entries);
-      // Publish a complete file atomically, without replacing even a writer that bypassed the lock.
-      try { await link(temp, path); }
-      catch (error) { if (code(error) === "EEXIST") return readCurrent(); throw error; }
-      return entries;
+      return await this.publishGlobalIfAbsent(temp, path, entries);
     }, readCurrent);
+  }
+
+  private async publishGlobalIfAbsent(temp: string, path: string, entries: RevisionPreference[]): Promise<RevisionPreference[]> {
+    try { await link(temp, path); }
+    catch (error) {
+      if (code(error) !== "EEXIST") throw error;
+      return await this.read(path, "global") ?? [];
+    }
+    return entries;
   }
 
   private async withLock<T>(path: string, action: (temp: string) => Promise<T>, onBusy?: () => Promise<T>): Promise<T> {
@@ -181,7 +184,6 @@ export class PreferenceStore implements PreferenceRepository {
   }
 
   async save(scope: PreferenceScope, value: PreferenceValue, expected?: RevisionPreference): Promise<RevisionPreference> {
-    // Freeze before awaiting IO: callers cannot change the pending operation.
     value = structuredClone(value); expected = expected && structuredClone(expected);
     if (value.metadata === undefined && expected?.metadata) value.metadata = structuredClone(expected.metadata);
     const error = preferenceValidation(value);
@@ -197,7 +199,6 @@ export class PreferenceStore implements PreferenceRepository {
   }
 
   async remove(expected: RevisionPreference): Promise<void> {
-    // Match save(): nested metadata is part of the call-time conflict expectation.
     if (expected.scope === "builtin") throw new Error("Built-in preferences are read-only.");
     const scope = expected.scope;
     expected = structuredClone(expected);

@@ -39,7 +39,7 @@ describe("shared refine workspace", () => {
 
   it("preserves unsaved Context across page arrows, but Esc from Settings still discards it", () => {
     const { workspace, actions } = create(40, "dark", true);
-    workspace.handleInput("\x1b[D"); // Preview -> Settings, wrapping left.
+    workspace.handleInput("\x1b[D");
     workspace.handleInput(" ");
     workspace.handleInput("\t");
     workspace.handleInput("\x1b[B");
@@ -67,7 +67,7 @@ describe("shared refine workspace", () => {
     panel.scrollBy(20);
     const preview = workspace.render(100);
     workspace.handleInput("\x1b[C");
-    workspace.handleInput("\x1b[B"); // Original root → model run.
+    workspace.handleInput("\x1b[B");
     workspace.handleInput("\r");
     expect(textOf(workspace.render(100))).toContain("Historical candidate");
     workspace.handleInput("\x1b[C");
@@ -92,7 +92,7 @@ describe("shared refine workspace", () => {
       workspace.handleInput("\x1b[C");
       const frame = workspace.render(100);
       expect(wrap).toHaveBeenCalled();
-      workspace.handleInput("\x1b[C"); // Usage → Settings → Usage
+      workspace.handleInput("\x1b[C");
       workspace.handleInput("\x1b[D");
       wrap.mockClear();
       expect(workspace.render(100)).toEqual(frame);

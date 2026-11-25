@@ -1,5 +1,4 @@
 #!/bin/sh
-# Run from the repository root after npm ci. Test the given tarball, not the checkout.
 set -eu
 root=$(pwd -P)
 archive=${1:?Pass an npm pack .tgz}
@@ -7,7 +6,6 @@ tarball=$(cd "$(dirname "$archive")" && pwd -P)/$(basename "$archive")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir "$tmp/home" "$tmp/agent" "$tmp/consumer"
-# No real profile, provider credentials, npm tokens or project .npmrc.
 env -i PATH="$PATH" HOME="$tmp/home" PI_CODING_AGENT_DIR="$tmp/agent" PI_TELEMETRY=0 \
   npm_config_registry=https://registry.npmjs.org/ sh -eu -s -- "$root" "$tarball" "$tmp/consumer" <<'SMOKE'
 root=$1

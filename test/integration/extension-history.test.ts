@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Api, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import type { Hello, RunDetail } from "../../src/app/api.js";
 import { extensionHarnessEnvironment, refinement, shortcut, trigger, type Harness } from "../support/extension-harness.js";
-import { flushPromises } from "../support/helpers.js";
+import { advanceMicrotaskTurns } from "../support/helpers.js";
 import { requireValue, wireRequest } from "../support/application-wire.js";
 
 const { makeHarness } = extensionHarnessEnvironment();
@@ -31,7 +31,7 @@ describe("persistent session-local Refine history", () => {
     for (const secret of ["earlier requirement", "visible answer", "systemPrompt", "preparedInput", "sentInput", "branchLeafId", "Draft refinement workflow"]) expect(saved).not.toContain(secret);
     h.holdPanel();
     const view = h.command("history", h.context);
-    h.panelInput("\x1b[B"); // Restored root -> saved run.
+    h.panelInput("\x1b[B");
     expect(h.panelLines(100).join("\n")).toContain("Saved result");
     expect(h.panelLines(100).join("\n")).toContain("↑300 ↓20 · ≈$0.012");
     h.panelInput("\r");
@@ -105,10 +105,10 @@ describe("persistent session-local Refine history", () => {
     const view = h.command("history", h.context);
     h.panelInput("i");
     expect(h.panelLines(100).join("\n")).toContain("Draft A");
-    h.panelInput("\r"); // Save a new unsent draft, no model call.
+    h.panelInput("\r");
     expect(h.complete).toHaveBeenCalledTimes(1);
     h.panelInput("\r");
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(h.complete).toHaveBeenCalledTimes(2);
     const packet = JSON.parse((h.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
     expect(JSON.stringify(packet.conversation)).toContain("New background");
@@ -128,7 +128,7 @@ describe("persistent session-local Refine history", () => {
     await trigger(h);
     await h.reload("resume");
     finish(refinement("Late result must not persist"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     h.holdPanel();
     const view = h.command("history", h.context);
     expect(h.panelLines(100).join("\n")).toContain("Interrupted");
@@ -201,7 +201,6 @@ describe("persistent session-local Refine history", () => {
     expect(h.panelLines(100).join("\n")).toContain("Saved");
     expect(h.panelLines(100).join("\n")).toContain("Confirmed saved runs");
     expect(h.panelLines(100).join("\n")).toContain("#1");
-    // The temporary directory can wrap the path across framed terminal rows.
     const document = h.panelLines(100).map(line => stripVTControlCharacters(line).slice(1, -1).trim()).join("");
     expect(document).toContain(path(h));
     h.panelInput("q"); h.panelInput("q"); h.panelInput("q"); await view;
@@ -215,7 +214,7 @@ describe("persistent session-local Refine history", () => {
 
   it("reports persistence failure without failing the model request", async () => {
     const h = await makeHarness({ persistHistory: true });
-    await mkdir(path(h)); // A non-file destination must not be replaced.
+    await mkdir(path(h));
     await trigger(h);
     await vi.waitFor(() => expect(h.notifications.join("\n")).toContain("history save failed"));
     expect(h.widgetLines().join("\n")).toContain("1 new");
@@ -240,7 +239,7 @@ describe("persistent session-local Refine history", () => {
     h.setConfirm(true);
     await h.command("history clear", h.context);
     await h.command("optimize New input", h.context);
-    await flushPromises();
+    await advanceMicrotaskTurns();
     await expect(readFile(path(h))).rejects.toMatchObject({ code: "ENOENT" });
     await h.reload();
     h.holdPanel();
@@ -267,7 +266,7 @@ describe("main request deletion shortcut", () => {
     harness.panelInput("y");
     await view;
     resolve(refinement("Deleted result must not return"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.widgetLines()).toEqual([]);
     expect(harness.widgetLines()).toEqual([]);
     expect(harness.editorWrites).toEqual([]);

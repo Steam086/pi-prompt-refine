@@ -26,7 +26,7 @@ describe("Prompt Refine configuration", () => {
     }
     const migrated = parseConfig({ version: 1, preferencesKey: "f2" });
     expect(migrated.config.preferencesKey).toBe("alt+p");
-    expect(migrated.warnings).toEqual([]); // The previous default must not block later settings saves.
+    expect(migrated.warnings).toEqual([]);
     const conflict = parseConfig({ version: 1, shortcuts: { view: "alt+p" } });
     expect(conflict.config.preferencesKey).toBeNull();
     expect(conflict.warnings.join(" ")).toContain("conflicts");

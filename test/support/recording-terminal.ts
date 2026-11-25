@@ -1,6 +1,5 @@
 import type { Terminal } from "@earendil-works/pi-tui";
 
-// Capture real renderer I/O while retaining mutable dimensions for resize tests.
 export function createRecordingTerminal(size: { rows: number; columns: number }, clearScreen = () => {}) {
   const writes: string[] = [];
   let onInput = (_data: string) => {};

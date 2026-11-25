@@ -1,7 +1,6 @@
 import type { RefineRequestInput } from "../request-types.js";
 import type { Failure, ModelIdentity, ModelOption, OptimizerDto, Snapshot, Thinking } from "./api.js";
 
-/** Internal, bounded ports. No editor/UI or client-controlled filesystem paths. */
 export interface InputPort { capture(text: string): RefineRequestInput }
 export interface ModelPort {
   list(): ModelOption[];

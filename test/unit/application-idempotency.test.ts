@@ -28,6 +28,20 @@ describe("operation ledger", () => {
     expect(await ledger.execute(scope.id, "op", { method: "createDraft", text: " x " }, commit)).toBe(result);
   });
 
+  it("returns the pending promise to a synchronous replay inside commit", async () => {
+    const ledger = createOperationLedger();
+    const scope = lease(ledger);
+    const duplicate = vi.fn(() => accepted);
+    let replay: Promise<Reply<Receipt>> | undefined;
+    const first = ledger.execute(scope.id, "op", {}, () => {
+      replay = ledger.execute(scope.id, "op", {}, duplicate);
+      return accepted;
+    });
+    expect(replay).toBe(first);
+    expect(duplicate).not.toHaveBeenCalled();
+    expect(await first).toEqual(accepted);
+  });
+
   it("records rejection, enforces quota before effects, and never executes expired scopes", async () => {
     let now = 0;
     const ledger = createOperationLedger({ now: () => now, ttlMs: 100, maxEntries: 1, maxLeases: 1 });

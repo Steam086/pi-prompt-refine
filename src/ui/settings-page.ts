@@ -162,7 +162,6 @@ export class SettingsPage {
     this.tui.requestRender();
   }
 
-  /** Settings and its numeric editor share the same passive top shortcut strip. */
   private hintLayout(layout: PanelLayout, hints: KeyHint[], compact: KeyHint[]) {
     const tabs = workspaceTabs(layout, "Settings", this.theme);
     return { tabs, ...passiveHintLayout(layout, tabs.length, hints, compact, this.theme) };
@@ -182,8 +181,6 @@ export class SettingsPage {
     const height = chrome.layout.bodyHeight;
     const body: string[] = error && !layout.headerHeight && height > 1 ? [feedback] : [];
     const prefix = innerWidth >= 12 ? "› " : "";
-    // Show the field first, with a small viewport for wrapped or multiline paste.
-    // PromptInput still owns the cursor and scroll position.
     const indent = " ".repeat(visibleWidth(prefix));
     const fieldWidth = innerWidth - visibleWidth(prefix);
     const field = input.render(fieldWidth, Math.min(3, height - body.length));
@@ -333,7 +330,6 @@ export class SettingsPage {
     const action = this.cursor === 4 ? (optimizer?.thinkingEnabled ? "Cycle" : undefined)
       : this.cursor === 3 ? "Choose" : this.cursor === 5 || NUMBER_SETTINGS[this.cursor] ? "Edit" : "Change";
     const enterHint = (key: string): KeyHint[] => action ? [[key, action]] : [];
-    // Saving has a fixed key and an explicit scope, independent of row focus.
     const back: KeyHint = ["Esc", dirty ? "Discard" : "Back"];
     const groupHints: KeyHint[] = groups.length > 1 ? [["Tab", innerWidth >= 72 ? "Next group" : "Group"]] : [];
     const { layout, tabs, footer } = this.hintLayout(baseLayout,
@@ -344,7 +340,6 @@ export class SettingsPage {
     const header = [layout.headerHeight === 1 && notice ? status : theme.fg("text", theme.bold("Settings")), status];
     const chrome = panelHeader(layout, header, tabs, footer);
     const contentHeight = chrome.layout.bodyHeight;
-    // Keep top-level navigation fixed; the subordinate group strip is compact.
     const rows = panelTabs({ ...layout, bodyHeight: Math.min(7, contentHeight) }, groups.map((group) => group.label), this.settingsGroup, theme);
     let focusStart = 0;
     let focusEnd = 0;
@@ -359,6 +354,7 @@ export class SettingsPage {
       const text = clip(value, width);
       return text + " ".repeat(Math.max(0, width - visibleWidth(text)));
     };
+    const prioritizesDetail = (index: number) => group === "Optimizer" || NUMBER_SETTINGS[index]?.field === "maxDraftChars";
     const add = (index: number, label: string, value: string, description: string, affordance = "", dimmed = false,
       options: { detail?: string; shortLabel?: string; shortValue?: string } = {}) => {
       const active = index === this.cursor;
@@ -368,7 +364,7 @@ export class SettingsPage {
       const suffix = affordance && innerWidth >= 20 ? ` ${affordance}` : "";
       const labelColor = dimmed ? "dim" : "text";
       const valueColor = dimmed ? "dim" : active || index === 3 ? "text" : "muted";
-      const fitPriority = group === "Optimizer" || index === 12;
+      const fitPriority = prioritizesDetail(index);
       const suffixWidth = visibleWidth(suffix);
       let content: string;
       let valueClipped: boolean;
@@ -394,9 +390,7 @@ export class SettingsPage {
         if (options.shortValue && visibleWidth(line(name, compactValue)) > available) compactValue = options.shortValue;
         const text = clip(line(name, compactValue), available);
         valueClipped = text !== line(name, value);
-        // Match wide rows: emphasize only the focused name, not its value or affordance.
         const nameText = clip(name, available);
-        // Slice only at the end of the full, untruncated label; never inside a wide grapheme.
         const tail = nameText === name ? text.slice(name.length) : "";
         content = theme.fg(labelColor, active ? theme.bold(nameText) : nameText) + theme.fg(valueColor, tail + suffix);
       }
@@ -413,7 +407,6 @@ export class SettingsPage {
     if (group === "Context") {
       const enabled = this.selected.enabled ?? this.settingsContextEnabled;
       const checkbox = (on: boolean) => on ? "[x] On" : "[ ] Off";
-      // Inactive children remain editable; their choices take effect when project context is on.
       const projectValue = (value: string, on: boolean) => !enabled && on ? `${value} · inactive` : value;
       const projectCheckbox = (on: boolean) => !enabled && on ? "On · inactive" : checkbox(on);
       add(6, "Project context", checkbox(enabled), "Rules, skills and directories");
@@ -454,9 +447,7 @@ export class SettingsPage {
     }
     const details = focusedDetail ? wrapTextWithAnsi(sanitizeTerminalText(focusedDetail), innerWidth) : [];
     const usualDetailHeight = contentHeight >= 12 ? 2 : contentHeight >= 3 ? 1 : 0;
-    const fitDetails = group === "Optimizer" || this.cursor === 12;
-    // In the shortest viewports, keep the selected row rather than spend a
-    // detail or paging-hint row on its neighbors.
+    const fitDetails = prioritizesDetail(this.cursor);
     const listReserve = contentHeight <= 3 ? 1 : Math.min(3, Math.ceil(contentHeight / 2));
     const detailCapacity = Math.max(0, contentHeight - listReserve);
     const detailHeight = fitDetails ? Math.min(details.length, detailCapacity) : usualDetailHeight;

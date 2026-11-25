@@ -15,7 +15,6 @@ export function selectionWindow(
 ): SelectionWindow {
   if (count <= 0 || height <= 0) return { start: 0, end: 0, rows: [] };
   selected = Math.max(0, Math.min(selected, count - 1));
-  // One physical row must show the actionable entry, not just its heading.
   const heading = group && height > 1 ? group : undefined;
   const firstCost = heading ? 2 : 1;
   const cost = (index: number) => 1 + (heading && heading(index - 1) !== heading(index) ? 1 + gap : 0);
@@ -31,8 +30,6 @@ export function selectionWindow(
     else first = selected;
   }
   if (!fits(first, last)) { first = selected; last = selected; }
-  // Find the earliest top that can include the desired trailing neighbour.
-  // Work backwards only one viewport, even for Home/End or large lists.
   let earliest = last;
   let used = firstCost;
   while (earliest > 0 && used + cost(earliest) <= height) {
@@ -43,7 +40,6 @@ export function selectionWindow(
   let end = start + 1;
   used = firstCost;
   while (end < count && used + cost(end) <= height) { used += cost(end); end++; }
-  // Resize and end-of-list navigation should not leave avoidable blank space.
   while (end === count && start > 0 && used + cost(start) <= height) {
     used += cost(start);
     start--;

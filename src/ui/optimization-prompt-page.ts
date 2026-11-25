@@ -11,7 +11,6 @@ export interface OptimizationPromptTarget {
   save(text: string): Promise<SettingsResult>;
 }
 
-/** Settings owns the list draft; this child owns only the policy draft and its confirmation. */
 export class OptimizationPromptPage {
   private readonly initial: string;
   private confirmation?: string;
@@ -28,8 +27,6 @@ export class OptimizationPromptPage {
     private readonly close: (result?: SettingsResult) => void,
     private readonly redraw: () => void,
   ) {
-    // Compare against the editor's representation (e.g. CRLF and tabs are normalized),
-    // so opening an existing policy and saving without edits never rewrites config.
     input.editor.setText(sanitizeTerminalText(target.text.replace(/\r\n?/g, "\n")));
     this.initial = input.editor.getExpandedText();
     input.editor.disableSubmit = true;

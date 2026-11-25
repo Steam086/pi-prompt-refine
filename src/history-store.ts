@@ -19,7 +19,6 @@ export interface HistoryStorageStatus {
   omittedIds: number[];
 }
 
-/** Deliberately not a serialized RefineRequestInput/Candidate: background stays in RAM. */
 interface SavedRecord {
   id: number;
   taskId: number;
@@ -60,7 +59,6 @@ function project(record: RefineRecord): SavedRecord {
     id: record.id, taskId: record.taskId, roundId: record.input.roundId, parentId: record.parentId,
     kind: record.kind, status: record.status, createdAt: record.createdAt, archivedAt: record.archivedAt,
     acceptedAt: record.acceptedAt, sentAt: record.sentAt,
-    // Do not rewrite on progress ticks or save unsubmitted draft edits.
     elapsedSeconds: ["generating", "queued"].includes(record.status) ? undefined : record.elapsedSeconds,
     draft: record.input.draft, originalDraft: record.originalInput?.draft,
     result: record.candidate?.text, instruction: record.input.revision?.instruction,
@@ -70,7 +68,6 @@ function project(record: RefineRecord): SavedRecord {
   };
 }
 
-/** Invalid entries are rejected, never cast into executable requests. Unknown fields are discarded. */
 function parseRecord(value: unknown): SavedRecord | undefined {
   if (!object(value) || !number(value.id) || value.id === 0 || !number(value.taskId) || value.taskId === 0 ||
     !number(value.createdAt) || !text(value.draft) || !object(value.model) ||
@@ -117,9 +114,8 @@ export function encodeHistory(records: RefineRecord[], sessionId: string): { con
   const eligible = records.filter((record) => record.input.sessionId === sessionId && record.status !== "unsent");
   let omitted = 0;
   const prefix = `${JSON.stringify({ version: 1, sessionId }).slice(0, -1)},"records":[`;
-  let bytes = Buffer.byteLength(prefix) + 3; // ]}\n
-  // Serialize each record once; repeated whole-snapshot encoding stalls large-history UI actions.
-  // Keep complete newest records; never silently truncate text that may be accepted later.
+  const suffix = "]}\n";
+  let bytes = Buffer.byteLength(prefix) + Buffer.byteLength(suffix);
   for (const record of eligible.slice().sort((a, b) => b.id - a.id)) {
     if (saved.length >= HISTORY_LIMIT) { omitted++; continue; }
     const entry = JSON.stringify(project(record));
@@ -129,7 +125,7 @@ export function encodeHistory(records: RefineRecord[], sessionId: string): { con
     savedIds.unshift(record.id);
     bytes += size;
   }
-  return { content: `${prefix}${saved.join(",")}]}` + "\n", omitted, savedIds };
+  return { content: `${prefix}${saved.join(",")}${suffix}`, omitted, savedIds };
 }
 
 export function decodeHistory(content: string, sessionId: string): RefineRecord[] {
@@ -164,7 +160,6 @@ export class HistoryStore {
 
   getStatus(records: readonly RefineRecord[]): HistoryStorageStatus {
     const eligible = records.filter((record) => record.input.sessionId === this.sessionId && record.status !== "unsent");
-    // A run ID alone cannot prove that its current result/accept/send state was saved.
     const memoryOnlyIds = eligible.filter((record) => {
       const saved = this.savedRecords.get(record.id);
       return !saved || Object.entries(project(record)).some(([key, value]) => JSON.stringify(value) !== JSON.stringify(saved[key as keyof SavedRecord]));
@@ -223,7 +218,6 @@ export class HistoryStore {
     this.omittedIds = records.filter((record) => record.input.sessionId === this.sessionId && record.status !== "unsent" && !kept.has(record.id)).map((record) => record.id);
     if (omitted) this.warning("Prompt Refine saved history limit reached (100 runs / 2 MiB); some records remain in memory only.");
     if ((!this.writing && content === this.last) || content === this.pending) return;
-    // An untouched empty session should not create a sidecar.
     if (!this.last && records.every((record) => record.input.sessionId !== this.sessionId || record.status === "unsent")) return;
     this.pending = content;
     this.pendingIds = savedIds;

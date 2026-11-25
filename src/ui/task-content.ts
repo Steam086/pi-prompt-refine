@@ -6,9 +6,11 @@ import { resultNoteHint, resultNoteLines, sanitizeTerminalText } from "../presen
 import { cacheHitRate, formatReferenceCost, formatRunUsage, totalInputTokens, truncatedOutputHint } from "../usage.js";
 
 export interface TaskRow { record: TaskDisplayRecord; original: boolean; records: TaskDisplayRecord[] }
+export function hasModelProviderCollision({ record, records }: TaskRow): boolean {
+  return records.some(({ input }) => input.model.id === record.input.model.id && input.model.provider !== record.input.model.provider);
+}
 export const pending = (record: TaskDisplayRecord) => record.status === "queued" || record.status === "generating";
 
-// The Tasks summary stays a single pane; only its prose gets a shorter measure.
 const TASK_PREVIEW_READING_WIDTH = 88;
 
 interface HeaderOptions {
@@ -94,9 +96,7 @@ export class TaskContent {
     const runPreview = options.taskPreview && !row.original;
     const titleText = previewDetails || runPreview ? this.theme.fg("text", sanitizeTerminalText(title)) : this.heading(title);
     const resultPreview = runPreview && record.status === "generated" && !!record.candidate;
-    // A compact tree can truncate same-name runs before the provider. Keep
-    // that distinction in the preview without repeating the whole run header.
-    const previewIdentity = resultPreview && records.some(({ input }) => input.model.id === record.input.model.id && input.model.provider !== record.input.model.provider)
+    const previewIdentity = resultPreview && hasModelProviderCollision(row)
       ? this.theme.fg("text", `#${record.id}`) + this.muted(` · ${record.input.model.provider}`) : titleText;
     const header = resultPreview ? [truncateToWidth(previewIdentity, width, "…")] : visibleWidth(titleText) + visibleWidth(status) + 3 <= width
       ? [titleText + (previewDetails ? this.muted(" · ") : " ".repeat(width - visibleWidth(titleText) - visibleWidth(status))) + status]
@@ -199,20 +199,16 @@ export class TaskContent {
       if (record.sentAt !== undefined) body.push(this.muted(`Pi started send: ${new Date(record.sentAt).toLocaleTimeString()}`));
     }
     const fixed = header.slice(0, Math.max(0, height - 2));
-    // Run previews use a single reading gap when space permits.
     if (options.taskPreview && row.original && height >= header.length + 5) fixed.push(this.muted("─".repeat(bodyWidth)), "");
     else if (height > fixed.length + 2 || (row.original && height === fixed.length + 2)) fixed.push("");
     const available = Math.max(1, height - fixed.length);
-    // Overflow diagnostics belong to the scrollable document, never a clipped header.
     const lines = this.wrapped([...header.slice(Math.max(0, height - 2)), ...body].join("\n"), bodyWidth);
     const offset = Math.min(options.scroll, Math.max(0, lines.length - available));
     return { lines: [...fixed, ...lines.slice(offset, offset + available)], viewport: available,
       offsets: [{ reference: false, offset }] };
   }
-  /** Preview keeps reference material separate from the result and Usage details. */
   private previewDetails(row: TaskRow, width: number, height: number, header: string[], options: PaneOptions): TaskPane {
     const { record } = row;
-    // The shared reading frame is capped at 100 columns; reserve at least 30 for references.
     const wide = width >= 90;
     const leftWidth = wide ? Math.floor((width - 3) * 0.65) : width;
     const rightWidth = wide ? width - leftWidth - 3 : width;

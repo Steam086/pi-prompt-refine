@@ -4,7 +4,6 @@ import { panelGeometry } from "./panel-layout.js";
 
 const HEIGHT_PERCENT = 75;
 
-/** One native modal, not a replacement terminal or a stack of child overlays. */
 export const REFINE_OVERLAY_OPTIONS = {
   anchor: "center", width: "96%", maxHeight: `${HEIGHT_PERCENT}%`, margin: 0,
 } satisfies OverlayOptions;
@@ -17,7 +16,6 @@ export function workspaceHeight(rows: number): number {
 
 export function workspaceViewport(width: number, rows: number) {
   const height = workspaceHeight(rows);
-  // Tiny terminals spend every cell on the active content, not decoration.
   const framed = width >= 8 && height >= 6;
   return { height, framed, width: Math.max(1, width - (framed ? 2 : 0)),
     rows: Math.max(1, height - (framed ? 2 : 0)) };

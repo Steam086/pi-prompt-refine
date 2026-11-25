@@ -17,6 +17,7 @@ interface Output {
 interface Connection { touched: number; unsubscribe?: () => void; stages: Map<string, Stage>; outputs: Map<string, Output> }
 const FRAME_BYTES = 48 * 1024;
 const MAX_TRANSFER = 2 * 1024 * 1024;
+const ENCODER_SCRATCH_BYTES = 256 * 1024;
 const MAX_OUTPUT = 16 * 1024 * 1024;
 const TTL = 60_000;
 
@@ -47,11 +48,11 @@ export function createSessionEventsBridge(api: ApplicationApi, bus: SessionBus, 
   }
   function emit(event: string, data: unknown) {
     if (disposed) return;
-    try { bus.emit(event, data); } catch { /* Delivery failure must not roll back a committed operation. */ }
+    try { bus.emit(event, data); } catch { }
   }
   function respond(connectionId: string, requestId: string, result: unknown, bound?: Binding, page = false) {
     const send = (result: unknown) => emit(RESPONSE_EVENT, { connectionId, requestId, result });
-    if (page) { send(result); return; } // Already bounded to one 48 KiB encoded page.
+    if (page) { send(result); return; }
     let bytes: number;
     try { bytes = retainedBytes(result, MAX_OUTPUT); }
     catch { send({ kind: "rejected", code: "resource-limit" }); return; }
@@ -60,7 +61,7 @@ export function createSessionEventsBridge(api: ApplicationApi, bus: SessionBus, 
     if (!connection || !bound || !api.isCurrentBinding(bound)) { send({ kind: "conflict", code: "binding-stale" }); return; }
     const localBytes = [...connection.outputs.values()].reduce((n, output) => n + output.bytes, 0);
     const count = [...connections.values()].reduce((n, entry) => n + entry.outputs.size, 0);
-    bytes += 256 * 1024; // Bounded iterator/lookahead/escaping scratch, not a second whole encoded result.
+    bytes += ENCODER_SCRATCH_BYTES;
     if (connection.outputs.size >= 4 || count >= 16 || localBytes + bytes > MAX_OUTPUT || outputBytes + bytes > 4 * MAX_OUTPUT) {
       send({ kind: "rejected", code: "resource-limit" }); return;
     }
@@ -168,7 +169,7 @@ export function createSessionEventsBridge(api: ApplicationApi, bus: SessionBus, 
     const { connectionId, requestId } = packet;
     prune();
     let size = Infinity;
-    try { size = Buffer.byteLength(JSON.stringify(packet)); } catch { /* Reject non-JSON bus data. */ }
+    try { size = Buffer.byteLength(JSON.stringify(packet)); } catch { }
     if (!keysOnly(packet, ["connectionId", "requestId", "call"]) || !isRecord(packet.call) || size > 60 * 1024) {
       respond(connectionId, requestId, { kind: "rejected", code: "invalid-input" }); return;
     }

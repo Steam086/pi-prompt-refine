@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { selectHistory } from "../../src/context.js";
 import { RefineController, type RefineCompletion, type RefineRequest, type RefineRequestInput } from "../../src/controller.js";
-import { deferred, FakeScheduler, flushPromises, success } from "../support/helpers.js";
+import { deferred, FakeScheduler, advanceMicrotaskTurns, success } from "../support/helpers.js";
 
 const model = { provider: "p", id: "a" };
 const other = { provider: "p", id: "b" };
@@ -88,7 +88,7 @@ describe("round workspace", () => {
     controller.trigger(input("A"));
     controller.capturePreparedInput(jobs[0]!.request.requestId, jobs[0]!.request.generation, "Original packet");
     jobs[0]!.result.resolve(success("A result"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const token = controller.getCandidateToken()!;
     controller.trigger({ ...input("A"), revision: { previousCandidate: "A result", instruction: "Shorter" } }, { revisionToken: token });
     const revisionId = jobs[1]!.request.recordId;
@@ -115,7 +115,7 @@ describe("round workspace", () => {
     const { controller, jobs } = setup();
     controller.trigger(input("A"));
     jobs[0]!.result.resolve(success("A result"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const token = controller.getCandidateToken()!;
     controller.capture(input("B"));
     const records = controller.getHistory();
@@ -125,7 +125,7 @@ describe("round workspace", () => {
     expect(jobs.map((j) => [j.request.draft, j.request.model.id])).toEqual([["A", "a"], ["B", "a"], ["A", "b"]]);
     jobs[2]!.result.resolve(success("Other model"));
     jobs[1]!.result.resolve(success("B result"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.isCandidateCurrent(token)).toBe(true);
     expect(controller.getCandidate()?.text).toBe("A result");
     expect(controller.applyResult(controller.getHistory()[2]!.id)).toBe(true);
@@ -147,10 +147,10 @@ describe("round workspace", () => {
     controller.capture(input("C", "latest Pi reply"));
     const records = controller.getHistory();
     expect(records[2]).toMatchObject({ status: "unsent", input: { roundId: 2, systemPrompt: "latest Pi reply" } });
-    controller.startRecord(records[1]!.id); // Old pending input explicitly uses its old snapshot.
+    controller.startRecord(records[1]!.id);
     expect(jobs[1]!.request).toMatchObject({ draft: "B", roundId: 1, systemPrompt: "first" });
     jobs[0]!.result.resolve(success("Old result"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     controller.applyResult(records[0]!.id);
     expect(controller.getRoundId()).toBe(2);
     expect(controller.getCandidate()?.roundId).toBe(1);
@@ -159,7 +159,7 @@ describe("round workspace", () => {
     const { controller, jobs, scheduler } = setup();
     controller.trigger(input("A"));
     jobs[0]!.result.resolve(success("Result"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const recordId = controller.getHistory()[0]!.id;
     controller.applyResult(recordId);
     let send = controller.beginSend(controller.getCandidateToken()!)!;
@@ -182,12 +182,12 @@ describe("round workspace", () => {
     controller.stopRequest(controller.getHistory()[2]!.id);
     expect(jobs).toHaveLength(2);
     jobs[0]!.result.resolve(success("A result"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(jobs[2]!.request.draft).toBe("D");
     expect(jobs[1]!.signal.aborted).toBe(false);
     controller.stopRequest(controller.getHistory()[1]!.id);
     jobs[1]!.result.resolve({ ...success("Too late"), usage: { totalTokens: 12 } });
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getHistory()[1]).toMatchObject({ status: "cancelled", usage: { totalTokens: 12 } });
     expect(controller.getHistory()[1]?.candidate).toBeUndefined();
   });
@@ -197,14 +197,14 @@ describe("round workspace", () => {
     controller.trigger(input("B"));
     controller.trigger(input("C"));
     jobs[0]!.result.reject(new Error("offline"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(jobs[1]!.signal.aborted).toBe(false);
     expect(jobs[2]!.request.draft).toBe("C");
     controller.invalidateLifecycle(true);
     expect(jobs.every((j) => j.signal.aborted)).toBe(true);
     expect(scheduler.size).toBe(0);
     for (const job of jobs) job.result.resolve(success("Late"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getHistory().every((r) => !r.candidate)).toBe(true);
   });
   it("refuses excess unsent work instead of evicting drafts", () => {

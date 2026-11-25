@@ -48,7 +48,6 @@ interface WorkspaceMount {
 export function createWorkspaceActions({ controller, config, setCompletionContext, persistConfig,
   historyStorage, optimizationError, operations, triggerOptimize, reviseCandidate,
   registeredModels, showOptimizerQuota, notify, preferenceRepository, saveOptimizer }: WorkspaceActionsDependencies) {
-  // Runtime-only drafts survive overlay mounts, but never enter history persistence.
   const inputDrafts = new Map<string, string>();
   const revisionDrafts = new Map<string, RevisionDraft>();
   return ({ ctx, sessionId, isClosed, isUsage, position, usagePosition,
@@ -74,7 +73,6 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
         const source = id === undefined ? undefined : original ? controller.getOriginalRecord(id) : controller.getRecord(id);
         if (id !== undefined && !source) return undefined;
         const selected = source?.input.preferences ?? [];
-        // A request (including its original row) only exposes adopted snapshots.
         if (!source || !original || source.status !== "unsent" || source.input.contextUnavailable || controller.getState().pendingSend) return { selected };
         return {
           selected,
@@ -184,8 +182,6 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
         return {
           text: original ?? REFINE_SYSTEM_PROMPT,
           save: async (text) => {
-            // Opening the editor captures authority; confirming after a session,
-            // generation or policy change must not overwrite the new state.
             if (!inSession() || controller.getGeneration() !== generation || config.systemPrompt !== original) {
               return { message: "Not persisted · Context or policy changed. Reopen to edit.", persisted: false };
             }
@@ -213,7 +209,6 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
       saveContext: async (selected) => {
         if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId) return { message: "Session changed; settings not saved.", persisted: false };
         config.projectContext.instructionsEnabled = selected.instructions !== "off";
-        // Off leaves the saved follow-up preference intact.
         if (selected.instructions !== "off") config.projectContext.instructionsOnFollowUp = selected.instructions === "always";
         config.projectContext.tree.enabled = selected.tree;
         config.projectContext.skillsEnabled = selected.skills;
@@ -236,7 +231,6 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
         const token = controller.getCandidateToken();
         if (!token || controller.getState().pendingSend) return undefined;
         return {
-          // Failure rebases generation but keeps this source identity; retain its feedback.
           key: `${token.sessionId}:${controller.getCandidate()?.recordId ?? token.requestId}`,
           label: `#${controller.getCandidate()!.recordId ?? "?"} · ${displayModel(controller.getCandidate()!.model)}`,
           submit: (text: string, resultNotes?: RevisionInput["resultNotes"]) => {

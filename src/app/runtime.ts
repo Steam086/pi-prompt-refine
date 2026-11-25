@@ -22,7 +22,6 @@ import { createTuiOperations } from "../adapters/tui-operations.js";
 import { createRpcSlash } from "../adapters/rpc-slash.js";
 import type { ModelIdentity, Thinking } from "./api.js";
 
-/** Composes bounded services; request execution, UI hosting and session state have separate owners. */
 export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMessage" | "getSessionName" | "setSessionName">) {
   const filePath = configPath(getAgentDir());
   const loaded = await loadConfig(filePath);

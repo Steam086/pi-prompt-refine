@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_CONFIG } from "../../src/config.js";
 import { extensionHarnessEnvironment, panelAction, refinement, trigger } from "../support/extension-harness.js";
-import { flushPromises } from "../support/helpers.js";
+import { advanceMicrotaskTurns } from "../support/helpers.js";
 
 const { makeHarness } = extensionHarnessEnvironment();
 
@@ -50,7 +50,7 @@ describe("session naming", () => {
       await trigger(harness);
       harness.manualName("Manual project name");
       resolve(refinement("Refined prompt", "Generated name"));
-      await flushPromises();
+      await advanceMicrotaskTurns();
       await panelAction(harness, "a");
     } else {
       await trigger(harness);
@@ -60,7 +60,7 @@ describe("session naming", () => {
         await panelAction(harness, "a");
         harness.manualName("Manual project name");
         harness.resolveConfirm(true);
-        await flushPromises();
+        await advanceMicrotaskTurns();
         expect(harness.getEditor()).toBe("Refined prompt");
       } else {
         await panelAction(harness, "s");
@@ -148,7 +148,7 @@ describe("session naming", () => {
       await panelAction(harness, "a");
       if (failure === "confirmation-stale") harness.handlers.get("session_before_tree")?.[0]?.({}, harness.context);
       harness.resolveConfirm(failure !== "confirmation-no");
-      await flushPromises();
+      await advanceMicrotaskTurns();
       expect(harness.setSessionName).not.toHaveBeenCalled();
       expect(harness.editorWrites).toEqual([]);
     });
@@ -165,7 +165,6 @@ describe("session naming", () => {
       if (ack === "followUp") harness.handlers.get("input")?.[0]?.({ text: "Refined prompt", source: "extension", streamingBehavior: "followUp" }, harness.context);
       else if (ack === "message_start") harness.handlers.get(ack)?.[0]?.({ message: { role: "user", content: [{ type: "text", text: "Refined prompt" }] } }, harness.context);
       else harness.handlers.get(ack)?.[0]?.({ messageType: "user", prompt: "Refined prompt" }, harness.context);
-      // Neither queue preflight nor before_agent_start is a successful send boundary.
       if (ack !== "message_start") harness.handlers.get("message_start")?.[0]?.({ message: { role: "user", content: "Refined prompt" } }, harness.context);
     };
     acknowledge();

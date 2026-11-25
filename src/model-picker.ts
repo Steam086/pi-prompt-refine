@@ -24,7 +24,6 @@ export function renderModelChoices(
     const prefix = active ? "› " : "  ";
     const badges = [item.label?.includes(" [thinking]") && "Thinking capable", item.label?.endsWith(" (current)") && "Current",
       item.usedInTask && "This task"].filter(Boolean).map((badge) => ` · ${badge}`).join("");
-    // On narrow terminals keep badges separate so they never consume the model name's space.
     const name = sanitizeTerminalText(item.description || item.value);
     const compact = visibleWidth(prefix + name + badges) > width;
     // Clip before styling so truncation resets cannot interrupt emphasis or the selected surface.
@@ -40,8 +39,6 @@ export function renderModelChoices(
     entries.set(index, lines);
     return lines;
   };
-  // Fit actual two-/three-row entries, not a three-row reservation for every model.
-  // Keep the selection centered and never cut a model unless even one cannot fit.
   let count = Math.min(items.length, 10, Math.max(1, Math.floor(height / 2)));
   let lines: string[];
   let moreHeight: number;
@@ -86,7 +83,6 @@ function renderSettingsModelPicker(options: ModelPickerOptions, layout: PanelLay
     const query = truncateToWidth(sanitizeTerminalText(options.query || "Type to filter"), width - 8, "…");
     body.push(theme.fg("muted", "Search: ") + theme.fg(options.query ? "text" : "muted", query));
   }
-  // Always leave space for the highlighted name and model ID before adding metadata.
   if (options.items.length && height - body.length >= 3) {
     const status = sanitizeTerminalText(options.thinkingStatus).replace(/^Thinking level: /, "Thinking: ");
     body.push(theme.fg("muted", truncateToWidth(status, width, "…")));
@@ -95,7 +91,6 @@ function renderSettingsModelPicker(options: ModelPickerOptions, layout: PanelLay
   return chrome.render([...body, ...choices], (line) => theme.fg("borderMuted", line));
 }
 
-/** Budget actual content rows inside the same bounded frame as the workspace. */
 export function renderModelPicker(options: ModelPickerOptions, width: number, rows: number, theme: Theme,
   layout: PanelLayout = panelLayout(width, rows)): string[] {
   if (width < 1) return [];
@@ -122,7 +117,6 @@ export function renderModelPicker(options: ModelPickerOptions, width: number, ro
     (text) => theme.fg("borderMuted", text));
 }
 
-/** Model selection shares the workspace shell, including when embedded as a child page. */
 export function renderOverlayModelPicker(options: ModelPickerOptions, width: number, rows: number, theme: Theme): string[] {
   if (width < 1) return [];
   return workspaceFrame(width, rows, renderModelPicker(options, workspaceViewport(width, rows).width, rows, theme,

@@ -46,7 +46,6 @@ describe("Library purpose groups", () => {
     expect(lines.join("\n")).toContain(f.theme.fg("text", f.theme.bold("Prompt rewriting")));
     expect(lines.join("\n")).toContain(f.theme.fg("muted", "Project"));
     expect(lines.join("\n")).toContain(f.theme.fg("muted", " Global"));
-    // Navigation skips non-interactive headings and spacers; bring-back is shared.
     f.panel.handleInput(down); f.panel.handleInput(" "); f.panel.handleInput("\x1b[A"); f.panel.handleInput(" ");
     f.panel.handleInput(bringBack);
     const selected = f.close.mock.calls[0]![0] as SelectedPreference[];
@@ -200,7 +199,7 @@ describe("three-action preference library", () => {
     };
     f.panel.handleInput("e"); assertSafe();
     expect(text(f.panel).replace(/\x1b_pi:[^\x07]*\x07/g, "")).toContain("Name: 中文😀    �[999C�]52;c;name-payload� �C1�");
-    f.panel.handleInput(esc); // Display normalization alone is not an unsaved change.
+    f.panel.handleInput(esc);
     expect(text(f.panel)).not.toContain("Discard unsaved form?");
     expect(text(f.panel)).not.toContain("Edit library entry");
     expect(f.repo.save).not.toHaveBeenCalled();
@@ -209,7 +208,7 @@ describe("three-action preference library", () => {
     save(f.panel); await loaded(f.panel); assertSafe();
     expect(f.panel.render(100).join("\n")).toContain(f.theme.fg("error", "⚠ Write conflict 中文😀"));
     expect(f.repo.save).toHaveBeenLastCalledWith(entry.scope, { name: entry.name, body: entry.body }, entry);
-    f.panel.handleInput(enter); await loaded(f.panel); // Explicit retry with the original name and conflict snapshot.
+    f.panel.handleInput(enter); await loaded(f.panel);
     expect(f.repo.save).toHaveBeenCalledTimes(2);
     expect(f.repo.save).toHaveBeenLastCalledWith(entry.scope, { name: entry.name, body: entry.body }, entry);
     expect(f.library.entries[0]!.name).toBe(entry.name);
@@ -244,10 +243,10 @@ describe("three-action preference library", () => {
     const f = setup([], "Preserve existing structure.", themeName); await loaded(f.panel);
     f.panel.handleInput("n"); f.panel.handleInput("Structure");
     f.panel.handleInput(tab); f.panel.handleInput(tab); f.panel.handleInput(tab);
-    f.panel.handleInput(enter); // Task -> Rewrite.
+    f.panel.handleInput(enter);
     expect(text(f.panel)).toContain("Type: Prompt rewriting");
     f.panel.handleInput(tab); f.panel.handleInput("并列问题 😀");
-    f.panel.handleInput(tab); // Description -> Save, with no adoption control.
+    f.panel.handleInput(tab);
     expect(text(f.panel)).toContain("Focus: Save");
     expect(text(f.panel)).not.toContain("Adoption:");
     for (let field = 0; field < 6; field++) {
@@ -360,7 +359,7 @@ describe("three-action preference library", () => {
 
   it("retains off-search selections and selection order; only Alt+Enter brings them back", async () => {
     const selected = [selectPreference(a)]; const f = setup(selected); await loaded(f.panel);
-    f.panel.handleInput(" "); // Remove A.
+    f.panel.handleInput(" ");
     search(f.panel, "Literal"); f.panel.handleInput(" ");
     search(f.panel, "Concise"); f.panel.handleInput(" ");
     f.panel.handleInput(ctrlS); f.panel.handleInput(enter); f.panel.handleInput(ctrlS);
@@ -386,7 +385,6 @@ describe("three-action preference library", () => {
       expect(lines.every((line) => visibleWidth(line) <= width!)).toBe(true);
       expect(stripVTControlCharacters(lines.join("\n"))).toContain("Same requirem");
     }
-    // Both sources remain manageable; refusing a duplicate never rewrites or deletes either.
     f.panel.handleInput("e"); expect(text(f.panel)).toContain("Edit library entry");
     f.panel.handleInput(esc); f.panel.handleInput("s"); f.panel.handleInput(" ");
     f.panel.handleInput("s"); f.panel.handleInput(" "); f.panel.handleInput(bringBack);

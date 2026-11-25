@@ -97,7 +97,6 @@ function markdownSections(content: string): Array<{ startLine: number; content: 
   return sections;
 }
 
-// A URI or foreign drive path must not become a supposedly project-relative label.
 function unsupportedPath(path: string): boolean {
   return /^[a-z][a-z0-9+.-]*:\/\//i.test(path) || (sep === "/" && (path.includes("\\") || /^[A-Za-z]:/.test(path)));
 }
@@ -106,7 +105,6 @@ function outsideProject(name: string): boolean {
   return name === ".." || name.startsWith(`..${sep}`) || isAbsolute(name);
 }
 
-/** Pi supplies local file paths. Expose provenance only relative to a known project root. */
 function ruleSource(cwd: string | undefined, path: string): string {
   if (!cwd || !isAbsolute(cwd) || !path || unsupportedPath(path)) return "external rule";
   const name = relative(cwd, resolve(cwd, path));
@@ -120,10 +118,9 @@ function instructionRecord(file: { source: string; content: string }, budget: nu
     if (full.length <= budget) return { text: full, incomplete: false };
   }
   if (budget < 80) return { text: "", incomplete: true };
-  // Retain whole Markdown sections only; never cut a prohibition or exception mid-sentence.
   const scannedText = prefix(file.content, Math.max(65_536, budget * 8));
   const sections = markdownSections(scannedText);
-  if (scannedText.length < file.content.length) sections.pop(); // The final scanned section may be incomplete.
+  if (scannedText.length < file.content.length) sections.pop();
   const selected: Array<{ startLine: number; content: string }> = [];
   for (const section of sections) {
     const candidate = JSON.stringify({ source, complete: false, sections: [...selected, section] });
@@ -187,7 +184,6 @@ function priority(name: string, draft: string): number {
 
 interface IgnoreRules { base: string; matcher: Ignore }
 
-/** Bounded local ignore parsing; no subprocess, full repository enumeration, or symlink reads. */
 async function readIgnore(base: string, reasons: Set<string>): Promise<IgnoreRules | undefined> {
   try {
     const file = await open(join(base, ".gitignore"), constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -210,13 +206,12 @@ async function ancestorIgnoreRules(cwd: string, reasons: Set<string>, signal: Ab
   let foundRoot = false;
   for (let depth = 0; depth < 32 && !signal.aborted; depth += 1) {
     ancestors.unshift(current);
-    try { await lstat(join(current, ".git")); foundRoot = true; break; } catch { /* Not the repository root. */ }
+    try { await lstat(join(current, ".git")); foundRoot = true; break; } catch { }
     const parent = dirname(current);
     if (parent === current) break;
     current = parent;
   }
   const rules: IgnoreRules[] = [];
-  // A non-Git project still gets its own .gitignore; do not read unrelated ancestor files.
   for (const base of foundRoot ? ancestors.slice(0, -1) : []) {
     if (signal.aborted) break;
     const entry = await readIgnore(base, reasons);
@@ -287,7 +282,7 @@ export async function collectTree(cwd: string, draft: string, config: ProjectCon
     if (queue.length && entries.length >= config.maxEntries) reasons.add("total tree entry limit");
     if (combined.aborted) return { text: "", warnings: [] };
     const visible = entries;
-    const lines = ["./"]; // Relative to cwd or the REFERENCED DIRECTORY header, never the host path.
+    const lines = ["./"];
     const footer = `\n[Partial tree: maxDepth=${config.maxDepth}; default excludes + .gitignore; unlisted paths may exist.]`;
     if (lines[0]!.length + footer.length > config.maxChars) reasons.add("tree character budget");
     let used = lines[0]!.length + footer.length;
@@ -333,7 +328,7 @@ export function directoryReferences(draft: string, maxReferences: number): { pat
   const pattern = /(?:^|[\s([{"'`，。；：])@(?:"([^"\r\n]+)"|'([^'\r\n]+)'|`([^`\r\n]+)`|([^\s"'`<>(){}\[\],;:!?，。；：！？]+))/gu;
   for (const match of draft.matchAll(pattern)) {
     const path = match[1] ?? match[2] ?? match[3] ?? match[4]!;
-    if (path.includes("@")) continue; // Not an email address or a nested scoped package token.
+    if (path.includes("@")) continue;
     if (paths.has(path)) continue;
     if (paths.size >= maxReferences) return { paths: [...paths], truncated: true };
     paths.add(path);
@@ -401,7 +396,6 @@ export async function collectDirectoryContext(
             break;
           }
           if (!stat.isDirectory()) {
-            // Ordinary @file references stay literal; never open their contents.
             if (index < parts.length - 1) warnings.push(`Directory reference ${label} skipped: a parent is not a directory.`);
             usable = false;
             break;
@@ -486,7 +480,6 @@ export function assembleProjectContext(snapshot: ProjectSnapshot, tree: TreeSnap
     if (!warnings.some((warning) => warning.includes("total project context budget"))) warnings.push("The total project context budget was exceeded; the tree was omitted.");
     treeText = "";
   }
-  // Snapshot formatting reserves room for diagnostics. Never silently cut instruction records.
   const text = warningHeader() + snapshot.text + (treeText ? treeHeader + treeText : "");
   return { text, warnings };
 }

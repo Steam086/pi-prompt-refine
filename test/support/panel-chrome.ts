@@ -5,13 +5,11 @@ const actionKey = "(?:Ctrl\\+S|Esc|Tab|Enter|r|m|a|x|q|o|↵|\\^S|\\?|n):? ";
 const leadingAction = new RegExp(`^[│ ]*${actionKey}`, "u");
 const sharedAction = new RegExp(` {3,}(?=${actionKey})`, "u");
 
-/** Return chrome without the separate transcript/shell borders or the content rule. */
 export function frameHeader(lines: string[]): string[] {
   const end = lines.findIndex((line, index) => index > 0 && /^[│ ]*─+[│ ]*$/u.test(strip(line)));
   return end < 0 ? lines : lines.slice(1, end);
 }
 
-/** Keep the action columns when the active tabs share their first row. */
 export function frameHints(lines: string[]): string[] {
   return frameHeader(lines).flatMap((line) => {
     const text = strip(line);

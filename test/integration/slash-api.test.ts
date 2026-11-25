@@ -3,7 +3,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import type { Hello, Snapshot } from "../../src/app/api.js";
 import { extensionHarnessEnvironment } from "../support/extension-harness.js";
 import { requireValue, wireRequest } from "../support/application-wire.js";
-import { flushPromises } from "../support/helpers.js";
+import { advanceMicrotaskTurns } from "../support/helpers.js";
 import { getThemeByName } from "../support/pi-theme.js";
 import { formatKeyHint } from "../../src/key-hints.js";
 
@@ -14,7 +14,7 @@ describe("native slash output and retry boundary", () => {
     const h = await makeHarness({ renderer: { mode, theme } });
     h.holdPanel();
     const command = h.commands.get("refine-api")!("status", h.context);
-    await flushPromises();
+    await advanceMicrotaskTurns();
     for (const rows of [16, 40]) {
       h.resize(rows);
       for (const width of [40, 140]) {

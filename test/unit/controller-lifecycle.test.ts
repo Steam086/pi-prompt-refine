@@ -3,7 +3,7 @@ import type { BudgetReport } from "../../src/budget.js";
 import { buildRefineSystemPrompt } from "../../src/context.js";
 import { RefineController, type RefineCompletion, type RefineRequest } from "../../src/controller.js";
 import { input, model, setup } from "../support/controller.js";
-import { deferred, FakeScheduler, flushPromises, success } from "../support/helpers.js";
+import { deferred, FakeScheduler, advanceMicrotaskTurns, success } from "../support/helpers.js";
 
 describe("runtime settings", () => {
   it("uses new limits for new work and queued starts without changing active timers or output guards", async () => {
@@ -25,7 +25,7 @@ describe("runtime settings", () => {
     limits.maxOutputChars = 5;
     expect(controller.trigger(input("Too long"))).toEqual({ kind: "too-long" });
     jobs[0]!.pending.resolve(success("Longer than the new output guard"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getRecord(jobs[0]!.request.recordId)?.status).toBe("generated");
     expect(jobs).toHaveLength(2);
     scheduler.advance(100);
@@ -37,7 +37,7 @@ describe("runtime settings", () => {
     controller.trigger(input("C"));
     limits.timeoutMs = 1000;
     scheduler.advance(500);
-    expect(jobs[2]!.signal.aborted).toBe(true); // Existing timer keeps its 500 ms deadline.
+    expect(jobs[2]!.signal.aborted).toBe(true);
   });
 });
 
@@ -55,7 +55,7 @@ describe("request budget diagnostics", () => {
     controller.capturePreparedInput(first.request.requestId, first.request.generation, "Full packet");
     controller.captureBudget(first.request.requestId, first.request.generation, report, "Reduced packet");
     expect(controller.getState().budget).toEqual(report);
-    first.pending.resolve(success("Result")); await flushPromises();
+    first.pending.resolve(success("Result")); await advanceMicrotaskTurns();
     expect(controller.getCandidate()).toMatchObject({ preparedInput: "Full packet", sentInput: "Reduced packet", budget: report });
     controller.rerunRecord(first.request.recordId, { provider: "other", id: "larger" });
     const second = jobs[1]!;
@@ -63,12 +63,11 @@ describe("request budget diagnostics", () => {
     expect(second.request.budget).toBeUndefined();
     expect(second.request.sentInput).toBeUndefined();
     controller.captureBudget(second.request.requestId, second.request.generation, { ...report, status: "ok", removedMessages: 0 }, "Full packet");
-    // Background work cannot overwrite the applied candidate's warning.
     expect(controller.getState().budget).toEqual(report);
     controller.stopRequest(second.request.recordId);
     controller.captureBudget(second.request.requestId, second.request.generation, { ...report, status: "blocked" });
     expect(controller.getRecord(second.request.recordId)?.input.budget?.status).toBe("ok");
-    second.pending.resolve(success("Late")); await flushPromises();
+    second.pending.resolve(success("Late")); await advanceMicrotaskTurns();
   });
 
   it("reports budget rejection distinctly and preserves the previous revision candidate", async () => {
@@ -78,10 +77,10 @@ describe("request budget diagnostics", () => {
       controller.captureBudget(request.requestId, request.generation, { ...report, status: "blocked", message: "Request not sent" });
       return { text: "", stopReason: "budget" };
     });
-    controller.trigger(input("Draft")); await flushPromises();
+    controller.trigger(input("Draft")); await advanceMicrotaskTurns();
     blocked = true;
     controller.trigger(input("Draft", { revision: { previousCandidate: "Previous", instruction: "Shorten" } }), { revisionToken: controller.getCandidateToken()! });
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getState()).toMatchObject({ phase: "error", error: "budget", budget: { status: "blocked" } });
     expect(controller.getCandidate()?.text).toBe("Previous");
     expect(controller.getHistory().at(-1)).toMatchObject({ status: "error", error: "budget" });
@@ -99,7 +98,7 @@ describe("RefineController request lifecycle", () => {
       now = 12_900;
       expect(controller.getState().elapsedSeconds).toBe(12);
       pending.resolve(success("First result"));
-      await flushPromises();
+      await advanceMicrotaskTurns();
       now = 60_000;
       expect(controller.getState().elapsedSeconds).toBe(12);
       controller.updateCandidate(controller.getCandidateToken()!, "Edited first result");
@@ -114,7 +113,7 @@ describe("RefineController request lifecycle", () => {
       expect(controller.getState().elapsedSeconds).toBe(0);
       now += 3_000;
       pending.resolve(success("Second result"));
-      await flushPromises();
+      await advanceMicrotaskTurns();
       controller.acceptCandidate(controller.getCandidateToken()!, "Edited first result", false, () => {});
       expect(controller.getAccepted()?.elapsedSeconds).toBe(3);
       controller.restoreDraft(controller.getRestoreToken()!, "Second result", false, () => {});
@@ -134,11 +133,11 @@ describe("RefineController request lifecycle", () => {
       now = 5_000;
       if (kind === "timeout") scheduler.advance(100);
       else pending.reject(new Error("offline"));
-      await flushPromises();
+      await advanceMicrotaskTurns();
       expect(controller.getState()).toMatchObject({ phase: "error", elapsedSeconds: 5 });
       now += 30_000;
       pending.resolve(success("Late"));
-      await flushPromises();
+      await advanceMicrotaskTurns();
       expect(controller.getState().elapsedSeconds).toBe(5);
       expect(controller.getCandidate()).toBeUndefined();
     } finally {
@@ -157,7 +156,7 @@ describe("RefineController request lifecycle", () => {
     const updated = input("Draft", { thinkingLevel: "high", systemPrompt: buildRefineSystemPrompt(false, "Be brief") });
     expect(controller.trigger(updated).kind).toBe("duplicate");
     pending.resolve(success("Refined"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()?.history.items[0]?.text).toBe("Keep it concise");
     expect(controller.getCandidate()?.systemPrompt).toBe(request.systemPrompt);
     expect(controller.trigger(updated).kind).toBe("ready");
@@ -175,20 +174,20 @@ describe("RefineController request lifecycle", () => {
   it("freezes title eligibility per round and drops unsolicited titles in the next", async () => {
     const { controller } = setup(async () => ({ ...success("Prompt"), title: "Project task" }));
     controller.trigger(input("Draft", { generateTitle: true }));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()?.title).toBe("Project task");
     expect(controller.trigger(input("Draft", { generateTitle: true })).kind).toBe("ready");
     expect(controller.trigger(input("Draft", { generateTitle: false })).kind).toBe("ready");
     controller.onMessageStarted("Prompt");
     expect(controller.trigger(input("Draft", { generateTitle: false })).kind).toBe("started");
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()?.title).toBeUndefined();
   });
 
   it("rejects invalid structured output while retaining reported usage", async () => {
     const { controller, onAccepted } = setup(async () => ({ ...success(""), invalidOutput: true, usage: { totalTokens: 12 } }));
     controller.trigger(input("Draft", { generateTitle: true }));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getState()).toMatchObject({ phase: "error", error: "invalid-output", usage: { totalTokens: 12 } });
     expect(controller.getCandidate()).toBeUndefined();
     expect(onAccepted).not.toHaveBeenCalled();
@@ -205,7 +204,7 @@ describe("RefineController request lifecycle", () => {
     expect(requests[0]?.project?.snapshot.text).toBe("Original rules");
     expect(controller.trigger(input("draft", { project })).kind).toBe("duplicate");
     pending.resolve(success("Refined"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()?.project?.snapshot.text).toBe("Original rules");
     expect(controller.trigger(input("draft", { project })).kind).toBe("ready");
   });
@@ -219,7 +218,7 @@ describe("RefineController request lifecycle", () => {
     expect(controller.trigger(input("draft A")).kind).toBe("duplicate");
     expect(complete).toHaveBeenCalledTimes(1);
     pending.resolve(success("improved A"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()?.text).toBe("improved A");
     expect(controller.trigger(input("draft A")).kind).toBe("ready");
     expect(complete).toHaveBeenCalledTimes(1);
@@ -240,9 +239,9 @@ describe("RefineController request lifecycle", () => {
     expect(signals[0]?.aborted).toBe(false);
     expect(signals[1]?.aborted).toBe(false);
     b.resolve(success("B refined"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     a.resolve(success("A refined"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
 
     expect(controller.getCandidate()?.text).toBe("B refined");
     expect(controller.getCandidate()?.draft).toBe("B");
@@ -267,9 +266,9 @@ describe("RefineController request lifecycle", () => {
     expect(signals[0]?.aborted).toBe(false);
     expect(complete).toHaveBeenCalledTimes(2);
     replacement.resolve(success("new A"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     a.resolve(success("stale A"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()?.text).toBe("new A");
   });
 
@@ -286,7 +285,7 @@ describe("RefineController request lifecycle", () => {
     controller.onMessageStarted("B");
     expect(signal?.aborted).toBe(false);
     pending.resolve(success("Archived A"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getHistory()[0]).toMatchObject({ status: "generated", candidate: { text: "Archived A" }, archivedAt: expect.any(Number) });
     expect(controller.getRoundId()).toBeUndefined();
   });
@@ -305,7 +304,7 @@ describe("RefineController request lifecycle", () => {
 
     if (callback === "resolve") pending.resolve(success("late"));
     else pending.reject(new Error("late failure"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()).toBeUndefined();
     expect(controller.getState().phase).toBe("idle");
     expect(onState.mock.calls.at(-1)?.[0].phase).toBe("idle");
@@ -314,7 +313,7 @@ describe("RefineController request lifecycle", () => {
   it("exposes an active provider/auth failure without creating a candidate", async () => {
     const { controller } = setup(async () => { throw new Error("authentication failed"); });
     controller.trigger(input("draft"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()).toBeUndefined();
     expect(controller.getState()).toMatchObject({ phase: "error", error: "failed" });
   });
@@ -331,7 +330,7 @@ describe("RefineController request lifecycle", () => {
     expect(signal?.aborted).toBe(true);
     expect(controller.getState()).toMatchObject({ phase: "error", error: "timeout" });
     pending.resolve(success("late but complete"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()).toBeUndefined();
     expect(controller.getState()).toMatchObject({ phase: "error", error: "timeout" });
   });
@@ -346,7 +345,7 @@ describe("RefineController request lifecycle", () => {
     for (const result of cases) {
       const { controller } = setup(async () => result);
       controller.trigger(input("draft"));
-      await flushPromises();
+      await advanceMicrotaskTurns();
       expect(controller.getCandidate()).toBeUndefined();
       expect(controller.getState()).toMatchObject({ phase: "error", error: result.error });
     }
@@ -365,20 +364,20 @@ describe("RefineController request lifecycle", () => {
     const complete = vi.fn().mockResolvedValueOnce(success("first")).mockImplementation(() => pending.promise);
     const { controller } = setup(complete);
     controller.trigger(input("draft"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.trigger(input("draft")).kind).toBe("ready");
     expect(controller.trigger(input("draft"), { force: true }).kind).toBe("started");
     expect(controller.trigger(input("draft"), { force: true }).kind).toBe("duplicate");
     expect(complete).toHaveBeenCalledTimes(2);
     pending.resolve(success("second"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()?.text).toBe("second");
   });
 
   it("does not discard a usable result when an explicit replacement draft is invalid", async () => {
     const { controller } = setup();
     controller.trigger(input("original"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const token = controller.getCandidateToken()!;
     expect(controller.trigger(input(" "), { force: true }).kind).toBe("empty");
     expect(controller.trigger(input("x".repeat(101)), { force: true }).kind).toBe("too-long");
@@ -393,7 +392,7 @@ describe("RefineController request lifecycle", () => {
     else if (boundary === "branch") controller.invalidateLifecycle(true);
     else if (boundary === "reload" || boundary === "shutdown") controller.setSession("session-1");
     pending.resolve(success("late"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()).toBeUndefined();
     expect(controller.getState().phase).toBe("idle");
   });

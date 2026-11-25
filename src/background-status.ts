@@ -33,7 +33,6 @@ export class BackgroundStatus {
     }
     const unseen = completed.filter((record) => !this.seen.has(record.id) && record.kind !== "edit" &&
       record.acceptedAt === undefined && record.sentAt === undefined);
-    // Archived requests can still be running; keep their count and timing together.
     const running = records.filter((record) => record.status === "generating");
     const results = unseen.filter((record) => record.status === "generated");
     const timed = running.length ? running : results.length === 1 ? results : [];
@@ -78,15 +77,12 @@ export function renderBackgroundStatus(status: BackgroundSummary, width: number,
     const inset = columns + 4 <= available ? 2 : 0;
     return [" ".repeat(inset) + line];
   };
-  // Time and branding yield first; keep complete state counts and the open hint.
   const untimed = renderEntries(false);
   const compact = renderEntries(false, true);
   for (const parts of [[brand, ...renderEntries(true), open], [brand, ...untimed, open], [...untimed, open], [...compact, open]]) {
     const fitted = fit(parts);
     if (fitted) return fitted;
   }
-  // When even compact counts cannot fit, retain the most relevant state, without
-  // rotating or cutting labels. Running > failed > new > queued.
   let retained = entries.map((entry, index) => ({ ...entry, text: compact[index]! }));
   for (const entry of [...retained].sort((a, b) => a.priority - b.priority)) {
     if (retained.length <= 1) break;

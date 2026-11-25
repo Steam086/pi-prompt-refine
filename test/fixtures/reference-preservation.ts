@@ -1,5 +1,3 @@
-// De-identified Preferences panel fixture. This reference is part of the draft,
-// not conversation/project background. Keep it literal across a rewrite.
 export const screen = ` Preferences
   Focus: Library · 0 frozen snapshots
   Search:

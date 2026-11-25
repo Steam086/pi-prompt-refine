@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { extensionHarnessEnvironment, panelAction, refinement, shortcut, trigger } from "../support/extension-harness.js";
-import { flushPromises } from "../support/helpers.js";
+import { advanceMicrotaskTurns } from "../support/helpers.js";
 
 const { makeHarness } = extensionHarnessEnvironment();
 
@@ -22,7 +22,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.customCalls()).toBe(0);
     harness.setEditorText("Draft B");
     resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "Automatic visible result", title: "Background refinement" }) }], stopReason: "stop" });
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.widgetLines().join("\n")).toContain("1 new");
     expect(harness.widgetLines()).toHaveLength(1);
     expect(harness.customCalls()).toBe(0);
@@ -46,9 +46,9 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.panelLines().join("\n")).toContain("Draft A");
     expect(harness.complete).toHaveBeenCalledTimes(1);
     resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "Fresh completed result", title: "Live preview" }) }], stopReason: "stop" });
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.panelLines().join("\n")).toContain("Fresh completed result");
-    expect(harness.panelLines().join("\n")).toContain("Draft A"); // Task label remains stable.
+    expect(harness.panelLines().join("\n")).toContain("Draft A");
     expect(harness.customCalls()).toBe(2);
     harness.panelInput("a");
     await view;
@@ -66,7 +66,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await vi.advanceTimersByTimeAsync(12_000);
     expect(harness.widgetLines().join("\n")).toContain("1 running 12s");
     resolve(refinement("Timed result"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.widgetLines()).toHaveLength(1);
     expect(harness.widgetLines().join("\n")).toContain("1 new 12s");
     expect(vi.getTimerCount()).toBe(0);
@@ -93,11 +93,11 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const finish: Array<(value: any) => void> = [];
     harness.complete.mockImplementation(() => new Promise((resolve) => { finish.push(resolve); }));
     await harness.command("optimize First", harness.context);
-    await flushPromises();
+    await advanceMicrotaskTurns();
     await vi.advanceTimersByTimeAsync(5_000);
     for (const draft of ["Second", "Third", "Fourth", "Fifth"]) {
       await harness.command(`optimize ${draft}`, harness.context);
-      await flushPromises();
+      await advanceMicrotaskTurns();
     }
     await vi.advanceTimersByTimeAsync(3_000);
     expect(harness.widgetLines(100).join("\n")).toContain("4 running 8s · 1 queued");
@@ -107,18 +107,17 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(narrow).not.toContain("8s");
 
     finish[0]!(refinement("First result"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(finish).toHaveLength(5);
     await vi.advanceTimersByTimeAsync(2_000);
     expect(harness.widgetLines(100).join("\n")).toContain("4 running 5s · 1 new");
     for (const resolve of finish.slice(1, 4)) resolve(refinement("Another result"));
-    await flushPromises();
-    // Fifth began only when First finished; its five-second queue wait is not elapsed time.
+    await advanceMicrotaskTurns();
     expect(harness.widgetLines(100).join("\n")).toContain("1 running 2s · 4 new");
     await vi.advanceTimersByTimeAsync(2_000);
     expect(harness.widgetLines(100).join("\n")).toContain("1 running 4s · 4 new");
     finish[4]!(refinement("Last result"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.widgetLines(100).join("\n")).toContain("5 new");
     expect(harness.widgetLines(100).join("\n")).not.toMatch(/\d+s/);
     expect(vi.getTimerCount()).toBe(0);
@@ -137,7 +136,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
       ...refinement("Priced result"),
       usage: { input: 200, output: 300, cacheRead: 1000, cacheWrite: 0, totalTokens: 1500, cost: { total: 0.012, input: 0.005, output: 0.006, cacheRead: 0.001, cacheWrite: 0 } },
     });
-    await flushPromises();
+    await advanceMicrotaskTurns();
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     expect(harness.panelLines().join("\n")).toContain("↑1.2k ↓300 · ≈$0.012 (sub)");
@@ -157,7 +156,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const view = harness.command("view", harness.context);
     expect(harness.panelLines().join("\n")).toContain("↑160 ↓30 · Cost —");
     expect(harness.panelLines().join("\n")).not.toContain("think(out)");
-    harness.panelInput("\x1b[C"); // Unified Usage shows full details beside the list.
+    harness.panelInput("\x1b[C");
     harness.panelInput("\r");
     let usageDetail = "";
     for (let i = 0; i < 4; i++) { usageDetail += harness.panelLines(100).join("").replace(/\s/g, ""); harness.panelInput("\x1b[6~"); }
@@ -171,7 +170,6 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.complete).toHaveBeenCalledTimes(1);
     expect(harness.sent).toEqual([]);
 
-    // A subsequent response without usage must not inherit the previous counts.
     await trigger(harness);
     const nextView = harness.command("view", harness.context);
     expect(harness.panelLines().join("\n")).not.toContain("↑160 ↓30");
@@ -255,7 +253,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await view;
     expect(signal.aborted).toBe(true);
     resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "Late output" }) }], stopReason: "stop" });
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.widgetLines()).toEqual([]);
     expect(harness.sent).toEqual([]);
     expect(harness.getEditor()).toBe("Draft A");
@@ -273,7 +271,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await view;
     expect(harness.widgetLines().join("\n")).toContain("1 running");
     resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "Background result" }) }], stopReason: "stop" });
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.widgetLines().join("\n")).toContain("1 new");
     expect(harness.customCalls()).toBe(1);
   });
@@ -289,7 +287,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await view;
     expect(harness.widgetLines()).toEqual([]);
     resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "must not reappear", title: "Stale task" }) }], stopReason: "stop" });
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.widgetLines()).toEqual([]);
     expect(harness.editorWrites).toEqual([]);
     expect(harness.customCalls()).toBe(1);
@@ -312,7 +310,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.complete.mockImplementation(async () => ({ content: [{ type: "text", text: JSON.stringify({ prompt: "retry succeeded" }) }], stopReason: "stop" }));
     harness.panelInput("r");
     await view;
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.widgetLines().join("\n")).toContain("1 new");
     expect(vi.getTimerCount()).toBe(0);
   });

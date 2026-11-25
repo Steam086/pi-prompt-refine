@@ -115,7 +115,7 @@ describe.each(["regular", "fullscreen"] as const)("TUI layout regressions (%s)",
       input("\t"); render();
       expect(position.selectedId).toBe(1);
       expect(position.scroll).toBe(firstScroll);
-      expect(tui.fullRedraws).toBeGreaterThanOrEqual(redraws); // Resizes may redraw; stable input must not.
+      expect(tui.fullRedraws).toBeGreaterThanOrEqual(redraws);
       const settled = tui.fullRedraws;
       writes.length = 0;
       input("\t"); render(); input("\t"); render();

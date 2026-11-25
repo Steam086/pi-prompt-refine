@@ -30,7 +30,7 @@ describe("SettingsPage navigation seam", () => {
         expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
         expect(frame.join("\n")).toContain(theme.fg("text", theme.bold("Settings")));
         expect(frame.join("\n")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Context "))));
-        expect(workspace.render(width)).toEqual(frame); // Cached frames preserve geometry and style.
+        expect(workspace.render(width)).toEqual(frame);
       }
       workspace.handleInput(" ");
       expect(workspace.render(160).join("\n")).toContain(theme.fg("warning", "Unsaved settings changes"));
@@ -89,7 +89,7 @@ describe("SettingsPage navigation seam", () => {
     expect(page.handleInput("\x1b[C")).toBe(true);
     expect(page.handleInput("\x1b[C")).toBe(false);
     expect(optimizer).toHaveBeenCalledTimes(1);
-    page.handleInput("\x1b[A"); // The draft limit is the final Optimizer setting.
+    page.handleInput("\x1b[A");
     page.handleInput("\r");
     const editor = inputs.at(-1)!.editor;
     expect(page.editingNumber).toBe(true);

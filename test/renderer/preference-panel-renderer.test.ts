@@ -7,7 +7,6 @@ import { selectPreference, type PreferenceRepository, type RevisionPreference } 
 import { getThemeByName } from "../support/pi-theme.js";
 import { createRecordingTerminal } from "../support/recording-terminal.js";
 
-// Captured renderer I/O is not human visual or IME validation.
 describe.each(["regular", "fullscreen"] as const)("preference selection terminal rendering (%s)", (mode) => {
   it.each(["dark", "light"])("keeps project toggles separate from request selection through resize and focus (%s)", async (themeName) => {
     vi.useFakeTimers();
@@ -93,7 +92,7 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
         }
         input("\t");
       }
-      input("\r"); await settled(); render(); // Retry from Save, without changing the name.
+      input("\r"); await settled(); render();
       expect(save).toHaveBeenCalledTimes(2);
       expect(current).toEqual({ ...original, version: 2 });
       const expected = structuredClone(current);
@@ -122,7 +121,7 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
       load: async () => ({ errors: {}, entries: structuredClone(entries) }),
       save: async (scope, value) => {
         const saved = { ...value, scope, id: "returned-identity", version: 1 };
-        entries.unshift(saved); // Reveal must use identity, not an assumed append position.
+        entries.unshift(saved);
         return saved;
       }, remove: async () => {},
     }, [selectPreference(second), selectPreference(first)], "Reusable 中文 body", 16000, close);
@@ -191,7 +190,6 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
       input("\r"); expect(render()).toContain("project · returned-identity");
       input("\x1b"); input("\x1b[13;3u");
       expect(close).toHaveBeenCalledWith([selectPreference(second), selectPreference(first)]);
-      // The same real renderer hosts management-only access with frozen snapshots.
       panel.dispose(); tui.removeChild(panel);
       const manageClose = vi.fn();
       let current = [{ ...first, version: 2, body: "Current library 中文😀" }];
@@ -219,7 +217,6 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
       input("\x1b"); input("e"); input("Edited "); input("\x1b[Z"); input("\r");
       for (let i = 0; i < 4; i++) await Promise.resolve();
       expect(render()).toContain("Saved to library");
-      // Storage recovery names the real Add action, including in a short warning row.
       versionLimit = true;
       input("e"); input("\x05"); input("\x15"); input("Unsaved 中文😀"); input("\x1b[Z"); input("\r");
       for (let i = 0; i < 4; i++) await Promise.resolve();
@@ -229,7 +226,7 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
         expect(panel.render(columns!).join("\n")).toContain(theme.fg("error", "⚠").split("⚠")[0] + "⚠");
       }
       expect(render()).toContain("Unsaved");
-      input("\x1b"); input("y"); // Explicitly discard only the failed form.
+      input("\x1b"); input("y");
       input("d"); expect(render()).toContain("Delete library entry?");
       input("n"); expect(current).toHaveLength(1);
       input("d"); input("y"); for (let i = 0; i < 4; i++) await Promise.resolve();

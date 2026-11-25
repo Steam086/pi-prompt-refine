@@ -11,7 +11,6 @@ import { getThemeByName } from "../support/pi-theme.js";
 import { createRecordingTerminal } from "../support/recording-terminal.js";
 import { record } from "../support/task-panel.js";
 
-// Real overlay compositing in both Pi renderers. This is not human IME validation.
 describe.each(["regular", "fullscreen"] as const)("native Refine overlay (%s)", (mode) => {
   it.each(["dark", "light"])("keeps a complete aligned shell, isolated focus and the host draft (%s)", (name) => {
     vi.useFakeTimers();
@@ -141,7 +140,6 @@ describe.each(["regular", "fullscreen"] as const)("native Refine overlay (%s)", 
         Object.assign(terminal, { columns, rows });
         const resized = frame();
         if (dimensions !== sizes[0]) {
-          // Resize keeps the Usage reading focus; PageUp must not select another run.
           expect(resized).toMatch(/\n│ +Usage/);
           pageTo("Result start", "up");
           expect(usagePosition.selectedId).toBe(1);
@@ -174,7 +172,6 @@ describe.each(["regular", "fullscreen"] as const)("native Refine overlay (%s)", 
         pageTo("Result start", "up");
         pageTo("Result end");
         expect(usagePosition.selectedId).toBe(1);
-        // Stay in the Usage reading pane for the next resize.
       }
       overlay.hide(); tui.renderNow();
       expect(editor.focused).toBe(true);

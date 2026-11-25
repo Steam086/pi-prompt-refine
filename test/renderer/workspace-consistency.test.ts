@@ -23,7 +23,6 @@ function screenLines(tui: TuiMainScreen | TuiAltScreen) {
   return previousLines.slice(previousViewportTop, previousViewportTop + previousHeight);
 }
 
-// Compare composited frames from the same overlay, not independently rendered panels.
 describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", (mode) => {
   describe.each(themes)("%s theme", (themeName) => {
     it.each(sizes)("keeps shared chrome and action hierarchy at %i×%i", async (columns, rows) => {
@@ -88,7 +87,6 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
       }
       function passivePage(name: string, active: Page, action: readonly [key: string, description: string]) {
         const lines = frame(name);
-        // The tab's location is measured at the beginning of the strip, not at the active label.
         const row = lines.findIndex((line) => / Preview +Usage +Settings /.test(strip(line)));
         expect(row, `${name}\n${lines.map(strip).join("\n")}`).toBeGreaterThan(0);
         const line = lines[row]!;
@@ -117,7 +115,6 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         if (columns >= 100) {
           expect(hints, name).toHaveLength(1);
           if (columns === 100 && active === "Preview") {
-            // The explicit editor destination makes the hint strip one row of its own.
             expect(strip(lines[row + 1]!), name).toContain(`${action[0]}: ${action[1]}`);
             expect(divider).toBe(row + 2);
           } else {
@@ -224,7 +221,7 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         expect(savePrompt).toHaveBeenCalledTimes(1);
         expect(saveContext).not.toHaveBeenCalled();
         input("\x1b[B"); input("\x1b[B"); input("\x1b[B"); input("\t");
-        input("\x1b[A"); input("\x1b[A"); input("\r"); // Reach History characters from Project instructions.
+        input("\x1b[A"); input("\x1b[A"); input("\r");
         const number = passivePage("Settings / number", "Settings", ["Esc", "Cancel"]);
         const rule = number.findIndex((line, index) => index > 0 && /^─+$/u.test(strip(line).slice(1, -1).trim()));
         expect(number[rule + 1]).toContain(theme.fg("muted", "› ") + theme.getFgAnsi("text") + "16000");
@@ -278,7 +275,7 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         expect(revision).toContain(theme.fg("text", theme.bold(columns === 60 ? "Revise" : "Revise current result"))
           + theme.fg("muted", " · #1 · model-1"));
         expect(strip(revision)).not.toMatch(/\b(?:a:? Editor only|Accept|Send)\b/);
-        input("\t"); input("\r"); // Revise's Preferences control owns Enter, not the editor underneath.
+        input("\t"); input("\r");
         await vi.waitFor(() => {
           tui.renderNow();
           expect(strip(screenLines(tui).join("\n"))).toContain("Preserve 中文😀");
@@ -291,7 +288,7 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         const reading = frame("Preferences / read").join("\n");
         operationHint(reading, "Esc", "Back");
         expect(reading).toContain(theme.fg("text", "Keep literals"));
-        input("\r"); input("\t"); // Reading consumes both keys without leaving the child page.
+        input("\r"); input("\t");
         expect(frame("Preferences / read after input", false).join("\n")).toBe(reading);
         input("\x1b"); input("\x1b");
         expect(frame("Back to Revise", false).join("\n")).toBe(revision);

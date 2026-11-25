@@ -4,6 +4,15 @@ import { immutable } from "./queries.js";
 
 interface Entry { fingerprint: string; result?: Reply<Receipt>; promise: Promise<Reply<Receipt>> }
 interface ClientLease extends Lease { clientId: string; entries: Map<string, Entry> }
+function reserveOperation(lease: ClientLease, operationId: string, fingerprint: string) {
+  let resolve!: (value: Reply<Receipt>) => void;
+  const promise = new Promise<Reply<Receipt>>((done) => { resolve = done; });
+  const entry: Entry = { fingerprint, promise };
+  lease.entries.set(operationId, entry);
+  const finish = (result: Reply<Receipt>) => { entry.result = immutable(structuredClone(result)); resolve(entry.result); };
+  return { promise, finish };
+}
+
 export function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value && typeof value === "object") return `{${Object.entries(value).filter(([, v]) => v !== undefined)
@@ -52,12 +61,7 @@ export function createOperationLedger(options: { now?: () => number; ttlMs?: num
       if (old) return old.fingerprint === fingerprint ? old.promise : Promise.resolve(failure("operation-id-reused", "conflict"));
       const count = [...leases.values()].reduce((n, lease) => n + lease.entries.size, 0);
       if (count >= (options.maxEntries ?? 256)) return Promise.resolve(failure("ledger-capacity"));
-      let resolve!: (value: Reply<Receipt>) => void;
-      const promise = new Promise<Reply<Receipt>>((done) => { resolve = done; });
-      const entry: Entry = { fingerprint, promise };
-      lease.entries.set(operationId, entry);
-      // Register before invoking even a synchronous/reentrant commit.
-      const finish = (result: Reply<Receipt>) => { entry.result = immutable(structuredClone(result)); resolve(entry.result); };
+      const { promise, finish } = reserveOperation(lease, operationId, fingerprint);
       try { Promise.resolve(commit()).then(finish, () => finish(failure("internal", "error"))); }
       catch { finish(failure("internal", "error")); }
       return promise;

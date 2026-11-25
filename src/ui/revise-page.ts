@@ -48,7 +48,6 @@ export class RevisePage {
   open(target: RevisionTarget, source: { render(width: number): string[] } | undefined): void {
     const draft = this.revisionDrafts.get(target.key);
     if (target.key !== this.revisionTarget?.key) {
-      // Undo must not resurrect another candidate's feedback. Child pages keep this instance.
       this.revisionInput.editor.focused = false;
       this.revisionInput = this.makeInput();
       this.revisionInput.editor.setText(draft?.freeText ?? "");
@@ -166,7 +165,6 @@ export class RevisePage {
     const inputs = control("Additional requirements:", this.revisionFocus === "input");
     const tools = preferences ? [preferences, review] : [review];
     const strip = tools.join(theme.fg("muted", " · "));
-    // Keep both explicit navigation targets, but avoid a separate row for every control.
     const controls = [...(visibleWidth(strip) <= layout.innerWidth ? [strip] : tools), inputs];
     const header = [theme.fg("text", theme.bold(title)) + identity, feedback];
     if (layout.headerHeight === 1 && warning) header[0] = feedback;
@@ -188,7 +186,6 @@ export class RevisePage {
     const body = layout.headerHeight === 0 && warning ? [feedback, ...editor] : [...visibleControls, ...editor];
     const lines = chrome.render(body, (text) => theme.fg("borderMuted", text));
     if (!inline) return lines;
-    // Keep the source panel's viewport/scroll unchanged; its snapshot has no live action hints.
     const source = this.revisionSource?.render(width);
     const bottom = ["", ...lines.slice(0, chrome.layout.headerHeight + chrome.layout.separatorHeight + visibleControls.length + inputHeight)];
     return [...(source ?? []).slice(0, layout.height - bottom.length), ...bottom];

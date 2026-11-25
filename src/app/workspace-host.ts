@@ -75,7 +75,7 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
       notify(ctx, "Preview requires TUI mode.", "warning");
       return;
     }
-    if (closePreview) return; // One user-opened panel; never stack dialogs on repeated shortcuts.
+    if (closePreview) return;
     const sessionId = ctx.sessionManager.getSessionId();
     let selection: WorkspaceSelection | undefined;
     try {
@@ -87,13 +87,10 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
           const accepted = state.phase === "idle" ? controller.getViewedAccepted() : undefined;
           const displayed = candidate ?? accepted;
           const source = controller.getRequestSource();
-          // A failed revision may keep an older candidate. Its details must describe
-          // that displayed result, not the instructions of the failed request.
           const revision = displayed ? displayed.revision : controller.getDisplayedInput()?.revision;
           const draft = displayed?.draft ?? source?.draft;
           const model = displayed?.model ?? state.model ?? controller.getModel();
           const registeredModel = model && registeredModels(ctx).find((candidate) => sameModel(candidate, model));
-          // Saved results and in-flight requests must not inherit later setting changes.
           const thinkingLevel = displayed ? displayed.thinkingLevel
             : state.phase === "generating" || state.phase === "error" ? state.thinkingLevel
             : registeredModel ? effectiveThinkingLevel(registeredModel, config.thinkingLevel, ctx.thinkingLevel) : undefined;
@@ -173,8 +170,6 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
         if (initialPage) workspace.openUsage();
         else if (resultView) workspace.openResult();
         closePreview = (reason) => {
-          // Keep explicit settings interactions open across idle refreshes;
-          // session transitions and shutdown still close the overlay.
           if (reason === "idle" && (choosingModel || workspace.isEditingOptimizationPrompt())) refreshPreview?.();
           else finish();
         };
@@ -184,7 +179,6 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
           workspace.refreshSettings();
           tui.requestRender();
         };
-        // Opening the workspace acknowledges completed requests and hides the background status.
         acknowledge(sessionId);
         ctx.ui.setStatus(STATUS_KEY, undefined);
         ctx.ui.setWidget(STATUS_KEY, undefined);
@@ -196,8 +190,6 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
           handleInput(data) {
             if (closed) return;
             if (choosingModel) {
-              // A confirmed picker remains visible while settings are persisted;
-              // consume further keys instead of confirming twice or leaking input.
               if (finishModelPicker) modelPicker?.handleInput?.(data);
               return;
             }

@@ -44,8 +44,6 @@ describe.skipIf(process.env.LUNA_REFERENCE_LIVE !== "1")("luna draft-reference p
     if (process.env.LUNA_REFERENCE_OUTPUT) await appendFile(process.env.LUNA_REFERENCE_OUTPUT, JSON.stringify(observation) + "\n");
     expect(response.stopReason, response.errorMessage).toBe("stop");
     expect(parsed, raw).toBeDefined();
-    // Permit indentation or spacing at the boundary with the user's question,
-    // but require every screenshot line's visible contents in the original order.
     expect(retainsScreen(guarded!.text)).toBe(true);
     expect(guarded!.text).toMatch(/右侧|right/u);
   }, 190_000);

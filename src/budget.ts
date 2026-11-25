@@ -60,7 +60,6 @@ export function budgetRequest(systemPrompt: string, preparedInput: string, model
   const contextWindow = validLimit(model.contextWindow) ? model.contextWindow : 0;
   const outputLimit = validLimit(model.maxTokens) && validLimit(configuredOutputLimit)
     ? Math.min(model.maxTokens, configuredOutputLimit) : 0;
-  // Covers message framing, provider-added instructions and tokenizer uncertainty.
   // At least the host streamSimple adapter's own 4096-token safety allowance.
   const safetyTokens = 4096 + Math.ceil(contextWindow * 0.01);
   const inputSize = (): number => estimateTextTokens(systemPrompt) + estimateTextTokens(input);
@@ -74,11 +73,8 @@ export function budgetRequest(systemPrompt: string, preparedInput: string, model
   };
   if (!contextWindow || !outputLimit) return blocked("model context/output limits are missing or invalid.");
 
-  // Prefer room for the full result, but do not reject requests based on an
-  // estimated answer length: rewriting can shorten it, and tokenization varies.
   const outputSize = Math.max(...[packet.draft ?? packet.original_draft ?? "", packet.previous_candidate ?? ""]
     .map((text) => estimateTextTokens(JSON.stringify({ prompt: text }))));
-  // Reserve room for short requested notes when trading output space for history.
   const preferredAnswer = Math.ceil(outputSize * 1.25) + 256 + (packet.result_note_requests?.length ?? 0) * 128;
   const reasoning = thinkingLevel !== undefined && thinkingLevel !== "off";
   // Planning allowance, not a guaranteed answer reserve: effort-only providers
@@ -125,12 +121,10 @@ export function budgetRequest(systemPrompt: string, preparedInput: string, model
     report.removedProjectParts.push(label);
     refresh();
   };
-  // Give up surplus output allowance before discarding useful background.
   if (!fits()) {
     report.outputTokens = Math.min(outputLimit, Math.max(minimumOutput, preferredAnswer + thinkingTokens,
       contextWindow - report.inputTokens - safetyTokens));
   }
-  // Old editing references must not displace concrete current constraints or history.
   if (!fits() && packet.historical_editing_context) {
     delete packet.historical_editing_context;
     report.removedInstructionContext = true;
@@ -149,7 +143,6 @@ export function budgetRequest(systemPrompt: string, preparedInput: string, model
     packet.conversation.omitted_message_count++;
     refresh();
   };
-  // Whole messages only: avoid introducing additional broken constraints/code.
   for (const item of [...items]) {
     if (fits()) break;
     if (item !== latestUser && item !== latestAssistant) removeMessage(item);
@@ -164,8 +157,6 @@ export function budgetRequest(systemPrompt: string, preparedInput: string, model
     if (item && items.includes(item)) removeMessage(item);
   }
   if (!fits()) {
-    // After exhausting optional background, even the preferred full-answer
-    // allowance is negotiable. Mandatory input is never cut.
     report.outputTokens = Math.min(outputLimit, contextWindow - report.inputTokens - safetyTokens);
     if (report.outputTokens < minimumOutput) {
       report.outputTokens = minimumOutput;

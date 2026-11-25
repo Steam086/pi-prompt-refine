@@ -45,7 +45,6 @@ describe("original and checklist geometry", () => {
         expect(preferences - original).toBe(2);
         expect(frame.join("\n")).not.toContain("\x1b[2J");
         expect(frame.join("\n")).toContain(theme.fg("text", theme.bold("Preferences")));
-        // Focus changes replace the tree, not the frame or its single divider.
         let selecting = false;
         for (const key of ["\t", "\t", " ", "\t"]) {
           panel.handleInput(key);

@@ -49,8 +49,6 @@ describe("short and narrow feedback", () => {
     panel.handleInput("?");
     let all = "";
     for (let i = 0; i < 40; i++) {
-      // At eight terminal rows the document viewport is one line, so assemble
-      // that viewport rather than inserting repeated frame chrome into the text.
       all += stripVTControlCharacters(panel.render(40).at(-1)!).trim() + " ";
       panel.handleInput("\x1b[B");
     }

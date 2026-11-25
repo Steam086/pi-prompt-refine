@@ -35,8 +35,6 @@ describe.skipIf(!enabled)("live revision semantics (observations, not proof of g
     const preferences = [selectPreference({ id: "synthetic", scope: "project", version: 1, name: scenario.name,
       body: scenario.initial, metadata: { kind: scenario.kind, activation: "manual", description: "Synthetic fixture" } })];
     const history = selectHistory([], 0, 0);
-    // Seeded probes isolate the late-window request with identical candidates in
-    // both arms. The removed requirement/correction is absent from this candidate.
     let candidate: string = mode === "seeded" ? scenario.seed : "";
     let previousInstruction: string | undefined = mode === "seeded" ? scenario.revisions[1] : undefined;
     const steps: Array<{ packet: unknown; prompt: string }> = [];

@@ -4,7 +4,7 @@ import { DEFAULT_CONFIG } from "../../src/config.js";
 import { PreferenceStore } from "../../src/preference-store.js";
 import { screenDraft } from "../fixtures/reference-preservation.js";
 import { extensionHarnessEnvironment, panelAction, refinement, trigger } from "../support/extension-harness.js";
-import { flushPromises } from "../support/helpers.js";
+import { advanceMicrotaskTurns } from "../support/helpers.js";
 
 const { makeHarness } = extensionHarnessEnvironment();
 
@@ -46,15 +46,15 @@ describe("source preservation in the provider path", () => {
     h.complete.mockResolvedValueOnce(refinement("右侧的正文部分是不是太靠下了？讨论能否删掉一部分。", "Misleading generated title"));
     await trigger(h);
     expect(h.notifications.some((message) => message.includes("omitted most of a pasted TUI reference"))).toBe(true);
-    expect(h.getEditor()).toBe(screenDraft); // Never auto-accept.
-    expect(h.getSessionName()).toBeUndefined(); // Discard the unsafe result's title too.
+    expect(h.getEditor()).toBe(screenDraft);
+    expect(h.getSessionName()).toBeUndefined();
     await vi.waitFor(async () => {
       const saved = JSON.parse(await readFile(`${h.context.sessionManager.getSessionFile()}.prompt-refine.json`, "utf8"));
       expect(saved.records[0].result).toBe(screenDraft);
     });
     expect(h.context.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Original draft kept"), "warning");
     await panelAction(h, "a");
-    expect(h.getSessionName()).toBeUndefined(); // Also after explicit acceptance.
+    expect(h.getSessionName()).toBeUndefined();
   });
 
   it.each(["rewrite", "task"] as const)("respects the scope of a selected %s removal preference", async (kind) => {
@@ -69,11 +69,11 @@ describe("source preservation in the provider path", () => {
     h.panelInput("p");
     await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Removal"));
     h.panelInput(" "); h.panelInput("\x1b[13;3u");
-    h.panelInput("\r"); await flushPromises();
+    h.panelInput("\r"); await advanceMicrotaskTurns();
     const packet = JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
     expect(packet.editing_instruction).toContain("Remove the screenshot.");
     expect(h.notifications.some((message) => message.includes("Original draft kept"))).toBe(kind === "task");
-    h.panelInput("a"); await view; await flushPromises();
+    h.panelInput("a"); await view; await advanceMicrotaskTurns();
     expect(h.getEditor()).toBe(kind === "rewrite" ? "Right side too low?" : screenDraft);
     expect(h.getSessionName()).toBe(kind === "rewrite" ? "Layout question" : undefined);
   });
@@ -98,7 +98,7 @@ describe("source preservation in the provider path", () => {
     await trigger(h);
     await h.command("cancel", h.context);
     resolve(refinement("Right side too low?", "Unsafe title"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(h.notifications.join("\n")).not.toContain("Original draft kept");
     expect(h.editorWrites).toEqual([]);
   });
@@ -111,9 +111,9 @@ describe("source preservation in the provider path", () => {
     h.holdPanel(); const view = h.command("view", h.context);
     h.panelInput("f"); h.panelInput("Remove the screenshot.");
     h.complete.mockResolvedValueOnce(refinement("Right side too low?", "Layout question"));
-    h.panelInput("\x13"); await flushPromises();
+    h.panelInput("\x13"); await advanceMicrotaskTurns();
     expect(h.notifications.join("\n")).not.toContain("Original draft kept");
-    h.panelInput("a"); await view; await flushPromises();
+    h.panelInput("a"); await view; await advanceMicrotaskTurns();
     expect(h.getEditor()).toBe("Right side too low?");
   });
 });
@@ -192,8 +192,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.holdPanel();
     const view = harness.command("", harness.context);
     expect(harness.panelLines(60).join("\n")).toContain("⚠");
-    harness.panelInput("m"); await flushPromises();
-    harness.panelInput("\r"); await flushPromises();
+    harness.panelInput("m"); await advanceMicrotaskTurns();
+    harness.panelInput("\r"); await advanceMicrotaskTurns();
     expect(harness.complete).toHaveBeenCalledTimes(2);
     const second = harness.complete.mock.calls[1] as any[];
     expect(second[0]).toBe(large);

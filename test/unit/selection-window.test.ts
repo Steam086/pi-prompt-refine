@@ -41,7 +41,6 @@ describe("selection windows", () => {
           expect(window.end).toBeLessThanOrEqual(count);
           expect(typeof window.rows.at(-1)).toBe("number");
           expect(selectionWindow(count, selected, height, window.start, group, 1, direction)).toEqual(window);
-          // Two headings and a gap suffice for a neighbour in the movement direction.
           if (height >= (direction > 0 ? 5 : 9) && selected + 1 < count) expect(window.rows).toContain(selected + 1);
           if (height >= (direction < 0 ? 5 : 9) && selected > 0) expect(window.rows).toContain(selected - 1);
         }

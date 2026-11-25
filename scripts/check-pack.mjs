@@ -1,4 +1,3 @@
-// Maintainer check; not shipped, and never runs as an install/publish hook.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -15,7 +14,6 @@ assert.deepEqual(manifest.pi.extensions, ['./src/extension.ts']);
 assert.ok(manifest.keywords.includes('pi-package'));
 assert.ok(JSON.parse(readFileSync('packages/pi-web/package.json', 'utf8')).private);
 
-// High-confidence signals only. A clean result is not a secret audit of the repository or its history.
 const sensitive = /-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----|\b(?:npm_|ghp_|github_pat_|sk-proj-)[\w-]{20,}|\bAKIA[A-Z0-9]{16}|\/(?:home|Users)\/[^/\s<>]+\//;
 for (const path of actual) {
   assert.ok(!sensitive.test(readFileSync(path, 'utf8')), `Review potential private material in ${path} (value withheld)`);

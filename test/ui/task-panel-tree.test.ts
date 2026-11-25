@@ -36,8 +36,6 @@ describe("prompt tree and inspection", () => {
           expect(cell).toContain(f.theme.fg("success", "✓ Done"));
           expect(cell).not.toContain(f.theme.fg("accent", "✓ Done"));
         }
-        // The selected surface spans the entire cell, including ANSI/Unicode
-        // content and trailing padding, without swallowing the split divider.
         const layout = workspaceLayout(width, rows);
         const leftWidth = layout.innerWidth >= 72 ? Math.min(layout.innerWidth >= 120 ? 48 : 36, Math.floor(layout.innerWidth / 3)) : layout.innerWidth;
         expect(visibleWidth(cell)).toBe(layout.inset + leftWidth);
@@ -91,7 +89,6 @@ describe("prompt tree and inspection", () => {
       expect(panel.render(width)).toEqual(frame);
       expect(f.position.selectedId).toBe(1);
     }
-    // Larger cells still show neighbouring identities while scrolling a long tree.
     for (let id = 1; id <= 24; id++) {
       const plain = left(panel.render(160)).map(stripVTControlCharacters).join("\n");
       expect(plain).toMatch(new RegExp(`model-${id}(?!\\d)`));
@@ -249,7 +246,7 @@ describe("prompt tree and inspection", () => {
         expect(selected).toContain(selectionStyle);
         expect(lines.join("\n")).not.toContain("\x1b[2J");
       }
-      f.panel.handleInput("\x1b[B"); // Browse another original before completion.
+      f.panel.handleInput("\x1b[B");
       const position = structuredClone(f.position);
       draft.status = "generated"; draft.candidate = record(2, 2).candidate;
       f.panel.render(100);
@@ -312,7 +309,7 @@ describe("prompt tree and inspection", () => {
   it.each(["dark", "light"])("retains only an open archived view until explicit Back, without following late completions (%s)", (name) => {
     for (const inspecting of [false, true]) {
       const f = create(name, false, [record(1), record(2, 2)]);
-      f.text(); // Establish a live viewing target, not merely a stale saved position.
+      f.text();
       if (inspecting) f.panel.handleInput("\r");
       const archived = f.records[0]!;
       archived.archivedAt = 1;
@@ -409,7 +406,7 @@ describe("prompt tree and inspection", () => {
     f.actions.launchModel = () => "provider/refine-test";
     expect(f.text(100)).toContain("History → Usage");
     expect(f.text(100)).toContain("Refine model: provider/refine-test");
-    f.size.rows = 12; // Only one header row.
+    f.size.rows = 12;
     expect(f.text(32)).toContain("Model: provider/refine-test");
     f.panel.setNotice("Request failed", "warning");
     expect(f.panel.render(32).join("\n")).toContain(f.theme.fg("warning", "Request failed"));

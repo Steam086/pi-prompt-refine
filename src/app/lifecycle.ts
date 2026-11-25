@@ -41,7 +41,6 @@ export function createLifecycle({ controller, config, loaded, getUiContext, setU
     if (!ctx || !candidate.title || candidate.sessionId !== ctx.sessionManager.getSessionId() ||
       candidate.sessionId !== controller.getSessionId() || !canNameSession(ctx)) return;
     try {
-      // Rechecked at commit time; never overwrite a name set while the model/UI was waiting.
       setSessionName(candidate.title);
       namedSessions.add(candidate.sessionId);
     } catch {

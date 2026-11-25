@@ -113,14 +113,12 @@ export function selectHistory(branch: readonly unknown[], maxMessages: number, m
     if (messageLimit === 1) {
       add(messages.length - 1, characterLimit);
     } else {
-      // User constraints get first use; the half-budget is a reservation, not a cap.
       add(latestUser, latestAssistant >= 0 ? Math.max(9, Math.ceil(characterLimit / 2)) : characterLimit);
       add(latestAssistant, characterLimit - used);
       for (let index = messages.length - 1; index >= 0 && selected.size < messageLimit; index -= 1) {
         add(index, characterLimit - used);
       }
     }
-    // Insertion order restores the user reservation before lower-priority history.
     for (const [index, text] of selected) {
       if (used >= characterLimit) break;
       const restored = excerpt(messages[index]!.text, text.length + characterLimit - used);
@@ -205,6 +203,22 @@ export interface ParsedRefineOutput {
   title?: string;
 }
 
+function decodeRequestedNotes(requested: readonly ResultNoteRequest[], raw: unknown): ResultNote[] {
+  const answers = new Map<string, string | undefined>();
+  if (requested.length && Array.isArray(raw) && raw.length <= PREFERENCE_SELECTION_LIMIT) {
+    for (const item of raw) {
+      if (!isRecord(item) || typeof item.id !== "string" || !/^r[1-9]\d?$/.test(item.id)) continue;
+      const uniqueText = !answers.has(item.id) && typeof item.text === "string" &&
+        item.text.length <= RESULT_NOTE_TEXT_LIMIT && item.text.trim() ? item.text : undefined;
+      answers.set(item.id, uniqueText);
+    }
+  }
+  return requested.map(({ name }, index) => {
+    const text = answers.get(`r${index + 1}`);
+    return text === undefined ? { name } : { name, text };
+  });
+}
+
 /** Fail closed on the envelope, but invalid optional metadata must not discard a usable prompt. */
 export function parseRefineOutput(output: string, requested: readonly ResultNoteRequest[] = []): ParsedRefineOutput | undefined {
   let value: unknown;
@@ -218,21 +232,7 @@ export function parseRefineOutput(output: string, requested: readonly ResultNote
   const title = rawTitle.trim();
   const validTitle = title.length > 0 && title.length <= 160 && [...title].length <= 80 &&
     !/[\p{Cc}\u2028\u2029\u200b\u202a-\u202e\u2066-\u2069\ufeff]/u.test(rawTitle);
-  // Resolve labels/order only from frozen selections. Ambiguous or invalid notes
-  // stay visibly unavailable without invalidating a well-formed prompt.
-  const additional: ResultNote[] = requested.map(({ name }) => ({ name }));
-  if (requested.length && Array.isArray(value.additional) && value.additional.length <= PREFERENCE_SELECTION_LIMIT) {
-    const seen = new Set<number>();
-    for (const item of value.additional) {
-      if (!isRecord(item) || typeof item.id !== "string" || !/^r[1-9]\d?$/.test(item.id)) continue;
-      const index = Number(item.id.slice(1)) - 1;
-      const note = additional[index];
-      if (!note) continue;
-      if (seen.has(index)) delete note.text;
-      else if (typeof item.text === "string" && item.text.length <= RESULT_NOTE_TEXT_LIMIT && item.text.trim()) note.text = item.text;
-      seen.add(index);
-    }
-  }
+  const additional = decodeRequestedNotes(requested, value.additional);
   return { text: value.prompt, ...(additional.length ? { additional } : {}), ...(validTitle ? { title } : {}) };
 }
 
@@ -256,7 +256,6 @@ export function runInstructions(editingInstruction?: string, preferences?: reado
 
 export function buildRefineInput(draft: string, history: HistorySnapshot, projectContext = "", revision?: RevisionInput, editingInstruction?: string,
   preferences?: readonly SelectedPreference[]): string {
-  // Preserve evidence of explicitly selected prior edits. No library lookup.
   const { notes, promptInstruction } = runInstructions(editingInstruction, preferences, revision);
   const initialInstruction = revision ? (preferences === undefined ? editingInstruction
     : promptInstructions(preferences, "")) : undefined;

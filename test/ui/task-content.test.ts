@@ -32,7 +32,7 @@ describe("Tasks preview hierarchy", () => {
     const plain = pane.lines.map(stripVTControlCharacters);
     expect(pane.lines[0]).toContain(theme.fg("text", theme.bold("Original prompt")));
     expect(pane.lines[0]).toContain(theme.fg("muted", "1 runs · 0 active"));
-    expect(visibleWidth(pane.lines[0]!)).toBe(105); // Statistics remain right aligned.
+    expect(visibleWidth(pane.lines[0]!)).toBe(105);
     expect(pane.lines[1]).toContain(theme.fg("muted", content.preferenceSummary(run)));
     expect(pane.lines[1]).not.toContain("\x1b[1m");
     expect(pane.lines[2]).toBe(theme.fg("muted", "─".repeat(88)));
@@ -147,7 +147,6 @@ describe("TaskContent reading seam", () => {
     const compact = content.pane(row, 100, 15, options, true);
     expect(compact.offsets).toEqual([{ reference: false, offset: 40 }, { reference: true, offset: 20 }]);
     expect(compact.lines.every((line) => visibleWidth(line) <= 100)).toBe(true);
-    // Wrapped multiline documents carry their color across line boundaries.
     expect(compact.lines.join("\n")).toContain(theme.fg("text", "Result 中文😀 **literal**").replace(/\x1b\[39m$/u, ""));
     expect(compact.lines.join("\n")).toContain(theme.fg("text", "Original 中文😀 **literal**").replace(/\x1b\[39m$/u, ""));
     expect(compact.lines.join("\n")).not.toContain(theme.bold("Result 中文😀 **literal**"));

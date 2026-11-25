@@ -4,7 +4,7 @@ import { createApplicationEvents } from "../../src/app/events.js";
 import { RefineController } from "../../src/controller.js";
 import type { Hello, Mutation, Receipt, Reply, RunDetail, Snapshot, TaskDetail } from "../../src/app/api.js";
 import { input, model } from "../support/controller.js";
-import { flushPromises } from "../support/helpers.js";
+import { advanceMicrotaskTurns } from "../support/helpers.js";
 
 function value<T>(reply: Reply<unknown>): T {
   expect(reply.kind).toBe("ok");
@@ -125,7 +125,7 @@ describe("shared application contract", () => {
       expect(current.binding.lifecycleEpoch).toBeGreaterThan(before.lifecycleEpoch);
       expect(current.binding.runtimeId).toBe(before.runtimeId);
       expect(current.lease.id).not.toBe(f.hello.lease.id);
-      await flushPromises();
+      await advanceMicrotaskTurns();
       expect(listener).toHaveBeenCalled();
       expect(f.controller.getHistory()).toHaveLength(1);
     } finally { f.controller.invalidateLifecycle(); }
@@ -134,11 +134,11 @@ describe("shared application contract", () => {
   it("coalesces invalidation and validates before capture, keeping over-limit requests side-effect free", async () => {
     const f = fixture();
     try {
-      await flushPromises();
+      await advanceMicrotaskTurns();
       const changed = vi.fn();
       const off = f.app.api.subscribe(f.hello.binding, changed);
       f.events.changed(); f.events.changed(); f.events.changed();
-      await flushPromises();
+      await advanceMicrotaskTurns();
       expect(changed).toHaveBeenCalledTimes(1);
       off();
       const revision = f.snapshot().revision;

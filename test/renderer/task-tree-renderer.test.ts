@@ -9,7 +9,6 @@ import { getThemeByName } from "../support/pi-theme.js";
 import { createRecordingTerminal } from "../support/recording-terminal.js";
 import { record } from "../support/task-panel.js";
 
-// Exercise the connected tree through both real Pi renderer paths.
 describe.each(["regular", "fullscreen"] as const)("task tree rendering (%s)", (mode) => {
   it.each(["dark", "light"])("keeps Tasks preview hierarchy and reading width through scroll and resize (%s)", (name) => {
     vi.useFakeTimers();
@@ -56,7 +55,7 @@ describe.each(["regular", "fullscreen"] as const)("task tree rendering (%s)", (m
       expect(strip(initial[3]!).trim()).toBe("");
       expect(initial.slice(4).every((line) => visibleWidth(strip(line).trimEnd()) <= 88)).toBe(true);
       expect(writes.join("")).toContain(theme.fg("text", theme.bold("Original prompt")));
-      input("\t"); render(); // Read the same original without changing the task target.
+      input("\t"); render();
       for (const [columns, rows] of [[45, 14], [80, 24], [100, 40], [160, 14], [240, 40], [160, 40]]) {
         Object.assign(terminal, { columns, rows }); view.invalidate(); render();
       }
@@ -143,7 +142,7 @@ describe.each(["regular", "fullscreen"] as const)("task tree rendering (%s)", (m
       expect(left(selected).find((line) => line.includes("#2 · openai-codex"))?.trimStart()).toBe("│  #2 · openai-codex · 23s");
       expect(position.selectedId).toBe(2);
       input("\t"); render();
-      input("\x1b[B"); render(); // Scroll the summary, not the selected run.
+      input("\x1b[B"); render();
       expect(position.selectedId).toBe(2);
       input("\t"); input("\x1b[B");
       const last = left(render());

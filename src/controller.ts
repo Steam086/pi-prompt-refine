@@ -46,8 +46,7 @@ export class RefineController {
   private roundSequence = 0;
   private taskSequence = 0;
   private taskId?: number;
-  // Captures follow the journal record through edits. Accept and Restore remember the literal editor write.
-  private lastCapture?: { recordId?: number; editorText?: string };
+  private lastCapture?: { recordId: number; editorText?: never } | { editorText: string; recordId?: never };
   private foregroundId?: number;
   private sessionId?: string;
   private currentModel?: ModelRef;
@@ -215,7 +214,6 @@ export class RefineController {
   setModel(model: ModelRef | undefined): boolean {
     if (sameModel(this.currentModel, model) || this.pendingSend) return false;
     this.currentModel = model ? { ...model } : undefined;
-    // Choosing a launch model does not replace an applied result or cancel any run.
     this.emitState();
     return true;
   }
@@ -277,8 +275,6 @@ export class RefineController {
   }
   /** Capture is a zero-call operation and never changes the applied preview. */
   capture(input: RefineRequestInput): TriggerResult {
-    // Keep inherited requirements editable even if a later limit change makes
-    // them too long to submit. Starting the request still validates the limit.
     const invalid = this.validate(input, true);
     if (invalid) return invalid;
     this.ensureSession(input.sessionId);
@@ -303,7 +299,6 @@ export class RefineController {
     const record = this.getRecord(id);
     if (!record || record.status !== "unsent" || record.archivedAt !== undefined || record.input.draft !== expected ||
       text.length > this.options.maxDraftChars) return false;
-    // Editing an original preserves its explicit selection and frozen instruction verbatim.
     this.journal.editDraft(id, text);
     this.emitState();
     return true;
@@ -343,7 +338,6 @@ export class RefineController {
     const source = this.getOriginalRecord(id);
     if (!source || source.input.contextUnavailable) return { kind: "stale-source" };
     if (source.status === "unsent") return this.startRecord(source.id, model, thinkingLevel);
-    // A source can outlive its earliest record when bounded history evicts completed calls.
     const input = { ...source.input, model, thinkingLevel, revision: undefined };
     if (source.input.revision) { delete input.preparedInput; delete input.projectDiagnostics; }
     const invalid = this.validate(input);
@@ -384,7 +378,6 @@ export class RefineController {
     const invalid = this.validate({ ...record.input, model, thinkingLevel });
     if (invalid) return invalid;
     this.journal.setModel(id, model, thinkingLevel);
-    // Starting another item never steals the applied preview.
     return this.launch(id, !this.candidate && !this.viewedAccepted && this.foregroundId === undefined);
   }
   /** Explicit retry / another-model run; source and earlier result are immutable. */
@@ -413,7 +406,6 @@ export class RefineController {
     const request: RefineRequest = { ...record.input, requestId, recordId, generation: this.generation };
     this.active.set(requestId, { request, controller: new AbortController(), previousCandidate });
     this.journal.update(recordId, { status: "queued" });
-    // Count admission, regardless of outcome or journal retention. Runs of archived work do not count.
     if (this.round && record.input.roundId === this.round.id) this.round.hasSubmittedRun = true;
     this.pump();
     const result: TriggerResult = { kind: "started", requestId };
@@ -436,7 +428,6 @@ export class RefineController {
     }
   }
   cancelAndDismiss(): void {
-    // Dismiss the preview, not unrelated tasks or their results.
     this.stopRequest();
     this.rebase();
     this.clearPendingSend();
@@ -483,7 +474,6 @@ export class RefineController {
       this.state = this.candidate ? this.candidateState(this.candidate)
         : { phase: "idle", requestId: this.requestSequence, pendingSend: false };
     }
-    // Accepted/restore snapshots describe actual editor writes, independent of the journal.
     this.lastCapture = undefined;
     this.pump();
     this.emitState();
@@ -626,9 +616,9 @@ export class RefineController {
     if (this.restore) this.restore = { ...this.restore, generation: this.generation };
   }
   private emitAccepted(candidate: Candidate): void {
-    try { this.options.onAccepted?.(structuredClone(candidate)); } catch { /* Metadata cannot undo acceptance. */ }
+    try { this.options.onAccepted?.(structuredClone(candidate)); } catch { }
   }
   private emitState(): void {
-    try { this.options.onState(this.getState()); } catch { /* UI failures must not break request cleanup. */ }
+    try { this.options.onState(this.getState()); } catch { }
   }
 }

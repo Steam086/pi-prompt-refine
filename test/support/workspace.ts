@@ -7,7 +7,6 @@ import { RefineWorkspace, type SettingsResult } from "../../src/workspace.js";
 import type { SettingsOptimizer } from "../../src/ui/settings-page.js";
 import { getThemeByName } from "./pi-theme.js";
 
-// Outer bounds and body offsets include the single shell, unlike child geometry.
 export const panelLayout = (width: number, rows: number) => ({ ...workspaceLayout(width, rows), height: workspaceHeight(rows),
   topSeparatorHeight: workspaceViewport(width, rows).framed ? 1 : 0 });
 

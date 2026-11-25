@@ -54,7 +54,6 @@ export class ProjectPreferenceDefaults {
     }
     const temp = `${path}.${randomUUID()}.tmp`;
     try {
-      // Re-read under the lock so toggles in other sessions are retained.
       const keys = await this.read(path);
       const preferences = enabled ? keys.includes(key) ? keys : [...keys, key] : keys.filter((item) => item !== key);
       if (preferences.length > PREFERENCE_SELECTION_LIMIT) throw new Error(`Select at most ${PREFERENCE_SELECTION_LIMIT} project defaults.`);

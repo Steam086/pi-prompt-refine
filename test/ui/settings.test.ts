@@ -25,7 +25,7 @@ function fixture(name = "dark") {
   const workspace = new RefineWorkspace(panel, tui, theme, new KeybindingsManager(TUI_KEYBINDINGS), actions);
   workspace.focused = true;
   const text = (width = 100) => stripVTControlCharacters(workspace.render(width).join("\n"));
-  const value = (text: string) => { workspace.handleInput("\x15"); workspace.handleInput(text); }; // Ctrl+U replaces the current value.
+  const value = (text: string) => { workspace.handleInput("\x15"); workspace.handleInput(text); };
   return { workspace, terminal, theme, actions, saved, text, value };
 }
 
@@ -116,7 +116,6 @@ describe("Settings budgets and limits", () => {
     for (const preset of spec.presets) {
       f.workspace.handleInput("\r");
       f.value("invalid");
-      // Unknown custom values start at the first preset; continue to this preset.
       for (let i = 0; i <= spec.presets.indexOf(preset); i++) f.workspace.handleInput("\t");
       f.workspace.handleInput("\r");
       const row = f.workspace.render(100).map(stripVTControlCharacters).find((line) => line.includes(`› ${spec.label}`));
@@ -172,7 +171,7 @@ describe("Settings budgets and limits", () => {
       expect(frame.join("\n")).not.toContain("\x1b[31m");
     }
     f.workspace.handleInput("q");
-    expect(f.text()).toContain("Output token limit"); // Text keys edit the value rather than navigating out.
+    expect(f.text()).toContain("Output token limit");
     expect(f.actions.submit).not.toHaveBeenCalled();
     f.workspace.handleInput("\x1b");
     expect(f.text()).toContain("› Output token limit");

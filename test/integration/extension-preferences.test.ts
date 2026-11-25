@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PreferenceStore } from "../../src/preference-store.js";
 import * as preferences from "../../src/revision-preferences.js";
 import { extensionHarnessEnvironment, refinement, shortcut, trigger } from "../support/extension-harness.js";
-import { flushPromises } from "../support/helpers.js";
+import { advanceMicrotaskTurns } from "../support/helpers.js";
 
 const { makeHarness } = extensionHarnessEnvironment();
 
@@ -23,7 +23,7 @@ describe("explicit candidate revision", () => {
     h.complete.mockResolvedValueOnce({ stopReason: "stop", content: [{ type: "text", text: JSON.stringify({
       prompt: "Discuss the options.", additional: [{ id: "r1", text: "You want a discussion." }],
     }) }] });
-    h.panelInput("\r"); await flushPromises();
+    h.panelInput("\r"); await advanceMicrotaskTurns();
     const packet = JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
     expect(packet.result_note_requests).toEqual([{ id: "r1", instruction: expect.stringContaining("restate the goal") }]);
     expect(packet.editing_instruction).toBeUndefined();
@@ -45,14 +45,14 @@ describe("explicit candidate revision", () => {
     h.complete.mockResolvedValueOnce({ stopReason: "stop", content: [{ type: "text", text: JSON.stringify({
       prompt: "Unrequested edit", additional: [{ id: "r1", text: "Intent playback" }],
     }) }] });
-    h.panelInput("\x13"); await flushPromises();
+    h.panelInput("\x13"); await advanceMicrotaskTurns();
     const second = JSON.parse((h.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
     expect(second.result_note_requests).toHaveLength(1);
     expect(second.revision_instruction).toBe("");
     const screen = h.panelLines(100).join("\n");
     expect(screen).toContain("Source prompt"); expect(screen).toContain("Intent playback");
     expect(screen).not.toContain("Unrequested edit");
-    h.panelInput("f"); h.panelInput("Shorten this"); h.panelInput("\x13"); await flushPromises();
+    h.panelInput("f"); h.panelInput("Shorten this"); h.panelInput("\x13"); await advanceMicrotaskTurns();
     const third = JSON.parse((h.complete.mock.calls[2] as any[])[1].messages[0].content[0].text);
     expect(third.result_note_requests).toBeUndefined();
     expect(third.previous_candidate).toBe("Source prompt");
@@ -104,10 +104,9 @@ describe("explicit candidate revision", () => {
       h.panelInput("n"); h.panelInput(`Draft ${i}`); h.panelInput("\r");
       expect(output()).toContain("Preferences · 0 selected");
       h.panelInput("p"); await vi.waitFor(() => expect(output()).not.toContain("Working…"));
-      h.panelInput(" "); h.panelInput("\x1b[13;3u"); h.panelInput("\r"); await flushPromises();
+      h.panelInput(" "); h.panelInput("\x1b[13;3u"); h.panelInput("\r"); await advanceMicrotaskTurns();
     }
     expect(h.complete).toHaveBeenCalledTimes(4);
-    // Latest group is queued; the next group is running. Both have original/run rows.
     for (const row of [0, 1, 2, 3]) {
       h.panelInput("\x1b[H");
       for (let i = 0; i < row; i++) h.panelInput("\x1b[B");
@@ -120,7 +119,6 @@ describe("explicit candidate revision", () => {
         h.panelInput("\x1b"); if (inspect) h.panelInput("\x1b");
       }
     }
-    // Library writes in the child's management page never rewrite adopted snapshots.
     h.panelInput("p"); await vi.waitFor(() => expect(output()).toContain("1 frozen snapshots"));
     h.panelInput("e"); h.panelInput("Changed "); h.panelInput("\x1b[Z"); h.panelInput("\r");
     await vi.waitFor(() => expect(output()).toContain("Saved to library"));
@@ -130,19 +128,18 @@ describe("explicit candidate revision", () => {
     h.panelInput("\x1b"); h.panelInput("d"); h.panelInput("y");
     await vi.waitFor(() => expect(output()).toContain("Deleted from library"));
     expect((await store.load()).entries).toEqual([]);
-    finishes[0]!(refinement("Done")); await flushPromises();
+    finishes[0]!(refinement("Done")); await advanceMicrotaskTurns();
     expect(h.complete).toHaveBeenCalledTimes(5);
     expect(output()).toContain("Preferences"); expect(output()).not.toContain("Bring back");
     h.panelInput("\r"); expect(output()).toContain("Source deleted"); expect(output()).toContain(entry.body);
     h.panelInput("\x1b"); h.panelInput("\x1b");
-    // The refresh affects only future drafts, not the five frozen requests.
     h.panelInput("n"); h.panelInput("New after delete"); h.panelInput("\r");
     expect(output()).toContain("Preferences · 0 selected");
     for (const call of h.complete.mock.calls) {
       const packet = JSON.parse((call as any[])[1].messages[0].content[0].text);
       expect(packet.editing_instruction).toBe(`Prompt rewriting instructions (manually selected):\n${entry.body}`);
     }
-    for (const finish of finishes.slice(1)) finish(refinement("Done")); await flushPromises();
+    for (const finish of finishes.slice(1)) finish(refinement("Done")); await advanceMicrotaskTurns();
     expect(h.complete).toHaveBeenCalledTimes(5); expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
     h.panelInput("q"); await view;
   });
@@ -197,7 +194,7 @@ describe("explicit candidate revision", () => {
     await store.save("project", { name: "Changed", body: "Do not replace the captured body." }, entry);
     view = h.command("", h.context);
     expect(output()).toContain("Preferences · 1 selected");
-    h.panelInput("\t"); h.panelInput("\r"); await flushPromises();
+    h.panelInput("\t"); h.panelInput("\r"); await advanceMicrotaskTurns();
     expect(h.complete).toHaveBeenCalledTimes(1);
     const packet = JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
     expect(packet).toMatchObject({ draft: original, editing_instruction: `Saved editing requirements (manually selected):\n${entry.body}` });
@@ -243,7 +240,7 @@ describe("explicit candidate revision", () => {
     h.panelInput("\x1b[Z");
     await vi.waitFor(() => expect(output()).toContain("[ ] Cached 中文😀"));
     if (change !== "add") h.panelInput(" ");
-    h.panelInput("\x1b"); // Leave inline selection, retaining the same workspace/cache.
+    h.panelInput("\x1b");
     h.panelInput("\x1b[B"); h.panelInput("\x1b[B"); h.panelInput("f");
     expect(output()).toContain("Revise current result");
     h.panelInput("\x1bp");
@@ -260,8 +257,8 @@ describe("explicit candidate revision", () => {
       h.panelInput("\r");
       await vi.waitFor(() => expect(output()).toContain(change === "add" ? "Saved; not selected" : "Saved to library"));
     }
-    h.panelInput(close === "cancel" ? "\x1b" : "\x1b[13;3u"); // Library writes survive either selection boundary.
-    h.panelInput("\x1b"); h.panelInput("\x1b"); // Revise -> details -> tasks.
+    h.panelInput(close === "cancel" ? "\x1b" : "\x1b[13;3u");
+    h.panelInput("\x1b"); h.panelInput("\x1b");
     h.panelInput("\x1b[A"); h.panelInput("\x1b[A"); h.panelInput("\x1b[Z");
     await vi.waitFor(() => {
       if (change === "add") expect(output()).toContain("[ ] Added 中文😀");
@@ -270,20 +267,20 @@ describe("explicit candidate revision", () => {
     if (change !== "add") {
       h.panelInput("o");
       expect(output()).toContain(change === "edit" ? "Source changed" : "Source deleted");
-      expect(output()).toContain(entry.body); // Adopted snapshot was not silently replaced.
+      expect(output()).toContain(entry.body);
       if (change === "edit") {
         h.panelInput("\x1b[6~");
         expect(output()).toContain("Original requirement.Updated body.");
       }
-      h.panelInput("\x1b"); h.panelInput(" "); // Explicitly deselect the old snapshot.
+      h.panelInput("\x1b"); h.panelInput(" ");
       if (change === "delete") expect(output()).not.toContain("Cached 中文😀");
-      else h.panelInput(" "); // Reselect now captures the edited library body.
+      else h.panelInput(" ");
     } else {
       h.panelInput("/"); h.panelInput("Added"); h.panelInput("\r"); h.panelInput(" ");
     }
-    expect(h.complete).toHaveBeenCalledTimes(1); // Management/selection never submits.
+    expect(h.complete).toHaveBeenCalledTimes(1);
     if (change !== "delete") {
-      h.panelInput("\x1b"); h.panelInput("\r"); await flushPromises();
+      h.panelInput("\x1b"); h.panelInput("\r"); await advanceMicrotaskTurns();
       const packet = JSON.parse((h.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
       expect(packet.editing_instruction).toContain(change === "edit" ? "Original requirement.Updated body." : "Updated body.");
     }
@@ -316,7 +313,7 @@ describe("explicit candidate revision", () => {
     view = h.command("", h.context);
     expect(h.panelLines().join("\n")).toContain("Preferences · 1 selected");
     expect(h.panelLines().join("\n")).toContain("[x] Bullet Points");
-    h.panelInput("\r"); await flushPromises();
+    h.panelInput("\r"); await advanceMicrotaskTurns();
     expect(h.complete).toHaveBeenCalledTimes(1);
     const context = (h.complete.mock.calls[0] as any[])[1];
     const packet = JSON.parse(context.messages[0].content[0].text);
@@ -356,14 +353,14 @@ describe("explicit candidate revision", () => {
     expect(h.panelLines().join("\n")).toContain("Preferences · 1 selected");
     expect(h.panelLines().join("\n")).toContain("[x] Structure");
     expect(h.complete).not.toHaveBeenCalled();
-    h.panelInput("\r"); await flushPromises();
+    h.panelInput("\r"); await advanceMicrotaskTurns();
     const first = JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
     expect(first).toMatchObject({ draft: "Why? How?", editing_instruction: `Prompt rewriting instructions (manually selected):\n${body}` });
     expect(JSON.stringify(first)).not.toContain(metadata.description);
     expect(JSON.stringify(first)).not.toContain("Answer in English.");
     h.panelInput("n"); h.panelInput("先检查，再解释。 What? Why?"); h.panelInput("\r");
     expect(h.panelLines().join("\n")).toContain("Preferences · 0 selected");
-    h.panelInput("\r"); await flushPromises();
+    h.panelInput("\r"); await advanceMicrotaskTurns();
     const second = JSON.parse((h.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
     expect(second).not.toHaveProperty("editing_instruction");
     expect(h.sent).toEqual([]); expect(h.editorWrites).toEqual([]);
@@ -378,7 +375,7 @@ describe("explicit candidate revision", () => {
       metadata: { kind: "rewrite", description: "Old configuration", activation: "auto", match } }] });
     await writeFile(path, content); await h.reload();
     h.setEditorText("先检查，再解释。 Why? How?"); await trigger(h);
-    await h.command("optimize First inspect, then explain. 为什么？怎么办？", h.context); await flushPromises();
+    await h.command("optimize First inspect, then explain. 为什么？怎么办？", h.context); await advanceMicrotaskTurns();
     for (const call of h.complete.mock.calls) {
       const packet = JSON.parse((call as any[])[1].messages[0].content[0].text);
       expect(packet).not.toHaveProperty("editing_instruction");
@@ -391,7 +388,7 @@ describe("explicit candidate revision", () => {
     expect(h.panelLines().join("\n")).toContain("0 selected");
     h.panelInput(" "); h.panelInput("\x1b[13;3u");
     expect(h.complete).toHaveBeenCalledTimes(2);
-    h.panelInput("\r"); await flushPromises();
+    h.panelInput("\r"); await advanceMicrotaskTurns();
     const packet = JSON.parse((h.complete.mock.calls[2] as any[])[1].messages[0].content[0].text);
     expect(packet.editing_instruction).toBe(`Prompt rewriting instructions (manually selected):\n${body}`);
     expect(await readFile(path, "utf8")).toBe(content);
@@ -413,7 +410,7 @@ describe("explicit candidate revision", () => {
     h.panelInput("/"); h.panelInput("Translation"); h.panelInput("\r");
     h.panelInput(" "); h.panelInput("\x1b[13;3u");
     h.complete.mockResolvedValueOnce(refinement("Explain caching."));
-    h.panelInput("\r"); await flushPromises();
+    h.panelInput("\r"); await advanceMicrotaskTurns();
     await store.save("project", { name: "Changed", body: "NEW LIBRARY BODY" }, translation);
     const packet = (index: number) => JSON.parse((h.complete.mock.calls[index] as any[])[1].messages[0].content[0].text);
     expect(packet(0).editing_instruction).not.toContain("UNSELECTED BODY");
@@ -422,7 +419,7 @@ describe("explicit candidate revision", () => {
       ["保留字面量。", "简述缓存。"], ["保留命令原样。", "简述缓存。"]]) {
       h.panelInput("f"); h.panelInput(instruction!);
       h.complete.mockResolvedValueOnce(refinement(result!));
-      h.panelInput("\x13"); await flushPromises();
+      h.panelInput("\x13"); await advanceMicrotaskTurns();
     }
     expect(h.complete).toHaveBeenCalledTimes(5);
     for (const index of [1, 2, 3, 4]) {
@@ -436,8 +433,6 @@ describe("explicit candidate revision", () => {
     expect(packet(3).historical_editing_context.previous_revision_instruction).toBe("改回中文。");
     expect(JSON.stringify(packet(3))).not.toContain("再短一点。");
     expect(packet(3).previous_candidate).toBe("简述缓存。");
-    // Structural coverage only: the explicit correction has now left the window.
-    // Real model compliance is measured separately by revision-semantics.live.test.ts.
     expect(packet(4).previous_candidate).toBe("简述缓存。");
     expect(packet(4).historical_editing_context.previous_revision_instruction).toBe("保留字面量。");
     expect(JSON.stringify(packet(4))).not.toContain("改回中文。");
@@ -453,7 +448,7 @@ describe("explicit candidate revision", () => {
     h.panelInput("\x1bp"); await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Steps"));
     h.panelInput(" "); h.panelInput("\x1b[13;3u");
     expect(h.complete).not.toHaveBeenCalled();
-    h.panelInput("m"); await flushPromises(); h.panelInput("\r");
+    h.panelInput("m"); await advanceMicrotaskTurns(); h.panelInput("\r");
     await vi.waitFor(() => expect(h.panelLines().join("\n")).not.toContain("Run original with another model"));
     expect(h.complete).toHaveBeenCalledTimes(1);
     const packet = JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
@@ -469,10 +464,10 @@ describe("explicit candidate revision", () => {
     h.holdPanel(); const view = h.command("", h.context);
     h.panelInput("n"); h.panelInput("Original"); h.panelInput("\r"); h.panelInput("p");
     await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Sections"));
-    h.panelInput(" "); h.panelInput("\x1b[13;3u"); h.panelInput("\r"); await flushPromises();
+    h.panelInput(" "); h.panelInput("\x1b[13;3u"); h.panelInput("\r"); await advanceMicrotaskTurns();
     h.panelInput("i"); h.panelInput(" copied"); h.panelInput("\r");
     expect(h.panelLines().join("\n")).toContain("Preferences · 0 selected");
-    h.panelInput("\r"); await flushPromises();
+    h.panelInput("\r"); await advanceMicrotaskTurns();
     expect(h.complete).toHaveBeenCalledTimes(2);
     const packets = h.complete.mock.calls.map((call: any[]) => JSON.parse(call[1].messages[0].content[0].text));
     expect(packets[0]).toHaveProperty("editing_instruction", "Saved editing requirements (manually selected):\nAsk for useful topic headings.");
@@ -492,10 +487,10 @@ describe("explicit candidate revision", () => {
     harness.panelInput(" ");
     harness.panelInput("\x13");
     expect(harness.complete).toHaveBeenCalledTimes(1);
-    harness.panelInput("\x1b[13;3u"); // Alt+Enter brings back; it does not request a revision.
+    harness.panelInput("\x1b[13;3u");
     await store.save("global", { name: "Changed", body: "New library body" }, entry);
     harness.panelInput("Shorten examples."); harness.panelInput("\x13");
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const packet = JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
     expect(packet).toMatchObject({ operation: "revise", original_draft: "Draft A", previous_candidate: "Refined prompt",
       revision_instruction: "Saved editing requirements (manually selected):\nKeep all commands unchanged.\n\nCurrent user instructions:\nShorten examples." });

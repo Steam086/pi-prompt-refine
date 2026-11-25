@@ -45,8 +45,6 @@ export function createCommands({ controller, taskPositions, useContext, host, re
       const selected = records.find((record) => position?.selectedTaskId !== undefined
         ? record.taskId === position.selectedTaskId
         : record.id === (position?.selectedId ?? controller.getAppliedRecordId()));
-      // Opening with an editor draft is an explicit navigation intent. Background
-      // updates still preserve selection; a newly captured prompt must not inherit it.
       const targetId = result?.kind === "captured" ? result.recordId : result && controller.getSubmission(result)?.recordId;
       let target = records.find((record) => record.id === targetId);
       let original = result?.kind !== "started";
@@ -101,8 +99,6 @@ export function createCommands({ controller, taskPositions, useContext, host, re
       await showPreview(ctx);
       return;
     }
-    // Only exact subcommands are reserved. Preserve prompt case and
-    // internal whitespace; `optimize <text>` disambiguates reserved words.
     const explicitDraft = /^optimize\s+([\s\S]+)$/i.exec(text)?.[1];
     const selectedAction = Object.hasOwn(mapping, action) ? mapping[action] : undefined;
     if (explicitDraft !== undefined || !selectedAction) {

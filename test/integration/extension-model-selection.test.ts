@@ -9,7 +9,7 @@ import { type RefineConfig } from "../../src/config.js";
 import { REFINE_SYSTEM_PROMPT } from "../../src/context.js";
 import { workspaceHeight } from "../../src/workspace-overlay.js";
 import { extensionHarnessEnvironment, shortcut, trigger } from "../support/extension-harness.js";
-import { flushPromises } from "../support/helpers.js";
+import { advanceMicrotaskTurns } from "../support/helpers.js";
 
 const { makeHarness } = extensionHarnessEnvironment();
 
@@ -102,7 +102,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
       const view = harness.command("", harness.context);
       harness.panelInput("m");
       await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Run original with another model"));
-      if (adjust) harness.panelInput("\x1b[Z"); // low -> medium
+      if (adjust) harness.panelInput("\x1b[Z");
       expect(harness.panelLines().join("\n")).toContain("Thinking level: medium");
       if (!adjust) expect(harness.panelLines().join("\n")).toContain("Last used for this model");
       harness.panelInput("\r");
@@ -217,7 +217,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const edited = "Custom optimization instructions\nKeep 中文😀";
     harness.holdPanel();
     const view = harness.command("view", harness.context);
-    input("\x1b[D"); input(" "); // Stage a change to project instructions.
+    input("\x1b[D"); input(" ");
     input("\t"); input("\x1b[B"); input("\x1b[B");
     expect(frame()).toContain("› Optimization prompt");
     expect(frame()).toContain("Enter: Edit");
@@ -225,7 +225,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(frame()).toContain(original);
     expect(frame()).toContain("Refine only · Applies next round");
     if (choice !== "unchanged") {
-      input("\x15"); // Clear the prefilled line.
+      input("\x15");
       if (choice === "empty") { input(" "); input("\r"); input(" "); }
       else { input("Custom optimization instructions"); input("\r"); input("Keep 中文😀"); }
     }
@@ -241,7 +241,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
       input("\r"); input("q"); input("\t"); input("\x1b[D");
       expect(frame()).toContain("Save optimization prompt?");
       if (choice) {
-        input("y"); input("y"); input("\x1b"); // A pending write consumes further keys.
+        input("y"); input("y"); input("\x1b");
         await vi.waitFor(() => expect(frame()).toContain("Optimization prompt saved"));
       } else {
         input("\x1b");
@@ -418,7 +418,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.panelLines().join("\n")).toMatch(new RegExp(`Thinking +${status}`));
     expect(harness.panelLines().join("\n")).toContain(options.reason);
     for (const key of ["\r", " ", "\x1b[Z"]) harness.panelInput(key);
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8")).toBe(before);
     expect(harness.panelLines().join("\n")).not.toContain("Thinking level saved");
     harness.panelInput("\x1b");

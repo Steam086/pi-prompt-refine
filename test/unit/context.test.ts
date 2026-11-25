@@ -27,7 +27,6 @@ describe("initial editing requirements", () => {
 
 describe("supplemental main-agent task requirements", () => {
   it.each([undefined, "Use short sentences."])("keeps supplementation in the fixed protocol with editing policy %s", (policy) => {
-    // These assertions cover the delivered protocol, not model compliance with it.
     const protocol = buildRefineSystemPrompt(false, policy);
     for (const rule of [
       'Blocks labeled "Main-agent task requirements" are supplemental requirements selected by the user',
@@ -73,7 +72,6 @@ describe("supplemental main-agent task requirements", () => {
 describe("literal content preservation", () => {
   describe.each([false, true])("title generation: %s", (generateTitle) => {
     it.each([undefined, "Use short sentences.", ""])("keeps literal safeguards in the fixed protocol with policy %j", (policy) => {
-      // Contract delivery only: model compliance is covered by opt-in live smoke tests.
       const prompt = buildRefineSystemPrompt(generateTitle, policy);
       const fixedProtocol = prompt.split("\n\nEditing preferences:\n")[0];
       for (const rule of [
@@ -120,7 +118,6 @@ describe("literal content preservation", () => {
       expect(packet.previous_candidate).toBe(candidate);
       expect(packet.revision_instruction).toBe(instruction);
     }
-    // The parser preserves a supplied response; it does not validate literal fidelity.
     const edited = (operation === "refine" ? draft : candidate).replace("../src/context.ts:144:7", "../src/context.ts:145:7");
     expect(parseRefineOutput(JSON.stringify({ prompt: edited }))).toEqual({ text: edited });
   });

@@ -164,7 +164,6 @@ describe("Revise visual hierarchy and feedback", () => {
   });
 });
 
-// Exercise the same focused/error states through both real Pi diff renderers.
 describe("Revise terminal renderers", () => {
   it.each([["regular", "dark"], ["regular", "light"], ["fullscreen", "dark"], ["fullscreen", "light"]] as const)("retains styled feedback without clearing the screen (%s / %s)", (mode, name) => {
     vi.useFakeTimers();

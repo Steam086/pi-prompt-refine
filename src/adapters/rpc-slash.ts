@@ -110,7 +110,7 @@ export function createRpcSlash(deps: {
         return;
       }
     }
-    refreshTracking(); // The run may already be terminal before subscription.
+    refreshTracking();
   }
 
   function canOpen(ctx: ExtensionContext): boolean {
@@ -120,7 +120,6 @@ export function createRpcSlash(deps: {
   function schedulePreview() {
     const watch = tracking;
     if (!watch?.ready.size || previewTimer !== undefined || !canOpen(watch.ctx)) return;
-    // Let the host finish its slash/turn UI transition before presenting the next question.
     previewTimer = setTimeout(() => {
       previewTimer = undefined;
       if (tracking !== watch || !api.isCurrentBinding(watch.binding) || !canOpen(watch.ctx)) return;

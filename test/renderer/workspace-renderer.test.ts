@@ -11,8 +11,6 @@ import { RefineWorkspace } from "../../src/workspace.js";
 import { getThemeByName } from "../support/pi-theme.js";
 import { createRecordingTerminal } from "../support/recording-terminal.js";
 
-// Exercise the real Pi diff renderers, not just component snapshots. Terminal I/O
-// is captured, so these tests make no claims about a physical terminal's latency/IME.
 describe("workspace terminal rendering", () => {
   it.each([
     ["regular", 20, 12, "dark"], ["regular", 40, 24, "dark"], ["regular", 80, 40, "dark"], ["regular", 100, 40, "light"],
@@ -114,11 +112,9 @@ describe("workspace terminal rendering", () => {
         tui.requestRender();
         tui.renderNow();
         expect(workspace.render(columns)).toHaveLength(initialHeight);
-        // Automatic navigation stays at the opening height. Explicit reading
-        // expansion is covered separately in workspace-height-renderer.test.ts.
         for (const key of [
-          "\t", "\x1b[6~", "\t", "\x1b[B", "\r", "\x1b[6~", "f", "中文😀", "\r", "keep", "\x13", "\x1b", "o", "\x1b", // Task browser and applied result
-          "\x1b[C", "\x1b[B", "\t", "\x1b[6~", "\r", "\x1b", // Unified Usage and Apply
+          "\t", "\x1b[6~", "\t", "\x1b[B", "\r", "\x1b[6~", "f", "中文😀", "\r", "keep", "\x13", "\x1b", "o", "\x1b",
+          "\x1b[C", "\x1b[B", "\t", "\x1b[6~", "\r", "\x1b",
           "\x1b[C", ...Array<string>(6).fill("\x1b[B"), ...Array<string>(6).fill("\x1b[A"), "\t", ...Array<string>(3).fill("\x1b[B"), "\t", "\x1b", "i", "\x1b",
         ]) {
           input(key);

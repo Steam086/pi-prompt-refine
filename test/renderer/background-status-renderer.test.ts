@@ -5,7 +5,6 @@ import { renderBackgroundStatus, type BackgroundSummary } from "../../src/backgr
 import { getThemeByName } from "../support/pi-theme.js";
 import { createRecordingTerminal } from "../support/recording-terminal.js";
 
-// Real renderer I/O, not a claim about physical-terminal appearance or IME behavior.
 describe.each(["regular", "fullscreen"])("background banner terminal rendering (%s)", (mode) => {
   it.each(["dark", "light"])("refreshes and resizes one non-focusing line in %s", (name) => {
     vi.useFakeTimers();

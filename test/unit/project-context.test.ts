@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CONFIG as DEFAULTS } from "../../src/config.js";
 import { assembleProjectContext, captureProjectContext, collectDirectoryContext, collectTree, directoryReferences, formatProjectResources, resourcesFromPrompt } from "../../src/project-context.js";
 
-// Resource/scanner tests opt in; production defaults are covered separately.
 const DEFAULT_CONFIG = { ...DEFAULTS, projectContext: {
   ...DEFAULTS.projectContext, instructionsEnabled: true,
   tree: { ...DEFAULTS.projectContext.tree, enabled: true },

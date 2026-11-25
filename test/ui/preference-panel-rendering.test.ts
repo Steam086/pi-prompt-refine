@@ -22,9 +22,7 @@ describe("preference rendering and responsiveness", () => {
     ];
     const f = setup(entries.map(selectPreference), "", themeName, entries); await loaded(f.panel);
     vi.spyOn(f.theme, "bold").mockImplementation((value) => `\x1b[1m${value}\x1b[22m`);
-    f.panel.handleInput("s"); // Stable snapshot order, with Global focused.
-    // 31/32 straddle the 28-column list threshold. At 80 the preview splits
-    // the pane; a short viewport at 100 instead gives the list all 96 columns.
+    f.panel.handleInput("s");
     for (const [width, rows, listWidth, full] of [
       [100, 40, 41, true], [31, 40, 27, false], [32, 40, 28, true],
       [79, 40, 75, true], [80, 24, 32, true], [40, 16, 36, true],
@@ -59,7 +57,6 @@ describe("preference rendering and responsiveness", () => {
         expect(stripVTControlCharacters(focused)).toContain("› [x]");
       }
     }
-    // Moving focus preserves checkbox selection and keeps the source regular/muted.
     f.panel.handleInput(down);
     const selected = f.panel.render(100).find((line) => stripVTControlCharacters(line).includes("› [x]"))!;
     expect(selected).toContain(f.theme.fg("text", f.theme.bold(entries[1]!.name)));
@@ -95,7 +92,7 @@ describe("preference rendering and responsiveness", () => {
       terminal.rows = 40;
       panel.handleInput(enter);
       const details = text(panel);
-      expect(details).toContain(`global · ${entry.id}`); // Full source and UUID stay discoverable.
+      expect(details).toContain(`global · ${entry.id}`);
       expect(details).toContain(state === "unavailable" ? "Library unavailable" : state === "deleted" ? "Source deleted" : "Library changed; snapshot kept");
     }
   });
@@ -116,8 +113,8 @@ describe("preference rendering and responsiveness", () => {
     expect(focused).toContain(f.theme.bg("selectedBg", "").split("\x1b[49m")[0]);
     const warning = lines.find((line) => stripVTControlCharacters(line).includes("!"))!;
     expect(warning).toContain(f.theme.fg("warning", "! "));
-    expect(warning).not.toContain("\x1b[1m"); // An unfocused name is never bold.
-    expect(warning).not.toContain(" · rewrite"); // Classification belongs in details, not every row.
+    expect(warning).not.toContain("\x1b[1m");
+    expect(warning).not.toContain(" · rewrite");
     expect(warning).not.toContain("\u001b[2J");
     f.panel.handleInput("\x1b[H"); f.panel.handleInput(enter);
     expect(text(f.panel)).toContain("Library changed; snapshot kept");

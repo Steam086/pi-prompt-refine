@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { RefineController, type RefineCompletion, type RefineRequest } from "../../src/controller.js";
 import { composeRevision, selectPreference, type RevisionPreference } from "../../src/revision-preferences.js";
 import { input, model, setup } from "../support/controller.js";
-import { deferred, FakeScheduler, flushPromises, success } from "../support/helpers.js";
+import { deferred, FakeScheduler, advanceMicrotaskTurns, success } from "../support/helpers.js";
 
 describe("manual-only preference lifecycle", () => {
   const entries: RevisionPreference[] = [{ id: "structure", version: 1, scope: "global", name: "Structure", body: "Preserve existing order.",
@@ -80,10 +80,10 @@ describe("manual-only preference lifecycle", () => {
     library[0]!.body = "Changed externally";
     library[0]!.metadata!.description = "Changed description";
     expect(controller.updateDraft(captured.recordId, "First inspect, then explain.", "Changed")).toBe(false);
-    jobs[0]!.pending.resolve(success("Blocking result")); await flushPromises();
+    jobs[0]!.pending.resolve(success("Blocking result")); await advanceMicrotaskTurns();
     expect(jobs[1]!.request.preferences).toEqual(frozen);
     expect(jobs[1]!.request.editingInstruction).toBe(composeRevision(frozen, ""));
-    jobs[1]!.pending.resolve(success("Structured result")); await flushPromises();
+    jobs[1]!.pending.resolve(success("Structured result")); await advanceMicrotaskTurns();
     controller.applyResult(captured.recordId);
     const source = controller.getCandidate()!;
     controller.trigger({ ...source, revision: { previousCandidate: source.text, instruction: "Remove the structure requirement." } },
@@ -145,7 +145,6 @@ describe("Unsent preference requirements", () => {
     controller.onMessageStarted("Pi message");
     expect(controller.updateDraftPreferences(current, [])).toContain("changed");
     const archived = controller.getRecord(source.id)!;
-    // Explicitly reopening an old Unsent original keeps its old background.
     expect(controller.updateDraftPreferences(archived, [preference()])).toBeUndefined();
     controller.setSession("other-session");
     expect(controller.updateDraftPreferences(archived, [])).toContain("changed");
@@ -192,13 +191,13 @@ describe("Unsent preference requirements", () => {
     expect(complete).toHaveBeenCalledTimes(1);
     expect(controller.updateDraftPreferences(saved, [])).toContain("already started");
     selected.body = "Mutated library";
-    jobs[0]!.pending.resolve(success("Busy result")); await flushPromises();
+    jobs[0]!.pending.resolve(success("Busy result")); await advanceMicrotaskTurns();
     expect(jobs[1]!.request).toMatchObject({ draft: queued.input.draft, editingInstruction: composeRevision([preference()], ""), preferences: [preference()] });
-    jobs[1]!.pending.resolve(success("Refined")); await flushPromises();
+    jobs[1]!.pending.resolve(success("Refined")); await advanceMicrotaskTurns();
     controller.runOriginal(queued.id, { provider: "another", id: "model" });
     expect(jobs[2]!.request).toMatchObject({ draft: queued.input.draft, editingInstruction: composeRevision([preference()], ""), preferences: [preference()] });
     expect(controller.getRecord(queued.id)!.input.editingInstruction).toBe(composeRevision([preference()], ""));
-    jobs[2]!.pending.resolve(success("Other result")); await flushPromises();
+    jobs[2]!.pending.resolve(success("Other result")); await advanceMicrotaskTurns();
   });
 
   it("does not inherit preferences into a newly created original or the next round", () => {
@@ -232,10 +231,10 @@ describe("request source and shortcut routing", () => {
     expect(complete.mock.calls[0]![1].aborted).toBe(false);
     expect(controller.getRequestSource()).toEqual({ draft: "B" });
     a.resolve(success("Late A"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getState().phase).toBe("generating");
     b.resolve(success("Result B"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()?.text).toBe("Result B");
     expect(controller.shouldOpenPanel("B")).toBe(true);
     expect(controller.shouldOpenPanel("A")).toBe(true);
@@ -254,7 +253,7 @@ describe("request source and shortcut routing", () => {
     expect(controller.getState()).toMatchObject({ phase: "generating", thinkingLevel: "high" });
     if (outcome === "timeout") scheduler.advance(100);
     else pending.reject(new Error("offline"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getState()).toMatchObject({ phase: "error", thinkingLevel: "high" });
     expect(controller.getRequestSource()).toEqual({ draft: "A" });
     expect(controller.shouldOpenPanel("A")).toBe(true);
@@ -269,7 +268,7 @@ describe("candidate revisions", () => {
     const complete = vi.fn(async () => success("First result"));
     const { controller } = setup(complete);
     controller.trigger(input("Original constraints"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const first = controller.getCandidateToken()!;
     const request = input("Original constraints", { revision: { previousCandidate: "First result", instruction: "Shorter" } });
     complete.mockResolvedValueOnce(success("Second result"));
@@ -277,14 +276,14 @@ describe("candidate revisions", () => {
     expect(controller.getCandidate()).toBeUndefined();
     request.revision!.instruction = "Mutated";
     expect(controller.getRequestSource()).toEqual({ draft: "Original constraints", revisionInstruction: "Shorter" });
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()).toMatchObject({ draft: "Original constraints", text: "Second result", revision: { instruction: "Shorter" } });
     const copy = controller.getCandidate()!;
     copy.revision!.previousCandidate = "Mutated copy";
     expect(controller.getCandidate()?.revision?.previousCandidate).toBe("First result");
     complete.mockResolvedValueOnce(success("Third result"));
     controller.trigger(input("Original constraints", { revision: { previousCandidate: "Second result", instruction: "Keep commands" } }), { revisionToken: controller.getCandidateToken()! });
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()).toMatchObject({ draft: "Original constraints", text: "Third result", revision: { previousCandidate: "Second result", instruction: "Keep commands" } });
     expect(JSON.stringify(controller.getCandidate())).not.toContain("First result");
     expect(controller.acceptCandidate(first, "Original constraints", false, () => {})).toBe(false);
@@ -297,7 +296,7 @@ describe("candidate revisions", () => {
   it("rejects empty, over-budget, stale, mismatched and pending-send revisions without discarding the source", async () => {
     const { controller } = setup();
     controller.trigger(input("Draft"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const token = controller.getCandidateToken()!;
     const revision = (instruction: string) => input("Draft", { revision: { previousCandidate: "Refined", instruction } });
     expect(controller.trigger(revision(" "), { revisionToken: token }).kind).toBe("empty");
@@ -315,9 +314,9 @@ describe("candidate revisions", () => {
   it("accepts a previous result larger than the draft limit without treating it as a new draft", async () => {
     const { controller } = setup(async () => success("x".repeat(150)));
     controller.trigger(input("Draft"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.trigger(input("Draft", { revision: { previousCandidate: "x".repeat(150), instruction: "Shorter" } }), { revisionToken: controller.getCandidateToken()! }).kind).toBe("started");
-    await flushPromises();
+    await advanceMicrotaskTurns();
   });
 
   it.each(["failure", "invalid", "truncated", "timeout"])("restores the previous candidate after revision %s and rejects late output", async (kind) => {
@@ -325,19 +324,19 @@ describe("candidate revisions", () => {
     let calls = 0;
     const { controller, scheduler } = setup(() => ++calls === 1 ? Promise.resolve(success("Previous")) : pending.promise);
     controller.trigger(input("Draft"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const oldToken = controller.getCandidateToken()!;
     controller.trigger(input("Draft", { revision: { previousCandidate: "Previous", instruction: "Shorter" } }), { revisionToken: oldToken });
     if (kind === "timeout") scheduler.advance(100);
     else if (kind === "failure") pending.reject(new Error("offline"));
     else pending.resolve({ text: "bad", stopReason: kind === "truncated" ? "length" : "stop", invalidOutput: kind === "invalid" });
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getState().phase).toBe("error");
     expect(controller.getCandidate()?.text).toBe("Previous");
     expect(controller.isCandidateCurrent(oldToken)).toBe(false);
     expect(controller.isCandidateCurrent(controller.getCandidateToken()!)).toBe(true);
     pending.resolve(success("Late replacement"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()?.text).toBe("Previous");
   });
 
@@ -346,13 +345,13 @@ describe("candidate revisions", () => {
     let calls = 0;
     const { controller } = setup(() => ++calls === 1 ? Promise.resolve(success("Previous")) : pending.promise);
     controller.trigger(input("Draft"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     controller.trigger(input("Draft", { revision: { previousCandidate: "Previous", instruction: "Shorter" } }), { revisionToken: controller.getCandidateToken()! });
     if (change === "cancel") controller.cancelAndDismiss();
     if (change === "session") controller.setSession("other");
     if (change === "new-draft") controller.trigger(input("New draft"));
     pending.reject(new Error("Late failure"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()).toBeUndefined();
   });
 });

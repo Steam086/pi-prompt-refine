@@ -6,7 +6,6 @@ import { budgetRequest } from "../../src/budget.js";
 import { buildRefineInput, selectHistory } from "../../src/context.js";
 import { readRunUsage, totalInputTokens } from "../../src/usage.js";
 
-// Exercise the real SDK's payload/usage conversion without credentials or network.
 const model: Model<"openai-completions"> = {
   id: "deepseek-flash", name: "DeepSeek Flash", provider: "deepseek", api: "openai-completions",
   baseUrl: "https://deepseek.invalid", reasoning: true, input: ["text"],

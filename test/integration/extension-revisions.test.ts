@@ -1,7 +1,7 @@
 import { frameHeader } from "../support/panel-chrome.js";
 import { describe, expect, it, vi } from "vitest";
 import { extensionHarnessEnvironment, projectConfig, refinement, resourcePrompt, trigger } from "../support/extension-harness.js";
-import { flushPromises } from "../support/helpers.js";
+import { advanceMicrotaskTurns } from "../support/helpers.js";
 
 const { makeHarness } = extensionHarnessEnvironment();
 
@@ -13,7 +13,7 @@ describe("explicit candidate revision", () => {
     harness.holdPanel(); const view = harness.command("view", harness.context);
     harness.panelInput("f"); harness.panelInput("Keep literal commands.");
     harness.complete.mockResolvedValueOnce(refinement("AFTER_REVISION_TEXT"));
-    harness.panelInput("\x13"); await flushPromises();
+    harness.panelInput("\x13"); await advanceMicrotaskTurns();
     expect(harness.panelLines(100).join("\n")).toContain("Revised prompt");
     let all = "";
     for (let i = 0; i < 5; i++) { all += harness.panelLines(100).join("\n"); harness.panelInput("\x1b[6~"); }
@@ -35,7 +35,7 @@ describe("explicit candidate revision", () => {
     harness.holdPanel(); const view = harness.command("view", harness.context);
     harness.panelInput("f"); harness.panelInput("FAILED_REVISION_INSTRUCTION");
     harness.complete.mockRejectedValueOnce(new Error("offline"));
-    harness.panelInput("\x13"); await flushPromises();
+    harness.panelInput("\x13"); await advanceMicrotaskTurns();
     let all = "";
     for (let i = 0; i < 5; i++) { all += harness.panelLines(100).join("\n"); harness.panelInput("\x1b[6~"); }
     expect(all).toContain("previous result kept"); expect(all).toContain("Refined prompt");
@@ -45,7 +45,6 @@ describe("explicit candidate revision", () => {
   it("opens list Revise for the selected run and returns through its details without sending", async () => {
     const harness = await makeHarness(); await trigger(harness);
     harness.holdPanel(); const view = harness.command("", harness.context);
-    // Select the run rather than the original root.
     if (harness.panelLines(100).join("\n").includes("› ▾")) harness.panelInput("\x1b[B");
     harness.panelInput("f");
     expect(harness.panelLines(100).join("\n")).toMatch(/Revise(?: current result)? · #1 · /);
@@ -68,7 +67,6 @@ describe("explicit candidate revision", () => {
     harness.panelInput("\x1b[6~");
     const before = harness.panelLines(100);
     harness.panelInput("f");
-    // Reference content keeps its viewport; only suspended navigation chrome changes.
     const sourceLines = (lines: string[]) => lines.filter((line) => /Source line \d+/.test(line)).slice(0, 4);
     expect(sourceLines(harness.panelLines(100))).toEqual(sourceLines(before));
     const referenceHeader = frameHeader(harness.panelLines(100)).join("\n");
@@ -81,7 +79,7 @@ describe("explicit candidate revision", () => {
     harness.panelInput("\r");
     harness.panelInput("Keep constraints");
     expect(harness.complete).toHaveBeenCalledTimes(1);
-    harness.panelInput("\x05"); // Expand, preserving the draft.
+    harness.panelInput("\x05");
     expect(harness.panelLines(100).join("\n")).toContain("Shorter");
     harness.panelInput("\x05");
     harness.panelInput("\x1b");
@@ -89,7 +87,7 @@ describe("explicit candidate revision", () => {
     harness.panelInput("f");
     expect(harness.panelLines(100).join("\n")).toContain("Keep constraints");
     harness.panelInput("\x13");
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const packet = JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
     expect(packet.revision_instruction).toBe("Shorter\nKeep constraints");
     expect(harness.sent).toEqual([]);
@@ -114,7 +112,7 @@ describe("explicit candidate revision", () => {
     harness.setEditorText("Unrelated main editor changes");
     harness.complete.mockResolvedValueOnce({ content: [{ type: "text", text: JSON.stringify({ prompt: "Second result" }) }], stopReason: "stop" });
     harness.panelInput("\x13");
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const packet = JSON.parse((harness.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
     expect(packet).toMatchObject({ operation: "revise", original_draft: "Draft A", previous_candidate: "Refined prompt", revision_instruction: "再短一点，命令原样保留。" });
     expect(packet).not.toHaveProperty("draft");
@@ -127,7 +125,7 @@ describe("explicit candidate revision", () => {
     harness.panelInput("Use bullet points");
     harness.complete.mockResolvedValueOnce({ content: [{ type: "text", text: JSON.stringify({ prompt: "Third result" }) }], stopReason: "stop" });
     harness.panelInput("\x13");
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const next = JSON.parse((harness.complete.mock.calls[2] as any[])[1].messages[0].content[0].text);
     expect(next).toMatchObject({ operation: "revise", original_draft: "Draft A", previous_candidate: "Second result", revision_instruction: "Use bullet points",
       historical_editing_context: { previous_revision_instruction: "再短一点，命令原样保留。" } });
@@ -137,7 +135,7 @@ describe("explicit candidate revision", () => {
     harness.panelInput("\x1b");
     harness.panelInput("a");
     await view;
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.context.ui.confirm).toHaveBeenCalled();
     expect(harness.getEditor()).toBe("Third result");
   });
@@ -158,7 +156,7 @@ describe("explicit candidate revision", () => {
     harness.panelInput("f");
     expect(harness.panelLines().join("\n")).toContain("x".repeat(31));
     await harness.command("optimize New task", harness.context);
-    await flushPromises();
+    await advanceMicrotaskTurns();
     harness.panelInput("\x13");
     expect(harness.panelLines().join("\n")).toContain("result changed");
     expect(harness.complete).toHaveBeenCalledTimes(2);
@@ -177,13 +175,13 @@ describe("explicit candidate revision", () => {
     harness.panelInput("Shorter");
     harness.complete.mockRejectedValueOnce(new Error("offline"));
     harness.panelInput("\x13");
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.panelLines().join("\n")).toContain("previous result kept");
     expect(harness.panelLines().join("\n")).toContain("Refined prompt");
     harness.panelInput("f");
     expect(harness.panelLines().join("\n")).toContain("Shorter");
     harness.panelInput("\x13");
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(harness.complete).toHaveBeenCalledTimes(3);
     expect(JSON.parse((harness.complete.mock.calls[2] as any[])[1].messages[0].content[0].text).revision_instruction).toBe("Shorter");
     expect(harness.editorWrites).toEqual([]);
@@ -199,11 +197,11 @@ describe("explicit candidate revision", () => {
     harness.holdPanel();
     const view = harness.command("view", harness.context);
     harness.panelInput("\x1b[D");
-    harness.panelInput(" "); // Disable project instructions for the next round.
+    harness.panelInput(" ");
     harness.panelInput("\x13");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Settings saved"));
     harness.panelInput("\x1b");
-    harness.panelInput("\r"); // Inspect the selected result before revising.
+    harness.panelInput("\r");
     harness.panelInput("f");
     harness.panelInput("Shorter");
     harness.panelInput("\x13");

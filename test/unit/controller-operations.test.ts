@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { type RefineCompletion, type RefineRequest } from "../../src/controller.js";
 import { input, model, setup } from "../support/controller.js";
-import { deferred, FakeScheduler, flushPromises, success } from "../support/helpers.js";
+import { deferred, FakeScheduler, advanceMicrotaskTurns, success } from "../support/helpers.js";
 
 describe("multi-model task history", () => {
   const other = { provider: "provider-b", id: "second-model" };
@@ -10,11 +10,11 @@ describe("multi-model task history", () => {
     const complete = vi.fn(async (request: RefineRequest) => success(`${request.model.id}-${request.requestId}`));
     const { controller } = setup(complete);
     controller.trigger(input("Draft"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const firstToken = controller.getCandidateToken()!;
     const first = controller.getCandidate()!.text;
     controller.trigger(controller.getTaskInput()!, { force: true, sameTask: true });
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()?.text).toBe(first);
     controller.applyResult(controller.getHistory().at(-1)!.id);
     const second = controller.getCandidate()!.text;
@@ -27,7 +27,7 @@ describe("multi-model task history", () => {
     expect(controller.getCandidatePosition()).toMatchObject({ index: 1, count: 2 });
     expect(controller.shouldOpenPanel("Draft")).toBe(true);
     controller.trigger({ ...controller.getTaskInput()!, model: other }, { force: true, sameTask: true });
-    await flushPromises();
+    await advanceMicrotaskTurns();
     controller.setModel(model);
     controller.applyResult(controller.getHistory()[0]!.id);
     expect(controller.getCandidate()?.text).toBe(first);
@@ -41,13 +41,13 @@ describe("multi-model task history", () => {
     const { controller } = setup();
     controller.trigger(input("Original"));
     controller.capturePreparedInput(controller.getState().requestId, controller.getGeneration(), '{"draft":"Original","project":"snapshot"}');
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const frozen = controller.getTaskInput()!;
     expect(controller.getCandidate()?.preparedInput).toBe(frozen.preparedInput);
     frozen.draft = "Mutated";
     controller.trigger(input("Original", { revision: { previousCandidate: "Refined", instruction: "Shorter" } }), { revisionToken: controller.getCandidateToken()! });
     controller.capturePreparedInput(controller.getState().requestId, controller.getGeneration(), "revision packet");
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getTaskInput()?.preparedInput).toContain('"draft":"Original"');
     const history = controller.getHistory();
     history[0]!.candidate!.text = "mutated";
@@ -59,7 +59,7 @@ describe("multi-model task history", () => {
     const additional = [{ name: "Intent", text: "Original interpretation" }];
     const { controller } = setup(async () => ({ ...success("Raw model output"), additional, usage: { totalTokens: 17 } }));
     controller.trigger(input("Draft"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     controller.updateCandidate(controller.getCandidateToken()!, "Edited text");
     const records = controller.getHistory();
     expect(records).toHaveLength(2);
@@ -77,13 +77,13 @@ describe("multi-model task history", () => {
   it("retains accepted snapshots while other models run and permits explicit historical Apply", async () => {
     const { controller } = setup();
     controller.trigger(input("Draft"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     controller.acceptCandidate(controller.getCandidateToken()!, "Draft", false, () => {});
     controller.setModel(other);
     expect(controller.getViewedAccepted()?.text).toBe("Refined");
     expect(controller.getCandidate()).toBeUndefined();
     controller.trigger({ ...controller.getTaskInput()!, model: other }, { force: true, sameTask: true });
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()).toBeUndefined();
     controller.applyResult(controller.getHistory().at(-1)!.id);
     expect(controller.getCandidate()).toBeDefined();
@@ -99,7 +99,7 @@ describe("multi-model task history", () => {
     const complete = vi.fn().mockResolvedValueOnce(success("First")).mockImplementationOnce(() => pending.promise);
     const { controller } = setup(complete);
     controller.trigger(input("Draft"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     controller.trigger(controller.getTaskInput()!, { force: true, sameTask: true });
     expect(controller.setModel(other)).toBe(true);
     expect(controller.cycleCandidate(1)).toBe(true);
@@ -109,7 +109,7 @@ describe("multi-model task history", () => {
     expect(controller.getTaskInput()?.draft).toBe("Draft");
     expect(controller.setModel(model)).toBe(true);
     pending.resolve(success("Late"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()?.text).toBe("First");
     expect(controller.getHistory().map((record) => record.status)).toEqual(["generated", "cancelled"]);
   });
@@ -118,9 +118,9 @@ describe("multi-model task history", () => {
     const complete = vi.fn().mockResolvedValueOnce({ ...success(""), invalidOutput: true, usage: { totalTokens: 5 } }).mockResolvedValue(success("Ready"));
     const { controller } = setup(complete);
     controller.trigger(input("Draft"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     controller.trigger(controller.getTaskInput()!, { force: true, sameTask: true });
-    await flushPromises();
+    await advanceMicrotaskTurns();
     controller.applyResult(controller.getHistory().at(-1)!.id);
     controller.beginSend(controller.getCandidateToken()!);
     expect(controller.setModel(other)).toBe(false);
@@ -143,7 +143,7 @@ describe("RefineController explicit operations", () => {
   it.each(["accept", "idle-send", "follow-up"])("commits an independent metadata snapshot exactly once on %s", async (operation) => {
     const { controller, onAccepted, scheduler } = setup(async () => ({ ...success("Prompt"), title: "Task name" }));
     controller.trigger(input("Draft", { generateTitle: true }));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const token = controller.getCandidateToken()!;
     expect(onAccepted).not.toHaveBeenCalled();
     onAccepted.mockImplementation((candidate) => { candidate.title = "Mutated by observer"; });
@@ -170,7 +170,7 @@ describe("RefineController explicit operations", () => {
   it("clears a pending send when accepting, without a second commit on late acknowledgement", async () => {
     const { controller, onAccepted, scheduler } = setup();
     controller.trigger(input("Draft"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const token = controller.getCandidateToken()!;
     controller.beginSend(token);
     controller.acceptCandidate(token, "Draft", false, () => {});
@@ -183,7 +183,7 @@ describe("RefineController explicit operations", () => {
     const { controller, onAccepted } = setup();
     onAccepted.mockImplementation(() => { throw new Error("metadata unavailable"); });
     controller.trigger(input("Draft"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.acceptCandidate(controller.getCandidateToken()!, "Draft", false, () => {})).toBe(true);
     expect(controller.getState().phase).toBe("idle");
     expect(controller.getAccepted()?.text).toBe("Refined");
@@ -191,7 +191,7 @@ describe("RefineController explicit operations", () => {
   async function readyController(draft = "original") {
     const { controller } = setup();
     controller.trigger(input(draft));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const token = controller.getCandidateToken();
     expect(token).toBeDefined();
     return { controller, token: token! };
@@ -244,7 +244,7 @@ describe("RefineController explicit operations", () => {
     const { controller, token } = await readyController();
     controller.acceptCandidate(token, "original", false, () => {});
     controller.trigger(input("Refined with edits"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     controller.updateCandidate(controller.getCandidateToken()!, "second version");
     controller.acceptCandidate(controller.getCandidateToken()!, "Refined with edits", false, () => {});
     const write = vi.fn();
@@ -261,7 +261,7 @@ describe("RefineController explicit operations", () => {
     expect(controller.shouldOpenPanel("draft")).toBe(false);
     controller.trigger(input("draft"));
     expect(controller.shouldOpenPanel("draft")).toBe(true);
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.shouldOpenPanel("draft")).toBe(true);
   });
 
@@ -270,7 +270,7 @@ describe("RefineController explicit operations", () => {
     const complete = vi.fn().mockResolvedValueOnce(success("accepted")).mockImplementation(() => pending.promise);
     const { controller } = setup(complete);
     controller.trigger(input("original"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     controller.acceptCandidate(controller.getCandidateToken()!, "original", false, () => {});
     controller.trigger(input("accepted with edits"));
     const write = vi.fn();
@@ -278,7 +278,7 @@ describe("RefineController explicit operations", () => {
     expect(write).toHaveBeenCalledWith("original");
     expect(controller.shouldOpenPanel("original")).toBe(true);
     pending.resolve(success("stale"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getCandidate()).toBeUndefined();
     expect(controller.getAccepted()).toBeUndefined();
   });
@@ -322,7 +322,7 @@ describe("RefineController explicit operations", () => {
     const scheduler = new FakeScheduler();
     const { controller } = setup(undefined, scheduler);
     controller.trigger(input("original"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const token = controller.getCandidateToken()!;
     const send = controller.beginSend(token, 100)!;
     expect(controller.onSubmittedInput(send.text, "extension", "followUp")).toBe("pending");
@@ -331,7 +331,7 @@ describe("RefineController explicit operations", () => {
     expect(controller.getCandidate()).toBeUndefined();
 
     controller.trigger(input("again"));
-    await flushPromises();
+    await advanceMicrotaskTurns();
     const retryToken = controller.getCandidateToken()!;
     controller.beginSend(retryToken, 100);
     scheduler.advance(100);
@@ -376,7 +376,7 @@ describe("confirmed request deletion", () => {
     expect(jobs.every((job) => job.signal.aborted)).toBe(true);
     expect(scheduler.size).toBe(0);
     for (const job of jobs) job.pending.resolve({ ...success("Late"), usage: { output: 12 } });
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(controller.getHistory()).toEqual([]);
     expect(controller.getCandidate()).toBeUndefined();
     expect(controller.getState()).toMatchObject({ phase: "idle", runningCount: 0, queuedCount: 0 });
@@ -384,10 +384,10 @@ describe("confirmed request deletion", () => {
 
   it("deletes an applied result without invalidating other runs", async () => {
     const { controller } = setup();
-    controller.trigger(input("One")); await flushPromises();
+    controller.trigger(input("One")); await advanceMicrotaskTurns();
     const token = controller.getCandidateToken()!;
     const id = controller.getAppliedRecordId()!;
-    controller.trigger(input("Two")); await flushPromises();
+    controller.trigger(input("Two")); await advanceMicrotaskTurns();
     controller.applyResult(id);
     expect(controller.deleteRecords([id])).toBe(true);
     expect(controller.getAppliedRecordId()).toBeUndefined();
@@ -398,7 +398,7 @@ describe("confirmed request deletion", () => {
 
   it("deletes accepted history while keeping the editor restore snapshot", async () => {
     const { controller } = setup();
-    controller.trigger(input("One")); await flushPromises();
+    controller.trigger(input("One")); await advanceMicrotaskTurns();
     const id = controller.getAppliedRecordId()!;
     const write = vi.fn();
     controller.acceptCandidate(controller.getCandidateToken()!, "One", false, write);

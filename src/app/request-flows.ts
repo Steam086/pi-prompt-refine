@@ -127,7 +127,6 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
     const defaultsTooLong = (input.editingInstruction?.length ?? 0) > config.maxDraftChars;
     let result = mode === "run" ? controller.trigger(input, { force }) : controller.capture(input);
     if (mode === "shortcut" && result.kind === "captured" && !controller.hasSubmittedRunInRound() && !defaultsTooLong) {
-      // Start the captured source in place. If admission is rejected, keep it editable.
       const started = controller.startRecord(result.recordId, selected, input.thinkingLevel);
       if (started.kind === "started") result = started;
       else notify(ctx, `Request not started (${started.kind}); draft kept as Unsent.`, "warning");

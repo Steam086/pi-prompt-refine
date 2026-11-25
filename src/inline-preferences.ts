@@ -80,13 +80,11 @@ export class InlinePreferences {
     if (this.disposed) return;
     const epoch = ++this.epoch;
     this.loading = true; this.cache = undefined;
-    // A cached comparison must not keep advertising old source text as the current library.
     for (const position of this.positions.values()) position.reading = false;
     this.updateFocus(); this.redraw();
     try {
       const library = await this.repository.load();
       if (this.disposed || epoch !== this.epoch) return;
-      // Never present stale entries from an unavailable scope as current library content.
       this.library = { ...library, entries: library.entries.filter((entry) => !library.errors[entry.scope]) };
     } catch (error) {
       if (this.disposed || epoch !== this.epoch) return;
@@ -100,7 +98,6 @@ export class InlinePreferences {
   }
   private entries(selected: SelectedPreference[], position: Position): RevisionPreference[] {
     const query = position.search.getValue();
-    // One bounded value snapshot: controller reads are detached, not stable references.
     if (this.cache && this.cache.query === query && this.cache.library === this.library && isDeepStrictEqual(this.cache.selected, selected)) return this.cache.entries;
     const libraryEntries = this.loading ? [] : this.library.entries;
     const keys = new Set(libraryEntries.map(preferenceKey));
@@ -221,7 +218,6 @@ export class InlinePreferences {
     const local = target.selected.find((item) => preferenceKey(item) === preferenceKey(entry));
     const warning = local && this.snapshotWarning(local);
     if (warning && result.length < height) result.push(truncateToWidth(this.theme.fg("warning", `⚠ ${sanitizeTerminalText(warning)}`), width, "…"));
-    // Keep description secondary and reserve readable instruction rows in short panes.
     const descriptionHeight = Math.min(3, Math.max(0, height - result.length - 4));
     const summary = descriptionLines.slice(0, descriptionHeight);
     const clipped = (line: string) => truncateToWidth(line, Math.max(0, width - 2), "") + (width > 1 ? " …" : "…");
@@ -267,12 +263,8 @@ export class InlinePreferences {
       return result;
     }
     const available = height - result.length;
-    // Use spare rows for larger cells only when every choice still fits. Dense
-    // libraries and short panes keep the compact, neighbour-preserving window.
     const groups = new Set(entries.map(preferenceGroup)).size;
     const spacious = width >= 36 && height >= 24 && entries.length * 2 + groups <= available;
-    // A wide host already owns descriptions in its reference column. Its larger
-    // cells use whitespace instead of duplicating that reference content.
     const description = showDescription && !spacious
       ? this.renderDescription(width, Math.max(0, Math.min(4, Math.floor(available / 2), available - 4)), false) : [];
     const count = Math.max(0, available - description.length - (spacious ? entries.length : 0));

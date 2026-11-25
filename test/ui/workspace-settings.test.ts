@@ -309,7 +309,6 @@ describe("shared refine workspace", () => {
             expect(footerRows[0]).toContain(formatKeyHint(["Ctrl+S", "Save"], theme, 1, "secondary"));
             expect(footerRows[0]).toContain(formatKeyHint(["Esc", back], theme, 1, "secondary"));
           }
-          // Cache hits must retain the packed frame unchanged.
           expect(workspace.render(width)).toEqual(lines);
         }
       }
@@ -506,7 +505,7 @@ describe("shared refine workspace", () => {
     const bg = vi.spyOn(theme, "bg");
     workspace.render(100);
     const selected = bg.mock.calls.filter(([color]) => color === "selectedBg");
-    expect(selected).toHaveLength(3); // Page, group and keyboard focus.
+    expect(selected).toHaveLength(3);
     const focus = selected.filter(([, text]) => stripVTControlCharacters(text).startsWith("› "));
     expect(focus).toHaveLength(1);
     expect(visibleWidth(focus[0]![1])).toBe(panelLayout(100, 40).innerWidth);

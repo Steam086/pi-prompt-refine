@@ -157,7 +157,6 @@ describe("unified request budget", () => {
     expect(result.input).toBe(input);
     expect(result.thinkingBudgets).toBeUndefined();
     expect(budgetRequest("system", input, deepseek, 2048, "off").report.message).toBeUndefined();
-    // An explicitly configured compatible endpoint with a numeric cap still gets it.
     const bounded = budgetRequest("system", input, { ...deepseek, compat: { supportsThinkingTokenBudget: true } }, 2048, "max");
     expect(bounded.report.message).toBeUndefined();
     expect(bounded.thinkingBudgets?.high).toBe(1024);

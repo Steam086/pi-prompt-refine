@@ -47,7 +47,6 @@ describe("model picker layout", () => {
         expect(output).toContain(formatKeyHint(["Enter", "Save"], theme));
         expect(output).toContain(theme.fg("text", "中文😀�[2J"));
         expect(output).toContain(theme.fg("text", theme.bold(item.description)));
-        // At 32×9 there is only one list row after the search field.
         if (rows >= 12) expect(output).toContain(theme.fg("muted", `  ${item.value}`));
         expect(output).not.toContain("\x1b[2J");
         if (rows >= 20) {
@@ -100,13 +99,12 @@ describe("model picker layout", () => {
         options.selectedKey = items[selected]!.value;
         const lines = renderModelPicker(options, width, rows, theme);
         const plain = lines.map(stripVTControlCharacters);
-        // Wide entries use two rows; narrow entries keep their badges on a third row.
         expect(plain.filter((line) => line.includes("模型 Model"))).toHaveLength(width >= 100 ? 7 : 4);
         expect(plain.join("\n")).toContain(`模型 Model ${selected}`);
         const more = plain.findIndex((line) => line.includes("More models"));
         const thinking = plain.findIndex((line) => line.includes("Thinking level:"));
         if (width >= 100) {
-          expect(thinking - more).toBe(2); // Only the intentional one-row gap remains.
+          expect(thinking - more).toBe(2);
           expect(lines[thinking]).toContain(theme.fg("muted", options.thinkingStatus));
         }
         expect(lines.join("\n")).toContain(formatKeyHint([width < 34 ? "↵" : "Enter", "Run"], theme));
@@ -124,7 +122,7 @@ describe("model picker layout", () => {
       { value: "p/3", label: "long [thinking]", description: "Long model 中文😀" },
     ];
     const lines = renderModelChoices(mixed, "p/1", 30, 8, theme);
-    expect(lines).toHaveLength(8); // 2 + 3 + 2 rows, then the scroll indicator.
+    expect(lines).toHaveLength(8);
     const plain = lines.map((line) => stripVTControlCharacters(line).trimEnd());
     for (const id of ["p/0", "p/1", "p/2"]) expect(plain).toContain(`  ${id}`);
     expect(plain.at(-1)).toContain("2/4 · ↑↓ More models");

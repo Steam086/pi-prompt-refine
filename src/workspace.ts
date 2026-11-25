@@ -193,7 +193,6 @@ export class RefineWorkspace implements Component, Focusable {
     this.preferencePanel = new PreferencePanel(this.tui, this.theme, this.keys, options.repository,
       draft.selected, draft.freeText, options.maxChars, (selected) => {
         this.preferencePanel?.dispose(); this.preferencePanel = undefined;
-        // Library writes are committed independently of bringing back selections.
         void this.inlinePreferences?.refresh();
         this.revise.bringBackPreferences(selected);
         this.focused = this.hasFocus;
@@ -216,13 +215,10 @@ export class RefineWorkspace implements Component, Focusable {
       target.selected, "", options.maxChars, (selected) => {
         if (selected) {
           const error = target.save?.(selected);
-          // Keep the child's working snapshots available on stale/over-limit failure.
           if (error) return error;
         }
         this.preferencePanel?.dispose(); this.preferencePanel = undefined;
         void this.inlinePreferences?.refresh();
-        // The live per-original summary is the feedback; a sticky notice could
-        // incorrectly advertise this selection after navigating to another task.
         if (selected) parent?.setNotice("", "muted");
         this.focused = this.hasFocus;
         if (!this.disposed) this.tui.requestRender();
@@ -340,7 +336,7 @@ export class RefineWorkspace implements Component, Focusable {
       if (this.keys.matches(data, "tui.select.cancel") || key === "ctrl+\\") {
         this.originalTarget?.cancel();
         this.originalTarget = undefined;
-        this.switchMode(this.inputReturnMode); // Back never discards the independent input draft.
+        this.switchMode(this.inputReturnMode);
       } else {
         this.beforeInput = this.activeInput.editor.getExpandedText();
         this.inputError = "";
@@ -360,8 +356,6 @@ export class RefineWorkspace implements Component, Focusable {
       this.tui.requestRender();
       return true;
     }
-    // Input/Revise owns cursor keys. Settings visits its adjacent group before
-    // leaving the page; arrows at the outer group boundaries still change pages.
     if (this.settings.busy) return true;
     if (this.mode === "context" && this.settings.handleInput(data)) return true;
     if (key === "left" || key === "right") {

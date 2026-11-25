@@ -2,7 +2,6 @@ import { CURSOR_MARKER, Editor, renderFakeCursor, truncateToWidth, type EditorTh
 
 /** Adapt Pi's editor (which budgets 30% of terminal rows) to our shared viewport.
  * The scoped terminal facade never changes the real terminal's dimensions.
- * Keep this compatibility adapter covered when upgrading pi-tui.
  */
 export class PromptInput {
   readonly editor: Editor;
@@ -24,7 +23,6 @@ export class PromptInput {
 
   render(width: number, height: number): string[] {
     this.height = Math.max(1, height);
-    // Editor owns wrapping, paste expansion, scrolling, undo and IME cursor placement.
     // Pi reserves one column for its cursor. Give its wrapper at least two more
     // for a wide grapheme; tiny viewports retain a cursor without recursive wrap.
     const lines = this.editor.render(Math.max(3, width)).slice(1, -1).map((line) => width >= 3 ? line

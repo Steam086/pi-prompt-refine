@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { RefineHistory } from "../../src/history.js";
 import { workspaceHeight } from "../../src/workspace-overlay.js";
 import { extensionHarnessEnvironment, trigger } from "../support/extension-harness.js";
-import { flushPromises } from "../support/helpers.js";
+import { advanceMicrotaskTurns } from "../support/helpers.js";
 import { getThemeByName } from "../support/pi-theme.js";
 
 const { makeHarness } = extensionHarnessEnvironment();
@@ -69,7 +69,7 @@ describe("native overlay workspace", () => {
       Object.assign(terminal, { columns: 40, rows: 12 });
       const compact = screen();
       expect(compact.slice(-2).map((line) => line.trimEnd())).toEqual(footer.slice(1));
-      expect(compact.join("\n")).not.toContain(footer[0]); // The centered overlay, not setFooter, covers this line.
+      expect(compact.join("\n")).not.toContain(footer[0]);
       expect(h.context.ui.setFooter).not.toHaveBeenCalled();
       input("q");
       expect(tui.hasOverlay()).toBe(false);
@@ -121,7 +121,7 @@ describe("native overlay workspace", () => {
           expect(r.tui.getFocusedComponent()).toBe(focusOwner);
           await input(...Array.from({ length: 12 }, () => "\x1b[B"));
           expect(h.panelLines(98).join("\n")).toContain("13/25");
-          await input("\x1b[Z", "q"); // Thinking/search must not reach the retained workspace.
+          await input("\x1b[Z", "q");
           expect(h.panelLines(98).join("\n")).toContain("No matching models");
           for (const [columns, rows] of [[28, 12], [160, 60], [100, 40]] as const) {
             Object.assign(r.terminal, { columns, rows });
@@ -142,7 +142,7 @@ describe("native overlay workspace", () => {
           if (origin === "usage") expect(h.panelLines(98).join("\n")).toContain("Usage · All rounds");
           await input(open);
           expect(h.panelLines(98).join("\n")).toContain(title);
-          await input("\r", "\r"); // Confirm once; consume input while persistence is pending.
+          await input("\r", "\r");
           await vi.waitFor(() => expect(h.panelLines(98).join("\n")).not.toContain(title));
           r.tui.renderNow();
           expect(h.customCalls()).toBe(1);
@@ -178,7 +178,7 @@ describe("native overlay workspace", () => {
       await h.handlers.get(event)?.[0]?.({ type: event }, h.context);
       await view;
       h.panelInput("\r"); h.panelInput("m");
-      await flushPromises();
+      await advanceMicrotaskTurns();
       expect(h.customCalls()).toBe(1);
       expect(await readFile(join(h.agentDir, "prompt-refine.json"), "utf8")).toBe(before);
       expect(h.complete).not.toHaveBeenCalled();
@@ -189,7 +189,7 @@ describe("native overlay workspace", () => {
     const h = await makeHarness({ noAvailableModels: true }); h.holdPanel();
     const view = h.command("view", h.context);
     h.panelInput("\x1b[D"); h.panelInput(" "); h.panelInput("\t"); h.panelInput("\r");
-    await flushPromises();
+    await advanceMicrotaskTurns();
     expect(h.panelLines().join("\n")).toContain("Unsaved settings changes");
     expect(h.notifications.at(-1)).toContain("No authorized text-generation models");
     expect(h.customCalls()).toBe(1);

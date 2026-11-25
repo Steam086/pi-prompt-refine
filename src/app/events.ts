@@ -9,14 +9,14 @@ export function createApplicationEvents() {
     changed(notifyImmediate = false) {
       revision++;
       if (notifyImmediate) for (const listener of [...immediate]) {
-        try { listener(revision); } catch { /* Native presentation must not suppress remote invalidation. */ }
+        try { listener(revision); } catch { }
       }
       if (scheduled) return;
       scheduled = true;
       queueMicrotask(() => {
         scheduled = false;
         for (const listener of [...listeners]) {
-          try { listener(revision); } catch { /* Presentation cannot undo a commit. */ }
+          try { listener(revision); } catch { }
         }
       });
     },

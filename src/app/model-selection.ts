@@ -105,7 +105,6 @@ export function createModelSelection({ controller, config, useContext, setComple
       let list: SelectList;
       let items: ModelChoice[] = [];
       const fromSettings = origin === "settings";
-      // Edits belong to individual models and stay local until confirmation.
       const thinkingEdits = new Map<string, ModelThinkingLevel>();
       const thinkingOverride = (model: ModelRef): ModelThinkingLevel | undefined =>
         thinkingEdits.get(modelKey(model)) ?? config.modelThinkingLevels[modelKey(model)] ??

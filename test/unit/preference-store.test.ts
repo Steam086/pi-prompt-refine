@@ -68,7 +68,6 @@ describe("preference persistence", () => {
     await writeFile(f.global, content);
     await expect(f.store.save("global", { name: "A", body: "Edited" }, source)).rejects.toThrow("Use Add and copy the text into a new entry");
     expect(await readFile(f.global, "utf8")).toBe(content);
-    // Add has no expected source, so it creates a new identity at version 1.
     const added = await f.store.save("global", { name: "Copy", body: source.body });
     expect(added.id).not.toBe(source.id); expect(added.version).toBe(1);
     expect((await f.store.load()).entries).toEqual([source, added]);
@@ -233,10 +232,8 @@ describe("typed preferences", () => {
     }
     const before = await readFile(f.global, "utf8");
     const pending = f.store.remove(saved);
-    // mutate() must await path/lock IO before comparing. The caller still owns saved.
     Object.assign(saved.metadata!, changedMetadata);
     if (stale) {
-      // Mutating a stale expectation to match disk must not bypass conflict checks.
       await expect(pending).rejects.toThrow("changed or was deleted");
       expect(await readFile(f.global, "utf8")).toBe(before);
     } else {

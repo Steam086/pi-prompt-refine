@@ -25,7 +25,7 @@ describe("Unsent preference selection", () => {
     for (const key of [" ", "i", "f", "n", ctrlS, bringBack, enter]) w.handleInput(key);
     expect(f.run).not.toHaveBeenCalled(); expect(f.complete).not.toHaveBeenCalled();
     expect(f.repo.save).not.toHaveBeenCalled();
-    w.handleInput(esc); // Close reading, keeping preference selection focused.
+    w.handleInput(esc);
     expect(text(w)).toContain("Choose preferences");
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.draft).toBe(f.originals[0]!.input.draft);
     w.handleInput(theme === "dark" ? enter : "\x1b[13u");
@@ -98,7 +98,6 @@ describe("Unsent preference selection", () => {
     text(w); await vi.waitFor(() => expect(text(w)).toContain(a.name));
     const loads = f.repo.load.mock.calls.length;
     w.handleInput(backTab); w.handleInput("/"); w.handleInput("Literal");
-    // Search owns all text and arrows; it cannot open another view or invoke task actions.
     for (const key of [left, right, ctrlS]) w.handleInput(key);
     expect(text(w)).toMatch(/Choose preferences +Search/);
     expect(f.run).not.toHaveBeenCalled();
@@ -167,7 +166,7 @@ describe("Unsent preference selection", () => {
     expect(f.run).toHaveBeenCalledTimes(2);
     expect(text(w)).not.toContain("Choose preferences");
     expect(f.position.selectedTaskId).toBeUndefined();
-    w.handleInput(enter); // The submitted run is inspected, never submitted twice.
+    w.handleInput(enter);
     expect(f.run).toHaveBeenCalledTimes(2);
     expect(f.complete).toHaveBeenCalledTimes(1);
     await Promise.resolve(); w.dispose();
@@ -252,7 +251,6 @@ describe("Unsent preference selection", () => {
     w.handleInput(altP); expect(text(w)).not.toContain("Bring back");
     w.handleInput("p"); await loaded(w);
     w.handleInput("n"); w.handleInput("New entry"); w.handleInput(tab);
-    // Add must not prefill the original task as a reusable editing requirement.
     expect(text(w)).not.toContain(f.originals[0]!.input.draft);
     for (const key of ["p", "i", "f", enter, ctrlS]) w.handleInput(key);
     expect(f.run).not.toHaveBeenCalled(); expect(f.complete).not.toHaveBeenCalled();
@@ -275,7 +273,6 @@ describe("Unsent preference selection", () => {
     w.handleInput("p"); await loaded(w);
     expect(text(w)).toContain("1 selected");
     expect(text(w)).toContain(a.name);
-    // Filter to the retained deleted snapshot and remove it explicitly.
     w.handleInput("/"); w.handleInput(a.name); w.handleInput(enter); w.handleInput(" "); w.handleInput(bringBack);
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.editingInstruction).toBeUndefined();
     expect(f.controller.getRecord(f.originals[1]!.id)!.input.preferences).toBeUndefined();

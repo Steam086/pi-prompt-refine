@@ -1,21 +1,16 @@
-# Installed dependencies
 node_modules/
 
-# Generated output and test coverage
 dist/
 coverage/
 *.tsbuildinfo
 
-# Local Pi configuration and session data
 .pi/
 
-# Local environment and credentials
 .env
 .env.*
 !.env.example
 !.env.sample
 
-# Private release/experiment inputs and outputs (not synthetic tracked fixtures)
 .npmrc
 *.prompt-refine.json
 *.prompt-refine.json.*.tmp
@@ -29,11 +24,9 @@ coverage/
 /sessions/
 /release-artifacts/
 
-# Logs and package archives
 *.log
 *.tgz
 
-# OS and editor temporary files
 .DS_Store
 Thumbs.db
 *.swp

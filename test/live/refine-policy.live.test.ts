@@ -14,7 +14,6 @@ const paths = ["../src/context.ts:144:7", "./config/dev.json", "../../data/input
 const url = "https://example.com/a%2Fb?q=Hello+World#L7";
 const configValue = "`Mode=Dev_01`";
 const pathDraft = `检查 ${paths[0]} 的引用，使用 ${paths[1]} 和 ${paths[2]}。参考 ${url}，配置值是 ${configValue}。只解释，不修改文件。`;
-// Intentionally invalid syntax, mixed indentation, Chinese comments, and trailing spaces.
 const codeBlock = ['```python', 'def Hello(User_Name)', '\t# 保留原注释  ', '    print("你好", User_Name)  ', '```'].join("\n");
 const codeDraft = `修复下面代码的语法错误，并解释修改原因：\n\n${codeBlock}`;
 const revisedPaths = pathDraft.replace(paths[0], "../src/context.ts:145:7");
@@ -127,7 +126,6 @@ describe.skipIf(process.env.REFINE_POLICY_LIVE !== "1")("live contextual editing
     const observation = { name, provider, model: model!.id, reasoning: "high", timestamp: Date.now(),
       systemPromptSha256: createHash("sha256").update(systemPrompt).digest("hex"),
       packet: JSON.parse(packet), raw, prompt: parsed?.text, stopReason: response.stopReason, usage: response.usage };
-    // Record even an unsuccessful assertion; do not retry until it passes.
     if (process.env.REFINE_POLICY_OUTPUT) await appendFile(process.env.REFINE_POLICY_OUTPUT, JSON.stringify(observation) + "\n");
     expect(response.stopReason, response.errorMessage).toBe("stop");
     expect(parsed, raw).toBeDefined();

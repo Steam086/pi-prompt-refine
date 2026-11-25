@@ -155,6 +155,8 @@ export function canonicalShortcut(value: string): string | undefined {
   return [...lowerModifiers].sort().concat(KEY_ALIASES[lowerKey] ?? lowerKey).join("+");
 }
 
+const LEGACY_DEFAULT_PREFERENCES_KEY = "f2";
+
 function isLegacyDefaultShortcuts(value: unknown): boolean {
   if (!isRecord(value) || Object.keys(value).length !== SHORTCUT_ACTIONS.length) return false;
   const legacy = [
@@ -317,9 +319,7 @@ export function parseConfig(value: unknown): LoadedConfig {
   if (value.preferencesKey === null) config.preferencesKey = null;
   else if (value.preferencesKey !== undefined) {
     const key = typeof value.preferencesKey === "string" ? canonicalShortcut(value.preferencesKey) : undefined;
-    // Migrate the previous shipped default without making every existing
-    // configuration invalid (warnings intentionally disable settings writes).
-    if (key === "f2") config.preferencesKey = DEFAULT_CONFIG.preferencesKey;
+    if (key === LEGACY_DEFAULT_PREFERENCES_KEY) config.preferencesKey = DEFAULT_CONFIG.preferencesKey;
     else if (key && !/(^|\+)f\d+$/.test(key) && (key.includes("ctrl+") || key.includes("alt+")) &&
       !["ctrl+s", "ctrl+e", "ctrl+c", "ctrl+\\", "tab", "shift+tab", "escape", "enter"].includes(key) &&
       !Object.values(config.shortcuts).some((shortcut) => shortcut && canonicalShortcut(shortcut) === key)) {

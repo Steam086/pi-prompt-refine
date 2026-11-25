@@ -38,7 +38,6 @@ export function resultNoteHint(notes: readonly ResultNote[] | undefined, theme: 
   return theme.fg("muted", ` · ${notes.length} ${notes.length === 1 ? "note" : "notes"} below`);
 }
 
-/** Literal, read-only run metadata, laid out in the result's existing scroll pane. */
 export function resultNoteLines(notes: readonly ResultNote[] | undefined, theme: PresentationTheme): string[] {
   if (!notes?.length) return [];
   const lines = ["", theme.fg("text", theme.bold("Result notes")) + theme.fg("muted", " · preview only")];

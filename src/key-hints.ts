@@ -22,7 +22,6 @@ export function fittingKeyHints(hints: KeyHint[], width: number, theme: HintThem
   return fittingHints(hints.map((hint) => formatKeyHint(hint, theme, 1, style)), width, theme.fg("muted", separator));
 }
 
-/** Operation pages keep Back and the primary action together, with one optional hint. */
 export function operationHintRows(primary: KeyHint[], secondary: KeyHint | undefined, layout: PanelLayout, theme: HintTheme): string[] {
   const { innerWidth: width, footerHeight } = layout;
   if (!footerHeight) return [];

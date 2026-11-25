@@ -9,7 +9,6 @@ export function panelLayout(width: number, rows: number, requestedHeight = Math.
   return panelGeometry(width, height);
 }
 
-/** Compose inner geometry independently of inline-panel/overlay height policy. */
 export function panelGeometry(width: number, height: number, maxWidth = READING_WIDTH, topSeparator = true, centered = false, horizontalPadding?: number) {
   const panelWidth = Math.max(1, Math.min(width, maxWidth));
   const padding = horizontalPadding ?? (panelWidth >= 16 ? 2 : 0);
@@ -18,7 +17,6 @@ export function panelGeometry(width: number, height: number, maxWidth = READING_
   const headerHeight = height >= 12 ? 2 : height >= 3 ? 1 : 0;
   const footerHeight = height >= 6 ? 2 : height >= 2 ? 1 : 0;
   const separatorHeight = height >= 12 ? 1 : 0;
-  // Separate the workspace from the transcript, but preserve content in tiny terminals.
   const topSeparatorHeight = topSeparator && height >= 4 ? 1 : 0;
   return { height, inset, innerWidth, headerHeight, footerHeight, separatorHeight, topSeparatorHeight,
     bodyHeight: height - topSeparatorHeight - headerHeight - footerHeight - separatorHeight };
@@ -35,7 +33,6 @@ export function workspaceTabs(layout: PanelLayout, active: WorkspacePage, theme:
   return panelTabs(layout, [...WORKSPACE_PAGES], WORKSPACE_PAGES.indexOf(active), theme);
 }
 
-/** One row of tabs with a flat selection surface and quiet inactive labels. */
 export function panelTabs(layout: PanelLayout, labels: string[], active: number, theme: Pick<Theme, "fg" | "bg" | "bold">,
   selectedTab = (label: string) => theme.bg("selectedBg", theme.fg("text", theme.bold(` ${label} `)))): string[] {
   if (layout.bodyHeight < 4) return [];
@@ -49,7 +46,6 @@ export function panelTabs(layout: PanelLayout, labels: string[], active: number,
   return [selectedTab(stripVTControlCharacters(truncateToWidth(label, layout.innerWidth - 2, "…")))];
 }
 
-/** Place title, status, tabs and actions above the content, sharing rows where they fit. */
 export function panelHeader(base: PanelLayout, headings: string[], tabs: string[] = [], hints: string[] = []) {
   const width = base.innerWidth;
   const gap = 3;
