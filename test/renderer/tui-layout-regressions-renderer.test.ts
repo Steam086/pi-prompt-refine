@@ -55,7 +55,11 @@ describe.each(["regular", "fullscreen"] as const)("TUI layout regressions (%s)",
       return lines.join("\n");
     };
     try {
-      tui.start(); render();
+      tui.start();
+      const initial = theme.fg("muted", "Thinking level: ") + theme.fg("text", theme.bold("high"))
+        + theme.fg("muted", " · Last used for this model");
+      expect(render()).toContain(initial);
+      expect(writes.join("")).toContain(initial);
       for (const [columns, rows] of [[100, 40], [20, 8], [40, 12], [180, 80], [100, 40]] as const) {
         Object.assign(terminal, { columns, rows });
         let output = render();
@@ -73,7 +77,7 @@ describe.each(["regular", "fullscreen"] as const)("TUI layout regressions (%s)",
         options.selectedKey = "provider/model-12";
       }
       expect(render()).toContain(theme.fg("text", theme.bold(options.title)));
-      expect(render()).toContain(theme.fg("muted", options.thinkingStatus));
+      expect(render()).toContain(theme.fg("muted", "Thinking level: ") + theme.fg("text", theme.bold("medium")));
       options.fromSettings = true;
       options.query = "中文😀";
       for (const [columns, rows] of [[100, 40], [40, 12], [32, 9], [160, 45], [100, 40]] as const) {

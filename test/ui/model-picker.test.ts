@@ -75,7 +75,8 @@ describe("model picker layout", () => {
       if (width >= 20 && rows >= 8) expect(frameHeader(lines).join("\n")).toContain(formatKeyHint(["Esc", "Cancel"], theme));
       if (width >= 20 && rows === 8) expect(frameHeader(lines).join("\n")).toContain(formatKeyHint(width < 34 ? ["↵", "Use"] : ["Enter", "Confirm"], theme));
       if (width >= 40 && rows >= 12) expect(lines.join("\n")).toContain("模型 Model 12");
-      if (width >= 100 && rows >= 24) expect(lines.join("\n")).toContain(theme.fg("muted", options.thinkingStatus));
+      if (width >= 100 && rows >= 24) expect(lines.join("\n")).toContain(theme.fg("muted", "Thinking level: ")
+        + theme.fg("text", theme.bold("high")) + theme.fg("muted", " · Last used for this model"));
     }
     options.query = "中文😀\x1b[31m".repeat(30); options.items = [];
     const empty = renderModelPicker(options, 40, 40, theme);
@@ -105,12 +106,40 @@ describe("model picker layout", () => {
         const thinking = plain.findIndex((line) => line.includes("Thinking level:"));
         if (width >= 100) {
           expect(thinking - more).toBe(2);
-          expect(lines[thinking]).toContain(theme.fg("muted", options.thinkingStatus));
+          expect(lines[thinking]).toContain(theme.fg("muted", "Thinking level: ")
+            + theme.fg("text", theme.bold("off")) + theme.fg("muted", " · Last used for this model"));
         }
         expect(lines.join("\n")).toContain(formatKeyHint([width < 34 ? "↵" : "Enter", "Run"], theme));
         expect(lines.join("\n")).toContain(formatKeyHint(["Esc", "Cancel"], theme));
       }
     }
+  });
+
+  it.each(["dark", "light"])("emphasizes the changing thinking value but not its label or source (%s)", (name) => {
+    const theme = getThemeByName(name)!;
+    const bold = vi.spyOn(theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
+    const options: ModelPickerOptions = { items, selectedKey: items[0]!.value, query: "",
+      title: "Run original with another model", subtitle: "Default model unchanged", thinkingKeys: "Shift+Tab",
+      thinkingStatus: "Thinking level: xhigh · Last used for this model", run: true };
+    const render = (width: number, rows = 40) => renderOverlayModelPicker(options, width, rows, theme).join("\n");
+    try {
+      const levelText = (value: string) => theme.fg("text", theme.bold(value));
+      expect(render(100)).toContain(theme.fg("muted", "Thinking level: ") + levelText("xhigh")
+        + theme.fg("muted", " · Last used for this model"));
+      expect(render(21, 20)).toContain(theme.fg("muted", "Thinking: ") + levelText("xhigh"));
+      options.thinkingStatus = "Thinking level: max · Extension setting";
+      expect(render(100)).toContain(theme.fg("muted", "Thinking level: ") + levelText("max")
+        + theme.fg("muted", " · Extension setting"));
+      expect(render(100)).not.toContain(levelText("xhigh"));
+      options.fromSettings = true;
+      expect(render(100)).toContain(theme.fg("muted", "Thinking: ") + levelText("max")
+        + theme.fg("muted", " · Extension setting"));
+      options.fromSettings = false;
+      for (const status of ["Thinking level: not supported by this model", "Thinking level: no model selected"]) {
+        options.thinkingStatus = status;
+        expect(render(100)).toContain(theme.fg("muted", status));
+      }
+    } finally { bold.mockRestore(); }
   });
 
   it.each(["dark", "light"])("fits mixed entry heights and only reserves scrolling when needed (%s)", (name) => {

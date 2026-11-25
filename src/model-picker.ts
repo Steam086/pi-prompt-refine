@@ -66,6 +66,21 @@ export interface ModelPickerOptions {
   run: boolean;
 }
 
+function formatThinkingStatus(status: string, width: number, theme: Theme, compact = false): string {
+  const text = sanitizeTerminalText(status);
+  const match = /^Thinking level: (\S+)(?= · |$)/.exec(text);
+  if (!match) return theme.fg("muted", compact ? text.replace(/^Thinking level: /, "Thinking: ") : text);
+  const level = match[1]!;
+  const label = !compact && visibleWidth(`Thinking level: ${level}`) <= width ? "Thinking level: "
+    : visibleWidth(`Thinking: ${level}`) <= width ? "Thinking: " : "";
+  const value = (label ? theme.fg("muted", label) : "") + theme.fg("text", theme.bold(level));
+  const note = text.slice(match[0].length);
+  if (!note) return value;
+  if (!compact) return value + theme.fg("muted", note);
+  const room = width - visibleWidth(value);
+  return room > 4 ? value + theme.fg("muted", truncateToWidth(note, room, "…")) : value;
+}
+
 function renderSettingsModelPicker(options: ModelPickerOptions, layout: PanelLayout, theme: Theme): string[] {
   const { innerWidth: width } = layout;
   const primary: KeyHint[] = [["Esc", width >= 10 ? "Cancel" : ""]];
@@ -84,8 +99,8 @@ function renderSettingsModelPicker(options: ModelPickerOptions, layout: PanelLay
     body.push(theme.fg("muted", "Search: ") + theme.fg(options.query ? "text" : "muted", query));
   }
   if (options.items.length && height - body.length >= 3) {
-    const status = sanitizeTerminalText(options.thinkingStatus).replace(/^Thinking level: /, "Thinking: ");
-    body.push(theme.fg("muted", truncateToWidth(status, width, "…")));
+    const status = formatThinkingStatus(options.thinkingStatus, width, theme, true);
+    body.push(truncateToWidth(status, width, "…"));
   }
   const choices = renderModelChoices(options.items, options.selectedKey, width, height - body.length, theme);
   return chrome.render([...body, ...choices], (line) => theme.fg("borderMuted", line));
@@ -107,9 +122,12 @@ export function renderModelPicker(options: ModelPickerOptions, width: number, ro
   const search = h >= 4 ? [theme.fg("muted", "Search: ") + theme.fg(options.query ? "text" : "muted",
     truncateToWidth(sanitizeTerminalText(options.query || "provider/model, name, or thinking"), Math.max(1, w - 8), "…"))] : [];
   const detailHeight = h >= 6 ? Math.min(3, Math.floor(h / 4)) : 0;
-  const details = detailHeight ? wrapTextWithAnsi(sanitizeTerminalText(options.thinkingStatus), w) : [];
-  const detail = details.slice(0, detailHeight).map((line, index) => theme.fg("muted",
-    index === detailHeight - 1 && details.length > detailHeight ? truncateToWidth(line + " …", w, "…") : line));
+  const details = detailHeight ? wrapTextWithAnsi(formatThinkingStatus(options.thinkingStatus, w, theme), w) : [];
+  const detail = details.slice(0, detailHeight);
+  const lastDetail = detail.at(-1);
+  if (lastDetail !== undefined && details.length > detailHeight && visibleWidth(lastDetail) + 2 <= w) {
+    detail[detail.length - 1] = lastDetail + theme.fg("muted", " …");
+  }
   const gap = detail.length ? 1 : 0;
   const listHeight = Math.max(0, h - search.length - detail.length - gap);
   const list = renderModelChoices(options.items, options.selectedKey, w, listHeight, theme);
