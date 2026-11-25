@@ -113,7 +113,7 @@ describe.each(["regular", "fullscreen"] as const)("current-round Preview (%s)", 
         }
         expect(text).toContain("Usage");
         expect(text).toMatch(/n:? New/);
-        expect(text).toMatch(/Esc:? Back/);
+        expect(text).toMatch(/Esc:? Close/);
         expect(text).not.toContain("Refine model:");
         if (columns === 120) {
           expect(frame.join("\n")).toContain(theme.fg("muted", "History → Usage · 1 earlier prompt"));

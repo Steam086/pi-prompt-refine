@@ -28,7 +28,6 @@ export interface SettingsPageActions {
   editSystemPrompt?(): OptimizationPromptTarget | undefined;
   cycleThinking?(): Promise<SettingsResult>;
   saveContext(selected: ContextSettings): Promise<SettingsResult>;
-  close(): void;
 }
 
 /** Settings owns its draft and caches; navigation and page lifetime belong to the workspace. */
@@ -236,7 +235,7 @@ export class SettingsPage {
     this.tui.requestRender();
   }
 
-  /** False at an outer group boundary delegates page navigation to the workspace. */
+  /** Delegate tab switches and top-level dismissal; Settings subpages consume their own input. */
   handleInput(data: string): boolean {
     if (this.optimizationPrompt) { this.optimizationPrompt.handleInput(data); return true; }
     if (this.numberInput) { this.handleNumberInput(data); return true; }
@@ -250,7 +249,7 @@ export class SettingsPage {
       return false;
     }
     if (key === "q" || key === "ctrl+\\" || this.keys.matches(data, "tui.select.cancel")) {
-      this.actions.close();
+      return false;
     } else if (key === "tab") {
       if (this.settingsGroups.length > 1) this.switchSettingsGroup();
     } else if (key === "pageUp" || key === "pageDown") {
@@ -334,11 +333,12 @@ export class SettingsPage {
       : this.cursor === 3 ? "Choose" : this.cursor === 5 || NUMBER_SETTINGS[this.cursor] ? "Edit" : "Change";
     const enterHint = (key: string): KeyHint[] => action ? [[key, action]] : [];
     // Saving has a fixed key and an explicit scope, independent of row focus.
-    const back: KeyHint = ["Esc", dirty ? "Discard" : "Back"];
+    const close: KeyHint = ["Esc", dirty ? "Discard and close" : "Close"];
+    const compactClose: KeyHint = ["Esc", innerWidth < (dirty ? 11 : 9) ? "" : dirty ? "Discard" : "Close"];
     const groupHints: KeyHint[] = groups.length > 1 ? [["Tab", innerWidth >= 72 ? "Next group" : "Group"]] : [];
     const { layout, tabs, footer } = this.hintLayout(baseLayout,
-      this.saving ? [] : [["Ctrl+S", "Save"], ...enterHint("Enter"), ...groupHints, back],
-      this.saving ? [] : [back, ["^S", "Save"], ...enterHint("↵"), ...groupHints]);
+      this.saving ? [] : [["Ctrl+S", "Save"], ...enterHint("Enter"), ...groupHints, close],
+      this.saving ? [] : [compactClose, ["^S", "Save"], ...enterHint("↵"), ...groupHints]);
     const timing = group === "Context" && this.cursor !== 12 ? "Context changes take effect next round" : "";
     const status = notice || theme.fg("muted", timing);
     const header = [layout.headerHeight === 1 && notice ? status : theme.fg("text", theme.bold("Settings")), status];

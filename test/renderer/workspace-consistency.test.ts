@@ -236,7 +236,7 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         expect(short).toContain(theme.getFgAnsi("warning") + "Enter 0–100000");
         expect(short).toContain(theme.fg("muted", "› ") + theme.getFgAnsi("text") + "-1");
         Object.assign(terminal, { columns, rows }); workspace.invalidate();
-        input("\x1b"); input("\x1b");
+        input("\x1b"); input("\x1b[D"); input("\x1b[D");
         expect(frame("Back to Preview", false)).toEqual(previewFrame);
         expect(position.selectedId).toBe(1);
         input("\r");
@@ -318,9 +318,9 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         const shortSaved = frame("Settings / saved after resize", false).map(strip).join("\n");
         expect(shortSaved).toContain("Settings saved");
         expect(shortSaved).toContain("› Skill metadata");
-        expect(shortSaved).toMatch(/Esc:? Back/);
+        expect(shortSaved).toMatch(/Esc:? Close/);
         expect(saveContext).toHaveBeenCalledExactlyOnceWith({ instructions: "always", tree: false, skills: true });
-        input("\x1b");
+        input("\x1b[D"); input("\x1b[D");
         Object.assign(terminal, { columns, rows }); workspace.invalidate();
         expect(frame("Preview after leaving Settings", false).join("\n")).not.toContain("Settings saved");
         overlay.hide(); tui.renderNow();

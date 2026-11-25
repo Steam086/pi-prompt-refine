@@ -232,8 +232,10 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await view;
   });
 
-  it.each(["\x1c", "q", "\x1b"])("cancels unsaved context edits with %j and keeps default context opt-outs", async (back) => {
+  it.each(["\x1c", "q", "\x1b"])("closes Settings with %j without saving unsaved context edits", async (close) => {
     const harness = await makeHarness({ config: { projectContext: structuredClone(DEFAULT_CONFIG.projectContext) } });
+    const file = join(harness.agentDir, "prompt-refine.json");
+    const before = await readFile(file, "utf8");
     vi.spyOn(harness.context.sessionManager, "getBranch").mockReturnValue([]);
     vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
     harness.holdPanel();
@@ -262,14 +264,11 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.panelLines().join("\n")).toContain("Default model");
     harness.panelInput("\t");
     expect(harness.panelLines()).toEqual(edited);
-    harness.panelInput(back);
-    await flushPromises();
+    harness.panelInput(close);
+    await view;
     expect(harness.complete).not.toHaveBeenCalled();
     expect(harness.customCalls()).toBe(1);
-    expect(harness.panelLines().join("\n")).not.toContain("Unsaved settings changes");
-    expect(harness.panelLines().join("\n")).toContain("Prompt refine");
-    harness.panelInput("q");
-    await view;
+    expect(await readFile(file, "utf8")).toBe(before);
     await trigger(harness);
     await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
     const input = (harness.complete.mock.calls[0] as any[])[1].messages[0].content[0].text;
@@ -365,7 +364,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const result = "x".repeat(20000); // Above the new character guard, within the old one.
     resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: result }) }], stopReason: "stop" });
     await flushPromises();
-    harness.panelInput("\x1b"); // Return to Preview after saving.
+    harness.panelInput("\x1b[D"); // Context group -> Usage.
+    harness.panelInput("\x1b[D"); // Usage -> Preview.
     harness.panelInput("\x1b[B"); // Original root -> completed run.
     harness.panelInput("a");
     await vi.waitFor(() => expect(harness.getEditor(), harness.panelLines(100).join("\n")).toBe(result));

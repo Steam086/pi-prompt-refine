@@ -35,7 +35,7 @@ describe("shared refine workspace", () => {
     expect(textOf(workspace.render(100))).toContain(formatKeyHint(["r", "Refine current draft in this round (model call)"], theme));
     workspace.openSettings();
     expect(textOf(workspace.render(100))).toContain(formatKeyHint(["Ctrl+S", "Save"], theme, 1, "secondary"));
-    workspace.handleInput("q");
+    workspace.handleInput("\x1b[D"); workspace.handleInput("\x1b[D");
     workspace.handleInput("i");
     expect(textOf(workspace.render(100))).toContain(formatKeyHint(["Enter", "Refine"], theme));
   });
@@ -53,7 +53,7 @@ describe("shared refine workspace", () => {
         const main = workspace.render(width);
         workspace.handleInput("\x1b[D");
         const context = workspace.render(width);
-        workspace.handleInput("\x1b");
+        workspace.handleInput("\x1b[C");
         workspace.handleInput("i");
         const input = workspace.render(width);
         for (const lines of [main, context, input]) {
@@ -78,7 +78,7 @@ describe("shared refine workspace", () => {
     workspace.render(80);
     panel.page(1);
     const before = workspace.render(80);
-    for (const [open, back] of [["\x1b[D", "\x1b"], ["i", "\x1b"]]) {
+    for (const [open, back] of [["\x1b[D", "\x1b[C"], ["i", "\x1b"]]) {
       workspace.handleInput(open!);
       workspace.render(80);
       workspace.handleInput(back!);
@@ -87,7 +87,7 @@ describe("shared refine workspace", () => {
     panel.toggleOriginal();
     const original = workspace.render(80);
     workspace.handleInput("\x1b[D");
-    workspace.handleInput("q");
+    workspace.handleInput("\x1b[C");
     expect(workspace.render(80)).toEqual(original);
   });
 

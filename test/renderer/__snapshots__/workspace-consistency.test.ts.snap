@@ -6,7 +6,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │  Prompt refine · Tasks   1 prompt · 2 runs            │
 │   Preview    Usage    Settings                        │
 │  a: Editor only  Enter: Inspect  Tab: Read            │
-│  Esc: Back  ?: Help                                   │
+│  Esc: Close  ?: Help                                  │
 │  ───────────────────────────────────────────────────  │
 │    ▾ 本项目的原始要求                                 │
 │    ├─ model-2                                 ✓ Done  │
@@ -22,7 +22,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 ╭───────────────────────────────────────────────────────╮
 │  Usage · All rounds   1 prompt · 2 runs               │
 │   Preview    Usage    Settings                        │
-│  Enter: Inspect  Tab: Read    Esc: Back  ?: Help      │
+│  Enter: Inspect  Tab: Read    Esc: Close  ?: Help     │
 │  ───────────────────────────────────────────────────  │
 │    ▾ 本项目的原始要求                                 │
 │    ├─ model-2                                 ✓ Done  │
@@ -39,7 +39,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 ╭───────────────────────────────────────────────────────╮
 │  Settings   Context changes take effect next round    │
 │   Preview    Usage    Settings                        │
-│  Ctrl+S: Save  Enter: Change  Tab: Group  Esc: Back   │
+│  Ctrl+S: Save  Enter: Change  Tab: Group  Esc: Close  │
 │  ───────────────────────────────────────────────────  │
 │   Context    Optimizer                                │
 │    Project context: [x] On                            │
@@ -56,7 +56,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 ╭───────────────────────────────────────────────────────╮
 │  Settings                                             │
 │   Preview    Usage    Settings                        │
-│  Ctrl+S: Save  Enter: Edit  Tab: Group  Esc: Back     │
+│  Ctrl+S: Save  Enter: Edit  Tab: Group  Esc: Close    │
 │  ───────────────────────────────────────────────────  │
 │   Context    Optimizer                                │
 │    Default model: provider/rewrite-model ›            │

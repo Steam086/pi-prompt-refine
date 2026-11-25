@@ -124,7 +124,7 @@ describe.each(["regular", "fullscreen"] as const)("task tree rendering (%s)", (m
       expect(hints[0]).toContain(formatKeyHint(["Enter", "Inspect"], theme, 1, "secondary"));
       expect(hints[0]).not.toContain("\x1b[1m");
       expect(strip(initial[divider + 1]!).trim()).not.toBe("");
-      expect(writes.join("")).toContain(formatKeyHint(["Esc", "Back"], theme, 1, "secondary"));
+      expect(writes.join("")).toContain(formatKeyHint(["Esc", "Close"], theme, 1, "secondary"));
       expect(writes.join("")).toContain(theme.fg("accent", theme.bold("›")));
       expect(writes.join("")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Usage "))));
       const root = left(initial).findIndex((line) => line.includes("› ▾ Earlier · Original prompt"));

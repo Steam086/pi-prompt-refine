@@ -21,7 +21,7 @@ describe("Tasks shortcut hierarchy", () => {
       () => ({ selected: [], save: () => undefined }), f.theme, keys, () => {});
     const panel = new TaskPanel({ ...f.actions, inlinePreferences: picker, deleteRecords: () => true }, f.theme,
       () => f.size.rows, keys, false, f.position, (width) => workspaceLayout(width, f.size.rows));
-    const expected = [["Enter", "Optimize"], ["Tab", "Preferences"], ["o", "Read original"], ["Esc", "Back"], ["?", "Help"]] as const;
+    const expected = [["Enter", "Optimize"], ["Tab", "Preferences"], ["o", "Read original"], ["Esc", "Close"], ["?", "Help"]] as const;
     try {
       for (const [width, rows, hintRows] of [[160, 40, 1], [120, 40, 1], [100, 40, 1], [80, 40, 2], [40, 24, 2], [160, 40, 1]] as const) {
         f.size.rows = rows;
@@ -34,7 +34,10 @@ describe("Tasks shortcut hierarchy", () => {
         expect(hintLines.length).toBeLessThanOrEqual(hintRows);
         expect(strip(hints)).not.toMatch(/(?:p|i|n|m|d):/);
         expect(hints).not.toContain("\x1b[1m");
-        for (const hint of expected) expect(frame.join("\n")).toContain(formatKeyHint(hint, f.theme, 1, "secondary"));
+        const style = width === 40 ? "secondary-compact" : "secondary";
+        for (const [key, label] of expected) {
+          expect(frame.join("\n")).toContain(formatKeyHint([style === "secondary-compact" && key === "Enter" ? "↵" : key, label], f.theme, 1, style));
+        }
         const tabs = lines.findIndex((line) => line.includes(" Preview "));
         const divider = lines.findIndex((line, i) => i > tabs && line.trim().startsWith("─"));
         if (width >= 120) expect(divider).toBe(tabs + 1);
@@ -78,7 +81,7 @@ describe("Tasks shortcut hierarchy", () => {
           const end = plain.findIndex((line, index) => index > tab && line.trim().startsWith("─"));
           const hints = frameHints(frame);
           const expected: KeyHint[] = [["Enter", "Inspect"], ["Tab", reading ? "Select" : "Read  "],
-            ["Esc", "Back"], ["?", "Help"]];
+            ["Esc", "Close"], ["?", "Help"]];
           expect(hints.map(strip).join(" ").trim().replace(/ +/g, " ")).toBe(
             wrappedKeyHints(expected, workspaceLayout(width, rows).innerWidth, f.theme, false, "  ")
               .map(strip).join(" ").trim().replace(/ +/g, " "));
@@ -111,7 +114,7 @@ describe("Tasks shortcut hierarchy", () => {
     } finally { bold.mockRestore(); }
   });
 
-  it.each(["dark", "light"])("retains a passive Back hint in tiny Tasks and Usage canvases (%s)", (name) => {
+  it.each(["dark", "light"])("retains a passive Close hint in tiny Tasks and Usage canvases (%s)", (name) => {
     for (const usage of [false, true]) {
       const f = create(name, usage);
       const bold = vi.spyOn(f.theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
@@ -121,9 +124,10 @@ describe("Tasks shortcut hierarchy", () => {
         for (const [width, rows] of [[10, 8], [12, 8], [20, 8], [40, 8], [40, 12], [10, 8]]) {
           f.size.rows = rows;
           const frame = panel.render(width);
-          const back = frame.find((line) => /Esc:? Back/.test(strip(line)))!;
-          expect(back).toBeDefined();
-          expect(back).not.toContain("\x1b[1m");
+          const hint = workspaceLayout(width, rows).innerWidth < 9 ? /\bEsc\b/ : /Esc:? Close/;
+          const close = frame.find((line) => hint.test(strip(line)));
+          expect(close).toBeDefined();
+          expect(close).not.toContain("\x1b[1m");
           expect(frame).toHaveLength(workspaceLayout(width, rows).height);
           expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
           expect(f.position.selectedId).toBe(1);
@@ -142,7 +146,7 @@ describe("Tasks shortcut hierarchy", () => {
       expect(f.text()).not.toContain("Refine model:");
       f.size.rows = 8;
       const short = f.text(32);
-      for (const hint of ["Esc Back", "x Stop", "? Help"]) expect(short).toContain(hint);
+      for (const hint of ["Esc Close", "x Stop", "? Help"]) expect(short).toContain(hint);
       f.panel.handleInput("x");
       expect(f.actions.stop).toHaveBeenCalledExactlyOnceWith(1);
     }

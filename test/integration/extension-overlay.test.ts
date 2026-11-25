@@ -47,6 +47,51 @@ describe("native overlay workspace", () => {
     await view;
   });
 
+  it.each([["regular", "dark"], ["fullscreen", "light"]] as const)("closes top-level tabs but returns from subpages (%s, %s)", async (mode, theme) => {
+    const h = await makeHarness({ renderer: { mode, theme } });
+    await trigger(h);
+    h.holdPanel();
+    const { tui, input } = h.renderer!;
+    const text = () => stripVTControlCharacters(h.panelLines(100).join("\n"));
+
+    for (const page of ["Usage", "Settings", "Preview"] as const) {
+      const view = h.command(page === "Usage" ? "usage" : "", h.context);
+      try {
+        await vi.waitFor(() => expect(tui.hasOverlay()).toBe(true));
+        if (page === "Usage") {
+          expect(text()).toContain("Usage · All rounds");
+          for (const [key, title] of [["\r", "Prompt details"], ["b", "History storage"], ["?", "Available actions"]] as const) {
+            input(key);
+            expect(text()).toContain(title);
+            input("\x1b");
+            expect(tui.hasOverlay()).toBe(true);
+            expect(text()).toContain("Usage · All rounds");
+          }
+        } else if (page === "Settings") {
+          input("\x1b[D");
+          input("\x1b[A"); // Project context master switch.
+          for (let i = 0; i < 5; i++) input("\x1b[B"); // History messages.
+          input("\r");
+          expect(text()).toContain("Esc: Cancel");
+          input("\x1b");
+          expect(tui.hasOverlay()).toBe(true);
+          expect(text()).toContain("Ctrl+S: Save");
+        } else {
+          expect(text()).toContain("Prompt refine · Tasks");
+        }
+        expect(text()).toContain("Esc: Close");
+        input("\x1b");
+        expect(tui.hasOverlay()).toBe(false);
+      } finally {
+        if (tui.hasOverlay()) await h.handlers.get("session_shutdown")?.[0]?.({ type: "session_shutdown" }, h.context);
+        await view;
+      }
+    }
+    expect(h.complete).toHaveBeenCalledOnce();
+    expect(h.editorWrites).toEqual([]);
+    expect(h.sent).toEqual([]);
+  });
+
   it.each(["regular", "fullscreen"] as const)("leaves the host footer in the background (%s)", async (mode) => {
     const h = await makeHarness({ renderer: { mode, theme: "dark" } });
     const { tui, terminal, input } = h.renderer!;

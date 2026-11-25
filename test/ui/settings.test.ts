@@ -94,15 +94,14 @@ describe("Settings budgets and limits", () => {
     expect(f.actions.saveContext).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ [spec.field]: spec.min * spec.scale }));
     await vi.waitFor(() => expect(f.text()).toContain("Settings saved"));
     expect(f.text()).toContain(`› ${spec.label}`);
-    expect(f.text()).toContain("Esc: Back");
+    expect(f.text()).toContain("Esc: Close");
     expect(f.text()).not.toContain("Unsaved settings changes");
     expect(f.saved[spec.field]).toBe(spec.min * spec.scale);
     f.workspace.handleInput("\r");
     f.value(String(spec.max));
     f.workspace.handleInput("\r");
-    expect(f.text()).toContain("Esc: Discard");
-    f.workspace.handleInput("\x1b");
-    expect(f.text()).toContain("Prompt refine");
+    expect(f.text()).toContain("Esc: Discard and close");
+    expect(f.workspace.handleInput("\x1b")).toBe(false);
     expect(f.saved[spec.field]).toBe(spec.min * spec.scale);
     f.workspace.openSettings(undefined, Number(cursor));
     expect(f.text()).not.toContain("Unsaved settings changes");

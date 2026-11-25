@@ -118,10 +118,6 @@ export class RefineWorkspace implements Component, Focusable {
       get editSystemPrompt() { return actions.editSystemPrompt; },
       get cycleThinking() { return actions.cycleThinking; },
       saveContext: (selected) => actions.saveContext(selected),
-      close: () => {
-        this.settingsInitialized = false;
-        this.switchMode("main");
-      },
     }, () => this.makeInput(), this.layout, tui);
     this.revise = new RevisePage(theme, keys, {
       get preferences() { return !!actions.preferences; }, preferencesKey: this.preferencesKey, preferencesKeyNotice: this.preferencesKeyNotice,
@@ -327,7 +323,7 @@ export class RefineWorkspace implements Component, Focusable {
     this.switchMode("context");
   }
 
-  /** Returns false only for main-page keys handled by the extension's guarded actions. */
+  /** Unhandled keys go to the host for overlay dismissal or guarded actions. */
   handleInput(data: string): boolean {
     if (this.disposed) return true;
     if (this.preferencePanel) { this.preferencePanel.handleInput(data); return true; }
@@ -361,7 +357,10 @@ export class RefineWorkspace implements Component, Focusable {
     // Input/Revise owns cursor keys. Settings visits its adjacent group before
     // leaving the page; arrows at the outer group boundaries still change pages.
     if (this.settings.busy) return true;
-    if (this.mode === "context" && this.settings.handleInput(data)) return true;
+    if (this.mode === "context") {
+      if (this.settings.handleInput(data)) return true;
+      if (key !== "left" && key !== "right") return false;
+    }
     if (key === "left" || key === "right") {
       this.navigatePage(key === "left" ? -1 : 1);
       return true;
@@ -369,10 +368,6 @@ export class RefineWorkspace implements Component, Focusable {
     if (this.mode === "usage" || (this.mode === "main" && this.taskPanel)) {
       if ((this.mode === "usage" ? this.historyPanel : this.taskPanel)?.handleInput(data)) {
         this.tui.requestRender();
-        return true;
-      }
-      if (this.mode === "usage" && (key === "q" || key === "ctrl+\\" || this.keys.matches(data, "tui.select.cancel"))) {
-        this.switchMode("main");
         return true;
       }
     }

@@ -69,7 +69,7 @@ describe("workspace terminal rendering", () => {
       const initialFrame = workspace.render(columns);
       const initialHeight = initialFrame.length;
       const plain = initialFrame.map(stripVTControlCharacters);
-      const back = plain.findIndex((line) => /Esc:? Back/.test(line));
+      const back = plain.findIndex((line) => /Esc:? Close/.test(line));
       const selectedRun = plain.findIndex((line) => line.includes("›"));
       expect(back).toBeGreaterThanOrEqual(0);
       expect(selectedRun).toBeGreaterThan(back);
@@ -83,11 +83,11 @@ describe("workspace terminal rendering", () => {
         const frame = workspace.render(columns);
         const settings = frame.map(stripVTControlCharacters);
         const save = settings.findIndex((line) => /(?:Ctrl\+S: Save|\^S Save)/.test(line));
-        const back = settings.findIndex((line) => /Esc:? Back/.test(line));
+        const back = settings.findIndex((line) => /Esc:? Close/.test(line));
         const selected = settings.findIndex((line) => line.includes("› "));
         expect(save).toBeGreaterThan(settings.findIndex((line) => line.includes(" Settings ")));
-        expect(back).toBeGreaterThanOrEqual(save);
-        expect(selected).toBeGreaterThan(back);
+        expect(back).toBeGreaterThanOrEqual(0);
+        expect(selected).toBeGreaterThan(Math.max(back, save));
         expect(frame).toHaveLength(initialHeight);
         expect(frame.every((line) => visibleWidth(line) <= columns)).toBe(true);
       }
@@ -101,7 +101,7 @@ describe("workspace terminal rendering", () => {
           expect(frame.join("\n")).toContain(theme.fg("muted", stripVTControlCharacters(frame.join("\n")).includes("Esc:") ? "Esc:" : "Esc"));
         }
       }
-      input("\x1b"); tui.renderNow();
+      input("\x1b[C"); tui.renderNow();
       for (let repeat = 0; repeat < 10; repeat++) {
         panel.update({
           state: { phase: "generating", requestId: repeat + 2, pendingSend: false },
@@ -119,7 +119,7 @@ describe("workspace terminal rendering", () => {
         for (const key of [
           "\t", "\x1b[6~", "\t", "\x1b[B", "\r", "\x1b[6~", "f", "中文😀", "\r", "keep", "\x13", "\x1b", "o", "\x1b", // Task browser and applied result
           "\x1b[C", "\x1b[B", "\t", "\x1b[6~", "\r", "\x1b", // Unified Usage and Apply
-          "\x1b[C", ...Array<string>(6).fill("\x1b[B"), ...Array<string>(6).fill("\x1b[A"), "\t", ...Array<string>(3).fill("\x1b[B"), "\t", "\x1b", "i", "\x1b",
+          "\x1b[C", ...Array<string>(6).fill("\x1b[B"), ...Array<string>(6).fill("\x1b[A"), "\t", ...Array<string>(3).fill("\x1b[B"), "\t", "\x1b[C", "i", "\x1b",
         ]) {
           input(key);
           tui.renderNow();

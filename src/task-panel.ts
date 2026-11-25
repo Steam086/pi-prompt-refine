@@ -267,7 +267,7 @@ export class TaskPanel {
       this.notice = "Background not saved · Press i to copy into current round";
       return true;
     }
-    if (this.inspecting && (key === "q" || this.keys.matches(data, "tui.select.cancel"))) {
+    if (this.inspecting && (key === "q" || key === "ctrl+\\" || this.keys.matches(data, "tui.select.cancel"))) {
       this.openList();
       return true;
     }
@@ -441,7 +441,7 @@ export class TaskPanel {
     const restored = selected?.record.input.contextUnavailable;
     const run = selected && !selected.original ? selected.record : undefined;
     const stop = run && pending(run);
-    const back: KeyHint = ["Esc", "Back"];
+    const back: KeyHint = ["Esc", passiveHints ? "Close" : "Back"];
     // Reading the original does not change the action target. Name the result
     // explicitly here, even when the selected result itself is off screen.
     const editorHint = this.original && run?.candidate
@@ -458,7 +458,7 @@ export class TaskPanel {
         : selected ? [["Tab", (this.reading ? "Select" : "Read").padEnd("Select".length)]] : [];
       ({ layout, footer } = passiveHintLayout(layout, tabs.length,
         [...primary, ...focus, back, ["?", "Help"]],
-        [back, ...compact(primary.slice(0, 1)), ["?", "Help"], ...compact(primary.slice(1)), ...focus], this.theme));
+        [layout.innerWidth < 9 ? ["Esc", ""] : back, ...compact(primary.slice(0, 1)), ["?", "Help"], ...compact(primary.slice(1)), ...focus], this.theme));
     } else {
       const primary: KeyHint[] = !selected ? [["n", "New"]] : [
         ...(!this.inspecting ? [["Enter", action] as const] : []),

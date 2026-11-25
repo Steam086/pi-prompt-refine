@@ -177,7 +177,7 @@ describe("top action hints", () => {
           expect(text).not.toContain(unavailable);
         }
         expect(text).toMatch(/n:? New/);
-        expect(text).toMatch(/Esc:? Back/);
+        expect(text).toMatch(/Esc:? Close/);
         expect(text).not.toContain("p: Preferences");
         expect(text).not.toContain("Refine model:");
         if (width === 120) expect(frame.join("\n")).toContain(formatKeyHint(["?", "Help"], f.theme, 1, "secondary"));
@@ -206,7 +206,7 @@ describe("top action hints", () => {
         const lines = frame.map(stripVTControlCharacters);
         const layout = panelLayout(width, rows);
         const tabs = lines.findIndex((line) => line.includes(usage ? "Usage" : "Preview"));
-        const back = lines.findIndex((line) => /Esc:? Back/.test(line));
+        const back = lines.findIndex((line) => /Esc:? Close/.test(line));
         const content = lines.findIndex((line) => line.includes(usage ? "No records" : "No current"));
         expect(back).toBeGreaterThanOrEqual(0);
         expect(content).toBeGreaterThan(back);
@@ -214,10 +214,10 @@ describe("top action hints", () => {
           expect(back).toBeGreaterThanOrEqual(tabs);
           expect(tabs).toBeGreaterThanOrEqual(0);
         }
-        expect(frame[back]).toContain(formatKeyHint(["Esc", "Back"], theme, 1, lines[back]!.includes("Esc:") ? "secondary" : "secondary-compact"));
+        expect(frame[back]).toContain(formatKeyHint(["Esc", "Close"], theme, 1, lines[back]!.includes("Esc:") ? "secondary" : "secondary-compact"));
         expect(frame).toHaveLength(layout.height);
         expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
-        expect(lines.slice(content).join("\n")).not.toMatch(/Esc:? Back/);
+        expect(lines.slice(content).join("\n")).not.toMatch(/Esc:? Close/);
       }
     }
   });
@@ -226,7 +226,7 @@ describe("top action hints", () => {
     for (let width = 20; width <= 140; width++) {
       const hints = () => frameHints(panel.render(width)).map(stripVTControlCharacters);
       const before = hints();
-      expect(before.join("\n")).toMatch(/Esc:? Back/);
+      expect(before.join("\n")).toMatch(/Esc:? Close/);
       panel.handleInput("\t");
       const after = hints();
       expect(after.map((line) => line.replace(/(Tab:?) Select/, "$1 Read  ").trimEnd()), `hints at width ${width}`)

@@ -20,7 +20,7 @@ describe("SettingsPage navigation seam", () => {
         const output = hints.join("\n");
         expect(hints).toHaveLength(count);
         expect(strip(output)).not.toMatch(/(?:Space|←|→|↑↓):/);
-        for (const hint of [["Ctrl+S", "Save"], ["Enter", "Change"], ["Esc", "Back"], ["Tab", width >= 80 ? "Next group" : "Group"]] as const) {
+        for (const hint of [["Ctrl+S", "Save"], ["Enter", "Change"], ["Esc", "Close"], ["Tab", width >= 80 ? "Next group" : "Group"]] as const) {
           expect(output).toContain(formatKeyHint(hint, theme, 1, "secondary"));
           expect(output).not.toContain(theme.bold(hint[0]));
         }
@@ -34,7 +34,7 @@ describe("SettingsPage navigation seam", () => {
       }
       workspace.handleInput(" ");
       expect(workspace.render(160).join("\n")).toContain(theme.fg("warning", "Unsaved settings changes"));
-      expect(footer(workspace.render(160)).join("\n")).toContain(formatKeyHint(["Esc", "Discard"], theme, 1, "secondary"));
+      expect(footer(workspace.render(160)).join("\n")).toContain(formatKeyHint(["Esc", "Discard and close"], theme, 1, "secondary"));
       expect(actions.saveContext).not.toHaveBeenCalled();
       expect(actions.submit).not.toHaveBeenCalled();
     } finally { bold.mockRestore(); workspace.dispose(); }
@@ -74,7 +74,7 @@ describe("SettingsPage navigation seam", () => {
     const saveContext = vi.fn(async () => ({ message: "Saved", persisted: true }));
     const page = new SettingsPage(getThemeByName("dark")!, getKeybindings(), {
       context: () => ({ instructions: "always", tree: true, skills: false }), contextEnabled: () => true,
-      optimizer, saveContext, close: vi.fn(),
+      optimizer, saveContext,
     }, () => {
       const input = new PromptInput(tui, { borderColor: (text) => text, selectList: {
         selectedPrefix: (text) => text, selectedText: (text) => text, description: (text) => text,

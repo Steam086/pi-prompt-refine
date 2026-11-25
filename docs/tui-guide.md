@@ -4,7 +4,7 @@ For installation and your first rewrite, start with the [README](../README.md). 
 
 ## Work with drafts and results
 
-The workspace has three tabs: **Preview** for the current round, **Usage** for current and earlier records, and **Settings** for configuration. Use the Left and Right arrow keys to switch tabs and `?` to see the actions available for your current selection.
+The workspace has three tabs: **Preview** for the current round, **Usage** for current and earlier records, and **Settings** for configuration. Use the Left and Right arrow keys to switch tabs and `?` to see the actions available for your current selection. From any top-level tab, press `Esc` once to close the workspace. In a subpage, such as Usage record details, `Esc` returns to the parent page.
 
 Scroll within the workspace to read long results. The frame stays stable as you switch pages and may cover part of the Pi footer in a short terminal.
 
@@ -31,7 +31,7 @@ Select **In Your Own Words** in Preferences to see how the rewrite model underst
 
 - Use `/refine model` to choose the default rewrite model. Your main agent's model does not change, and Pi still manages provider authentication.
 - In **Settings**, use `Tab` to switch between **Context** and **Optimizer**. Select a row for details and use `PgUp` / `PgDn` to read more.
-- `Enter` stages a numeric edit; `Ctrl+S` back in Settings saves it without leaving the current group or selection. `Esc` returns to Preview. Context changes apply to the next round, not the current round. The model, thinking level, and optimization prompt save separately.
+- `Enter` stages a numeric edit; `Ctrl+S` back in Settings saves it without leaving the current group or selection. `Esc` in the numeric editor cancels the current edit. In Settings itself, `Esc` closes the workspace and discards any unsaved settings changes. Context changes apply to the next round, not the current round. The model, thinking level, and optimization prompt save separately.
 - In **Optimizer → Optimization prompt**, press `Enter` to edit Refine’s rewrite policy without leaving Settings. Press `Ctrl+S`, then `y` to confirm. `Esc` from confirmation returns to your draft; `Esc` from the editor discards your edits. The policy applies only to Refine, starting with the next round.
 - The config file is `prompt-refine.json` in your Pi agent directory. See the [example config](../examples/prompt-refine.json); its model entry is illustrative. After editing the file, run `/reload` in Pi.
 

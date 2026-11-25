@@ -438,14 +438,12 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Settings saved"));
     const frame = () => stripVTControlCharacters(harness.panelLines().join("\n"));
     expect(frame()).toContain("› Default model");
-    expect(frame()).toContain("Esc: Back");
+    expect(frame()).toContain("Esc: Close");
     expect(frame()).not.toContain("Unsaved settings changes");
     expect(harness.customCalls()).toBe(1);
     const saved = JSON.parse(await readFile(join(harness.agentDir, "prompt-refine.json"), "utf8"));
     expect(saved.projectContext.instructionsEnabled).toBe(true);
     harness.panelInput("\x1b");
-    expect(frame()).not.toContain("Settings saved");
-    harness.panelInput("q");
     await view;
   });
 

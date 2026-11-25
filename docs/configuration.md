@@ -4,7 +4,7 @@
 
 ## Settings 面板
 
-Tab 切换 **Context**、**Optimizer**，方向键选择设置，必要时用 PgUp／PgDn 阅读详情。Enter／Space 切换开关。数值项按 Enter 打开编辑页，可直接输入或用 Tab 切换档位。再次按 Enter 暂存，返回 Settings 后按 Ctrl+S 保存。Esc 可取消本次暂存。
+Tab 切换 **Context**、**Optimizer**，方向键选择设置，必要时用 PgUp／PgDn 阅读详情。Enter／Space 切换开关。数值项按 Enter 打开编辑页，可直接输入或用 Tab 切换档位。再次按 Enter 暂存，返回 Settings 后按 Ctrl+S 保存。在数值编辑页按 Esc 取消本次编辑；在 Settings 顶层按 Esc 关闭工作台，未保存的暂存修改会被放弃。
 
 上下文和编辑策略从下一 round 生效。输出和超时设置用于之后实际启动的请求，包括届时启动的排队项。原稿长度限制用于新的输入及编辑校验，已有记录仍可阅读。保存失败时检查 `Not persisted`，已应用的设置可能只在当前进程有效。
 

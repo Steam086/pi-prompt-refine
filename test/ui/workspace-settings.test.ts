@@ -118,7 +118,7 @@ describe("shared refine workspace", () => {
         const style = stripVTControlCharacters(output).includes(":") ? "secondary" : "secondary-compact";
         const save = [style === "secondary" ? "Ctrl+S" : "^S", "Save"] as const;
         if (layout.footerHeight > 1 || layout.innerWidth >= 20) expect(output).toContain(formatKeyHint(save, theme, 1, style));
-        expect(output).toContain(formatKeyHint(["Esc", "Back"], theme, 1, style));
+        expect(output).toContain(formatKeyHint(["Esc", "Close"], theme, 1, style));
         if (layout.separatorHeight) {
           const divider = plain.findIndex((line) => /^[│ ]*─+[│ ]*$/u.test(line));
           expect(divider).toBeGreaterThan(0);
@@ -281,7 +281,7 @@ describe("shared refine workspace", () => {
     const { workspace } = create(40, "dark", true);
     workspace.openSettings(undefined, cursor);
     const hints = footer(workspace.render(100)).map((line) => stripVTControlCharacters(line).replace(/^│|│$/g, "").trim());
-    expect(hints).toEqual([`Ctrl+S: Save  Enter: ${cursor === 3 ? "Choose" : "Change"}  Tab: Next group  Esc: Back`]);
+    expect(hints).toEqual([`Ctrl+S: Save  Enter: ${cursor === 3 ? "Choose" : "Change"}  Tab: Next group  Esc: Close`]);
   });
 
   it.each(["dark", "light"])("aligns Settings hints across groups, dirty/disabled states and resize in %s", (name) => {
@@ -295,7 +295,7 @@ describe("shared refine workspace", () => {
           const footerRows = footer(lines);
           const hints = footerRows.map(stripVTControlCharacters).join("\n");
           const action = cursor === 3 ? "Choose" : cursor === 4 ? undefined : cursor === 5 ? "Edit" : "Change";
-          const back = dirty ? "Discard" : "Back";
+          const back = dirty ? "Discard" : "Close";
           expect(hints).not.toMatch(/(?:Space|←|→|↑↓):|\t/);
           expect(hints).toMatch(/(?:Ctrl\+S:|\^S) Save/);
           expect(hints).toMatch(new RegExp(`Esc:? ${back}`));
@@ -307,7 +307,7 @@ describe("shared refine workspace", () => {
             expect(hints).toContain(`${action ? `Enter: ${action}  ` : ""}${optimizer ? "Tab: Next group  " : ""}Esc: ${back}`);
             if (!action) expect(hints).not.toContain("Enter:");
             expect(footerRows[0]).toContain(formatKeyHint(["Ctrl+S", "Save"], theme, 1, "secondary"));
-            expect(footerRows[0]).toContain(formatKeyHint(["Esc", back], theme, 1, "secondary"));
+            expect(footerRows[0]).toContain(formatKeyHint(["Esc", dirty ? "Discard and close" : "Close"], theme, 1, "secondary"));
           }
           // Cache hits must retain the packed frame unchanged.
           expect(workspace.render(width)).toEqual(lines);
@@ -324,7 +324,7 @@ describe("shared refine workspace", () => {
       workspace.openSettings(undefined, cursor);
       for (const width of [12, 20, 24, 30]) {
         const footerRows = footer(workspace.render(width)).map(stripVTControlCharacters);
-        expect(footerRows[0]).toMatch(/Esc Back/);
+        expect(footerRows[0]).toMatch(/Esc Close/);
         expect(footerRows.join("\n")).toMatch(/\^S Save/);
         for (const line of footerRows) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       }
@@ -334,8 +334,8 @@ describe("shared refine workspace", () => {
     terminal.rows = 5;
     expect(stripVTControlCharacters(footer(workspace.render(40)).at(-1)!).trim()).toBe("Esc Discard · ^S Save · ↵ Choose");
     workspace.openSettings();
-    expect(stripVTControlCharacters(footer(workspace.render(40)).at(-1)!).trim()).toBe("Esc Back · ^S Save · ↵ Choose");
-    expect(stripVTControlCharacters(footer(workspace.render(12)).at(-1)!).trim()).toBe("Esc Back");
+    expect(stripVTControlCharacters(footer(workspace.render(40)).at(-1)!).trim()).toBe("Esc Close · ^S Save · ↵ Choose");
+    expect(stripVTControlCharacters(footer(workspace.render(12)).at(-1)!).trim()).toBe("Esc Close");
   });
 
   it("keeps disabled context warnings visible and omits unavailable groups", () => {
@@ -358,7 +358,7 @@ describe("shared refine workspace", () => {
       workspace.handleInput("\x1b[B");
     }
     for (let i = 0; i < 6; i++) workspace.handleInput("\x1b[B");
-    workspace.handleInput("q");
+    workspace.handleInput("\x1b[C");
     workspace.handleInput("\x1b[D");
     expect(stripVTControlCharacters(textOf(workspace.render(40)))).toContain("› Directory tree: [x] On");
   });
@@ -380,15 +380,11 @@ describe("shared refine workspace", () => {
     await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain("Context saved"));
   });
 
-  it.each(["\x1b", "q", "\x1c"])("discards only pending context when returning with %j", (key) => {
+  it.each(["\x1b", "q", "\x1c"])("delegates Settings dismissal without saving with %j", (key) => {
     const { workspace, actions } = create(40, "dark", true);
     workspace.openSettings();
     workspace.handleInput("\r");
-    workspace.handleInput(key);
-    expect(stripVTControlCharacters(workspace.render(100)[1]!)).toContain("Prompt refine");
-    workspace.openSettings();
-    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toMatch(/› Project instructions +Always/);
-    expect(textOf(workspace.render(100))).not.toContain("Unsaved settings changes");
+    expect(workspace.handleInput(key)).toBe(false);
     expect(actions.saveContext).not.toHaveBeenCalled();
   });
 

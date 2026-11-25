@@ -61,7 +61,7 @@ export function renderTaskDocument(
       if (row.record.error === "truncated") body.push(theme.fg("warning", truncatedOutputHint(row.record.usage)));
     }
     if (row) body.push(content.muted(`Focus: ${options.inspecting || options.reading ? "Reading · ↑↓ scroll" : "List · ↑↓ select"}`), "");
-    const hints: KeyHint[] = [["Esc", "Back"], ["?", "Available actions and full feedback"]];
+    const hints: KeyHint[] = [["Esc", options.inspecting || options.retainedEarlier ? "Back" : "Close workspace"], ["?", "Available actions and full feedback"]];
     const expansion = options.expansion;
     if (expansion) hints.push(expansion);
     const inline = options.inline;
