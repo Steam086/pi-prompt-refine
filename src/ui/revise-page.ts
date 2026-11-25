@@ -4,9 +4,10 @@ import { panelHeader, type PanelLayoutProvider } from "../panel-layout.js";
 import { alignedKeyHints, fittingKeyHints } from "../key-hints.js";
 import type { PromptInput } from "../prompt-input.js";
 import { sanitizeTerminalText } from "../presentation.js";
-import { composeRevision, type RevisionDraft, type SelectedPreference } from "../revision-preferences.js";
+import type { RevisionInput } from "../context.js";
+import { composeRevision, promptInstructions, resultNoteRequests, type RevisionDraft, type SelectedPreference } from "../revision-preferences.js";
 
-export interface RevisionTarget { key: string; label?: string; submit(text: string): string | undefined }
+export interface RevisionTarget { key: string; label?: string; submit(text: string, resultNotes?: RevisionInput["resultNotes"]): string | undefined }
 interface RevisePageOptions {
   preferences: boolean;
   preferencesKey?: KeyId | null;
@@ -112,7 +113,9 @@ export class RevisePage {
       this.inputError = "";
       if (key === "ctrl+s") {
         const requirements = composeRevision(this.revisionSelected, text);
+        const requests = resultNoteRequests(this.revisionSelected);
         const error = !requirements.trim() ? "Select preferences or enter additional requirements before submitting."
+          : requests.length ? this.revisionTarget?.submit(requirements, { requests, promptInstruction: promptInstructions(this.revisionSelected, text) })
           : this.revisionTarget?.submit(requirements);
         this.inputError = this.revisionTarget ? error ?? "" : "No current result to revise.";
         if (!this.inputError) this.options.submitted();

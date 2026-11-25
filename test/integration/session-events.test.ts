@@ -1,4 +1,5 @@
 import { assert, describe, expect, it, vi } from "vitest";
+import { BUILTIN_PREFERENCES, PreferenceStore } from "../../src/preference-store.js";
 import type { Hello, Receipt, RunDetail, Snapshot, TaskDetail } from "../../src/app/api.js";
 import { INVALIDATION_EVENT, REQUEST_EVENT, RESPONSE_EVENT } from "../../src/adapters/wire.js";
 import { extensionHarnessEnvironment } from "../support/extension-harness.js";
@@ -9,6 +10,17 @@ const { makeHarness } = extensionHarnessEnvironment();
 describe("session-local application transport", () => {
   it.each(["rpc", "print"] as const)("configures, creates, explicitly runs and reads in %s without editor/transcript effects", async (mode) => {
     const h = await makeHarness({ mode, configureModel: false });
+    if (mode === "rpc") {
+      const store = new PreferenceStore(h.agentDir, h.context.cwd, BUILTIN_PREFERENCES);
+      await store.setProjectDefault(BUILTIN_PREFERENCES[0]!, true);
+      await h.reload();
+      h.complete.mockResolvedValueOnce({ stopReason: "stop", content: [
+        { type: "text", text: '{"prompt":"Not the rewrite"}', textSignature: JSON.stringify({ v: 1, id: "msg_commentary", phase: "commentary" }) },
+        { type: "text", textSignature: JSON.stringify({ v: 1, id: "msg_final", phase: "final_answer" }), text: JSON.stringify({
+          prompt: "Refined prompt", additional: [{ id: "r1", text: "Discuss the original goal." }],
+        }) },
+      ] });
+    }
     const hello = requireValue(await wireRequest<Hello>(h.events, { action: "hello", clientId: "browser-one" }));
     const empty = requireValue(await wireRequest<Snapshot>(h.events, { action: "query", binding: hello.binding, query: { method: "snapshot", scope: "current" } }));
     expect(empty.optimizer.model).toBeUndefined();
@@ -32,6 +44,12 @@ describe("session-local application transport", () => {
     expect(h.internalMessages).toEqual([]);
     expect(h.sessionWrites).toEqual([]);
     expect(h.customCalls()).toBe(0);
+    expect(run.additional).toEqual(mode === "rpc" ? [{ name: "In Your Own Words", text: "Discuss the original goal." }] : undefined);
+    // The configure receipt is pending. Let its asynchronous write finish before fixture teardown.
+    await vi.waitFor(async () => {
+      const snapshot = requireValue(await wireRequest<Snapshot>(h.events, { action: "query", binding: hello.binding, query: { method: "snapshot", scope: "current" } }));
+      expect(snapshot.optimizer.persistence).toBe("persisted");
+    });
   });
 
   it.each([

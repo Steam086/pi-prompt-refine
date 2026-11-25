@@ -21,6 +21,8 @@
 - `models`：可用优化模型与支持的 thinking；没有认证配置。
 - `operation`：传 clientLeaseId、operationId，查询未见、等待、完成或过期。
 
+带结果附注的运行可在 `run` 详情的可选 `additional` 数组中读取。每项含冻结名称 `name`，可用时还有 `text`；顺序对应本次选择。正文仍取 `text`。
+
 DTO 是脱离内部记录的不可变快照。不输出完整背景、prepared input、provider 原始响应、错误堆栈或 sidecar 绝对路径。原稿、结果、已采用的要求本身仍可能敏感，访问权限由宿主部署承担。任务/运行编号必须连同 Binding 使用，不能跨 runtime 单独识别。
 
 `subscribe(binding, listener)` 只合并发送 `{binding, revision}` invalidation；订阅者重新查询。解除订阅/断线不停止请求。时钟读取不增加 revision，运行中 elapsed 从实际启动时计算，排队不计时。

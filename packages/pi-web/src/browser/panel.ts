@@ -28,7 +28,7 @@ export class RefinePanel extends HTMLElement {
   private runSignature = "";
   private selectedRunId = "";
   private selectedRunBinding = "";
-  private output = element("pre");
+  private output = element("article");
   private notice = element("p");
   private optimizerStatus = element("p");
   private original = element("textarea");
@@ -46,7 +46,7 @@ export class RefinePanel extends HTMLElement {
   constructor() {
     super();
     const style = element("style");
-    style.textContent = `:host{display:block;color:inherit;font:inherit;min-width:0}*{box-sizing:border-box}section{min-width:0}label{display:grid;gap:.35rem;margin:.6rem 0}textarea,select,button{font:inherit;color:inherit;background:inherit;border:1px solid currentColor;border-radius:.25rem;padding:.4rem}textarea{width:100%;min-height:12rem;resize:vertical}button{margin:.2rem}button:disabled{opacity:.5}select{max-width:100%;width:100%}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr));gap:1rem}pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere;max-height:60vh;overflow:auto}h2,h3{font-size:1em}p{overflow-wrap:anywhere}[role=alert]{font-weight:bold} :focus-visible{outline:2px solid currentColor;outline-offset:2px}`;
+    style.textContent = `:host{display:block;color:inherit;font:inherit;min-width:0}*{box-sizing:border-box}section{min-width:0}label{display:grid;gap:.35rem;margin:.6rem 0}textarea,select,button{font:inherit;color:inherit;background:inherit;border:1px solid currentColor;border-radius:.25rem;padding:.4rem}textarea{width:100%;min-height:12rem;resize:vertical}button{margin:.2rem}button:disabled{opacity:.5}select{max-width:100%;width:100%}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr));gap:1rem}article{max-height:60vh;overflow:auto;overflow-wrap:anywhere}article h4,article h5{font:inherit;font-weight:bold;margin:1rem 0 .25rem}article section{border-block-start:1px solid currentColor;margin-block-start:1rem}article pre{font:inherit;white-space:pre-wrap;margin:.25rem 0}h2,h3{font-size:1em}p{overflow-wrap:anywhere}[role=alert]{font-weight:bold} :focus-visible{outline:2px solid currentColor;outline-offset:2px}`;
     this.notice.setAttribute("role", "status"); this.notice.setAttribute("aria-live", "polite");
     this.original.spellcheck = false; this.original.maxLength = 100_000;
     this.original.addEventListener("input", () => {
@@ -172,11 +172,23 @@ export class RefinePanel extends HTMLElement {
     const client = this.client;
     this.selectedRunId = id; this.selectedRunBinding = scopeKey(client.hello?.binding);
     const run = await client.query<RunDetail>({ method: "run", runId: id });
-    if (client !== this.client) return;
-    this.output.textContent = `${run.id} · ${run.model.provider}/${run.model.id} · ${run.status}\n\n${run.text ?? run.diagnostic ?? "No result yet."}\n\nOriginal\n${run.original}` +
-      (run.initialInstruction ? `\n\nInitial requirements\n${run.initialInstruction}` : "") +
-      (run.revisionInstruction ? `\n\nRevision requirements\n${run.revisionInstruction}` : "") +
-      (run.previousResult ? `\n\nPrevious result\n${run.previousResult}` : "");
+    if (client !== this.client || this.selectedRunId !== id || this.selectedRunBinding !== scopeKey(client.hello?.binding)) return;
+    this.output.replaceChildren(
+      element("p", `${run.id} · ${run.model.provider}/${run.model.id} · ${run.status}`),
+      element("pre", run.text ?? run.diagnostic ?? "No result yet."),
+    );
+    if (run.additional?.length) {
+      const notes = element("section");
+      notes.append(element("h4", "Result notes · preview only"));
+      for (const note of run.additional) {
+        notes.append(element("h5", note.name), element("pre", note.text ?? "Note unavailable for this run."));
+      }
+      this.output.append(notes);
+    }
+    this.output.append(element("h4", "Original"), element("pre", run.original));
+    if (run.initialInstruction) this.output.append(element("h4", "Initial requirements"), element("pre", run.initialInstruction));
+    if (run.revisionInstruction) this.output.append(element("h4", "Revision requirements"), element("pre", run.revisionInstruction));
+    if (run.previousResult) this.output.append(element("h4", "Previous result"), element("pre", run.previousResult));
   }
   private async receipt(receipt: Receipt, pending?: RefineClient["pending"]) {
     const mutation = pending?.mutation;

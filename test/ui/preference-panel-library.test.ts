@@ -55,6 +55,19 @@ describe("Library purpose groups", () => {
     expect(composed.indexOf("Main-agent task requirements")).toBeLessThan(composed.indexOf("Prompt rewriting instructions"));
   });
 
+  it("creates a custom result note and shows its destination while choosing the type", async () => {
+    const f = setup([], "Name the unresolved question."); await loaded(f.panel);
+    f.panel.handleInput("n"); f.panel.handleInput("Open question");
+    for (const key of [tab, tab, tab, enter, enter]) f.panel.handleInput(key);
+    expect(text(f.panel)).toContain("Type: Result notes");
+    expect(text(f.panel)).toContain("Shown in Result only.");
+    for (const key of [tab, tab, enter]) f.panel.handleInput(key);
+    await loaded(f.panel);
+    expect(f.repo.save).toHaveBeenCalledWith("project", { name: "Open question", body: "Name the unresolved question.",
+      metadata: { kind: "result", description: "Open question", activation: "manual" } }, undefined);
+    expect(f.close).not.toHaveBeenCalled();
+  });
+
   it("wraps arrow navigation across groups and filtered/selected lists", async () => {
     const f = setup([selectPreference(rewrite), selectPreference(task)], "", "dark", [rewrite, task]);
     await loaded(f.panel);

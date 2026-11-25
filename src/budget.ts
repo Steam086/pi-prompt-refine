@@ -25,6 +25,7 @@ export interface BudgetModel {
   compat?: Model<Api>["compat"];
 }
 interface Packet {
+  result_note_requests?: { id: string; instruction: string }[];
   draft?: string;
   original_draft?: string;
   previous_candidate?: string;
@@ -77,7 +78,8 @@ export function budgetRequest(systemPrompt: string, preparedInput: string, model
   // estimated answer length: rewriting can shorten it, and tokenization varies.
   const outputSize = Math.max(...[packet.draft ?? packet.original_draft ?? "", packet.previous_candidate ?? ""]
     .map((text) => estimateTextTokens(JSON.stringify({ prompt: text }))));
-  const preferredAnswer = Math.ceil(outputSize * 1.25) + 256;
+  // Reserve room for short requested notes when trading output space for history.
+  const preferredAnswer = Math.ceil(outputSize * 1.25) + 256 + (packet.result_note_requests?.length ?? 0) * 128;
   const reasoning = thinkingLevel !== undefined && thinkingLevel !== "off";
   // Planning allowance, not a guaranteed answer reserve: effort-only providers
   // can spend the entire shared ceiling on reasoning.

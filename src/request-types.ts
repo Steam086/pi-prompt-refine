@@ -4,7 +4,7 @@ import type { BudgetReport } from "./budget.js";
 import type { HistorySnapshot, RevisionInput } from "./context.js";
 import type { TokenUsage } from "./usage.js";
 import type { ProjectSnapshot } from "./project-context.js";
-import type { SelectedPreference } from "./revision-preferences.js";
+import type { ResultNote, SelectedPreference } from "./revision-preferences.js";
 
 interface RequestProjectContext { cwd: string; snapshot: ProjectSnapshot; revisionSnapshot?: ProjectSnapshot; config?: ProjectContextConfig }
 export type RefinePhase = "idle" | "generating" | "ready" | "error";
@@ -40,6 +40,7 @@ export interface RefineRequest extends RefineRequestInput {
   recordId: number;
 }
 export interface RefineCompletion {
+  additional?: ResultNote[];
   usage?: TokenUsage;
   title?: string;
   invalidOutput?: boolean;
@@ -47,6 +48,7 @@ export interface RefineCompletion {
   stopReason: RefineStopReason;
 }
 export interface Candidate extends RefineRequestInput {
+  additional?: ResultNote[];
   recordId?: number;
   elapsedSeconds?: number;
   usage?: TokenUsage;

@@ -240,7 +240,14 @@ test("form identity survives scope switches and recovered draft receipts preserv
 
 test("run receipts retain their target before options arrive and never migrate it to another Binding", async () => {
   const saved = Object.getOwnPropertyDescriptor(globalThis, "HTMLElement");
+  const savedDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const node = tag => ({
+    tag, textContent: "", children: [],
+    append(...children) { this.children.push(...children); },
+    replaceChildren(...children) { this.children = children; },
+  });
   try {
+    Object.defineProperty(globalThis, "document", { configurable: true, value: { createElement: node } });
     Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: class {} });
     const { RefinePanel } = await import("../dist/browser/packages/pi-web/src/browser/panel.js");
     const binding = { runtimeId: "runtime", sessionId: "session", lifecycleEpoch: 1 };
@@ -248,16 +255,23 @@ test("run receipts retain their target before options arrive and never migrate i
     const runs = { options };
     Object.defineProperty(runs, "value", { get: () => value, set: (next) => { value = options.some((o) => o.value === next) ? next : ""; } });
     const panel = Object.assign(Object.create(RefinePanel.prototype), {
-      client: { hello: { binding }, query: async () => ({ id: "run-1", model: { provider: "mock", id: "model" }, status: "generating", original: "original" }) },
-      runs, output: { textContent: "" }, selectedRunId: "", selectedRunBinding: "",
+      client: { hello: { binding }, query: async () => ({ id: "run-1", model: { provider: "mock", id: "model" }, status: "generated", original: "original",
+        text: "Candidate", additional: [{ name: "Intent", text: "<literal>" }, { name: "Missing" }] }) },
+      runs, output: node("article"), selectedRunId: "", selectedRunBinding: "",
     });
     await panel.receipt({ outcome: "started", taskId: "task-1", runId: "run-1" });
     assert.equal(runs.value, ""); assert.equal(panel.selectedRunId, "run-1");
+    assert.equal(panel.output.children[1].textContent, "Candidate");
+    const notes = panel.output.children[2];
+    assert.equal(notes.tag, "section");
+    assert.deepEqual(notes.children.map(child => child.textContent),
+      ["Result notes · preview only", "Intent", "<literal>", "Missing", "Note unavailable for this run."]);
     options.push({ value: "run-1" }); panel.restoreRunSelection();
     assert.equal(runs.value, "run-1");
     panel.client.hello = { binding: { ...binding, lifecycleEpoch: 2 } }; panel.restoreRunSelection();
     assert.equal(panel.selectedRunId, ""); assert.equal(runs.value, ""); assert.equal(panel.output.textContent, "");
   } finally {
+    if (savedDocument) Object.defineProperty(globalThis, "document", savedDocument); else delete globalThis.document;
     if (saved) Object.defineProperty(globalThis, "HTMLElement", saved); else delete globalThis.HTMLElement;
   }
 });

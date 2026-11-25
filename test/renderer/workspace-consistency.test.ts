@@ -245,6 +245,28 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         operationHint(details, "Esc", "Back");
         expect(details).toContain(theme.getFgAnsi("text") + "Literal **正文** 中文😀");
         expect(details).not.toContain("\x1b[31m");
+        records[0]!.candidate!.additional = [
+          { name: "In Your Own Words", text: "只讨论 **范围** 😀" },
+          { name: "Limits", text: undefined },
+        ];
+        workspace.invalidate();
+        const initialNotes = frame("Result with notes", false).join("\n");
+        expect(initialNotes).toContain(theme.fg("muted", " · 2 notes below"));
+        input("\x1b[6~");
+        const firstPage = frame("Result notes heading", false).join("\n");
+        input("\x1b[6~");
+        const lastPage = frame("Result notes").join("\n");
+        input("\x1b[B");
+        const notes = [initialNotes, firstPage, lastPage, frame("End of notes", false).join("\n")].join("\n");
+        expect(notes).toContain(theme.fg("text", theme.bold("In Your Own Words")));
+        expect(notes).toContain(theme.getFgAnsi("text") + "只讨论 **范围** 😀");
+        expect(notes).toContain(theme.getFgAnsi("warning") + "Note unavailable");
+        expect(position.selectedId).toBe(1);
+        input("\x1b[5~");
+        input("\x1b[5~");
+        input("\x1b[5~");
+        delete records[0]!.candidate!.additional;
+        workspace.invalidate();
         input("c");
         const compare = frame("Compare").join("\n");
         operationHint(compare, "Esc", "Back");

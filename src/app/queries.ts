@@ -91,6 +91,7 @@ export function runSummary(record: RefineRecord, version: number, elapsedSeconds
 export function runDetail(record: RefineRecord, version: number, elapsedSeconds = record.elapsedSeconds): RunDetail {
   const budget = record.input.budget;
   return { ...runSummary(record, version, elapsedSeconds), original: record.input.draft, text: record.candidate?.text,
+    ...(record.candidate?.additional ? { additional: record.candidate.additional.map(({ name, text }) => ({ name, text })) } : {}),
     initialInstruction: record.input.editingInstruction, revisionInstruction: record.input.revision?.instruction,
     previousResult: record.input.revision?.previousCandidate, backgroundAvailable: !record.input.contextUnavailable,
     ...(budget ? { budget: { status: budget.status, inputTokens: budget.inputTokens,

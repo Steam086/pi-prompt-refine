@@ -3,7 +3,7 @@ import type { AssistantMessage, UserMessage } from "@earendil-works/pi-ai";
 import type { RefineConfig } from "../config.js";
 import type { RefineController } from "../controller.js";
 import type { RefineRequest, RefineCompletion } from "../request-types.js";
-import { buildRefineInput, parseRefineOutput } from "../context.js";
+import { buildRefineInput, parseRefineOutput, runInstructions } from "../context.js";
 import { preserveDroppedTuiReference } from "../reference-preservation.js";
 import { budgetRequest } from "../budget.js";
 import { assembleProjectContext, collectDirectoryContext, type TreeSnapshot } from "../project-context.js";
@@ -43,6 +43,7 @@ export function createCompletion<Context extends CompletionContext>({ config, ge
     // Freeze runtime limits before asynchronous directory collection. Settings
     // changes must not alter a request that has already started.
     const outputLimit = config.maxOutputTokens;
+    const { notes, promptInstruction } = runInstructions(request.editingInstruction, request.preferences, request.revision);
     let projectText = "";
     let diagnostics = request.projectDiagnostics;
     const projectConfig = structuredClone(request.project?.config ?? config.projectContext);
@@ -113,12 +114,14 @@ export function createCompletion<Context extends CompletionContext>({ config, ge
     }
     const stopReason = response.stopReason === "error" && isTransportError(response.errorMessage, httpStatus) ? "network"
       : response.content.some((block) => block.type === "toolCall") ? "toolUse" : response.stopReason;
-    const parsed = stopReason === "stop" ? parseRefineOutput(finalResponseText(response.content)) : undefined;
-    const guarded = parsed && !request.revision ? preserveDroppedTuiReference(request.draft, parsed.text, request.editingInstruction) : undefined;
+    const parsed = stopReason === "stop" ? parseRefineOutput(finalResponseText(response.content), notes) : undefined;
+    const guarded = parsed && !request.revision ? preserveDroppedTuiReference(request.draft, parsed.text, promptInstruction) : undefined;
     if (guarded?.restored && !signal.aborted) notifyIfSameSession(request.sessionId,
       `Refine #${request.recordId} omitted most of a pasted TUI reference. Original draft kept; review the result before accepting.`);
+    const unchangedPrompt = request.revision?.resultNotes && !promptInstruction ? request.revision.previousCandidate : undefined;
     return {
-      text: guarded?.text ?? parsed?.text ?? "",
+      text: parsed ? unchangedPrompt ?? guarded?.text ?? parsed.text : "",
+      additional: guarded?.restored ? parsed?.additional?.map(({ name }) => ({ name })) : parsed?.additional,
       title: request.generateTitle && !guarded?.restored ? parsed?.title : undefined,
       invalidOutput: stopReason === "stop" && !parsed,
       stopReason,

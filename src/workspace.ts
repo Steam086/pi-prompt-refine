@@ -16,7 +16,7 @@ import type { PreferenceRepository, RevisionDraft, SelectedPreference } from "./
 import { canonicalShortcut } from "./config.js";
 import type { ContextSettings } from "./settings.js";
 import { SettingsPage, type SettingsOptimizer, type SettingsPageActions, type SettingsResult } from "./ui/settings-page.js";
-import { RevisePage } from "./ui/revise-page.js";
+import { RevisePage, type RevisionTarget } from "./ui/revise-page.js";
 export type { SettingsResult } from "./ui/settings-page.js";
 export type { ContextSettings } from "./settings.js";
 
@@ -43,7 +43,7 @@ interface WorkspaceActions {
   /** Undefined means the request was accepted; errors stay beside the retained input. */
   submit(text: string): string | undefined;
   /** Captures one actionable candidate; the callback rejects stale targets. */
-  revision?(id?: number): { key: string; label?: string; submit(text: string): string | undefined } | undefined;
+  revision?(id?: number): RevisionTarget | undefined;
   /** Bounded in-memory drafts survive closing the overlay, never persisted to history. */
   revisionDrafts?: Map<string, RevisionDraft>;
 }

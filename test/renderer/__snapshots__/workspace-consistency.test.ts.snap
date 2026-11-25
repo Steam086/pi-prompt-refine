@@ -120,6 +120,23 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │  Literal **正文** 中文😀                              │
 ╰───────────────────────────────────────────────────────╯
 
+=== Result notes ===
+╭───────────────────────────────────────────────────────╮
+│  Prompt details   Selected: #1 model-1 · o Reference  │
+│   Preview    Usage    Settings                        │
+│  a Editor only · s Send · p Preferences               │
+│  Esc Back · ? Help · c Compare · e Edit result        │
+│  ───────────────────────────────────────────────────  │
+│  model-1 · ✓ Done                                     │
+│  openai-codex · Thinking xhigh · 23s · ↑2.3k ↓670 ·   │
+│  Cost —                                               │
+│                                                       │
+│  In Your Own Words                                    │
+│  只讨论 **范围** 😀                                   │
+│                                                       │
+│  Limits                                               │
+╰───────────────────────────────────────────────────────╯
+
 === Compare ===
 ╭───────────────────────────────────────────────────────╮
 │  Compare results   Selected: #1 model-1 · ↑↓ scroll   │

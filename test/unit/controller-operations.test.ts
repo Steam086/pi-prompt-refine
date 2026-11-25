@@ -56,7 +56,8 @@ describe("multi-model task history", () => {
   });
 
   it("archives manual edits without losing raw model output or inventing request usage", async () => {
-    const { controller } = setup(async () => ({ ...success("Raw model output"), usage: { totalTokens: 17 } }));
+    const additional = [{ name: "Intent", text: "Original interpretation" }];
+    const { controller } = setup(async () => ({ ...success("Raw model output"), additional, usage: { totalTokens: 17 } }));
     controller.trigger(input("Draft"));
     await flushPromises();
     controller.updateCandidate(controller.getCandidateToken()!, "Edited text");
@@ -64,6 +65,8 @@ describe("multi-model task history", () => {
     expect(records).toHaveLength(2);
     expect(records[0]).toMatchObject({ kind: "refine", candidate: { text: "Raw model output" }, usage: { totalTokens: 17 } });
     expect(records[1]).toMatchObject({ kind: "edit", parentId: records[0]!.id, candidate: { text: "Edited text" } });
+    expect(records[0]?.candidate?.additional).toEqual(additional);
+    expect(records[1]?.candidate?.additional).toBeUndefined();
     expect(records[1]?.usage).toBeUndefined();
     expect(controller.getCandidate()?.usage).toBeUndefined();
     expect(controller.getState().usage).toBeUndefined();

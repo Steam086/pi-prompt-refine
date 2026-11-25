@@ -1,7 +1,7 @@
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { RefineConfig } from "../config.js";
-import { REFINE_SYSTEM_PROMPT } from "../context.js";
+import { REFINE_SYSTEM_PROMPT, type RevisionInput } from "../context.js";
 import type { PreferenceStore } from "../preference-store.js";
 import type { RefineController } from "../controller.js";
 import type { CandidateToken, RefineRequestInput, TriggerResult } from "../request-types.js";
@@ -28,7 +28,7 @@ interface WorkspaceActionsDependencies {
   optimizationError(ctx: ExtensionContext, draft: string): string | undefined;
   operations: TuiOperations;
   triggerOptimize: ReturnType<typeof createRequestFlows>["triggerOptimize"];
-  reviseCandidate(ctx: ExtensionContext, token: CandidateToken, instruction: string): string | undefined;
+  reviseCandidate(ctx: ExtensionContext, token: CandidateToken, instruction: string, resultNotes?: RevisionInput["resultNotes"]): string | undefined;
   registeredModels(ctx: ExtensionContext): ReturnType<ExtensionContext["modelRegistry"]["getAvailable"]>;
   showOptimizerQuota(): boolean;
   notify: Notify;
@@ -239,9 +239,9 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
           // Failure rebases generation but keeps this source identity; retain its feedback.
           key: `${token.sessionId}:${controller.getCandidate()?.recordId ?? token.requestId}`,
           label: `#${controller.getCandidate()!.recordId ?? "?"} · ${displayModel(controller.getCandidate()!.model)}`,
-          submit: (text: string) => {
+          submit: (text: string, resultNotes?: RevisionInput["resultNotes"]) => {
             if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId) return "Session changed; no request sent.";
-            return reviseCandidate(ctx, token, text);
+            return reviseCandidate(ctx, token, text, resultNotes);
           },
         };
       },

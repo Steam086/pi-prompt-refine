@@ -6,7 +6,7 @@ import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
 import { renderPreferenceRow } from "./preference-row.js";
-import { composeRevision, preferenceContentKey, preferenceKey, preferenceSelectionLabel, preferenceValidation, searchPreferences, selectPreference, PREFERENCE_SELECTION_LIMIT,
+import { preferenceGroup, preferenceGroupOrder, RESULT_NOTE_HINT, composeRevision, preferenceContentKey, preferenceKey, preferenceSelectionLabel, preferenceValidation, searchPreferences, selectPreference, PREFERENCE_SELECTION_LIMIT,
   type PreferenceLibrary, type PreferenceMetadata, type PreferenceRepository, type PreferenceScope, type PreferenceValue, type RevisionPreference, type SelectedPreference } from "./revision-preferences.js";
 
 type Form = {
@@ -104,7 +104,7 @@ export class PreferencePanel {
     const keys = new Set(this.library.entries.map(preferenceKey));
     const missingDefaults: RevisionPreference[] = (this.library.projectDefaults ?? []).filter((key) => !keys.has(key) &&
       !this.working.some((entry) => preferenceKey(entry) === key)).map((key) => {
-        const [scope, id] = key.split(":") as [PreferenceScope, string];
+        const [scope, id] = key.split(":") as [RevisionPreference["scope"], string];
         return { scope, id, version: 1, name: `Unavailable default · ${id}`, body: "" };
       });
     const candidates = this.selectedOnly ? this.working
@@ -112,9 +112,8 @@ export class PreferencePanel {
     const matches = searchPreferences(candidates, query);
     // Selected snapshots are audited in composeRevision order, never search rank.
     const matchedKeys = new Set(matches.map(preferenceKey));
-    const rank = (entry: RevisionPreference) => entry.metadata?.kind === "rewrite" ? 0 : entry.metadata?.kind === "task" ? 1 : 2;
     const entries = this.selectedOnly ? this.working.filter((entry) => matchedKeys.has(preferenceKey(entry)))
-      : matches.sort((a, b) => rank(a) - rank(b));
+      : matches.sort((a, b) => preferenceGroupOrder(a) - preferenceGroupOrder(b));
     this.entriesCache = { query, version: this.contentVersion, entries };
     return entries;
   }
@@ -229,8 +228,9 @@ export class PreferencePanel {
       ...(this.repository.setProjectDefault ? [{ text: `Project default: ${this.library.projectDefaults?.includes(preferenceKey(value)) ? "On" : "Off"} · future drafts`, color: "muted" as const }] : []),
       ...state,
       ...(value.metadata ? [
-        { text: `${value.metadata.kind === "rewrite" ? "Prompt rewriting" : "Task requirements"}${compact ? ""
+        { text: `${preferenceGroup(value)}${compact ? ""
           : "selectionSource" in value && value.selectionSource === "project-default" ? " · project default" : " · manual"}`, color: "muted" as const },
+        ...(value.metadata.kind === "result" ? [{ text: RESULT_NOTE_HINT, color: "muted" as const }] : []),
         { text: value.metadata.description, color: "muted" as const },
       ] : []),
       { text: "", color: "text" }, { text: value.body, color: "text" },
@@ -251,7 +251,7 @@ export class PreferencePanel {
         { text: status, color: unavailable || !source || changed ? "warning" : "muted" },
         ...(!local.metadata && !compact ? [{ text: preferenceSelectionLabel(local), color: "muted" as const }] : []),
         ...(local.metadata ? compact ? [
-          { text: local.metadata.kind === "rewrite" ? "Prompt rewriting" : "Task requirements", color: "muted" as const },
+          { text: preferenceGroup(local), color: "muted" as const },
           { text: local.metadata.description, color: "muted" as const },
         ] : [{ text: `${local.metadata.kind} · ${preferenceSelectionLabel(local)} · ${local.metadata.description}`, color: "muted" as const }] : []),
         { text: local.body, color: "text" });
@@ -287,7 +287,7 @@ export class PreferencePanel {
     const name = new Input({ prompt: "Name: " }); name.setValue(sanitizeTerminalText(rawName).replace(/\n/g, " "));
     const rawDescription = entry?.metadata?.description ?? "";
     const description = new Input({ prompt: "Description: " }); description.setValue(sanitizeTerminalText(rawDescription).replace(/\n/g, " "));
-    const form: Form = { kind, scope: entry?.scope ?? "project", name, rawName, initialEditorName: name.getValue(),
+    const form: Form = { kind, scope: entry?.scope === "global" ? "global" : "project", name, rawName, initialEditorName: name.getValue(),
       body, rawBody, initialEditorBody: body.editor.getExpandedText(),
       description, rawDescription, initialEditorDescription: description.getValue(),
       metadata: entry ? entry.metadata && structuredClone(entry.metadata) : { kind: "task", description: "", activation: "manual" },
@@ -302,6 +302,13 @@ export class PreferencePanel {
     else {
       const source = entry && this.source(entry);
       if (!source) { this.setNotice("Select a saved preference to edit or delete.", "warning"); return; }
+      if (source.scope === "builtin") {
+        if (action === "edit") {
+          this.openForm("new", source);
+          this.setNotice("Editing a new copy of this built-in preference.");
+        } else this.setNotice("Built-in preference. Use g to change its project default.", "warning");
+        return;
+      }
       if (action === "edit") this.openForm("library", source);
       else this.page = { kind: "delete", entry: structuredClone(source) };
     }
@@ -391,7 +398,7 @@ export class PreferencePanel {
       else if (form.focus === count - 1 && enter) void this.save(form);
       else if (form.focus === 2 && (enter || key === "space") && form.kind !== "library") form.scope = form.scope === "project" ? "global" : "project";
       else if (form.focus === 3 && (enter || key === "space")) {
-        form.metadata = { description: form.description.getValue(), kind: form.metadata?.kind === "rewrite" ? "task" : "rewrite", activation: "manual" };
+        form.metadata = { description: form.description.getValue(), kind: form.metadata?.kind === "rewrite" ? "result" : form.metadata?.kind === "result" ? "task" : "rewrite", activation: "manual" };
       } else if (form.focus === 4) {
         if (enter) form.focus = 5;
         else {
@@ -489,7 +496,8 @@ export class PreferencePanel {
       subtitle = `Focus: ${["Name", "Instruction", "Scope", "Type", "Description", "Save"][form.focus]} · Check paths and sensitive text`;
       const name = form.name.render(w);
       const scope = button(`Scope: ${form.scope}${form.kind === "library" ? " (fixed)" : " (Enter change)"}`, form.focus === 2);
-      const type = button(`Type: ${form.metadata?.kind === "rewrite" ? "Prompt rewriting" : form.metadata?.kind === "task" ? "Task requirements" : "Unclassified (legacy)"}`, form.focus === 3);
+      const type = button(`Type: ${form.metadata ? preferenceGroup({ metadata: form.metadata }) : "Unclassified (legacy)"}`, form.focus === 3);
+      if (form.metadata?.kind === "result") subtitle = RESULT_NOTE_HINT;
       const description = form.description.render(w);
       const save = button("Save to preference library", form.focus === 5);
       // Native Editor cannot wrap a wide glyph into a one-column line. The
@@ -530,10 +538,8 @@ export class PreferencePanel {
         this.viewport = available;
         const split = room && w >= 76;
         const leftWidth = split ? Math.floor(w * 0.43) : w;
-        const groupTitle = (entry: RevisionPreference) => entry.metadata?.kind === "task" ? "Task requirements"
-          : entry.metadata?.kind === "rewrite" ? "Prompt rewriting" : "Unclassified";
         const window = selectionWindow(entries.length, this.index, available, this.top,
-          this.selectedOnly ? undefined : (index) => groupTitle(entries[index]!), available >= 10 ? 1 : 0, this.navigationDirection);
+          this.selectedOnly ? undefined : (index) => preferenceGroup(entries[index]!), available >= 10 ? 1 : 0, this.navigationDirection);
         this.top = window.start;
         const rows = window.rows;
         this.viewport = Math.max(1, rows.filter((row) => typeof row === "number").length);

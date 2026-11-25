@@ -5,7 +5,7 @@ import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
 import { renderPreferenceRow } from "./preference-row.js";
 import { formatKeyHint } from "./key-hints.js";
-import { preferenceContentKey, preferenceKey, searchPreferences, selectPreference, PREFERENCE_SELECTION_LIMIT,
+import { preferenceGroup, preferenceGroupOrder, RESULT_NOTE_HINT, preferenceContentKey, preferenceKey, searchPreferences, selectPreference, PREFERENCE_SELECTION_LIMIT,
   type PreferenceLibrary, type PreferenceRepository, type RevisionPreference, type SelectedPreference } from "./revision-preferences.js";
 
 export interface InlinePreferenceTarget {
@@ -107,8 +107,7 @@ export class InlinePreferences {
     const snapshots = new Map(selected.map((entry) => [preferenceKey(entry), entry]));
     const candidates = [...libraryEntries.map((entry) => snapshots.get(preferenceKey(entry)) ?? entry),
       ...selected.filter((entry) => !keys.has(preferenceKey(entry)))];
-    const rank = (entry: RevisionPreference) => entry.metadata?.kind === "rewrite" ? 0 : entry.metadata?.kind === "task" ? 1 : 2;
-    const entries = searchPreferences(candidates, query).sort((a, b) => rank(a) - rank(b));
+    const entries = searchPreferences(candidates, query).sort((a, b) => preferenceGroupOrder(a) - preferenceGroupOrder(b));
     this.cache = { selected: structuredClone(selected), query, library: this.library, entries };
     return entries;
   }
@@ -174,7 +173,8 @@ export class InlinePreferences {
       } else if (entry && key === "o") {
         const local = target.selected.find((item) => preferenceKey(item) === preferenceKey(entry));
         const warning = local && this.snapshotWarning(local);
-        const parts = [entry.name, ...(warning ? [warning] : []), local ? "Selected snapshot" : "Library entry", (local ?? entry).body];
+        const parts = [entry.name, ...(warning ? [warning] : []), local ? "Selected snapshot" : "Library entry",
+          ...(entry.metadata?.kind === "result" ? [RESULT_NOTE_HINT] : []), (local ?? entry).body];
         const source = this.library.entries.find((item) => preferenceKey(item) === preferenceKey(entry));
         if (local && warning && source) parts.push("Current library entry", source.body);
         const text = parts.join("\n\n");
@@ -198,7 +198,7 @@ export class InlinePreferences {
     const entry = target && position && this.highlighted(target.selected, position);
     if (!entry?.metadata?.description) return [];
     const heading = showName ? [truncateToWidth(this.theme.fg("text", this.theme.bold(sanitizeTerminalText(entry.name))), width, "…")] : [];
-    const lines = wrapTextWithAnsi(sanitizeTerminalText(entry.metadata.description), width);
+    const lines = wrapTextWithAnsi(sanitizeTerminalText(entry.metadata.kind === "result" ? RESULT_NOTE_HINT : entry.metadata.description), width);
     const room = height - heading.length;
     const body = lines.slice(0, room);
     if (lines.length > room) body[room - 1] = truncateToWidth(body[room - 1]! + " …", width, "…");
@@ -210,7 +210,7 @@ export class InlinePreferences {
     const target = this.target(this.id), position = this.positions.get(this.id);
     const entry = target && position && this.highlighted(target.selected, position);
     if (!entry) return [];
-    const description = entry.metadata?.description ?? "";
+    const description = entry.metadata?.kind === "result" ? RESULT_NOTE_HINT + " " + entry.metadata.description : entry.metadata?.description ?? "";
     if (!this.previewCache || this.previewCache.width !== width || this.previewCache.body !== entry.body || this.previewCache.description !== description) {
       this.previewCache = { width, body: entry.body, description,
         bodyLines: wrapTextWithAnsi(sanitizeTerminalText(entry.body), width),
@@ -266,18 +266,17 @@ export class InlinePreferences {
       if (result.length < height) result.push(muted(this.loading ? "Loading preferences…" : position.search.getValue() ? "No matches · / Search" : errors.length ? "Selected snapshots remain available." : "No preferences · p Add / manage"));
       return result;
     }
-    const group = (item: RevisionPreference) => item.metadata?.kind === "task" ? "Task requirements" : item.metadata?.kind === "rewrite" ? "Prompt rewriting" : "Unclassified";
     const available = height - result.length;
     // Use spare rows for larger cells only when every choice still fits. Dense
     // libraries and short panes keep the compact, neighbour-preserving window.
-    const groups = new Set(entries.map(group)).size;
+    const groups = new Set(entries.map(preferenceGroup)).size;
     const spacious = width >= 36 && height >= 24 && entries.length * 2 + groups <= available;
     // A wide host already owns descriptions in its reference column. Its larger
     // cells use whitespace instead of duplicating that reference content.
     const description = showDescription && !spacious
       ? this.renderDescription(width, Math.max(0, Math.min(4, Math.floor(available / 2), available - 4)), false) : [];
     const count = Math.max(0, available - description.length - (spacious ? entries.length : 0));
-    const window = selectionWindow(entries.length, position.index, count, position.top, (index) => group(entries[index]!), 0, position.direction);
+    const window = selectionWindow(entries.length, position.index, count, position.top, (index) => preferenceGroup(entries[index]!), 0, position.direction);
     position.top = window.start;
     this.viewport = Math.max(1, window.end - window.start);
     const groupHeading = (label: string) => this.theme.fg("text", this.theme.bold(clean(label)));

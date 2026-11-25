@@ -5,6 +5,12 @@ import { dirname, join, resolve } from "node:path";
 import { metadataValidation, preferenceValidation, preferenceKey, selectPreference, uniquePreferences, type SelectedPreference, type PreferenceLibrary, type PreferenceMetadata, type PreferenceRepository, type PreferenceScope, type PreferenceValue, type RevisionPreference } from "./revision-preferences.js";
 import { ProjectPreferenceDefaults } from "./project-preference-defaults.js";
 
+export const BUILTIN_PREFERENCES: readonly RevisionPreference[] = [{
+  scope: "builtin", id: "in-your-own-words", version: 1, name: "In Your Own Words",
+  body: "In the user's conversational language, briefly restate the goal and the problem they want to solve in your own words. Use the draft, relevant conversation and current corrections. Mention a material ambiguity only if it changes the intended outcome. When revising, describe the intended task after the correction. Use one or two sentences.",
+  metadata: { kind: "result", activation: "manual", description: "用一两句话复述优化模型理解的用户意图，供发送前核对。" },
+}];
+
 export const PREFERENCE_MAX_BYTES = 1024 * 1024;
 export const PREFERENCE_MAX_ENTRIES = 500;
 const scopes: PreferenceScope[] = ["project", "global"];
@@ -37,7 +43,8 @@ function decode(content: string, scope: PreferenceScope): RevisionPreference[] {
 export class PreferenceStore implements PreferenceRepository {
   private projectRoot?: Promise<string>;
   private defaultPreferences: SelectedPreference[] = [];
-  constructor(private readonly agentDir: string, private readonly cwd: string) {}
+  constructor(private readonly agentDir: string, private readonly cwd: string,
+    private readonly builtins: readonly RevisionPreference[] = []) {}
 
   private async path(scope: PreferenceScope): Promise<string> {
     const root = scope === "project" ? join(await (this.projectRoot ??= realpath(this.cwd)), ".pi") : resolve(this.agentDir);
@@ -72,6 +79,7 @@ export class PreferenceStore implements PreferenceRepository {
         result.entries.push(...(entries ?? (scope === "global" && initializeStarters ? await this.initializeGlobal(path) : [])));
       } catch (error) { result.errors[scope] = `${scope}: ${message(error)}`; }
     }
+    result.entries.push(...this.builtins.map(entry => structuredClone(entry)));
     try {
       const keys = await new ProjectPreferenceDefaults(this.cwd).load();
       if (keys.length) result.projectDefaults = keys;
@@ -190,7 +198,9 @@ export class PreferenceStore implements PreferenceRepository {
 
   async remove(expected: RevisionPreference): Promise<void> {
     // Match save(): nested metadata is part of the call-time conflict expectation.
+    if (expected.scope === "builtin") throw new Error("Built-in preferences are read-only.");
+    const scope = expected.scope;
     expected = structuredClone(expected);
-    await this.mutate(expected.scope, (entries) => { entries.splice(this.current(entries, expected), 1); });
+    await this.mutate(scope, (entries) => { entries.splice(this.current(entries, expected), 1); });
   }
 }

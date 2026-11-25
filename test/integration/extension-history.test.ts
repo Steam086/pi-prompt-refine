@@ -1,4 +1,5 @@
 import { mkdir, readFile } from "node:fs/promises";
+import { stripVTControlCharacters } from "node:util";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { Api, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
@@ -200,7 +201,9 @@ describe("persistent session-local Refine history", () => {
     expect(h.panelLines(100).join("\n")).toContain("Saved");
     expect(h.panelLines(100).join("\n")).toContain("Confirmed saved runs");
     expect(h.panelLines(100).join("\n")).toContain("#1");
-    expect(h.panelLines(100).join("\n")).toContain("session.jsonl.prompt-refine.json");
+    // The temporary directory can wrap the path across framed terminal rows.
+    const document = h.panelLines(100).map(line => stripVTControlCharacters(line).slice(1, -1).trim()).join("");
+    expect(document).toContain(path(h));
     h.panelInput("q"); h.panelInput("q"); h.panelInput("q"); await view;
     h.setConfirm(true); await h.command("history clear", h.context);
     view = h.command("usage", h.context); h.panelInput("b");

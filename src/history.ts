@@ -26,12 +26,13 @@ export interface RefineRecord {
 /** Detached fields used to browse tasks. Execution background can be much larger than the visible text. */
 export interface TaskDisplayRecord extends Omit<RefineRecord, "input" | "originalInput" | "candidate"> {
   input: Pick<RefineRequestInput, "draft" | "model" | "thinkingLevel" | "roundId" | "contextUnavailable" |
-    "editingInstruction" | "revision" | "budget"> & {
+    "editingInstruction" | "budget"> & {
+    revision?: Pick<NonNullable<RefineRequestInput["revision"]>, "instruction" | "previousCandidate">;
     preferences?: Pick<SelectedPreference, "name">[];
     projectDiagnostics?: { warnings: string[] };
     project?: { snapshot: { warnings: string[] } };
   };
-  candidate?: Pick<Candidate, "text">;
+  candidate?: Pick<Candidate, "text" | "additional">;
 }
 
 /** Bounded runtime journal; history-store persists only a minimal projection. Never model context. */
@@ -200,11 +201,12 @@ export class RefineHistory {
         createdAt: record.createdAt, archivedAt: record.archivedAt, appliedAt: record.appliedAt,
         acceptedAt: record.acceptedAt, sentAt: record.sentAt, elapsedSeconds: record.elapsedSeconds, error: record.error,
         usage: usage && structuredClone(usage),
-        candidate: candidate && { text: candidate.text },
+        candidate: candidate && { text: candidate.text, ...(candidate.additional ? { additional: structuredClone(candidate.additional) } : {}) },
         input: {
           draft: input.draft, model: { ...input.model }, thinkingLevel: input.thinkingLevel,
           roundId: input.roundId, contextUnavailable: input.contextUnavailable, editingInstruction: input.editingInstruction,
-          revision: input.revision && { ...input.revision }, budget: input.budget && structuredClone(input.budget),
+          revision: input.revision && { instruction: input.revision.instruction, previousCandidate: input.revision.previousCandidate },
+          budget: input.budget && structuredClone(input.budget),
           preferences: input.preferences?.map(({ name }) => ({ name })),
           projectDiagnostics: warnings && { warnings: [...warnings] },
         },

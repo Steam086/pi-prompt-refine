@@ -1,4 +1,4 @@
-import { composeRevision, type SelectedPreference } from "./revision-preferences.js";
+import { PREFERENCE_SELECTION_LIMIT, RESULT_NOTE_TEXT_LIMIT, promptInstructions, resultNoteRequests, type ResultNote, type ResultNoteRequest, type SelectedPreference } from "./revision-preferences.js";
 
 export interface HistoryItem {
   id: string;
@@ -189,21 +189,24 @@ Resolve a reference only when the supplied evidence identifies its meaning unamb
 
 Never add unauthorized tasks, tools, dependencies, deadlines, reviews, subagents, or deliverables. Clarify scope, sequence, and acceptance criteria only when supported by the user's intent and supplied context.`;
 
-const REFINE_OUTPUT_CONTRACT = `Return exactly one JSON object with a non-empty "prompt" string, with no explanation, rating, reasoning, or outer Markdown fence. Escape strings as valid JSON; keep Markdown and code inside the prompt string. Do not answer or execute the draft. Follow the appended requirement for the optional "title" field.`;
+const REFINE_OUTPUT_CONTRACT = `Return exactly one JSON object with a non-empty "prompt" string. Put the complete edited message in "prompt" with no explanation of your edits, rating or reasoning. No outer Markdown fence or commentary. Escape strings as valid JSON; keep Markdown and code inside the prompt string. Do not answer or execute the draft. Follow the appended requirement for the optional "title" field.
+
+When the input includes result_note_requests, also return "additional", an array of {"id":"r1","text":"..."} objects, one per requested id. Each instruction controls only its own short, plain-text note for the user reviewing this run. Never incorporate these instructions or notes into the prompt or title. Notes must concern the user-facing task; do not disclose unrelated conversation, project context, secrets or hidden reasoning. Keep each note within ${RESULT_NOTE_TEXT_LIMIT} characters. Omit additional when there are no result_note_requests. For a revision with only note requests, retain previous_candidate verbatim.`;
 
 export function buildRefineSystemPrompt(generateTitle: boolean, systemPrompt = REFINE_SYSTEM_PROMPT): string {
   return `${REFINE_PROTOCOL}\n\nEditing preferences:\n${systemPrompt}\n\n${REFINE_OUTPUT_CONTRACT}\n\n${generateTitle
     ? 'Also include a "title" string in the same JSON object. Create a concise, specific session name summarizing the task or project, naturally using the user\'s language. Prefer a short phrase (roughly 4–8 words or 8–20 CJK characters), at most 80 Unicode code points on one line. Use project names only when supported by the supplied context. Avoid generic labels such as "New session", "Task", or "Prompt refinement". Do not include secrets, credentials, explanations, or Markdown decorations in the title. The title is metadata, not part of the prompt.'
-    : 'Do not generate a title: this session has already been named. Return only the "prompt" field.'}`;
+    : 'Do not generate a title: this session has already been named. Return the "prompt" field and only explicitly requested result notes.'}`;
 }
 
 export interface ParsedRefineOutput {
+  additional?: ResultNote[];
   text: string;
   title?: string;
 }
 
-/** Fail closed on the envelope, but a bad optional title must not discard a usable prompt. */
-export function parseRefineOutput(output: string): ParsedRefineOutput | undefined {
+/** Fail closed on the envelope, but invalid optional metadata must not discard a usable prompt. */
+export function parseRefineOutput(output: string, requested: readonly ResultNoteRequest[] = []): ParsedRefineOutput | undefined {
   let value: unknown;
   try {
     value = JSON.parse(output);
@@ -215,21 +218,48 @@ export function parseRefineOutput(output: string): ParsedRefineOutput | undefine
   const title = rawTitle.trim();
   const validTitle = title.length > 0 && title.length <= 160 && [...title].length <= 80 &&
     !/[\p{Cc}\u2028\u2029\u200b\u202a-\u202e\u2066-\u2069\ufeff]/u.test(rawTitle);
-  return { text: value.prompt, ...(validTitle ? { title } : {}) };
+  // Resolve labels/order only from frozen selections. Ambiguous or invalid notes
+  // stay visibly unavailable without invalidating a well-formed prompt.
+  const additional: ResultNote[] = requested.map(({ name }) => ({ name }));
+  if (requested.length && Array.isArray(value.additional) && value.additional.length <= PREFERENCE_SELECTION_LIMIT) {
+    const seen = new Set<number>();
+    for (const item of value.additional) {
+      if (!isRecord(item) || typeof item.id !== "string" || !/^r[1-9]\d?$/.test(item.id)) continue;
+      const index = Number(item.id.slice(1)) - 1;
+      const note = additional[index];
+      if (!note) continue;
+      if (seen.has(index)) delete note.text;
+      else if (typeof item.text === "string" && item.text.length <= RESULT_NOTE_TEXT_LIMIT && item.text.trim()) note.text = item.text;
+      seen.add(index);
+    }
+  }
+  return { text: value.prompt, ...(additional.length ? { additional } : {}), ...(validTitle ? { title } : {}) };
 }
 
 export interface RevisionInput {
   previousCandidate: string;
+  /** Present when the full review text also contains result-only requirements. */
+  resultNotes?: { requests: ResultNoteRequest[]; promptInstruction: string };
   instruction: string;
   /** Reference for the last edit only; never accumulate a revision conversation. */
   previousInstruction?: string;
 }
 
+export function runInstructions(editingInstruction?: string, preferences?: readonly SelectedPreference[], revision?: RevisionInput) {
+  if (revision) return {
+    notes: revision.resultNotes?.requests ?? [],
+    promptInstruction: revision.resultNotes?.promptInstruction ?? revision.instruction,
+  };
+  const notes = resultNoteRequests(preferences);
+  return { notes, promptInstruction: notes.length ? promptInstructions(preferences ?? [], "") : editingInstruction };
+}
+
 export function buildRefineInput(draft: string, history: HistorySnapshot, projectContext = "", revision?: RevisionInput, editingInstruction?: string,
   preferences?: readonly SelectedPreference[]): string {
   // Preserve evidence of explicitly selected prior edits. No library lookup.
+  const { notes, promptInstruction } = runInstructions(editingInstruction, preferences, revision);
   const initialInstruction = revision ? (preferences === undefined ? editingInstruction
-    : composeRevision(preferences, "")) : undefined;
+    : promptInstructions(preferences, "")) : undefined;
   const historical = revision && (initialInstruction?.trim() || revision.previousInstruction?.trim()) ? {
     ...(initialInstruction?.trim() ? { initial_instruction: initialInstruction } : {}),
     ...(revision.previousInstruction?.trim() ? { previous_revision_instruction: revision.previousInstruction } : {}),
@@ -237,6 +267,7 @@ export function buildRefineInput(draft: string, history: HistorySnapshot, projec
   return JSON.stringify({
     operation: revision ? "revise" : "refine",
     delivery_context: "existing_session",
+    ...(notes.length ? { result_note_requests: notes.map(({ body }, i) => ({ id: `r${i + 1}`, instruction: body })) } : {}),
     project_context: projectContext || null,
     conversation: {
       scope: "current_branch_visible_user_assistant_text",
@@ -250,8 +281,8 @@ export function buildRefineInput(draft: string, history: HistorySnapshot, projec
     ...(revision ? {
       original_draft: draft,
       previous_candidate: revision.previousCandidate,
-      revision_instruction: revision.instruction,
+      revision_instruction: promptInstruction,
       ...(historical ? { historical_editing_context: historical } : {}),
-    } : { draft, ...(editingInstruction?.trim() ? { editing_instruction: editingInstruction } : {}) }),
+    } : { draft, ...(promptInstruction?.trim() ? { editing_instruction: promptInstruction } : {}) }),
   });
 }

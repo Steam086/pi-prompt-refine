@@ -8,8 +8,8 @@ const entry = (id: string, name: string, description = "", body = ""): RevisionP
 const ids = (entries: RevisionPreference[], query: string) => searchPreferences(entries, query).map((item) => item.id);
 
 describe("manual preference metadata", () => {
-  it("accepts manual preferences of either type, but rejects automatic adoption on new writes", () => {
-    for (const kind of ["rewrite", "task"]) {
+  it("accepts manual preferences of each type, but rejects automatic adoption on new writes", () => {
+    for (const kind of ["rewrite", "task", "result"]) {
       const metadata = { kind, activation: "manual", description: "Requirements" };
       expect(metadataValidation(metadata)).toBeUndefined();
       expect(metadataValidation({ ...metadata, activation: "auto", match: "always" })).toContain("manually");

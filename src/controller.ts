@@ -2,7 +2,7 @@ import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ModelRef } from "./config.js";
 import type { BudgetReport } from "./budget.js";
 import { RefineHistory, type RefineRecord, type TaskDisplayRecord } from "./history.js";
-import { composeRevision, preferenceKey, preferenceValidation, uniquePreferences, PREFERENCE_SELECTION_LIMIT, type SelectedPreference } from "./revision-preferences.js";
+import { composeRevision, resultNoteRequests, preferenceKey, preferenceValidation, uniquePreferences, PREFERENCE_SELECTION_LIMIT, type SelectedPreference } from "./revision-preferences.js";
 
 import type {
   RefineRequestInput, RefineRequest, Candidate, CandidateToken, RestoreSnapshot, RestoreToken,
@@ -32,7 +32,7 @@ const stopErrors: Partial<Record<RefineStopReason, ControllerState["error"]>> = 
 };
 function sameModel(a: ModelRef | undefined, b: ModelRef | undefined): boolean { return a?.provider === b?.provider && a?.id === b?.id; }
 function fingerprint(input: RefineRequestInput): string {
-  return JSON.stringify([input.draft, input.model, input.thinkingLevel, input.sessionId, input.roundId, input.revision, input.editingInstruction]);
+  return JSON.stringify([input.draft, input.model, input.thinkingLevel, input.sessionId, input.roundId, input.revision, input.editingInstruction, resultNoteRequests(input.preferences)]);
 }
 function elapsed(active: ActiveRequest): number { return active.startedAt === undefined ? 0 : Math.max(0, Math.floor((Date.now() - active.startedAt) / 1000)); }
 
@@ -492,7 +492,7 @@ export class RefineController {
   updateCandidate(token: CandidateToken, text: string): boolean {
     if (!this.isCandidateCurrent(token) || !text.trim() || text.length > (this.options.maxOutputChars ?? 1_000_000) || !this.journal.canStart()) return false;
     this.clearPendingSend();
-    const source = this.candidate!;
+    const { additional: _generatedNotes, ...source } = this.candidate!;
     const recordId = this.journal.start(this.taskId!, source, source.recordId, "edit");
     this.candidate = { ...source, recordId, text, usage: undefined, version: ++this.candidateSequence };
     this.journal.update(recordId, { status: "generated", candidate: this.candidate,
@@ -570,6 +570,7 @@ export class RefineController {
       this.release(active);
       const candidate: Candidate = { ...structuredClone(active.request), text: result.text, version: ++this.candidateSequence,
         elapsedSeconds: elapsed(active), usage: result.usage,
+        ...(result.additional ? { additional: result.additional } : {}),
         ...(active.request.generateTitle && result.title ? { title: result.title } : {}) };
       this.journal.update(active.request.recordId, { status: "generated", candidate, usage: result.usage, elapsedSeconds: candidate.elapsedSeconds });
       if (this.foregroundId === active.request.requestId) {

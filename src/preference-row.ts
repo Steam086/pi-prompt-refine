@@ -1,12 +1,12 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { sanitizeTerminalText } from "./presentation.js";
-import type { PreferenceScope } from "./revision-preferences.js";
+import type { RevisionPreference } from "./revision-preferences.js";
 
 interface PreferenceRow {
   width: number;
   name: string;
-  scope: PreferenceScope;
+  scope: RevisionPreference["scope"];
   selected: boolean;
   focused: boolean;
   cursor: "›" | "·" | " ";
@@ -23,7 +23,7 @@ export function renderPreferenceRow(row: PreferenceRow, theme: Pick<Theme, "fg" 
   // Reserve the source first, even for long names or tiny panes. Both list hosts
   // choose full labels by their actual pane width, not the outer window width.
   const fullSource = width >= 28;
-  const sourceWidth = fullSource ? 7 : 1;
+  const sourceWidth = fullSource ? (row.scope === "builtin" ? 8 : 7) : 1;
   const sourceGap = width >= sourceWidth + 2 ? 1 : 0;
   const contentWidth = width - sourceWidth - sourceGap;
   const checkbox = row.selected ? "[x]" : "[ ]";
@@ -47,7 +47,8 @@ export function renderPreferenceRow(row: PreferenceRow, theme: Pick<Theme, "fg" 
   const label = truncateToWidth(name, nameWidth, "…");
   const content = prefix + theme.fg("text", focused ? theme.bold(label) : label)
     + (visibleWidth(name + status) <= nameWidth && status ? theme.fg("muted", status) : "");
-  const source = fullSource ? row.scope === "project" ? "Project" : "Global" : row.scope === "project" ? "P" : "G";
+  const scopeLabel = { project: "Project", global: "Global", builtin: "Built-in" }[row.scope];
+  const source = fullSource ? scopeLabel : scopeLabel[0];
   const cell = content + " ".repeat(Math.max(0, contentWidth - visibleWidth(content)) + sourceGap)
     + theme.fg("muted", source.padStart(sourceWidth));
   return focused ? theme.bg("selectedBg", cell) : cell;

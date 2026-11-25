@@ -31,6 +31,7 @@ export interface RunSummary {
 export interface TaskDetail extends TaskSummary { text: string; initialInstruction?: string; selectedNames: string[] }
 export interface RunDetail extends RunSummary {
   original: string; text?: string; initialInstruction?: string;
+  additional?: { name: string; text?: string }[];
   revisionInstruction?: string; previousResult?: string; backgroundAvailable: boolean;
   budget?: { status: "ok" | "trimmed" | "blocked"; inputTokens: number; outputTokens: number; contextWindow: number };
 }

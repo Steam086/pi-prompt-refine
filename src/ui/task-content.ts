@@ -2,7 +2,7 @@ import { Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { TaskDisplayRecord } from "../history.js";
 import { formatKeyHint } from "../key-hints.js";
-import { sanitizeTerminalText } from "../presentation.js";
+import { resultNoteHint, resultNoteLines, sanitizeTerminalText } from "../presentation.js";
 import { cacheHitRate, formatReferenceCost, formatRunUsage, totalInputTokens, truncatedOutputHint } from "../usage.js";
 
 export interface TaskRow { record: TaskDisplayRecord; original: boolean; records: TaskDisplayRecord[] }
@@ -148,6 +148,7 @@ export class TaskContent {
       original && !record.input.draft ? this.muted("Empty prompt · ") + formatKeyHint(["i", "Edit original"], this.theme)
         : this.theme.fg("text", sanitizeTerminalText(original ? record.input.draft : record.candidate!.text)),
     ];
+    if (!original) body.push(...resultNoteLines(record.candidate?.additional, this.theme));
     if (options.inspecting || options.usage) {
       if (record.input.editingInstruction) body.push("", this.heading("Initial editing instruction"), "", this.theme.fg("text", sanitizeTerminalText(record.input.editingInstruction)));
       if (!row.original && record.candidate && !original) body.push("", this.heading("Original prompt"), "", this.theme.fg("text", sanitizeTerminalText(record.input.draft)));
@@ -220,7 +221,9 @@ export class TaskContent {
     const available = Math.max(1, height - fixed.length);
     const offsets: TaskPane["offsets"] = [];
     const literal = (text: string) => this.theme.fg("text", sanitizeTerminalText(text));
-    const result = [...header.slice(Math.max(0, height - 2)), this.heading(record.kind === "revise" ? "Revised result" : "Result"), "", literal(record.candidate!.text)];
+    const result = [...header.slice(Math.max(0, height - 2)), this.heading(record.kind === "revise" ? "Revised result" : "Result")
+      + resultNoteHint(record.candidate?.additional, this.theme), "", literal(record.candidate!.text),
+      ...resultNoteLines(record.candidate?.additional, this.theme)];
     const reference = [this.heading("Original prompt"), "", literal(record.input.draft)];
     if (record.input.editingInstruction) reference.push("", this.heading("Initial editing instruction"), "", literal(record.input.editingInstruction));
     if (record.input.revision) {

@@ -1,11 +1,12 @@
+import { runInstructions } from "../context.js";
 import type { RefineRecord } from "../history.js";
 import type { TreeSnapshot } from "../project-context.js";
 import type { RefineRequestInput } from "../request-types.js";
 
 /** The text scanned for @directories is also the identity used when retaining its snapshot. */
-export function directoryJobKeys(input: Pick<RefineRequestInput, "sessionId" | "roundId" | "draft" | "editingInstruction" | "revision">) {
+export function directoryJobKeys(input: Pick<RefineRequestInput, "sessionId" | "roundId" | "draft" | "editingInstruction" | "preferences" | "revision">) {
   const round = JSON.stringify([input.sessionId, input.roundId]);
-  const instruction = input.revision?.instruction ?? input.editingInstruction;
+  const { promptInstruction: instruction } = runInstructions(input.editingInstruction, input.preferences, input.revision);
   const source = instruction === undefined ? input.draft : `${input.draft}\n${instruction}`;
   return { source, baseKey: `${round}:base`, referenceKey: `${round}:${JSON.stringify(source)}` };
 }

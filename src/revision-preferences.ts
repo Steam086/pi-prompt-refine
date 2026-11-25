@@ -1,7 +1,7 @@
 export type PreferenceScope = "project" | "global";
 export interface PreferenceMetadata {
   description: string;
-  kind: "rewrite" | "task";
+  kind: "rewrite" | "task" | "result";
   activation: "manual";
 }
 export interface PreferenceValue {
@@ -12,7 +12,7 @@ export interface PreferenceValue {
 export interface RevisionPreference {
   id: string;
   version: number;
-  scope: PreferenceScope;
+  scope: PreferenceScope | "builtin";
   name: string;
   body: string;
   metadata?: PreferenceMetadata;
@@ -28,7 +28,7 @@ export interface RevisionDraft {
 }
 export interface PreferenceLibrary {
   entries: RevisionPreference[];
-  errors: Partial<Record<PreferenceScope | "defaults", string>>;
+  errors: Partial<Record<RevisionPreference["scope"] | "defaults", string>>;
   projectDefaults?: string[];
 }
 export interface PreferenceRepository {
@@ -40,6 +40,28 @@ export interface PreferenceRepository {
 export const PREFERENCE_NAME_LIMIT = 120;
 export const PREFERENCE_BODY_LIMIT = 16_000;
 export const PREFERENCE_SELECTION_LIMIT = 50;
+
+export const RESULT_NOTE_TEXT_LIMIT = 2000;
+export const RESULT_NOTE_HINT = "Shown in Result only. Accept and Send use the prompt.";
+export function preferenceGroup(entry: Pick<RevisionPreference, "metadata">): string {
+  switch (entry.metadata?.kind) {
+    case "rewrite": return "Prompt rewriting";
+    case "task": return "Task requirements";
+    case "result": return "Result notes";
+    default: return "Unclassified";
+  }
+}
+export function preferenceGroupOrder(entry: RevisionPreference): number {
+  return ["rewrite", "task", undefined, "result"].indexOf(entry.metadata?.kind);
+}
+export interface ResultNoteRequest { name: string; body: string }
+export interface ResultNote { name: string; text?: string }
+export function resultNoteRequests(selected: readonly SelectedPreference[] = []): ResultNoteRequest[] {
+  return uniquePreferences(selected).filter(entry => entry.metadata?.kind === "result").map(({ name, body }) => ({ name, body }));
+}
+export function promptInstructions(selected: readonly SelectedPreference[], freeText: string): string {
+  return composeRevision(selected.filter(entry => entry.metadata?.kind !== "result"), freeText);
+}
 
 export function preferenceKey(entry: Pick<RevisionPreference, "id" | "scope">): string {
   return `${entry.scope}:${entry.id}`;
@@ -68,6 +90,7 @@ export function composeRevision(selected: readonly SelectedPreference[], freeTex
   const entries = uniquePreferences(selected);
   const blocks = entries.map((entry) => {
     const purpose = !entry.metadata ? "Saved editing requirements"
+      : entry.metadata.kind === "result" ? "Result note instructions"
       : entry.metadata.kind === "rewrite" ? "Prompt rewriting instructions" : "Main-agent task requirements";
     return `${purpose} (${preferenceSelectionLabel(entry).toLowerCase()}):\n${entry.body}`;
   });
@@ -79,7 +102,7 @@ export function metadataValidation(value: unknown, legacy = false): string | und
   if (!value || typeof value !== "object" || Array.isArray(value)) return "Metadata must be a JSON object.";
   const data = value as Record<string, unknown>;
   if (typeof data.description !== "string" || !data.description.trim() || data.description.length > 2000) return "Description must contain 1–2000 characters.";
-  if (data.kind !== "rewrite" && data.kind !== "task") return "Preference type must be rewrite or task.";
+  if (data.kind !== "rewrite" && data.kind !== "task" && data.kind !== "result") return "Preference type must be rewrite, task or result.";
   if (data.activation !== "manual" && !(legacy && data.activation === "auto")) return "Preferences must be selected manually.";
   if (legacy) {
     if (data.match !== undefined && !["always", "parallel", "sequence"].includes(data.match as string)) return "Unknown legacy adoption condition.";

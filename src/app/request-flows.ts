@@ -1,6 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { RefineConfig } from "../config.js";
-import { buildRefineSystemPrompt, selectHistory, type HistorySnapshot } from "../context.js";
+import { buildRefineSystemPrompt, selectHistory, type RevisionInput, type HistorySnapshot } from "../context.js";
 import { captureProjectContext } from "../project-context.js";
 import type { RefineController } from "../controller.js";
 import type { CandidateToken, RefineRequest, RefineRequestInput, TriggerResult } from "../request-types.js";
@@ -174,7 +174,7 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
     if (result.kind !== "started") notify(ctx, "Same-input generation was not started; current results kept.", "warning");
   }
 
-  function reviseCandidate(ctx: ExtensionContext, token: CandidateToken, instruction: string): string | undefined {
+  function reviseCandidate(ctx: ExtensionContext, token: CandidateToken, instruction: string, resultNotes?: RevisionInput["resultNotes"]): string | undefined {
     if (!controller.isCandidateCurrent(token) || controller.getState().pendingSend) return "The result changed or is being sent. Reopen Revise for the current result.";
     if (!instruction.trim()) return "Enter revision instructions; the current result is unchanged.";
     if (instruction.length > config.maxDraftChars) return `Revision instructions exceed ${config.maxDraftChars} characters; the current result is unchanged.`;
@@ -192,7 +192,8 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
     setCompletionContext(ctx);
     const result = controller.trigger({
       draft: source.draft,
-      revision: { previousCandidate: source.text, instruction, previousInstruction: source.revision?.instruction },
+      revision: { previousCandidate: source.text, instruction, ...(resultNotes ? { resultNotes } : {}),
+        previousInstruction: source.revision?.resultNotes?.promptInstruction ?? source.revision?.instruction },
       editingInstruction: source.editingInstruction,
       preferences: source.preferences,
       model: source.model,

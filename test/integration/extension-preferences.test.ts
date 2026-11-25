@@ -10,6 +10,56 @@ const { makeHarness } = extensionHarnessEnvironment();
 
 describe("explicit candidate revision", () => {
 
+  it.each(["a", "s"])("keeps built-in result notes visible and uses only the prompt for %s", async action => {
+    const h = await makeHarness();
+    h.holdPanel();
+    const view = h.command("", h.context);
+    h.panelInput("n"); h.panelInput("Discuss this"); h.panelInput("\r");
+    h.panelInput("\t");
+    const screen = () => h.panelLines(100).join("\n");
+    await vi.waitFor(() => expect(screen()).toContain("In Your Own Words"));
+    h.panelInput(" ");
+    expect(h.complete).not.toHaveBeenCalled();
+    h.complete.mockResolvedValueOnce({ stopReason: "stop", content: [{ type: "text", text: JSON.stringify({
+      prompt: "Discuss the options.", additional: [{ id: "r1", text: "You want a discussion." }],
+    }) }] });
+    h.panelInput("\r"); await flushPromises();
+    const packet = JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
+    expect(packet.result_note_requests).toEqual([{ id: "r1", instruction: expect.stringContaining("restate the goal") }]);
+    expect(packet.editing_instruction).toBeUndefined();
+    h.panelInput("\r");
+    await vi.waitFor(() => expect(screen()).toContain("You want a discussion."));
+    h.panelInput(action); await view;
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    if (action === "a") { expect(h.getEditor()).toBe("Discuss the options."); expect(h.sent).toEqual([]); }
+    else expect(h.sent).toEqual([{ text: "Discuss the options.", options: undefined }]);
+  });
+
+  it("keeps a notes-only revision's source prompt, and does not replay its note instruction on later revisions", async () => {
+    const h = await makeHarness();
+    h.complete.mockResolvedValueOnce(refinement("Source prompt")); await trigger(h);
+    h.holdPanel(); const view = h.command("view", h.context);
+    h.panelInput("f"); h.panelInput("\t"); h.panelInput("\r");
+    await vi.waitFor(() => expect(h.panelLines(100).join("\n")).toContain("In Your Own Words"));
+    h.panelInput(" "); h.panelInput("\x1b[13;3u");
+    h.complete.mockResolvedValueOnce({ stopReason: "stop", content: [{ type: "text", text: JSON.stringify({
+      prompt: "Unrequested edit", additional: [{ id: "r1", text: "Intent playback" }],
+    }) }] });
+    h.panelInput("\x13"); await flushPromises();
+    const second = JSON.parse((h.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
+    expect(second.result_note_requests).toHaveLength(1);
+    expect(second.revision_instruction).toBe("");
+    const screen = h.panelLines(100).join("\n");
+    expect(screen).toContain("Source prompt"); expect(screen).toContain("Intent playback");
+    expect(screen).not.toContain("Unrequested edit");
+    h.panelInput("f"); h.panelInput("Shorten this"); h.panelInput("\x13"); await flushPromises();
+    const third = JSON.parse((h.complete.mock.calls[2] as any[])[1].messages[0].content[0].text);
+    expect(third.result_note_requests).toBeUndefined();
+    expect(third.previous_candidate).toBe("Source prompt");
+    expect(JSON.stringify(third)).not.toMatch(/Intent playback|restate the goal/);
+    h.panelInput("q"); await view;
+  });
+
   it("opens an empty editor/workspace to browse and Add/Edit/Delete Preferences without a request", async () => {
     const h = await makeHarness({ config: { preferencesKey: null } });
     const store = new PreferenceStore(h.agentDir, h.context.cwd);
@@ -20,7 +70,7 @@ describe("explicit candidate revision", () => {
     h.panelInput("\x1b");
     h.panelInput("p");
     await vi.waitFor(() => {
-      expect(h.panelLines().join("\n")).toContain("Library is empty");
+      expect(h.panelLines().join("\n")).toContain("In Your Own Words");
       expect(h.panelLines().join("\n")).not.toContain("Working…");
     });
     h.panelInput("n"); h.panelInput("First 中文😀"); h.panelInput("\t"); h.panelInput("Keep literal commands.");

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { PreferenceStore } from "../../src/preference-store.js";
+import { BUILTIN_PREFERENCES, PreferenceStore } from "../../src/preference-store.js";
 import { ProjectPreferenceDefaults } from "../../src/project-preference-defaults.js";
 import { composeRevision, preferenceKey, selectPreference } from "../../src/revision-preferences.js";
 
@@ -16,6 +16,23 @@ async function setup() {
 }
 
 describe("project preference defaults", () => {
+  it("resolves built-in defaults without creating user libraries and permits a separately editable copy", async () => {
+    const f = await setup();
+    const store = new PreferenceStore(f.agent, f.cwd, BUILTIN_PREFERENCES);
+    const preset = (await store.load()).entries[0]!;
+    expect(preset).toMatchObject({ scope: "builtin", metadata: { kind: "result" } });
+    expect(store.getDefaultPreferences()).toEqual([]);
+    await store.setProjectDefault(preset, true);
+    const resumed = new PreferenceStore(f.agent, f.cwd, BUILTIN_PREFERENCES);
+    await resumed.load();
+    expect(resumed.getDefaultPreferences().map(preferenceKey)).toEqual(["builtin:in-your-own-words"]);
+    await expect(readFile(join(f.agent, "prompt-refine-preferences.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(resumed.remove(preset)).rejects.toThrow("read-only");
+    const copy = await resumed.save("project", { name: preset.name, body: "Describe the open question.", metadata: preset.metadata });
+    expect((await resumed.load()).entries).toEqual([copy, preset]);
+    await resumed.setProjectDefault(preset, false);
+    expect(resumed.getDefaultPreferences()).toEqual([]);
+  });
   it("persists ordered references to both scopes per real cwd without changing libraries or selected snapshots", async () => {
     const f = await setup();
     const a = await f.store.save("global", { name: "Shared", body: "Keep literals." });

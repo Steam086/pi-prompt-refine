@@ -1,3 +1,4 @@
+import type { ResultNote } from "./revision-preferences.js";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { ControllerState } from "./request-types.js";
 
@@ -30,4 +31,20 @@ export function resultHeading(options: SummaryOptions, theme: PresentationTheme,
   const warning = state.budget && (state.budget.status !== "ok" || state.budget.message) ? theme.fg("warning", " ⚠") : "";
   const status = theme.fg(color, theme.bold(label)) + warning;
   return includeBrand ? `${status} · ${theme.fg("muted", "Prompt Refine")}` : status;
+}
+
+export function resultNoteHint(notes: readonly ResultNote[] | undefined, theme: PresentationTheme): string {
+  if (!notes?.length) return "";
+  return theme.fg("muted", ` · ${notes.length} ${notes.length === 1 ? "note" : "notes"} below`);
+}
+
+/** Literal, read-only run metadata, laid out in the result's existing scroll pane. */
+export function resultNoteLines(notes: readonly ResultNote[] | undefined, theme: PresentationTheme): string[] {
+  if (!notes?.length) return [];
+  const lines = ["", theme.fg("text", theme.bold("Result notes")) + theme.fg("muted", " · preview only")];
+  for (const note of notes) {
+    lines.push("", theme.fg("text", theme.bold(sanitizeTerminalText(note.name).replace(/\n/g, " "))),
+      note.text ? theme.fg("text", sanitizeTerminalText(note.text)) : theme.fg("warning", "Note unavailable for this run."));
+  }
+  return lines;
 }

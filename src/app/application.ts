@@ -1,3 +1,4 @@
+import { resultNoteRequests } from "../revision-preferences.js";
 import { randomUUID } from "node:crypto";
 import type { RefineController } from "../controller.js";
 import type { RefineRecord } from "../history.js";
@@ -117,6 +118,7 @@ export function createApplication(deps: {
         const duplicate = result.kind === "duplicate" ? controller.getHistory().find((record) =>
           ["queued", "generating"].includes(record.status) && record.input.roundId === controller.getRoundId() &&
           !record.input.revision && record.input.draft === input.draft && record.input.editingInstruction === input.editingInstruction &&
+          JSON.stringify(resultNoteRequests(record.input.preferences)) === JSON.stringify(resultNoteRequests(input.preferences)) &&
           record.input.model.provider === selection.model.provider && record.input.model.id === selection.model.id &&
           record.input.thinkingLevel === selection.thinking)?.id : undefined;
         return started(result, duplicate);

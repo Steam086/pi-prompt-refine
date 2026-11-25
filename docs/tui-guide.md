@@ -21,6 +21,8 @@ The first request counts as soon as Refine queues it, even if you stop it, it fa
 
 To choose Preferences before the first rewrite, open `/refine`, press `n`, and save a draft with `Enter` before choosing Preferences.
 
+Select **In Your Own Words** in Preferences to see how the rewrite model understood your draft. The note appears below the rewritten prompt and is not included when you accept or send it. You can also add your own **Result notes** in Preferences.
+
 ## Settings
 
 - Use `/refine model` to choose the default rewrite model. Your main agent's model does not change, and Pi still manages provider authentication.

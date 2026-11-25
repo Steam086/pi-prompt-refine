@@ -30,6 +30,8 @@ The offline suite connects two `RefineClient`s through the real server peer and 
 
 Local edited text is not replaced by background snapshots. Scope switches retain its source Binding and require explicit New draft/task selection before saving elsewhere. Recovered save receipts attach only to the original form without overwriting later edits; unchanged loaded textarea text retains its literal CRLF. Optimistic versions reject stale saves. Lifecycle changes require an explicit fresh binding; pending operations retain the original Binding/lease/nonce. **Check / retry operation** first queries its ledger status; **Forget retry** explicitly drops only local retry metadata, not the task. Up to eight conversation clients are retained in panel memory, so switching views does not automatically replay unknown writes.
 
+Read result displays any requested result notes beneath the generated prompt in selection order.
+
 The panel uses DOM textContent, not HTML/Markdown injection. It has no composer accept/send/restore action and does not manage the full Preferences/Settings UI. Advanced native TUI features remain native. Native slash has no browser caller identity: RPC slash only emits a short notice; the panel's tasks/runs expose the full saved data through bound queries, not private caller-targeted slash notifications.
 
 ## Transport bounds

@@ -4,7 +4,7 @@ import { BackgroundStatus, renderBackgroundStatus } from "../background-status.j
 import { RefineController } from "../controller.js";
 import type { ControllerState } from "../request-types.js";
 import type { TaskPanelPosition } from "../task-panel.js";
-import { PreferenceStore } from "../preference-store.js";
+import { BUILTIN_PREFERENCES, PreferenceStore } from "../preference-store.js";
 import { STATUS_KEY } from "./contracts.js";
 import { createCompletion } from "./completion.js";
 import { createContextJobs } from "./context-jobs.js";
@@ -42,7 +42,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
   const preferenceStores = new Map<string, PreferenceStore>();
   const preferenceRepository = (ctx: ExtensionContext) => {
     let store = preferenceStores.get(ctx.cwd);
-    if (!store) { store = new PreferenceStore(getAgentDir(), ctx.cwd); preferenceStores.set(ctx.cwd, store); }
+    if (!store) { store = new PreferenceStore(getAgentDir(), ctx.cwd, BUILTIN_PREFERENCES); preferenceStores.set(ctx.cwd, store); }
     return store;
   };
   const openHint = config.shortcuts.view ?? config.shortcuts.optimize ?? "/refine view";

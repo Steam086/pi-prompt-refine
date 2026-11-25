@@ -425,3 +425,36 @@ describe("parseRefineOutput", () => {
     expect(parseRefineOutput(output)).toBeUndefined();
   });
 });
+
+describe("result note output boundaries", () => {
+  const requested = [{ name: "First", body: "Scope" }, { name: "Second", body: "Intent" }];
+  const parse = (additional: unknown) => parseRefineOutput(JSON.stringify({ prompt: "Candidate", additional }), requested);
+  it("isolates result instructions from prompt edits, main-agent requirements and historical editing context", () => {
+    const note = selectPreference({ id: "intent", version: 1, scope: "project", name: "Internal label", body: "Describe intent",
+      metadata: { kind: "result", description: "Display only", activation: "manual" } });
+    const task = selectPreference({ ...note, id: "answer", body: "Answer in English.", metadata: { ...note.metadata!, kind: "task" } });
+    const selected = [note, task];
+    const history = selectHistory([], 0, 0);
+    const full = composeRevision(selected, "");
+    const packet = JSON.parse(buildRefineInput("Discuss", history, "", undefined, full, selected));
+    expect(packet.result_note_requests).toEqual([{ id: "r1", instruction: note.body }]);
+    expect(packet.editing_instruction).toBe(composeRevision([task], ""));
+    expect(JSON.stringify(packet)).not.toMatch(/Internal label|Display only/);
+    const revision = JSON.parse(buildRefineInput("Discuss", history, "", { previousCandidate: "Discuss it", instruction: "Shorter" }, full, selected));
+    expect(revision.historical_editing_context.initial_instruction).toBe(composeRevision([task], ""));
+    expect(JSON.stringify(revision)).not.toContain(note.body);
+  });
+  it("matches whitelisted ids in request order and ignores unrequested notes and model labels", () => {
+    expect(parse([{ id: "r2", text: "Two", name: "spoof" }, { id: "extra", text: "ignore" }, { id: "r1", text: "One" }]))
+      .toEqual({ text: "Candidate", additional: [{ name: "First", text: "One" }, { name: "Second", text: "Two" }] });
+    expect(parseRefineOutput(JSON.stringify({ prompt: "Candidate", additional: [{ id: "r1", text: "oops" }] })))
+      .toEqual({ text: "Candidate" });
+  });
+  it("retains the candidate and exposes missing, duplicate and over-limit notes as unavailable", () => {
+    for (const invalid of [undefined, {}, [{ id: "r1", text: "first" }, { id: "r1", text: "duplicate" },
+      { id: "r2", text: "x".repeat(2001) }], Array(51).fill({ id: "r1", text: "extra" })]) {
+      expect(parse(invalid)).toEqual({ text: "Candidate", additional: [{ name: "First" }, { name: "Second" }] });
+    }
+    expect(parseRefineOutput('{"additional":[]}', requested)).toBeUndefined();
+  });
+});

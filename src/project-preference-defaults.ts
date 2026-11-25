@@ -33,7 +33,7 @@ export class ProjectPreferenceDefaults {
       const data: unknown = JSON.parse(buffer.toString("utf8", 0, size));
       if (!data || typeof data !== "object" || Array.isArray(data) || !("version" in data) || data.version !== 1 ||
         !("preferences" in data) || !Array.isArray(data.preferences) || data.preferences.length > PREFERENCE_SELECTION_LIMIT ||
-        data.preferences.some((key: unknown) => typeof key !== "string" || !/^(project|global):[a-zA-Z0-9-]{1,80}$/.test(key)) ||
+        data.preferences.some((key: unknown) => typeof key !== "string" || !/^(project|global|builtin):[a-zA-Z0-9-]{1,80}$/.test(key)) ||
         new Set(data.preferences).size !== data.preferences.length) throw new Error("Invalid or unsupported project defaults; original file kept.");
       return data.preferences;
     } finally { await file.close(); }
@@ -42,7 +42,7 @@ export class ProjectPreferenceDefaults {
   async load(): Promise<string[]> { return this.read(await this.path()); }
 
   async set(key: string, enabled: boolean): Promise<void> {
-    if (!/^(project|global):[a-zA-Z0-9-]{1,80}$/.test(key)) throw new Error("Invalid preference identity.");
+    if (!/^(project|global|builtin):[a-zA-Z0-9-]{1,80}$/.test(key)) throw new Error("Invalid preference identity.");
     const path = await this.path();
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     const lockPath = `${path}.lock`;

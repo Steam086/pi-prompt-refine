@@ -100,7 +100,7 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
           displayedToken = controller.getCandidateToken();
           return {
             state: { ...state, usage: state.phase === "error" ? state.usage : displayed?.usage ?? state.usage, model },
-            candidateText: displayed?.text,
+            candidateText: displayed?.text, additional: displayed?.additional,
             sessionTitle: candidate?.title && canNameSession(ctx) ? candidate.title : undefined,
             draft,
             revisionInstruction: displayed ? revision?.instruction : source?.revisionInstruction,

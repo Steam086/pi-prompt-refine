@@ -3,9 +3,11 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
 import { panelHeader, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
 import { formatRunUsage, formatTokenUsage } from "./usage.js";
-import { resultHeading, sanitizeTerminalText, type SummaryOptions } from "./presentation.js";
+import type { ResultNote } from "./revision-preferences.js";
+import { resultNoteHint, resultNoteLines, resultHeading, sanitizeTerminalText, type SummaryOptions } from "./presentation.js";
 
 export interface PreviewOptions extends SummaryOptions {
+  additional?: ResultNote[];
   draft?: string;
   revisionInstruction?: string;
   editingInstruction?: string;
@@ -102,7 +104,7 @@ export class PreviewPanel implements Component {
     }
     // Elapsed time and notices affect chrome, not document layout. Keep the long
     // body cached during progress ticks and background refreshes while scrolling.
-    const bodyChanged = textChanged || changed || options.viewKey !== this.options.viewKey ||
+    const bodyChanged = JSON.stringify(options.additional) !== JSON.stringify(this.options.additional) || textChanged || changed || options.viewKey !== this.options.viewKey ||
       JSON.stringify(options.navigation) !== JSON.stringify(this.options.navigation) || options.state.pendingSend !== this.options.state.pendingSend ||
       options.draftChanged !== this.options.draftChanged || options.sessionTitle !== this.options.sessionTitle ||
       options.errorLabel !== this.options.errorLabel || !!options.accepted !== !!this.options.accepted ||
@@ -260,8 +262,9 @@ export class PreviewPanel implements Component {
       }
       const revised = options.revisionInstruction !== undefined;
       const title = options.accepted ? `Accepted prompt · read-only${revised ? " · revised" : ""}` : revised ? "Revised prompt" : "Refined prompt";
-      lines.push(theme.fg("text", theme.bold(`${title}${this.sourceVisible ? " · source" : ""}`)), "");
+      lines.push(theme.fg("text", theme.bold(`${title}${this.sourceVisible ? " · source" : ""}`)) + resultNoteHint(options.additional, theme), "");
       lines.push(...this.document.render(width));
+      for (const line of resultNoteLines(options.additional, theme)) lines.push(...wrapTextWithAnsi(line, width));
       // Revision provenance is part of the result details, not hidden behind Help.
       // o still jumps straight to the original when a long result pushes it off screen.
       if ((this.originalVisible || revised) && options.draft !== undefined) {
