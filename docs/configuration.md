@@ -16,11 +16,14 @@ Tab 切换 **Context**、**Optimizer**，方向键选择设置，必要时用 Pg
 
 ## 历史保存与隐私
 
-`historyPersistence: false` 加 `/reload` 可停止历史读写。已有文件可在对应 Pi 会话的原生 TUI 中用 `/refine history clear` 清理。保存数据和清除边界见[本地历史与清理](tui-guide.md#local-history-and-cleanup)，旧结果的重用见[历史恢复](usage.md#resume--reload-后的历史)。
+Pi 会话有对应文件时，Refine 默认将已提交的原稿、候选正文、编辑要求和运行信息以明文保存在同目录的 `<会话文件>.prompt-refine.json`。Unsent 草稿、完整背景和结果附注仅供当前运行时使用。每个会话最多保存 100 次运行、共 2 MiB。超限的记录整条略过，正文保持完整。在 **Usage** 按 `b` 可查看路径和保存状态。[恢复后使用旧结果](usage.md#resume--reload-后的历史)
+
+将配置中的 `historyPersistence` 设为 `false` 并执行 `/reload`，即可停止自动读写。要删除已有文件，在对应会话的原生 TUI 执行 `/refine history clear` 并确认。本次清理只删除该会话的 Refine 历史文件，并暂停保存至下次重载。仍可查看内存中的记录和 Pi 对话。卸载扩展会保留本地历史、配置与偏好库。[偏好库路径](preference-selection.md#库文件与旧版兼容)
 
 ## 预算与上下文开关
 
 - **History messages** 或 **History characters** 任一设为 `0` 即排除会话历史正文。历史计数仍可存在。**Project context** 独立控制规则、技能和目录列表，关闭时保留子设置。
 - **Directory references** 控制显式 `@目录` 列表，**Directory tree** 控制没有历史正文时可附带的默认树。**Project instructions** 的 `First request only` 指每个新优化任务的首次请求，`Always` 包含 Revise，`Off` 关闭规则发送。
-- 关闭 **Project context** 只排除项目背景。仍会发送草稿、改写策略、已提交的偏好或编辑要求。Revise 还会发送上一候选，可能附带历史编辑依据。有关绝对路径、文件内容和会话历史的范围，见[Provider 收到的数据](tui-guide.md#what-the-rewrite-provider-receives)。
+- 默认最多取当前分支 12 条可见的用户或助手消息，合计 16,000 个字符。启用目录引用时只列出目录内的名称。`@文件` 不会附带文件正文。扩展也不会主动附上工作目录的绝对路径，草稿、历史或规则正文中本来就有的路径则会保留。
+- 关闭 **Project context** 后，仍会发送草稿、改写策略、已提交的偏好或编辑要求，以及历史设置允许的会话文本。Revise 还会发送上一候选，可能附带先前的编辑要求。[请求协议](context.md)
 - 字符限额按 UTF-16 计算。**Output token limit** 约束模型输出预算，推理模型可能与正文共享额度。容量告警见运行详情。长输出截断时可考虑提高允许的输出量或降低 thinking。[预算预检](context.md#发送前统一预算)

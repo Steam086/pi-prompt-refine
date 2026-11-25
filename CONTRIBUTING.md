@@ -19,7 +19,7 @@ Maintainers: use the [release checklist](docs/release.md) to audit dependencies,
 
 | Audience | Scope |
 | --- | --- |
-| English readers | English is the primary language for the native TUI release: [installation and first use](README.md), the [TUI guide](docs/tui-guide.md), [release smoke tests](docs/macos-smoke-test.md), contribution instructions, and [security reporting](SECURITY.md). Document new public workflows in English. |
+| English readers | English is the primary language for the native TUI release: [installation and first use](README.md), the [TUI guide](docs/tui-guide.md), contribution instructions, and [security reporting](SECURITY.md). Document new public workflows in English. |
 | Simplified Chinese readers | Maintain the [Chinese README](README.zh-CN.md) for installation and first use. Keep the existing [usage](docs/usage.md) and [configuration](docs/configuration.md) references available; they need not mirror the English guide. |
 | Maintainers and experimenters | Architecture, API, test, design, and experiment notes can stay in their existing language. Translate only what readers need to use a supported feature. The experimental Web integration is outside the native TUI release. |
 

@@ -48,4 +48,4 @@ pi install npm:pi-prompt-refine
 - [使用说明](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/usage.md)
 - [配置参考](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/configuration.md)
 - [Preferences 选择与保存](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/preference-selection.md)
-- [快捷键排查](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/shortcut-troubleshooting.md#现在如何使用)
+- [快捷键排查](https://github.com/Steam086/pi-prompt-refine/blob/main/docs/usage.md#快捷键无响应)

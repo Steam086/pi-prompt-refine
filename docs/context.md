@@ -20,6 +20,8 @@ round 的首份输入冻结会话历史、系统模板和项目资源。并行�
 
 每次运行最多一次独立无工具请求。固定角色和输出约定独立于可编辑策略。模型输入区分当前草稿、补充的会话／项目背景和用户提交的编辑要求。原稿内的代码、TUI、路径和引用按字面保护；额外背景只用于理解任务。JSON 可以界定数据字段，模型可能仍误解指令，需用户审阅。
 
-Revise 把原稿、上一候选和本次修订要求分别传入。历史编辑依据只解释候选中仍保留的改动，不能重放已删除的要求。它受预算约束，也不扩展旁车文件。[连续修订实验](revision-semantics-experiment.md)记录删除这份依据的取舍。
+Revise 把原稿、上一候选和本次修订要求分别传入。历史编辑依据只解释候选中仍保留的改动，不能重放已删除的要求。预算不足时可省略这份依据。[连续修订实验](experiments/revision-semantics-experiment.md)
 
-只接受完整有效的改写结果。无效可选标题可略过，截断、工具调用或非法输出不产生候选。首次改写严重遗失粘贴的 TUI 参考时，有窄范围的原稿回退来减少字面材料丢失。触发和授权例外见[实现](../src/reference-preservation.ts)及[回归](../test/unit/reference-preservation-guard.test.ts)。通用语义质量要通过[真实样例验收](optimizer-evaluation.md)评估。
+只有正常结束、没有工具调用且返回有效 JSON 正文的响应才能产生候选。若 Provider 区分输出阶段，优先解析 `final_answer` 文本，跳过 `commentary`。可选标题或附注无效时保留有效正文。附注顺序和名称取自本次选择，仅请求附注的 Revise 会保留上一候选的正文。[响应阶段选择](../src/app/provider-response.ts) · [输出解析](../src/context.ts)
+
+首次改写严重遗失原稿中粘贴的 TUI 参考时，可以回退到原稿并提示用户。触发条件和显式删除参考的例外见[保留规则](../src/reference-preservation.ts)及[回归测试](../test/unit/reference-preservation-guard.test.ts)。通用语义质量通过[样例验收](optimizer-evaluation.md)评估。

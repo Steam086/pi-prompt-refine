@@ -8,7 +8,7 @@
 | --- | --- |
 | 首次澄清、上下文纠正、字面保护、明确编辑和条件偏好 | [SDK live fixture 与断言](../test/live/refine-policy.live.test.ts) |
 | 粘贴 TUI 原稿 | [保留案例与模型观察](experiments/luna-reference-preservation.md) |
-| 连续修订、合法编辑和要求复活 | [连续修订对照](revision-semantics-experiment.md) |
+| 连续修订、合法编辑和要求复活 | [连续修订对照](experiments/revision-semantics-experiment.md) |
 | 统一语义评分 | [12 题合成 benchmark 设计](benchmarks/project-semantic-fidelity-v1/README.md) · [判题规则](benchmarks/project-semantic-fidelity-v1/judge.md) |
 | 历史下游格式遵循 | [IFEval 实验及局限](experiments/README.md) |
 

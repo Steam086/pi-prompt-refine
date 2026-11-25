@@ -15,7 +15,9 @@ Refine passes the full candidate to Pi's RPC editor and uses status updates for 
 
 - **Pi RPC 1.6.0, Linux x86_64, isolated profile.** A deterministic optimizer received the exact draft in one request. Explicit viewing and reopening delivered 262,144 UTF-16 code units unchanged. Confirming edited text or cancelling left the candidate and transcript unchanged.
 - **T3 Code desktop.** The user reported opening and copying a short result through the receipt's command. The installed build was unrecorded.
-- **Offline tests.** The [RPC integration suite](../test/integration/rpc-slash.test.ts) exercises scheduling, deferral, expiration and exact delivery, including a 2,097,152-code-unit result through the mocked editor. [Manual retest checklist](rpc-slash-v1.md) covers stable builds and Chinese IME.
+- **Offline tests.** The RPC integration suite exercises scheduling, deferral, expiration and exact delivery, including a 2,097,152-code-unit result through the mocked editor. [RPC integration tests](../test/integration/rpc-slash.test.ts)
+
+For a stable T3 build, record the extension revision, host and Pi versions, and viewport. Use an isolated profile and a deterministic stub. With an unsent draft and a Chinese IME composition in progress, check which thread receives the preview, when focus moves and what text returns on close. Scroll a long synthetic candidate to its end and compare the clipboard with the original fixture. Reopen it using the receipt, then check that a session change expires the command.
 
 ## Synthetic probe in unmodified T3 Code
 

@@ -1,6 +1,6 @@
 # 使用说明
 
-安装与首轮操作见[中文 README](../README.zh-CN.md)。本页介绍原生 TUI。其他入口见[文档索引](index.md)。
+安装与首轮操作见[中文 README](../README.zh-CN.md)。下文按原生 Pi 工作台说明操作，T3 Code 用户可直接查看 [RPC 用法](#在-t3-code-中查看结果)。
 
 ## 快捷键：每轮首次直接优化
 
@@ -55,7 +55,7 @@
 
 ## 记录范围与用量
 
-运行记录按 session 保存或查看。会话间切换不会合并日志。关于保存内容、清除和卸载后的文件，见[本地历史与清理](tui-guide.md#local-history-and-cleanup)。
+运行记录按 Pi 会话保存或查看。在 **Usage** 中按 `b` 检查哪些运行已保存、哪些只在内存中。要关闭保存或删除当前会话的历史文件，见[历史保存与隐私](configuration.md#历史保存与隐私)。
 
 ### 用量与参考费用
 
@@ -75,7 +75,15 @@ Pi 报告可识别的网络传输故障时，Usage 显示 `Error: network`。历
 /refine view
 ```
 
-命令正文是显式请求，不受首次快捷键规则限制。原稿与子命令同名时用显式形式，例如 `/refine optimize model`。`/refine usage`（兼容 `/refine history`）打开用量页。快捷键问题见[排查指南](shortcut-troubleshooting.md#现在如何使用)。RPC 宿主使用自己的[命令流程](rpc-slash-verification.md)。独立的 `/refine-api` 语法、结果查询与安全重试见[应用接口](application-api.md#refine-api)。
+命令正文是显式请求，不受首次快捷键规则限制。原稿与子命令同名时用显式形式，例如 `/refine optimize model`。`/refine usage`（兼容 `/refine history`）打开用量页。独立的 `/refine-api` 语法、结果查询与重试见[应用接口](application-api.md#refine-api)。
+
+### 快捷键无响应
+
+先用 `/refine` 打开工作台，或用 `/refine optimize <文本>` 继续改写。在出现问题的 Pi 会话中运行 `/hotkeys`，确认绑定已加载，再回到主编辑器试按。如果只在终端复用器中失效，用同一个 Pi 配置在直接终端复测。`Ctrl+\` 在普通 shell 提示符下可能触发 SIGQUIT，请在 Pi 编辑器内测试。
+
+### 在 T3 Code 中查看结果
+
+先在使用同一 Pi agent 目录的原生 TUI 执行 `/refine model` 选好模型，再回到 T3 Code 线程提交 `/refine optimize <文本>`。结果就绪且 Pi 空闲、当前对话框关闭后，原线程会弹出预填候选正文的 **Question**。可全选复制，按 **Submit** 关闭并回到先前的草稿。预览中的编辑会被丢弃。要重看，复制回执或状态中完整的 `/refine result …` 命令。重看不会再次调用模型。切换 Pi 会话或分支、重载扩展后，原命令会失效。[宿主版本与实测范围](rpc-slash-verification.md)
 
 ## 会话名称与兼容性
 
