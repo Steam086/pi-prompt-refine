@@ -11,6 +11,7 @@ import { createContextJobs } from "./context-jobs.js";
 import { createModelSelection } from "./model-selection.js";
 import { createEditorActions } from "./editor-actions.js";
 import { createLifecycle } from "./lifecycle.js";
+import { SessionPreferences } from "./session-preferences.js";
 import { createRequestFlows } from "./request-flows.js";
 import { createWorkspaceHost } from "./workspace-host.js";
 import { createWorkspaceActions } from "./workspace-actions.js";
@@ -40,6 +41,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
   const taskPositions = new Map<string, TaskPanelPosition>();
   const usagePositions = new Map<string, TaskPanelPosition>();
   const preferenceStores = new Map<string, PreferenceStore>();
+  const sessionPreferences = new SessionPreferences();
   const preferenceRepository = (ctx: ExtensionContext) => {
     let store = preferenceStores.get(ctx.cwd);
     if (!store) { store = new PreferenceStore(getAgentDir(), ctx.cwd, BUILTIN_PREFERENCES); preferenceStores.set(ctx.cwd, store); }
@@ -89,7 +91,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     controller, config, useContext, setCompletionContext,
     canNameSession: lifecycle.canNameSession, modelSwitchBlocked: models.modelSwitchBlocked,
     showPreview: (ctx) => host.showPreview(ctx), updatePresentation: presentation, notify, notifyCurrent,
-    defaultPreferences: (ctx) => preferenceRepository(ctx).getDefaultPreferences(),
+    initialPreferences: (ctx) => preferenceRepository(ctx).getDefaultPreferences(sessionPreferences.overrides(ctx.sessionManager.getSessionId())),
   });
   function executionContext(): ExtensionContext {
     if (!completionContext || completionContext.sessionManager.getSessionId() !== controller.getSessionId()) {
@@ -127,7 +129,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     optimizationError: requests.optimizationError, operations, saveOptimizer,
     triggerOptimize: requests.triggerOptimize, reviseCandidate: requests.reviseCandidate,
     registeredModels: models.registeredModels, showOptimizerQuota,
-    notify, preferenceRepository,
+    notify, preferenceRepository, sessionPreferences,
   });
   const host = createWorkspaceHost({
     controller, config, openHint, taskPositions, usagePositions, useContext,

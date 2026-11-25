@@ -11,6 +11,7 @@ import type { RefineWorkspace } from "../workspace.js";
 import type { RevisionDraft } from "../revision-preferences.js";
 import type { TaskPanelPosition } from "../task-panel.js";
 import type { createRequestFlows } from "./request-flows.js";
+import type { SessionPreferences } from "./session-preferences.js";
 import { displayModel, effectiveThinkingLevel, sameModel, thinkingSource } from "./model-selection.js";
 import { RESTORED_CONTEXT_HINT, type Notify, type WorkspaceSelection } from "./contracts.js";
 
@@ -33,6 +34,7 @@ interface WorkspaceActionsDependencies {
   showOptimizerQuota(): boolean;
   notify: Notify;
   preferenceRepository(ctx: ExtensionContext): PreferenceStore;
+  sessionPreferences: SessionPreferences;
 }
 interface WorkspaceMount {
   ctx: ExtensionContext;
@@ -47,7 +49,7 @@ interface WorkspaceMount {
 
 export function createWorkspaceActions({ controller, config, setCompletionContext, persistConfig,
   historyStorage, optimizationError, operations, triggerOptimize, reviseCandidate,
-  registeredModels, showOptimizerQuota, notify, preferenceRepository, saveOptimizer }: WorkspaceActionsDependencies) {
+  registeredModels, showOptimizerQuota, notify, preferenceRepository, sessionPreferences, saveOptimizer }: WorkspaceActionsDependencies) {
   // Runtime-only drafts survive overlay mounts, but never enter history persistence.
   const inputDrafts = new Map<string, string>();
   const revisionDrafts = new Map<string, RevisionDraft>();
@@ -67,20 +69,23 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
       const result = operations.start(id, selected, thinking);
       if (result.kind !== "started") notify(ctx, `Request not started (${result.kind}); existing work kept.`, "info");
     };
+    const currentSession = () => !isClosed() && ctx.sessionManager.getSessionId() === sessionId && controller.getSessionId() === sessionId;
     return {
       preferences: { repository: preferenceRepository(ctx), key: config.preferencesKey, get maxChars() { return config.maxDraftChars; } },
+      sessionPreferences: sessionPreferences.target(sessionId, currentSession, () => config.maxDraftChars),
       draftPreferences: (id, original) => {
-        if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId || controller.getSessionId() !== sessionId) return undefined;
+        if (!currentSession()) return undefined;
         const source = id === undefined ? undefined : original ? controller.getOriginalRecord(id) : controller.getRecord(id);
         if (id !== undefined && !source) return undefined;
         const selected = source?.input.preferences ?? [];
         // A request (including its original row) only exposes adopted snapshots.
-        if (!source || !original || source.status !== "unsent" || source.input.contextUnavailable || controller.getState().pendingSend) return { selected };
+        if (!source || !original || source.status !== "unsent" || source.input.contextUnavailable || controller.getState().pendingSend ||
+          (!isUsage() && source.archivedAt !== undefined)) return { selected };
         let expected = source;
         return {
           selected,
           save: (selected) => {
-            if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId || controller.getSessionId() !== sessionId) return "Session changed; no selection applied.";
+            if (!currentSession()) return "Session changed; no selection applied.";
             const error = controller.updateDraftPreferences(expected, selected);
             if (!error) expected = controller.getRecord(source.id) ?? expected;
             return error;

@@ -174,7 +174,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 === Preferences / choose ===
 ╭───────────────────────────────────────────────────────╮
 │  Preferences · This revision                          │
-│  Focus: Library · 0 selected · 9/16000 chars          │
+│  Focus: Library · 0 selected · Kept on return         │
 │  Space Toggle · Enter Read · s Selected               │
 │  Esc Back · l Manage library · Tab Focus · / Search   │
 │  ───────────────────────────────────────────────────  │
@@ -193,13 +193,13 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │  Preferences library                                  │
 │  Focus: Library · 0 selected (read-only)              │
 │  Enter Read · s Selected                              │
-│  Esc Back · Tab Focus · / Search                      │
+│  Esc To selection · Tab Focus · / Search              │
 │  ───────────────────────────────────────────────────  │
 │  Search:                                              │
 │  Library 1/1                                          │
 │  n Add · e Edit · d Delete                            │
 │  Unclassified                                         │
-│  › [ ] Preserve 中文😀                        Global  │
+│  ›     Preserve 中文😀                        Global  │
 │                                                       │
 │                                                       │
 │                                                       │

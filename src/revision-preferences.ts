@@ -75,6 +75,33 @@ export function selectPreference(entry: RevisionPreference): SelectedPreference 
 export function preferenceSelectionLabel(entry: SelectedPreference): string {
   return entry.selectionSource === "project-default" ? "Project default" : "Manually selected";
 }
+
+export function resolvePreferenceSelection(library: PreferenceLibrary, overrides?: ReadonlyMap<string, boolean>): SelectedPreference[] {
+  const entries = new Map(library.entries.filter((entry) => !library.errors[entry.scope]).map((entry) => [preferenceKey(entry), entry]));
+  const keys = new Set(library.projectDefaults ?? []);
+  for (const [key, enabled] of overrides ?? []) {
+    if (enabled) keys.add(key);
+    else keys.delete(key);
+  }
+  const seen = new Set<string>();
+  const explicitContent = new Set([...keys].flatMap((key) => {
+    const entry = entries.get(key);
+    return entry && overrides?.get(key) === true ? [preferenceContentKey(entry)] : [];
+  }));
+  const selected: SelectedPreference[] = [];
+  for (const key of keys) {
+    const entry = entries.get(key);
+    if (!entry) continue;
+    const content = preferenceContentKey(entry);
+    const explicit = overrides?.get(key) === true;
+    if (seen.has(content) || (!explicit && explicitContent.has(content))) continue;
+    seen.add(content);
+    const snapshot = selectPreference(entry);
+    if (!explicit) snapshot.selectionSource = "project-default";
+    selected.push(snapshot);
+  }
+  return selected;
+}
 /** Deduplicate literal content, not names, retaining the user's selection order. */
 export function uniquePreferences(selected: readonly SelectedPreference[]): SelectedPreference[] {
   const result: SelectedPreference[] = [];

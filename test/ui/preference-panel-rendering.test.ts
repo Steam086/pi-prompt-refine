@@ -202,6 +202,38 @@ describe("preference rendering and responsiveness", () => {
     expect(reading).toContain(f.theme.fg("muted", "Saved snapshot"));
   });
 
+  it.each(["dark", "light"])("separates the wide library preview from its controls and only shows an active search cursor (%s)", async (name) => {
+    const entry = { ...a, metadata: { kind: "rewrite" as const, description: "简短说明 😀", activation: "manual" as const },
+      body: "Keep **literal** text.\n\n第二段\x1b[2J" };
+    const f = setup([], "", name, [entry], "manage"); await loaded(f.panel);
+    vi.spyOn(f.theme, "bold").mockImplementation((value) => `\x1b[1m${value}\x1b[22m`);
+    f.panel.invalidate();
+    const lines = f.panel.render(100);
+    const preview = lines.flatMap((line) => line.includes(" │ ") ? [line.split(" │ ")[1]!] : []);
+    expect(preview.slice(0, 8).map((line) => stripVTControlCharacters(line).trim())).toEqual([
+      a.name, "Prompt rewriting", "", "简短说明 😀", "", "Keep **literal** text.", "", "第二段�[2J",
+    ]);
+    expect(preview[0]).toContain(f.theme.fg("text", f.theme.bold(a.name)));
+    expect(preview[1]).toContain(f.theme.fg("muted", "Prompt rewriting"));
+    expect(preview[3]).toContain(f.theme.fg("muted", entry.metadata.description));
+    expect(preview[5]).toContain(f.theme.fg("text", "Keep **literal** text."));
+    const chrome = lines.join("\n");
+    expect(chrome).not.toContain("\x1b[2J");
+    expect(chrome).not.toContain(CURSOR_MARKER);
+    expect(chrome).not.toContain("\x1b[7m");
+    expect(text(f.panel)).not.toContain("[ ]");
+
+    f.panel.handleInput("/"); f.panel.handleInput("Concise");
+    expect(f.panel.render(100).join("\n")).toContain(CURSOR_MARKER);
+    f.panel.handleInput(enter);
+    expect(text(f.panel)).toContain("Search: Concise");
+    expect(f.panel.render(100).join("\n")).not.toContain(CURSOR_MARKER);
+    f.panel.handleInput(" ");
+    expect(f.panel.render(100).join("\n")).toContain(f.theme.fg("warning", "⚠ Select an Unsent original or open Revise to change preferences."));
+    expect(f.updateSelection).not.toHaveBeenCalled();
+    expect(f.repo.save).not.toHaveBeenCalled();
+  });
+
   it.each(["dark", "light"])("keeps load/write/validation failures visible and semantic at short sizes (%s)", async (name) => {
     const f = setup([], "Extra", name); await loaded(f.panel);
     f.panel.handleInput("l"); f.panel.handleInput("n"); save(f.panel);
@@ -232,6 +264,24 @@ describe("preference rendering and responsiveness", () => {
     f.panel.handleInput(esc); expect(f.close).toHaveBeenCalledExactlyOnceWith();
     expect(f.updateSelection).not.toHaveBeenCalled();
     expect(f.repo.save).not.toHaveBeenCalled();
+  });
+
+  it("pages through both the chooser and the full instruction with Pi's PageUp and PageDown keys", async () => {
+    const entries = Array.from({ length: 30 }, (_, i) => ({ ...a, id: `page-${i}`, name: `Entry ${i}`,
+      body: Array.from({ length: 20 }, (_, j) => `Instruction line ${j}`).join("\n") }));
+    const f = setup([], "", "dark", entries); await loaded(f.panel);
+    f.terminal.rows = 14;
+    expect(highlightedRow(f.panel, 50)).toContain("Entry 0");
+    f.panel.handleInput("\x1b[6~");
+    expect(highlightedRow(f.panel, 50)).not.toContain("Entry 0");
+    f.panel.handleInput("\x1b[5~");
+    expect(highlightedRow(f.panel, 50)).toContain("Entry 0");
+    f.panel.handleInput(enter);
+    expect(text(f.panel, 50)).toContain("Instruction line 0");
+    f.panel.handleInput("\x1b[6~");
+    expect(text(f.panel, 50)).not.toContain("Instruction line 0");
+    f.panel.handleInput("\x1b[5~");
+    expect(text(f.panel, 50)).toContain("Instruction line 0");
   });
 
   it("does not repeat library I/O, filtering or long-document layout on focus changes and scrolling", async () => {

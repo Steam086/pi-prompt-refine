@@ -58,7 +58,7 @@ export function save(panel: { handleInput(data: string): unknown }) {
 
 export const listRows = (panel: PreferencePanel, width = 70) => text(panel, width).split("\n").filter((line) => /\[[x ]\]/.test(line));
 
-export const highlightedRow = (panel: PreferencePanel, width = 70) => listRows(panel, width).find((line) => line.includes("›"));
+export const highlightedRow = (panel: PreferencePanel, width = 70) => text(panel, width).split("\n").find((line) => /^\s*›/.test(line));
 
 export function unsentWorkspaceSetup(key: KeyId | null = "alt+p", conflict = false, theme = "dark", maxChars = 16000, maxConcurrent = 4) {
   const f = setup([], "", theme); f.panel.dispose();

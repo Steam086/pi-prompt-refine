@@ -10,7 +10,7 @@ Scroll within the workspace to read long results. The frame stays stable as you 
 
 | To… | Do this |
 | --- | --- |
-| Refine from the Pi editor | With an optimizer selected, type a new draft and press `Ctrl+\`. The first rewrite of the round starts immediately with your project defaults. Later new drafts open as **Unsent**. |
+| Refine from the Pi editor | With an optimizer selected, type a new draft and press `Ctrl+\`. The first rewrite of the round starts immediately with the current session choices, including inherited project defaults. Later new drafts open as **Unsent**. |
 | Rewrite an Unsent draft | Select it and press `Enter`. To add Preferences first, press `Tab`, then `Space` on each item you want. Press `Enter` to start the rewrite. |
 | Try a different model | Select the draft or a run and press `m`. Choose a model and press `Enter` to run it without changing your default. |
 | Revise a result | Select the result and press `f`. Enter your revision instructions, then press `Ctrl+S` to request a new rewrite. |
@@ -19,11 +19,15 @@ Scroll within the workspace to read long results. The frame stays stable as you 
 
 The first request counts as soon as Refine queues it, even if you stop it, it fails, or you delete its record. An unchanged draft reopens its existing entry without calling the optimizer again. Sending a user message to Pi ends the round; merely accepting a result into the editor does not. The shortcut never changes the editor or sends to the main agent.
 
-To choose Preferences before the first rewrite, open `/refine`, press `n`, and save a draft with `Enter` before choosing Preferences.
+### Preferences
 
-For an existing result, press `f` to open **Revise**, then `Alt+P` (or `Tab`, then `Enter`) to choose Preferences for this revision. `Space` toggles a preference on the draft immediately; `Esc` returns without undoing the selection. Only `Ctrl+S` in Revise requests a rewrite. On an Unsent original, `p` opens the full chooser with the same selection behavior; return to the original and press `Enter` to run it.
+In **Preview**, press `p` on an editable **Unsent** original to choose preferences for that prompt. With any other selection, or with an empty workspace, `p` opens **This session**: choices for new prompts and explicit copies in this Pi session. `Space` toggles and saves immediately. The checkbox and selected count update without another key; `Esc` just returns. Neither action runs a rewrite or writes to the Pi editor.
 
-In the chooser, press `l` to open **Preferences library**. Use `n` to add, `e` to edit, or `d` to delete an entry. These actions don't replace or remove instructions you've already selected. To use an edited entry in your draft, deselect it and select it again. From an already-run item or an empty workspace, `p` opens the library directly; any adopted preferences shown there are read-only.
+`g` changes the **project default** (`*`) from either chooser. A session choice inherits that default until you override it with `Space`. For example, `[ ] *` means the project default is on but this session has opted out. In **This session**, `r` restores inheritance for the highlighted item. Session choices survive closing the workspace and starting a new round, but not `/reload`. They don't change existing drafts or runs, same-input retries, or Revise drafts.
+
+Press `l` to manage the library (`n` Add, `e` Edit, `d` Delete). New prompts take a snapshot of the current library text when captured. Edits and deletions don't change existing snapshots. To use a new version in an existing draft, deselect the old entry and select it again. In **Usage**, `p` on a run opens a read-only audit of its adopted preferences.
+
+For an existing result, press `f` to open **Revise**, then `Alt+P` (or `Tab`, then `Enter`) to choose preferences for the revision draft. `Ctrl+S` in Revise or `Enter` on an Unsent original starts a rewrite; `Space` in a chooser never does.
 
 Select **In Your Own Words** in Preferences to see how the rewrite model understood your draft. The note appears below the rewritten prompt and is not included when you accept or send it. You can also add your own **Result notes** in Preferences.
 

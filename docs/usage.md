@@ -4,7 +4,7 @@
 
 ## 快捷键：每轮首次直接优化
 
-选好优化模型后，在 Pi 输入框输入新草稿，按 `Ctrl+\`。本轮首次请求通过校验后直接启动并采用项目默认 Preferences。同一轮后来捕获的新草稿显示为 **Unsent**，需要选中并按 Enter 才启动。想在第一次请求前挑选偏好，可先用 `/refine` → `n` 新建并保存。空输入或未配置模型时快捷键只打开工作台，已有相同输入时定位原记录。若项目默认组合超长，可在 Unsent 中减少选择后再运行。每次改写可能消耗优化模型额度。
+选好优化模型后，在 Pi 输入框输入新草稿，按 `Ctrl+\`。本轮首次请求通过校验后直接启动，并采用会话选择及其继承的项目默认 Preferences。同一轮后来捕获的新草稿显示为 **Unsent**，需要选中并按 Enter 才启动。想在第一次请求前挑选偏好，可先用 `/refine` → `p` 为本会话设置，也可用 `/refine` → `n` 创建原稿后单独选择。空输入或未配置模型时快捷键只打开工作台，已有相同输入时定位原记录。若项目默认组合超长，可在 Unsent 中减少选择后再运行。每次改写可能消耗优化模型额度。
 
 ## Round：发送后自动归档
 
@@ -45,7 +45,7 @@
 
 ## 保存与复用编辑要求（Preferences）
 
-可编辑 Unsent 按 `p`，Revise 按 Alt+P 打开选择器。Space 立即勾选或取消，Esc 返回并保留选择。按 `l` 可单独管理库，不改变已选快照。返回 Unsent 按 Enter，或返回 Revise 按 Ctrl+S，才会提交请求。[项目默认与选择详情](preference-selection.md)
+在 Preview 按 `p`：高亮可编辑 Unsent 时只修改该原稿，否则修改本会话后续新 prompt 的选择。`Space` 即时保存勾选，`g` 单独设项目默认，Esc 只返回。按 `l` 管理库不改已有快照；在 Usage 的运行上按 `p` 只读审计。返回 Unsent 按 Enter，或返回 Revise 按 Ctrl+S，才会提交请求。[项目默认与选择详情](preference-selection.md)
 
 **In Your Own Words** 可显示模型对原稿的理解。可在 Preferences 中选择该内置项，或通过 **Add** 创建自定义附注。[Result notes 使用方式](preference-selection.md#result-notes)
 

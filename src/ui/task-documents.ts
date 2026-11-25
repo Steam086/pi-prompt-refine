@@ -70,7 +70,9 @@ export function renderTaskDocument(
       hints.push(["n", "New"]);
     }
     if (inline) hints.push(["Tab / Shift+Tab", "Enter preferences; return to tasks without changing selections"], ["Space", "Toggle at Preferences focus; saved immediately"], ["Enter", "Optimize this Unsent at Preferences focus; search/read never submit"], ["o", "Read original or full preference at its focus"], ["/", "Search at Preferences focus"]);
-    if (options.preferences) hints.push(["p", inline ? "More preferences; l manages the library" : "Preferences"]);
+    if (options.preferences) hints.push(["p", inline ? "More preferences; l manages the library" : options.usage
+      ? row ? "Preferences: Unsent choices or read-only adopted snapshots" : "Preferences library"
+      : "Preferences for the selected Unsent or future prompts in this session"]);
     if (row) {
       hints.push(["i", row.record.input.contextUnavailable ? "Copy to current" : "Edit original"]);
       if (!row.record.input.contextUnavailable) hints.push(["m", "Run model"]);

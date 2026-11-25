@@ -276,9 +276,11 @@ describe("three-action preference library", () => {
     expect(text(f.panel)).toContain("Preferences library");
     expect(text(f.panel)).toContain("Focus: Library");
     const lines = text(f.panel).split("\n");
-    const heading = lines.findIndex((line) => /Library 1\/2.*│ Preview\s*$/.test(line));
+    const heading = lines.findIndex((line) => /Library 1\/2.*│ /.test(line));
     expect(heading).toBeGreaterThan(0);
+    expect(lines[heading - 1]).toMatch(/Search:.*│ Concise 中文/);
     expect(lines[heading + 1]!.split("│")[0]!.trim()).toBe("n Add · e Edit · d Delete");
+    expect(lines.join("\n")).toContain("Esc To selection");
     expect(lines.join("\n").match(/s Selected(?: only)?/g)).toHaveLength(1);
     expect(lines.join("\n").match(/Enter Read/g)).toHaveLength(1);
     for (const removed of ["Show all selected", "Refresh library", "Save highlighted", "Current actual", "Preview after", "Edit selected for", "Clear search"]) {

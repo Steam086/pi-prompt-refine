@@ -307,6 +307,7 @@ describe("Unsent preference selection", () => {
     const f = unsentWorkspaceSetup(); const w = f.workspace;
     f.controller.onMessageStarted("Another Pi task");
     w.openUsage({ id: f.originals[0]!.id, original: true });
+    expect(text(w, 160)).toContain("p: Preferences");
     w.handleInput("p"); await loaded(w);
     expect(text(w)).toContain("Preferences · Unsent original");
     w.handleInput(" "); w.handleInput(esc);

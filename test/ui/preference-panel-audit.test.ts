@@ -213,7 +213,8 @@ describe("new preference save identity and reveal", () => {
     expect(text(f.panel)).not.toContain("Search: No match");
     expect(text(f.panel)).toContain("Saved; not selected.");
     expect(text(f.panel).includes("Filters reset to All.")).toBe(mode !== "none");
-    expect(highlightedRow(f.panel)).toContain(`› [ ] ${a.name}`);
+    expect(highlightedRow(f.panel)?.trim()).toMatch(/^›\s+Concise 中文/);
+    expect(highlightedRow(f.panel)).not.toMatch(/\[[x ]\]/);
     f.panel.handleInput(enter);
     expect(text(f.panel)).toContain("project · new");
     expect(text(f.panel)).toContain("Extra");

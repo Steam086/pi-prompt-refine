@@ -19,7 +19,10 @@ describe.each(["dark", "light"])("project default controls (%s)", (themeName) =>
     await vi.waitFor(() => expect(text(f.panel)).toContain("Project default enabled"));
     let lines = f.panel.render(100);
     expect(lines.join("\n")).toContain(f.theme.fg("muted", "* "));
-    expect(lines.join("\n")).toContain(f.theme.fg("muted", "Project default: On · future drafts"));
+    expect(lines.join("\n")).toContain(f.theme.fg("muted", "Project default: On"));
+    f.panel.handleInput(enter);
+    expect(f.panel.render(100).join("\n")).toContain(f.theme.fg("muted", "Project default: On · future drafts"));
+    f.panel.handleInput(esc);
     expect(lines.join("\n")).toContain(formatKeyHint(["g", "Project default"], f.theme));
     expect(lines.join("\n")).not.toContain(formatKeyHint(["c", "Clear all"], f.theme));
     for (const action of [["n", "Add"], ["e", "Edit"], ["d", "Delete"]] as const) {

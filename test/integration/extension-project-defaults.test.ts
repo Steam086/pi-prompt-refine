@@ -17,7 +17,7 @@ describe("project defaults through the extension", () => {
     const output = () => h.panelLines(100).join("\n");
     const packet = (index: number) => JSON.parse((h.complete.mock.calls[index] as any[])[1].messages[0].content[0].text);
     h.panelInput("p"); await vi.waitFor(() => expect(output()).not.toContain("Working…"));
-    h.panelInput("l"); h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default disabled"));
+    h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default disabled"));
     h.panelInput("\x1b[B"); h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default enabled"));
     h.panelInput("\x1b");
     h.panelInput("f"); h.panelInput("Remove the initial requirement.");
@@ -51,9 +51,11 @@ describe("project defaults through the extension", () => {
     h.panelInput("n"); h.panelInput("Existing draft"); h.panelInput("\r");
     const output = () => h.panelLines(100).join("\n");
     h.panelInput("p"); await vi.waitFor(() => expect(output()).not.toContain("Working…"));
-    h.panelInput("l"); h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default enabled"));
+    expect(output()).toContain("Space Toggle · g Project default");
+    h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default enabled"));
+    expect(output()).toContain("[ ] * Default 中文😀");
     expect((await store.load()).projectDefaults).toEqual([preferenceKey(entry)]);
-    h.panelInput("\x1b"); h.panelInput("\x1b"); expect(output()).toContain("Preferences · 0 selected");
+    h.panelInput("\x1b"); expect(output()).toContain("Preferences · 0 selected");
     expect(h.complete).not.toHaveBeenCalled(); expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
     h.panelInput("q"); await view;
 
@@ -78,6 +80,91 @@ describe("project defaults through the extension", () => {
     expect((await store.load()).projectDefaults).toEqual([preferenceKey(entry)]);
     expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
     h.panelInput("q"); await view;
+  });
+
+  it("keeps session and project choices separate, applies them to new prompts, and isolates other sessions", async () => {
+    const h = await makeHarness(); const store = new PreferenceStore(h.agentDir, h.context.cwd);
+    const inherited = await store.save("project", { name: "Inherited item", body: "Project requirement." });
+    const manual = await store.save("global", { name: "Session item", body: "Session requirement." });
+    await store.setProjectDefault(inherited, true);
+    h.holdPanel(); let view = h.command("", h.context);
+    const output = (width = 100) => h.panelLines(width).join("\n");
+    const find = (name: string) => { for (const key of ["/", "\x15", name, "\r"]) h.panelInput(key); };
+    h.panelInput("p"); await vi.waitFor(() => expect(output()).toContain("[x] * Inherited item"));
+    find(inherited.name); h.panelInput(" ");
+    expect(output()).toContain("[ ] * Inherited item"); expect(output()).toContain("0 selected");
+    h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default disabled"));
+    h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default enabled"));
+    expect(output()).toContain("[ ] * Inherited item"); expect(output()).toContain("This session: Off");
+    h.panelInput("r"); expect(output()).toContain("[x] * Inherited item");
+    h.panelInput(" "); find(manual.name);
+    h.resize(10);
+    expect(output(24)).toMatch(/Esc.*Space.*g/);
+    h.panelInput(" ");
+    expect(output(24)).toContain("1 selected"); expect(output(24)).toContain("[x]");
+    h.resize(40);
+    expect(output()).toContain("[x] Session item");
+    h.panelInput("\x1b"); h.panelInput("q"); await view;
+    expect(h.complete).not.toHaveBeenCalled(); expect(h.sent).toEqual([]); expect(h.editorWrites).toEqual([]);
+    expect((await store.load()).projectDefaults).toEqual([preferenceKey(inherited)]);
+
+    const messageStarted = h.handlers.get("message_start")![0]!;
+    messageStarted({ message: { role: "user", content: "Another round" } }, h.context);
+    view = h.command("", h.context);
+    h.panelInput("p"); await vi.waitFor(() => expect(output()).toContain("[x] Session item"));
+    h.panelInput("\x1b"); h.panelInput("n"); h.panelInput("Draft captured earlier"); h.panelInput("\r");
+    expect(output()).toContain("Preferences · 1 selected");
+    h.panelInput("q"); await view;
+    await h.command("optimize New explicit request", h.context); await flushPromises();
+    const packet = (index: number) => JSON.parse((h.complete.mock.calls[index] as any[])[1].messages[0].content[0].text);
+    expect(packet(0).editing_instruction).toBe(`Saved editing requirements (manually selected):\n${manual.body}`);
+
+    view = h.command("view", h.context);
+    h.panelInput("p"); await vi.waitFor(() => expect(output()).toContain("[x] Session item"));
+    find(manual.name); h.panelInput(" "); expect(output()).toContain("0 selected");
+    h.panelInput("\x1b"); h.panelInput("q"); await view;
+    await h.command("optimize Changed session selection", h.context); await flushPromises();
+    expect(packet(1).editing_instruction).toBeUndefined();
+    view = h.command("", h.context);
+    const draftVisible = () => output().includes("› ○ Unsent");
+    for (let i = 0; i < 5 && !draftVisible(); i++) h.panelInput("\x1b[B");
+    expect(draftVisible()).toBe(true);
+    h.panelInput("\r"); await flushPromises(); expect(packet(2).editing_instruction).toContain(manual.body);
+    h.panelInput("q"); await view;
+
+    const sessionId = vi.spyOn(h.context.sessionManager, "getSessionId");
+    for (const [id, marker] of [["session-two", "[x]"], ["session-one", "[ ]"]]) {
+      h.handlers.get("session_before_switch")![0]!({}, h.context);
+      sessionId.mockReturnValue(id!);
+      await h.handlers.get("session_start")![0]!({ reason: "resume" }, h.context);
+      view = h.command("", h.context);
+      h.panelInput("p"); await vi.waitFor(() => expect(output()).toContain(`${marker} * Inherited item`));
+      h.panelInput("\x1b"); h.panelInput("q"); await view;
+    }
+  });
+
+  it("changes future session choices after a send without changing the adopted audit", async () => {
+    const h = await makeHarness(); const store = new PreferenceStore(h.agentDir, h.context.cwd);
+    const old = await store.save("project", { name: "Adopted item", body: "Original adopted requirement." });
+    await store.setProjectDefault(old, true); await h.reload();
+    await h.command("optimize Previous prompt", h.context); await flushPromises();
+    h.holdPanel(); let view = h.command("view", h.context);
+    h.panelInput("s"); await view;
+    expect(h.sent).toHaveLength(1);
+    h.handlers.get("message_start")![0]!({ message: { role: "user", content: h.sent[0]!.text } }, h.context);
+
+    view = h.command("", h.context);
+    const output = () => h.panelLines(100).join("\n");
+    h.panelInput("p"); await vi.waitFor(() => expect(output()).toContain("[x] * Adopted item"));
+    expect(output()).toContain("Preferences · This session");
+    h.panelInput(" "); expect(output()).toContain("[ ] * Adopted item");
+    h.panelInput("\x1b"); h.panelInput("\x1b[C"); h.panelInput("p");
+    await vi.waitFor(() => expect(output()).toContain("[x] * Adopted item"));
+    expect(output()).toContain("Adopted preferences");
+    h.panelInput(" "); expect(output()).toContain("[x] * Adopted item");
+    h.panelInput("\r"); expect(output()).toContain(old.body);
+    expect(h.complete).toHaveBeenCalledTimes(1); expect(h.sent).toHaveLength(1);
+    h.panelInput("\x1b"); h.panelInput("\x1b"); h.panelInput("q"); await view;
   });
 
   it("loads defaults after resume and clears them for the draft without a separate confirmation", async () => {

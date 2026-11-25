@@ -188,7 +188,8 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
       for (let i = 0; i < 4; i++) await Promise.resolve();
       expect(render()).toContain("Filters reset to All.");
       expect(render()).toContain("Focus: Library");
-      expect(render()).toContain("› [ ] Saved 中文😀");
+      expect(render()).toMatch(/›\s+Saved 中文😀/);
+      expect(render()).not.toContain("[ ] Saved 中文😀");
       expect(entries.find((entry) => entry.id === "returned-identity")?.metadata).toEqual({
         kind: "task", description: "Saved 中文😀", activation: "manual",
       });

@@ -17,12 +17,14 @@ import { canonicalShortcut } from "./config.js";
 import type { ContextSettings } from "./settings.js";
 import { SettingsPage, type SettingsOptimizer, type SettingsPageActions, type SettingsResult } from "./ui/settings-page.js";
 import { RevisePage, type RevisionTarget } from "./ui/revise-page.js";
+import type { SessionPreferenceTarget } from "./app/session-preferences.js";
 export type { SettingsResult } from "./ui/settings-page.js";
 export type { ContextSettings } from "./settings.js";
 
 interface WorkspaceActions {
   preferences?: { repository: PreferenceRepository; key: KeyId | null; maxChars: number };
-  /** No save capability means library management with read-only adopted snapshots. */
+  sessionPreferences?: SessionPreferenceTarget;
+  /** No save capability means this record is an adopted snapshot, never a selection target. */
   draftPreferences?(id?: number, original?: boolean): { selected: SelectedPreference[]; save?(selected: SelectedPreference[]): string | undefined } | undefined;
   original?(id?: number): { text: string; save(text: string): string | undefined; cancel(): void } | undefined;
   /** Session-owned text, independent of request snapshots and revision feedback. */
@@ -99,6 +101,7 @@ export class RefineWorkspace implements Component, Focusable {
     if (actions.tasks) {
       const taskActions: TaskPanelActions = { ...actions.tasks,
         inlinePreferences: this.inlinePreferences,
+        sessionPreferences: !!actions.sessionPreferences,
         preferences: actions.preferences ? (id, original) => this.openDraftPreferences(id, original) : undefined,
         preferencesKey: this.preferencesKey,
         revise: (id) => this.openRevision(id),
@@ -197,23 +200,26 @@ export class RefineWorkspace implements Component, Focusable {
 
   private openDraftPreferences(id?: number, original?: boolean): void {
     const options = this.actions.preferences;
-    const target = this.actions.draftPreferences ? this.actions.draftPreferences(id, original) : { selected: [] };
-    const parent = this.mode === "usage" ? this.historyPanel : this.taskPanel;
     if (!options || this.preferencePanel) return;
+    const usage = this.mode === "usage";
+    const target = this.actions.draftPreferences ? this.actions.draftPreferences(id, original) : { selected: [] };
+    const parent = usage ? this.historyPanel : this.taskPanel;
     if (!target) {
       parent?.setNotice("Preferences target changed; reopen Preferences.", "warning");
       return;
     }
     const save = target.save;
+    const session = !usage && !save ? this.actions.sessionPreferences : undefined;
     this.preferencePanel = new PreferencePanel(this.tui, this.theme, this.keys, options.repository,
-      target.selected, "", options.maxChars, {
+      session ? [] : target.selected, "", options.maxChars, {
+        session,
         updateSelection: save && ((selected) => {
           const error = save(selected);
           if (!error) parent?.setNotice("", "muted");
           return error;
         }),
         back: () => this.closePreferences(),
-      }, save ? "refine" : "manage", this.layout);
+      }, save ? "refine" : session ? "session" : usage && id !== undefined ? "audit" : "manage", this.layout);
     this.focused = this.hasFocus;
     this.tui.requestRender();
   }
@@ -380,6 +386,10 @@ export class RefineWorkspace implements Component, Focusable {
       return true;
     }
     if (key?.toLowerCase() === "p") {
+      if (this.mode === "result" && this.actions.sessionPreferences) {
+        this.openDraftPreferences();
+        return true;
+      }
       this.panel.setNotice("Press f to revise, then open Preferences with Alt+P or Tab.");
       this.tui.requestRender();
       return true;

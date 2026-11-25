@@ -8,6 +8,7 @@ interface PreferenceRow {
   name: string;
   scope: RevisionPreference["scope"];
   selected: boolean;
+  selectionEditable?: boolean;
   focused: boolean;
   cursor: "›" | "·" | " ";
   warning?: string;
@@ -26,7 +27,7 @@ export function renderPreferenceRow(row: PreferenceRow, theme: Pick<Theme, "fg" 
   const sourceWidth = fullSource ? (row.scope === "builtin" ? 8 : 7) : 1;
   const sourceGap = width >= sourceWidth + 2 ? 1 : 0;
   const contentWidth = width - sourceWidth - sourceGap;
-  const checkbox = row.selected ? "[x]" : "[ ]";
+  const checkbox = row.selected ? "[x]" : row.selectionEditable === false ? "   " : "[ ]";
   const prefixColor = row.prefixColor ?? "muted";
   let prefix: string;
   if (contentWidth >= (warning ? 8 : 6) + 1) {
@@ -35,6 +36,8 @@ export function renderPreferenceRow(row: PreferenceRow, theme: Pick<Theme, "fg" 
   } else if (contentWidth >= (warning ? 5 : 4) + 1) {
     prefix = theme.fg(prefixColor, `${row.cursor}${checkbox}`)
       + (warning ? theme.fg("warning", "!") : "");
+  } else if (contentWidth >= 4 && !warning && (row.selected || row.selectionEditable !== false)) {
+    prefix = theme.fg(prefixColor, checkbox);
   } else {
     prefix = contentWidth >= (warning ? 3 : 2) ? theme.fg(prefixColor, row.cursor) : "";
     if (warning && contentWidth > 0) prefix += theme.fg("warning", "!");

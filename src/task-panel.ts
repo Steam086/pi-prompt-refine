@@ -27,6 +27,7 @@ export interface TaskPanelActions {
   preferences?(id?: number, original?: boolean): void;
   preferencesKey?: KeyId | null;
   inlinePreferences?: InlinePreferences;
+  sessionPreferences?: boolean;
   launchModel?(): string;
   showOptimizerQuota?(): boolean;
   historyStorage?(): HistoryStorageStatus;
@@ -167,7 +168,8 @@ export class TaskPanel {
     return !!this.actions.preferences;
   }
   private canChoosePreferences(row?: Row): boolean {
-    return !!(row?.original && row.record.status === "unsent" && row.record.archivedAt === undefined && !row.record.input.contextUnavailable && this.actions.preferences);
+    return !!(row?.original && row.record.status === "unsent" && (this.usage || row.record.archivedAt === undefined)
+      && !row.record.input.contextUnavailable && this.actions.preferences);
   }
   private inline(row?: Row): InlinePreferences | undefined {
     return !this.usage && !this.referenceOnly && !this.inspecting && this.canChoosePreferences(row) &&
@@ -454,11 +456,13 @@ export class TaskPanel {
       if (stop) primary.unshift(["x", "Stop"]);
       if (run?.candidate && !this.usage) primary.unshift(["a", editorHint]);
       // Reserve both focus labels so a focus change never moves or hides other hints.
+      const preferences: KeyHint[] = this.actions.sessionPreferences || (!inline && this.canChoosePreferences(selected))
+        ? [["p", "Preferences"]] : [];
       const focus: KeyHint[] = inline ? [["Tab", "Preferences"], ["o", (this.reading ? "Select" : "Read original").padEnd("Read original".length)]]
         : selected ? [["Tab", (this.reading ? "Select" : "Read").padEnd("Select".length)]] : [];
       ({ layout, footer } = passiveHintLayout(layout, tabs.length,
-        [...primary, ...focus, back, ["?", "Help"]],
-        [layout.innerWidth < 9 ? ["Esc", ""] : back, ...compact(primary.slice(0, 1)), ["?", "Help"], ...compact(primary.slice(1)), ...focus], this.theme));
+        [...primary, ...preferences, ...focus, back, ["?", "Help"]],
+        [layout.innerWidth < 9 ? ["Esc", ""] : back, ...compact(primary.slice(0, 1)), ...preferences, ["?", "Help"], ...compact(primary.slice(1)), ...focus], this.theme));
     } else {
       const primary: KeyHint[] = !selected ? [["n", "New"]] : [
         ...(!this.inspecting ? [["Enter", action] as const] : []),

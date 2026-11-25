@@ -72,6 +72,12 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       }
       expect(stripVTControlCharacters(selecting.join("\n"))).toContain("› [x] Choice 0");
       expect(stripVTControlCharacters(selecting.join("\n"))).toContain("Literal requirement 0");
+      input("/"); input("Choice 0"); render();
+      expect(writes.join("")).toContain("Search: Choice 0\x1b[7m");
+      writes.length = 0;
+      input("\r");
+      expect(stripVTControlCharacters(render().join("\n"))).toContain("Search: Choice 0");
+      expect(writes.join("")).not.toContain("\x1b[7m");
       input("\x1b");
       expect(tabStrip(render())).toBe(tabs);
       expect(tui.fullRedraws).toBe(redraws);

@@ -1,12 +1,23 @@
 # Preferences：检查选择与保存新条目
 
-在 Preview／Usage 的可编辑 Unsent 原稿上按 `p` 打开选择器；在空工作区或其他原稿、运行上按 `p` 直接打开库管理，不能更改本次选择。保存库、浏览和勾选均不会请求模型或写 Pi 编辑器。
+## `p` 打开哪种选择
 
-## 项目默认与单次选择
+| 入口 | 操作对象 |
+| --- | --- |
+| Preview 或 Usage 高亮可编辑 Unsent 原稿，按 `p` | 只修改该原稿。Preview 也可按 Tab 使用内联选择。 |
+| Preview 未高亮可编辑的 Unsent 原稿，按 `p` | **This session**：修改本 Pi 会话后续新建 prompt 的选择，包括空工作区或高亮运行时。 |
+| Usage 高亮一次运行或它的原稿，按 `p` | **Adopted preferences**：只读审计，不把该请求的快照当成当前会话选择。 |
+| Revise 中按 Alt+P（或 Tab 到 Preferences 后按 Enter） | 只修改这份修订草稿。 |
 
-在库管理中高亮条目后按 `g` 切换项目默认，`*` 标记已开启。Project、Global 和 Built-in 条目都可设为当前目录的默认项。更改立即保存，从之后的新建或复制原稿生效。已有草稿、重试和 Revise 保持自己的选择。
+在可编辑选择列表中，Space 立即保存并更新 `[ ]`／`[x]` 和已选计数；Enter 只阅读，Esc 只返回。`c` 清除当前选择（包括被筛选隐藏的项）。这些操作不提交请求、不写 Pi 编辑器。
 
-Space 逐项取消，`c` 清空本次选择（包括被筛选隐藏的项）。更改立即生效，不修改项目默认。项目默认正文会随提交发送，可在运行前移除。选择使用快照，后续库写入不会改变已提交要求。
+## 项目默认与会话选择
+
+Unsent 和会话的完整选择器都可按 `g` 切换高亮条目的项目默认，`*` 表示已启用。它写到当前项目目录，不改已有草稿或会话已明确设置的开关。Project、Global 和 Built-in 条目都可设为项目默认。
+
+会话默认继承项目设置。按 Space 可明确开启或关闭某项；`[ ] *` 表示项目默认开启、当前会话明确关闭。按 `r` 恢复高亮项的继承；按 `c` 取消当前已启用的项目默认和会话项，不改项目文件。会话选择按 Pi session 隔离，关闭工作台、开始下一轮不会清除；不跨 `/reload` 或进程重启。
+
+新建、捕获、显式复制以及直接启动的新 prompt 使用当时有效的选择，并保存库正文快照。库更新会影响以后捕获的正文，但不会改已有草稿、已排队或已发送的请求、同原稿重试或 Revise。
 
 ## 任务要求如何融入 prompt
 
@@ -28,7 +39,7 @@ Space 逐项取消，`c` 清空本次选择（包括被筛选隐藏的项）。�
 
 ## 完整面板：All 与 Selected only
 
-在 Revise 按 Alt+P，或 Tab 到 Preferences 再按 Enter。在选择器中，Space 立即更新当前草稿，Enter 阅读全文，Esc 返回并保留选择。Tab 在搜索和列表间切换。按 `l` 进入库管理，Esc 回到选择器；库管理不改变已选快照。返回原稿按 Enter 或返回 Revise 按 Ctrl+S 才提交模型请求。在 Revise 可先打开 **Review full requirements** 检查组合要求。
+Tab 在搜索和列表之间切换，Enter 可阅读全文。按 `l` 进入库管理，Esc 回到选择器；库管理不改变已捕获的快照。返回原稿按 Enter，或返回 Revise 按 Ctrl+S，才提交模型请求。在 Revise 可先打开 **Review full requirements** 检查组合要求。
 
 在 Library 或 Actions 按 `s` 切换 **All**／**Selected only**。后者从空搜索开始，按提交顺序展示已选快照，方便发现被筛选隐藏的项目。搜索匹配名称、描述和正文。Enter 可核对 **Selected snapshot** 和 **Current library entry**，库发生变更时要先取消再勾选才能采用新版。[搜索与排序回归](../test/unit/revision-preferences.test.ts) · [快照回归](../test/ui/preference-panel-audit.test.ts)
 

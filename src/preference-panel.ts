@@ -6,6 +6,7 @@ import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
 import { renderPreferenceRow } from "./preference-row.js";
+import type { SessionPreferenceChange, SessionPreferenceTarget } from "./app/session-preferences.js";
 import { preferenceGroup, preferenceGroupOrder, RESULT_NOTE_HINT, composeRevision, preferenceContentKey, preferenceKey, preferenceSelectionLabel, preferenceValidation, searchPreferences, selectPreference, PREFERENCE_SELECTION_LIMIT,
   type PreferenceLibrary, type PreferenceMetadata, type PreferenceRepository, type PreferenceScope, type PreferenceValue, type RevisionPreference, type SelectedPreference } from "./revision-preferences.js";
 
@@ -37,7 +38,7 @@ const ACTIONS = [
   { id: "delete", key: "d", label: "Delete" },
 ] as const;
 
-type PreferencePanelActions = { back(): void; updateSelection?(selected: SelectedPreference[]): string | undefined };
+type PreferencePanelActions = { back(): void; updateSelection?(selected: SelectedPreference[]): string | undefined; session?: SessionPreferenceTarget };
 
 /** Draft selection and library management have separate controls; neither submits a request. */
 export class PreferencePanel {
@@ -49,6 +50,10 @@ export class PreferencePanel {
   private selected: SelectedPreference[];
   private libraryMode = false;
   private get managing(): boolean { return this.purpose === "manage" || this.libraryMode; }
+  private get selectable(): boolean { return !this.managing && this.purpose !== "audit"; }
+  private get projectDefaultsEditable(): boolean {
+    return !!this.repository.setProjectDefault && (this.managing || this.purpose === "refine" || this.purpose === "session");
+  }
   private focus = 1;
   private actionIndex = 0;
   private index = 0;
@@ -58,7 +63,7 @@ export class PreferencePanel {
   private allView: { index: number; top: number; direction: number; key?: string } = { index: 0, top: 0, direction: 1 };
   private contentVersion = 0;
   private entriesCache?: { query: string; version: number; entries: RevisionPreference[] };
-  private descriptionCache?: { entry: RevisionPreference; version: number; compact: boolean; document: PreferenceDocument };
+  private descriptionCache?: { entry: RevisionPreference; version: number; compact: boolean; managing: boolean; document: PreferenceDocument };
   private documents: { document: PreferenceDocument; width: number; lines: string[] }[] = [];
   private notice = "";
   private noticeColor: "muted" | "warning" | "error" = "muted";
@@ -73,10 +78,11 @@ export class PreferencePanel {
     private readonly repository: PreferenceRepository, selected: readonly SelectedPreference[],
     private readonly freeText: string, private readonly maxChars: number,
     private readonly actions: PreferencePanelActions,
-    private readonly purpose: "revise" | "refine" | "manage" = "revise",
+    private readonly purpose: "revise" | "refine" | "session" | "manage" | "audit" = "revise",
     private readonly layout: PanelLayoutProvider = (width) => panelLayout(width, this.tui.terminal.rows),
   ) {
     this.selected = structuredClone([...selected]);
+    this.selectedOnly = purpose === "audit";
     this.requirementsChars = composeRevision(this.selected, freeText).length;
     void this.refresh();
   }
@@ -165,34 +171,50 @@ export class PreferencePanel {
     try {
       const library = await this.repository.load();
       if (this.disposed) return;
-      this.library = library;
-      this.contentVersion++;
+      this.setLibrary(library);
       const index = identity ? this.entries().findIndex((entry) => preferenceKey(entry) === preferenceKey(identity)) : 0;
       this.index = Math.max(0, index);
     } catch (error) {
-      if (!this.disposed) { this.library.errors = { project: this.error(error), global: this.error(error) }; this.contentVersion++; }
+      if (!this.disposed) this.setLibrary({ ...this.library, errors: { project: this.error(error), global: this.error(error) } });
     } finally { this.busy = false; this.redraw(); }
   }
   private error(error: unknown): string { return error instanceof Error ? error.message : "Could not access preference library."; }
-  private updateSelection(selected: SelectedPreference[]): boolean {
-    if (!this.actions.updateSelection) return false;
-    const error = this.actions.updateSelection(structuredClone(selected));
-    if (error) { this.setNotice(error, "warning"); return false; }
+  private setLibrary(library: PreferenceLibrary): void {
+    this.library = library;
+    if (this.actions.session) this.setSelection(this.actions.session.read(library));
+    else this.contentVersion++;
+  }
+  private setSelection(selected: SelectedPreference[]): void {
     this.selected = selected;
     this.contentVersion++;
     this.requirementsChars = composeRevision(selected, this.freeText).length;
     this.index = Math.min(this.index, Math.max(0, this.entries().length - 1));
+  }
+  private updateSelection(selected: SelectedPreference[]): boolean {
+    if (!this.actions.updateSelection) return false;
+    const error = this.actions.updateSelection(structuredClone(selected));
+    if (error) { this.setNotice(error, "warning"); return false; }
+    this.setSelection(selected);
+    return true;
+  }
+  private changeSessionSelection(change: SessionPreferenceChange): boolean {
+    const session = this.actions.session;
+    if (!session) return false;
+    const error = session.change(this.library, change);
+    if (error) { this.setNotice(error, "warning"); return false; }
+    this.setSelection(session.read(this.library));
     return true;
   }
   private toggle(): void {
     const entry = this.highlighted();
     if (!entry) return;
     const index = this.selected.findIndex((item) => preferenceKey(item) === preferenceKey(entry));
-    if (index >= 0) this.updateSelection(this.selected.filter((_, i) => i !== index));
-    else if (!this.source(entry) || this.library.errors[entry.scope]) this.setNotice("Library entry unavailable or deleted; no selection applied.", "warning");
-    else if (this.selected.some((item) => preferenceContentKey(item) === preferenceContentKey(entry))) {
+    if (index < 0 && (!this.source(entry) || this.library.errors[entry.scope])) {
+      this.setNotice("Library entry unavailable or deleted; no selection applied.", "warning");
+    } else if (index < 0 && this.selected.some((item) => preferenceContentKey(item) === preferenceContentKey(entry))) {
       this.setNotice("Same requirements already selected. Use Selected only (s) to inspect or remove them.", "warning");
-    }
+    } else if (this.actions.session) this.changeSessionSelection({ kind: "set", key: preferenceKey(entry), enabled: index < 0 });
+    else if (index >= 0) this.updateSelection(this.selected.filter((_, i) => i !== index));
     else if (this.selected.length >= PREFERENCE_SELECTION_LIMIT) this.setNotice(`Select at most ${PREFERENCE_SELECTION_LIMIT} preferences for one ${this.purpose === "refine" ? "refinement" : "revision"}.`, "warning");
     else this.updateSelection([...this.selected, selectPreference(entry)]);
   }
@@ -210,9 +232,8 @@ export class PreferencePanel {
     try {
       const library = await this.repository.setProjectDefault(entry, enabled);
       if (this.disposed) return;
-      this.library = library;
-      this.contentVersion++;
-      this.setNotice(`Project default ${enabled ? "enabled" : "disabled"}; current selection unchanged.`);
+      this.setLibrary(library);
+      this.setNotice(`Project default ${enabled ? "enabled" : "disabled"}; ${this.actions.session ? "session overrides kept." : "current selection unchanged."}`);
     } catch (error) {
       if (!this.disposed) this.setNotice(`Project default not saved: ${this.error(error)}`, "error");
     } finally { this.busy = false; this.redraw(); }
@@ -221,8 +242,9 @@ export class PreferencePanel {
     return this.library.entries.find((item) => preferenceKey(item) === preferenceKey(entry));
   }
   private description(entry: RevisionPreference, compact = false): PreferenceDocument {
+    const managing = this.managing;
     if (this.descriptionCache?.entry === entry && this.descriptionCache.version === this.contentVersion &&
-      this.descriptionCache.compact === compact) return this.descriptionCache.document;
+      this.descriptionCache.compact === compact && this.descriptionCache.managing === managing) return this.descriptionCache.document;
     const local = this.local(entry);
     const source = this.source(entry);
     const changed = local && source && (source.version !== local.version || source.body !== local.sourceBody || source.name !== local.name ||
@@ -230,22 +252,33 @@ export class PreferencePanel {
     const unavailable = !!this.library.errors[entry.scope];
     const status = local ? [local.body !== local.sourceBody ? "Edited for this revision" : "Saved snapshot",
       unavailable ? "Library unavailable" : !source ? "Source deleted" : changed ? "Library changed; snapshot kept" : ""].filter(Boolean).join(" · ") : "Library entry";
-    const details = (value: RevisionPreference, state: PreferenceDocument): PreferenceDocument => [
-      { text: value.name, color: "text", heading: true },
-      ...(!compact ? [{ text: `${value.scope} · ${value.id}`, color: "muted" as const }] : []),
-      ...(this.repository.setProjectDefault ? [{ text: `Project default: ${this.library.projectDefaults?.includes(preferenceKey(value)) ? "On" : "Off"} · future drafts`, color: "muted" as const }] : []),
-      ...state,
-      ...(value.metadata ? [
-        { text: `${preferenceGroup(value)}${compact ? ""
-          : "selectionSource" in value && value.selectionSource === "project-default" ? " · project default" : " · manual"}`, color: "muted" as const },
-        ...(value.metadata.kind === "result" ? [{ text: RESULT_NOTE_HINT, color: "muted" as const }] : []),
-        { text: value.metadata.description, color: "muted" as const },
-      ] : []),
-      { text: "", color: "text" }, { text: value.body, color: "text" },
-    ];
+    const gap = { text: "", color: "text" } as const;
+    const details = (value: RevisionPreference, state: PreferenceDocument): PreferenceDocument => {
+      const group = value.metadata ? `${preferenceGroup(value)}${compact ? ""
+        : "selectionSource" in value && value.selectionSource === "project-default" ? " · project default" : " · manual"}` : "";
+      const projectDefault = this.repository.setProjectDefault && (!compact || this.projectDefaultsEditable)
+        ? `Project default: ${this.library.projectDefaults?.includes(preferenceKey(value)) ? "On" : "Off"}` : "";
+      const metadata = compact ? [[group, projectDefault].filter(Boolean).join(" · ")]
+        : [`${value.scope} · ${value.id}`, projectDefault && `${projectDefault} · future drafts`, group];
+      const description = [
+        compact && value.metadata?.description === value.name ? "" : value.metadata?.description,
+        value.metadata?.kind === "result" ? RESULT_NOTE_HINT : "",
+      ].filter((text): text is string => !!text);
+      return [
+        { text: value.name, color: "text", heading: true },
+        ...metadata.filter(Boolean).map((text) => ({ text, color: "muted" as const })),
+        ...state,
+        ...(description.length ? [gap, ...description.map((text) => ({ text, color: "muted" as const }))] : []),
+        ...(value.body ? [gap, { text: value.body, color: "text" as const }] : []),
+      ];
+    };
     let document: PreferenceDocument;
     // Delete confirmation still describes its current-source operation target.
-    if (this.selectedOnly && local && this.page.kind !== "delete") {
+    if (this.actions.session) {
+      const override = this.actions.session.override(preferenceKey(entry));
+      document = details(entry, [{ text: `This session: ${override === undefined ? "Inherits project default" : override ? "On" : "Off"}`, color: "muted" },
+        ...(!source || unavailable ? [{ text: unavailable ? "Library unavailable" : "Deleted source", color: "warning" as const }] : [])]);
+    } else if (this.selectedOnly && local && this.page.kind !== "delete") {
       document = [{ text: "Selected snapshot", color: "text", heading: true }, ...details(local, [
         { text: status, color: unavailable || !source || changed ? "warning" : "muted" },
         ...(!compact ? [{ text: preferenceSelectionLabel(local), color: "muted" as const }] : []),
@@ -253,8 +286,10 @@ export class PreferencePanel {
       if (source && !unavailable && (changed || source.body !== local.body)) document.push(
         { text: "", color: "text" }, { text: "Current library entry", color: "text", heading: true }, ...details(source, []));
     } else {
-      document = details(entry, compact && source && !unavailable ? [] : [{ text: unavailable ? "Library unavailable" : source ? "Library entry" : "Deleted source",
-        color: unavailable || !source ? "warning" : "muted" }]);
+      const differentSnapshot = local && (changed || local.body !== entry.body);
+      document = details(entry, differentSnapshot && this.page.kind !== "delete" ? [{ text: "Current library version · not the selected snapshot", color: "warning" }]
+        : compact && source && !unavailable ? [] : [{ text: unavailable ? "Library unavailable" : source ? "Library entry" : "Deleted source",
+          color: unavailable || !source ? "warning" : "muted" }]);
       if (local) document.push({ text: "", color: "text" }, { text: "Selected snapshot", color: "text", heading: true },
         { text: status, color: unavailable || !source || changed ? "warning" : "muted" },
         ...(!local.metadata && !compact ? [{ text: preferenceSelectionLabel(local), color: "muted" as const }] : []),
@@ -262,9 +297,9 @@ export class PreferencePanel {
           { text: preferenceGroup(local), color: "muted" as const },
           { text: local.metadata.description, color: "muted" as const },
         ] : [{ text: `${local.metadata.kind} · ${preferenceSelectionLabel(local)} · ${local.metadata.description}`, color: "muted" as const }] : []),
-        { text: local.body, color: "text" });
+        gap, { text: local.body, color: "text" });
     }
-    this.descriptionCache = { entry, version: this.contentVersion, compact, document };
+    this.descriptionCache = { entry, version: this.contentVersion, compact, managing, document };
     return document;
   }
   private read(title: string, document: PreferenceDocument): void { this.page = { kind: "read", title, document, scroll: 0 }; }
@@ -364,7 +399,7 @@ export class PreferencePanel {
     try {
       await this.repository.remove(entry);
       if (this.disposed) return;
-      this.page = { kind: "list" }; this.setNotice("Deleted from library; selected snapshots kept.");
+      this.page = { kind: "list" }; this.setNotice(this.actions.session ? "Deleted from library; existing prompts unchanged." : "Deleted from library; selected snapshots kept.");
       await this.refresh();
     } catch (error) { if (!this.disposed) { this.page = { kind: "list" }; this.setNotice(this.error(error), "error"); } }
     finally { this.busy = false; this.redraw(); }
@@ -372,10 +407,13 @@ export class PreferencePanel {
 
   handleInput(data: string): void {
     if (this.disposed) return;
-    const key = parseKey(data);
+    const key = parseKey(data)?.toLowerCase();
     if (key && /(^|\+)f\d+$/.test(key)) return;
     if (key === "ctrl+s") {
-      this.setNotice(this.managing ? "Library management only; no request sent." : this.purpose === "refine" ? "Return to the Unsent original and press Enter to refine." : "Return to Revise to request revision with Ctrl+S.");
+      this.setNotice(this.managing ? "Library management only; no request sent."
+        : this.purpose === "audit" ? "Read-only snapshot; no request sent."
+        : this.purpose === "session" ? "Session choices are saved on Space; no request sent."
+        : this.purpose === "refine" ? "Return to the Unsent original and press Enter to refine." : "Return to Revise to request revision with Ctrl+S.");
       this.redraw(); return;
     }
     const cancel = this.keys.matches(data, "tui.select.cancel") || key === "ctrl+\\";
@@ -428,12 +466,16 @@ export class PreferencePanel {
     } else if (this.focus === 0) {
       if (enter || key === "down") this.focus = 1;
       else { this.search.handleInput(data); this.index = 0; this.top = 0; this.navigationDirection = 1; }
-    } else if (key === "s") this.toggleView();
-    else if (key === "c" && !this.managing) {
-      if (this.selected.length && this.updateSelection([])) this.setNotice("Selection cleared; project defaults unchanged.");
-    } else if (key === "g" && this.managing && this.focus === 1) void this.toggleProjectDefault();
-    else if (key === "/") this.focus = 0;
-    else if (key === "l" && !this.managing) this.libraryMode = true;
+    } else if (key === "s" && this.purpose !== "audit") this.toggleView();
+    else if (key === "c" && this.selectable) {
+      const cleared = this.actions.session ? this.changeSessionSelection({ kind: "clear" }) : this.selected.length && this.updateSelection([]);
+      if (cleared) this.setNotice("Selection cleared; project defaults unchanged.");
+    } else if (key === "g" && this.projectDefaultsEditable && this.focus === 1) void this.toggleProjectDefault();
+    else if (key === "r" && this.selectable && this.actions.session && this.focus === 1) {
+      const entry = this.highlighted();
+      if (entry && this.changeSessionSelection({ kind: "inherit", key: preferenceKey(entry) })) this.setNotice("Session now follows the project default for this item.");
+    } else if (key === "/") this.focus = 0;
+    else if (key === "l" && this.selectable) this.libraryMode = true;
     else if (this.managing && ACTIONS.some((action) => action.key === key)) {
       this.actionIndex = ACTIONS.findIndex((action) => action.key === key);
       this.activate(ACTIONS[this.actionIndex]!.id);
@@ -447,8 +489,15 @@ export class PreferencePanel {
       else if (key === "pagedown") this.index = Math.min(max, this.index + this.viewport);
       else if (key === "home") this.index = 0;
       else if (key === "end") this.index = max;
-      else if (key === "space" && !this.managing) this.toggle();
-      else if (enter) { const entry = this.highlighted(); if (entry) this.read(this.managing ? "Preference details" : this.purpose === "refine" ? "Full editing instruction" : "Full revision instruction", this.description(entry)); }
+      else if (key === "space") {
+        if (this.selectable) this.toggle();
+        else this.setNotice(this.libraryMode ? "Esc: return to the chooser." : this.purpose === "audit" ? "Read-only snapshot. Edit choices in Preview."
+          : "Select an Unsent original or open Revise to change preferences.", "warning");
+      } else if (enter) {
+        const entry = this.highlighted();
+        if (entry) this.read(this.purpose === "audit" ? "Adopted preference" : this.managing || this.purpose === "session" ? "Preference details"
+          : this.purpose === "refine" ? "Full editing instruction" : "Full revision instruction", this.description(entry));
+      }
     } else {
       if (key === "left" || key === "up") this.actionIndex = (this.actionIndex + ACTIONS.length - 1) % ACTIONS.length;
       else if (key === "right" || key === "down") this.actionIndex = (this.actionIndex + 1) % ACTIONS.length;
@@ -464,25 +513,38 @@ export class PreferencePanel {
     const clean = (text: string) => sanitizeTerminalText(text);
     const wrap = (text: string, columns = w) => wrapTextWithAnsi(clean(text), columns);
     const button = (text: string, active: boolean) => active ? this.theme.bg("selectedBg", this.theme.fg("text", `› ${clean(text)}`)) : this.theme.fg("muted", `  ${clean(text)}`);
-    const managing = this.managing;
-    let title = managing ? "Preferences library" : `Preferences · ${this.purpose === "refine" ? "Unsent original" : "This revision"}`;
-    const tooLong = this.requirementsChars > this.maxChars;
-    let subtitle = `Focus: ${["Search", "Library", "Actions"][this.focus]} · ${this.selected.length} selected${managing ? " (read-only)" : ` · ${this.requirementsChars}/${this.maxChars} chars`}`;
+    const { managing, selectable } = this;
+    const audit = this.purpose === "audit";
+    const session = this.purpose === "session";
+    const target = this.purpose === "refine" ? "Unsent original" : session ? "This session" : "This revision";
+    const selectionLabel = `${this.selected.length} selected`;
+    const selectionScope = !selectable ? " (read-only)" : session ? " · Future prompts · Saved on Space" : " · Kept on return";
+    let title = managing ? "Preferences library" : audit ? "Adopted preferences" : `Preferences · ${target}`;
+    if (selectable && layout.headerHeight === 1) {
+      const shortTarget = this.purpose === "refine" ? "Unsent" : session ? "Session" : "Revision";
+      title = [`${title} · ${selectionLabel}`, `${shortTarget} · ${selectionLabel}`, `${shortTarget} ${selectionLabel}`,
+        `${shortTarget} · ${this.selected.length}`, shortTarget].find((line) => visibleWidth(line) <= w) ?? shortTarget;
+    }
+    let subtitle = `${w >= 36 ? `Focus: ${["Search", "Library", "Actions"][this.focus]} · ` : ""}${selectionLabel}${selectionScope}`;
     let subtitleColor: DocumentPart["color"] = "muted";
     let renderBody: (height: number) => string[];
     const viewHint: KeyHint = ["s", this.selectedOnly ? "All" : w < 60 ? "Selected" : "Selected only"];
+    const toggle: KeyHint | undefined = this.focus === 1 && selectable && (!this.selectedOnly || this.selected.length)
+      ? ["Space", this.selectedOnly ? "Deselect" : "Toggle"] : undefined;
+    const project: KeyHint | undefined = this.focus === 1 && this.projectDefaultsEditable ? ["g", "Project default"] : undefined;
+    const selectionActions = [toggle, project].filter((hint): hint is KeyHint => !!hint);
     let hints: KeyHint[][] = [[
-      ...(this.focus !== 0 && this.selectedOnly ? [viewHint] : []),
-      ...(this.focus === 1 && !managing && (!this.selectedOnly || this.selected.length) ? [["Space", this.selectedOnly ? "Deselect" : "Toggle"] as KeyHint] : []),
-      ...(this.focus === 1 && managing && this.repository.setProjectDefault ? [["g", "Project default"] as KeyHint] : []),
+      ...(this.focus !== 0 && this.selectedOnly && !audit ? [viewHint] : []),
+      ...selectionActions,
       ["Enter", this.focus === 0 ? "Browse" : this.focus === 1 ? "Read" : "Choose"],
       ...(this.focus === 2 ? [["←→", "Choose action"] as KeyHint] : []),
       ...(this.focus !== 0 && !this.selectedOnly ? [viewHint] : []),
-    ], [["Esc", this.focus === 0 ? "End search" : "Back"],
-      ...(this.focus !== 0 && !managing ? [["l", w < 30 ? "Library" : "Manage library"] as KeyHint] : []),
+    ], [["Esc", this.focus === 0 ? "End search" : this.libraryMode && w >= 30 ? "To selection" : "Back"],
+      ...(this.focus !== 0 && selectable ? [["l", w < 30 ? "Library" : "Manage library"] as KeyHint] : []),
+      ...(this.focus === 1 && selectable && session ? [["r", "Inherit default"] as KeyHint] : []),
       [w < 54 ? "Tab" : "Tab / Shift+Tab", "Focus"],
       ...(this.focus !== 0 ? [["/", "Search"] as KeyHint] : []),
-      ...(this.focus !== 0 && !managing ? [["c", "Clear all"] as KeyHint] : [])]];
+      ...(this.focus !== 0 && selectable ? [["c", "Clear all"] as KeyHint] : [])]];
     const page = this.page;
     if (page.kind === "read") {
       title = page.title;
@@ -499,7 +561,7 @@ export class PreferencePanel {
       subtitle = "";
       renderBody = () => page.kind === "discard"
         ? wrap("Unsaved form changes will be discarded. Current selection and saved library entries stay unchanged.").map((line) => this.theme.fg("warning", line))
-        : [...wrap("Selections for this request stay unchanged.").map((line) => this.theme.fg("muted", line)),
+        : [...wrap(this.actions.session ? "Existing prompt snapshots stay unchanged." : "Selections for this request stay unchanged.").map((line) => this.theme.fg("muted", line)),
           "", ...this.document(this.description(page.entry), w)];
       hints = [[["y", page.kind === "discard" ? "Discard" : "Delete"]],
         [["n / Esc", page.kind === "discard" ? "Keep editing" : "Cancel"]]];
@@ -550,11 +612,12 @@ export class PreferencePanel {
             if (active) actionRow = toolbar.length - 1;
           }
         }
-        const search = this.search.render(w);
-        const room = h >= search.length + toolbar.length + 2;
-        const available = Math.max(1, room ? h - search.length - toolbar.length - 1 : h);
+        const room = h >= toolbar.length + 3;
+        const available = Math.max(1, room ? h - toolbar.length - 2 : h);
         const split = room && splitCandidate;
         const leftWidth = split ? toolbarWidth : w;
+        const search = this.focus === 0 && this.hasFocus ? this.search.render(leftWidth) : [truncateToWidth(this.theme.fg("muted", "Search: ")
+          + this.theme.fg("text", clean(this.search.getValue()).replace(/\n/g, " ")), leftWidth, "…")];
         const window = selectionWindow(entries.length, this.index, available, this.top,
           this.selectedOnly ? undefined : (index) => preferenceGroup(entries[index]!), available >= 10 ? 1 : 0, this.navigationDirection);
         this.top = window.start;
@@ -573,7 +636,7 @@ export class PreferencePanel {
           const warning = unavailable ? "unavailable" : !source ? "deleted" : changed ? "snapshot kept" : "";
           const cursor = active ? "›" : current ? "·" : " ";
           return renderPreferenceRow({ width: leftWidth, name: entry.name, scope: entry.scope,
-            selected: !!local, focused: active, cursor, warning,
+            selected: !!local, selectionEditable: selectable, focused: active, cursor, warning,
             projectDefault: this.library.projectDefaults?.includes(preferenceKey(entry)) }, this.theme);
         });
         if (!entries.length) list.push(...wrap(status, leftWidth).map((line) => this.theme.fg(errors.length ? "error" : "muted", line)));
@@ -583,17 +646,24 @@ export class PreferencePanel {
         }
         const rightWidth = split ? w - leftWidth - 3 : w;
         const detail = split && entries[this.index] ? this.document(this.description(entries[this.index]!, true), rightWidth) : [];
-        const headingText = this.theme.fg("text", this.theme.bold(`${this.selectedOnly ? "Selected only" : "Library"} ${entries.length ? this.index + 1 : 0}/${entries.length}`));
+        const headingText = this.theme.fg("text", this.theme.bold(`${audit ? "Adopted" : this.selectedOnly ? "Selected only" : "Library"} ${entries.length ? this.index + 1 : 0}/${entries.length}`));
         const count = subtitleColor !== "muted" || this.notice || this.busy || layout.headerHeight < 2
-          ? this.theme.fg("muted", ` · ${this.selected.length} selected`) : "";
+          ? this.theme.fg("muted", ` · ${selectionLabel}${!selectable && !this.busy ? selectionScope : ""}`) : "";
         const heading = truncateToWidth(headingText + (visibleWidth(headingText + count) <= leftWidth ? count : ""), leftWidth, "");
-        const pair = (left: string, right = "") => split
-          ? left + " ".repeat(Math.max(0, leftWidth - visibleWidth(left))) + this.theme.fg("borderMuted", " │ ") + right : left;
-        const panes = Array.from({ length: available }, (_, i) => pair(list[i] ?? "", detail[i]));
-        return [...search, pair(heading, this.theme.fg("muted", "Preview")), ...toolbar.map((line) => pair(line)), ...panes];
+        const left = [...search, heading, ...toolbar, ...list];
+        if (!split) return left;
+        const divider = this.theme.fg("borderMuted", " │ ");
+        return Array.from({ length: h }, (_, i) => {
+          const line = left[i] ?? "";
+          return line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line))) + divider + (detail[i] ?? "");
+        });
       };
       if (errors.length) { subtitle = `Load failed · ${errors.join(" · ")}`; subtitleColor = "error"; }
-      else if (tooLong && !managing) { subtitle = `Too long · ${this.requirementsChars}/${this.maxChars} chars`; subtitleColor = "warning"; }
+      else if (selectable && this.selected.length > PREFERENCE_SELECTION_LIMIT) {
+        subtitle = `Too many selected · limit ${PREFERENCE_SELECTION_LIMIT}`; subtitleColor = "warning";
+      } else if (selectable && this.requirementsChars > this.maxChars) {
+        subtitle = `Too long · ${this.requirementsChars}/${this.maxChars} chars`; subtitleColor = "warning";
+      }
     }
     if (this.busy) { subtitle = "Working…"; subtitleColor = "muted"; }
     else if (this.notice && (this.noticeColor !== "muted" || subtitleColor === "muted")) {
@@ -610,18 +680,26 @@ export class PreferencePanel {
       : w < 30 || page.kind === "list"
       ? hints.map((row) => fittingKeyHints(row, w, this.theme))
       : alignedKeyHints(hints, w, this.theme);
-    if (layout.footerHeight === 1) {
+    if (page.kind === "list" && selectionActions.length) {
       const [back, ...secondary] = hints[1]!;
-      const primary = page.kind === "list" && !managing && this.focus === 1
-        ? [hints[0]![0]!, ...secondary.slice(0, 1), ...hints[0]!.slice(1), ...secondary.slice(1)] : hints[0]!;
-      footer[0] = fittingKeyHints([back!, ...primary], w, this.theme);
+      const short = ([key, label]: KeyHint): KeyHint => [key, key === "g" ? "Default" : key === "Esc" && label === "To selection" ? "Back" : label];
+      const required = layout.footerHeight === 1 ? [back!, ...selectionActions] : selectionActions;
+      const variants = [required, required.map(short), required.map((hint): KeyHint => hint[0] === "Space" ? ["Space", ""] : short(hint)),
+        required.map(([key]): KeyHint => [key, ""])];
+      const separator = w < 30 ? " " : " · ";
+      const primary = variants.find((variant) => visibleWidth(fittingKeyHints(variant, Infinity, this.theme, separator)) <= w) ?? variants.at(-1)!;
+      const extra = hints[0]!.filter(([key]) => !selectionActions.some(([action]) => key === action));
+      footer[0] = fittingKeyHints([...primary, ...extra, ...(layout.footerHeight === 1 ? secondary : [])], w, this.theme, separator);
+    } else if (layout.footerHeight === 1) {
+      footer[0] = fittingKeyHints([hints[1]![0]!, ...hints[0]!], w, this.theme);
     }
     const severe = subtitleColor !== "muted";
     const feedback = this.theme.fg(subtitleColor, clean(`${severe ? "⚠ " : ""}${subtitle}`));
     const heading = this.theme.fg("text", this.theme.bold(clean(title)));
-    const chrome = panelHeader(layout, [severe && layout.headerHeight === 1 ? feedback : heading, feedback], [], footer);
+    const foregroundFeedback = severe || this.busy;
+    const chrome = panelHeader(layout, [foregroundFeedback && layout.headerHeight === 1 ? feedback : heading, feedback], [], footer);
     const body = renderBody(chrome.layout.bodyHeight);
-    if (severe && layout.headerHeight === 0) body.unshift(feedback);
+    if (foregroundFeedback && layout.headerHeight === 0) body.unshift(feedback);
     return chrome.render(body, (text) => this.theme.fg("borderMuted", text));
   }
 }

@@ -6,7 +6,7 @@ import type { RefineController } from "../controller.js";
 import type { CandidateToken, RefineRequest, RefineRequestInput, TriggerResult } from "../request-types.js";
 import { displayModel, effectiveThinkingLevel, sameModel } from "./model-utils.js";
 import { RESTORED_CONTEXT_HINT, type Notify, type NotifyCurrent } from "./contracts.js";
-import { composeRevision, type SelectedPreference } from "../revision-preferences.js";
+import { composeRevision, PREFERENCE_SELECTION_LIMIT, type SelectedPreference } from "../revision-preferences.js";
 
 interface RequestFlowDependencies {
   controller: Pick<RefineController,
@@ -21,11 +21,11 @@ interface RequestFlowDependencies {
   updatePresentation(): void;
   notify: Notify;
   notifyCurrent: NotifyCurrent;
-  defaultPreferences(ctx: ExtensionContext): SelectedPreference[];
+  initialPreferences(ctx: ExtensionContext): SelectedPreference[];
 }
 
 export function createRequestFlows({ controller, config, useContext, setCompletionContext,
-  canNameSession, modelSwitchBlocked, showPreview, updatePresentation, notify, notifyCurrent, defaultPreferences }: RequestFlowDependencies) {
+  canNameSession, modelSwitchBlocked, showPreview, updatePresentation, notify, notifyCurrent, initialPreferences }: RequestFlowDependencies) {
   let historySnapshot: HistorySnapshot | undefined;
   let projectLabel = "";
   let projectWarnings: string[] = [];
@@ -80,7 +80,7 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
   }
 
   function defaultSelection(ctx: ExtensionContext): Pick<RefineRequestInput, "preferences" | "editingInstruction"> {
-    const preferences = defaultPreferences(ctx);
+    const preferences = initialPreferences(ctx);
     return preferences.length ? { preferences, editingInstruction: composeRevision(preferences, "") } : {};
   }
 
@@ -125,6 +125,7 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
         revisionSnapshot: captureProjectContext(ctx, config.projectContext, draft, true), config: structuredClone(config.projectContext) } } : {}),
     };
     const defaultsTooLong = (input.editingInstruction?.length ?? 0) > config.maxDraftChars;
+    const tooMany = (input.preferences?.length ?? 0) > PREFERENCE_SELECTION_LIMIT;
     let result = mode === "run" ? controller.trigger(input, { force }) : controller.capture(input);
     if (mode === "shortcut" && result.kind === "captured" && !controller.hasSubmittedRunInRound() && !defaultsTooLong) {
       // Start the captured source in place. If admission is rejected, keep it editable.
@@ -136,13 +137,15 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
       ({ historySnapshot, projectLabel, projectWarnings } = previousContext);
     }
     if (result.kind === "empty") notify(ctx, "The editor is empty; no refinement request was sent.", "info");
-    else if (result.kind === "too-long") notify(ctx, `The draft or editing requirements exceed ${config.maxDraftChars} characters; no request was sent. Reduce the text or selection and try again.`, "warning");
+    else if (result.kind === "too-long") notify(ctx, tooMany ? `Select at most ${PREFERENCE_SELECTION_LIMIT} preferences before optimizing; no request was sent.`
+      : `The draft or editing requirements exceed ${config.maxDraftChars} characters; no request was sent. Reduce the text or selection and try again.`, "warning");
     else if (result.kind === "duplicate" || result.kind === "ready") {
       void showPreview(ctx).catch(() => notifyCurrent("Could not open the refinement panel; the main draft was not changed.", "warning"));
     }
     else if (result.kind === "busy") notify(ctx, "Work is pending or the 100-entry journal is full. Existing work kept.", "warning");
     if (result.kind === "captured" && defaultsTooLong) {
-      notify(ctx, `Project defaults exceed ${config.maxDraftChars} characters. Reduce the selection or use c to clear all in Preferences before optimizing.`, "warning");
+      const scope = input.preferences?.every((entry) => entry.selectionSource === "project-default") ? "Project defaults" : "Initial preferences";
+      notify(ctx, `${scope} exceed ${config.maxDraftChars} characters. Reduce the selection or use c to clear all in Preferences before optimizing.`, "warning");
     }
     return result;
   }

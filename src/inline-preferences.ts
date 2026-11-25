@@ -259,7 +259,11 @@ export class InlinePreferences {
       doc.renderedScroll = offset;
       return [...result, ...doc.lines.slice(offset, offset + this.viewport)].slice(0, height);
     }
-    if ((position.searching || position.search.getValue()) && result.length < height) result.push(...position.search.render(width).slice(0, 1));
+    if ((position.searching || position.search.getValue()) && result.length < height) {
+      const line = position.search.focused ? position.search.render(width)[0]! : muted("Search: ") +
+        this.theme.fg("text", clean(position.search.getValue()).replace(/\n/g, " "));
+      result.push(truncateToWidth(line, width, "…"));
+    }
     const entry = this.highlighted(target.selected, position);
     const entries = this.entries(target.selected, position);
     if (!entry) {
