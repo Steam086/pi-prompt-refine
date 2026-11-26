@@ -174,7 +174,7 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
         expect(focused).toContain(theme.bg("selectedBg", "").split("\x1b[49m")[0]);
       }
       input("l"); input("n"); input("Saved 中文😀");
-      for (const field of ["Name", "Instruction", "Options", "Scope", "Type", "Description", "Save"]) {
+      for (const field of ["Name", "Instruction", "Scope", "Type", "Description", "Save"]) {
         Object.assign(terminal, { columns: 100, rows: 40 }); panel.invalidate();
         const frame = render();
         expect(frame).toContain(`› ${field}`);
@@ -184,7 +184,6 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
         for (const [columns, rows] of [[40, 16], [20, 8], [100, 40]]) {
           Object.assign(terminal, { columns, rows }); panel.invalidate(); render();
         }
-        if (field === "Options") input("\r");
         if (field !== "Save") input("\t");
       }
       expect(close).not.toHaveBeenCalled();

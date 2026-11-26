@@ -183,7 +183,7 @@ describe("workspace terminal rendering", () => {
       workspace.openResult(); input("f"); input("\x1bp");
       await Promise.resolve();
       for (const key of [" ", "\r", "\x1b[6~", "\x1b", "l", "n", "Saved name", "\r", "中文",
-        "\x1b", "\x1b[B", " ", "\x1b[B", "\x1b[B", "\r", "\x1b[A", " ", "\x1b[B", "中文😀 description", "\x13"]) {
+        "\x1b", "\x1b[B", " ", "\x1b[B", "\r", " ", "\x1b[B", "中文😀 description", "\x13"]) {
         input(key);
         expect(renderFrame()).toHaveLength(initialHeight);
       }

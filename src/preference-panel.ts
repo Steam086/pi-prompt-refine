@@ -12,7 +12,8 @@ import { preferenceGroup, preferenceGroupOrder, RESULT_NOTE_HINT, composeRevisio
 
 type TextField = "name" | "instruction" | "description";
 type ChoiceField = "scope" | "type";
-type FormField = TextField | ChoiceField | "options" | "save";
+const FORM_FIELDS = ["name", "instruction", "scope", "type", "description", "save"] as const;
+type FormField = typeof FORM_FIELDS[number];
 type Form = {
   kind: "new" | "library";
   expected?: RevisionPreference;
@@ -30,22 +31,13 @@ type Form = {
   initial: string;
   focus: FormField;
   editing: boolean;
-  optionsOpen: boolean;
+  top: number;
 };
 
-function formFields(form: Form): FormField[] {
-  const fields: FormField[] = ["name", "instruction", "options"];
-  if (form.optionsOpen) {
-    if (form.kind === "new") fields.push("scope");
-    fields.push("type", "description");
-  }
-  return [...fields, "save"];
-}
 type DocumentPart = { text: string; color: "text" | "muted" | "warning" | "error"; heading?: boolean };
 type PreferenceDocument = DocumentPart[];
 type Page = { kind: "list" } | { kind: "read"; title: string; document: PreferenceDocument; scroll: number }
   | { kind: "form"; form: Form } | { kind: "discard"; form: Form }
-  | { kind: "choose"; form: Form; field: ChoiceField; index: number }
   | { kind: "delete"; entry: RevisionPreference; document: PreferenceDocument };
 type Action = "new" | "edit" | "delete";
 const ACTIONS = [
@@ -55,16 +47,27 @@ const ACTIONS = [
 ] as const;
 const KINDS = ["rewrite", "task", "result"] as const;
 const SCOPES = ["project", "global"] as const;
+const TYPE_LABELS = KINDS.map((kind) => preferenceGroup({ metadata: { kind, description: "", activation: "manual" } }));
+const SHORT_TYPES = ["Rewrite", "Task", "Result"];
+const TYPE_HELP = {
+  rewrite: "Guides how Refine rewrites the prompt.",
+  task: "Adds requirements for the main agent.",
+  result: RESULT_NOTE_HINT,
+};
 const textEditBindings = ["cursorLineStart", "cursorLineEnd", "deleteToLineStart", "deleteToLineEnd",
   "deleteCharBackward", "deleteCharForward", "yank"] as const;
 const isTextField = (field: FormField): field is TextField => field === "name" || field === "instruction" || field === "description";
-const typeLabel = (metadata?: PreferenceMetadata) => metadata ? preferenceGroup({ metadata }) : "Unclassified (legacy)";
 const scopeLabel = (scope: PreferenceScope) => scope === "project" ? "Project" : "Global";
 
 function moveFormFocus(form: Form, step: number): void {
-  const fields = formFields(form);
+  const fields: readonly FormField[] = form.kind === "new" ? FORM_FIELDS : FORM_FIELDS.filter((field) => field !== "scope");
   form.focus = fields[(fields.indexOf(form.focus) + step + fields.length) % fields.length]!;
   form.editing = false;
+}
+
+function cycleChoice<T>(values: readonly T[], current?: T): T {
+  const index = current === undefined ? -1 : values.indexOf(current);
+  return values[(index + 1) % values.length]!;
 }
 
 type PreferencePanelActions = { back(): void; updateSelection?(selected: SelectedPreference[]): string | undefined; session?: SessionPreferenceTarget };
@@ -379,7 +382,7 @@ export class PreferencePanel {
       description, rawDescription, initialEditorDescription: description.getValue(),
       metadata: entry ? entry.metadata && structuredClone(entry.metadata) : { kind: "task", description: "", activation: "manual" },
       expected: kind === "library" ? structuredClone(entry) : undefined, initial: "",
-      focus: kind === "library" ? "instruction" : "name", editing: false, optionsOpen: false };
+      focus: kind === "library" ? "instruction" : "name", editing: false, top: 0 };
     form.initial = this.stamp(form);
     this.page = { kind: "form", form }; this.setNotice("");
   }
@@ -411,7 +414,6 @@ export class PreferencePanel {
     if (issue) {
       form.focus = issue.field;
       form.editing = isTextField(issue.field);
-      if (issue.field === "type" || issue.field === "description") form.optionsOpen = true;
       this.setNotice(issue.message, "warning");
       this.redraw();
       return;
@@ -474,9 +476,10 @@ export class PreferencePanel {
       moveFormFocus(form, step);
     } else if (enter || key === "space") {
       if (isTextField(form.focus)) form.editing = true;
-      else if (form.focus === "options") form.optionsOpen = !form.optionsOpen;
       else if (form.focus === "save") void this.save(form);
-      else this.openFormChoice(form, form.focus);
+      else if (form.focus === "type") form.metadata = { kind: cycleChoice(KINDS, form.metadata?.kind),
+        description: form.description.getValue(), activation: "manual" };
+      else if (form.kind === "new") form.scope = cycleChoice(SCOPES, form.scope);
     } else if (isTextField(form.focus) &&
       (data.startsWith("\x1b[200~") || decodeKittyPrintable(data) !== undefined || /^[^\p{Cc}]+$/u.test(data) ||
         textEditBindings.some((action) => getKeybindings().matches(data, `tui.editor.${action}`)))) {
@@ -497,12 +500,6 @@ export class PreferencePanel {
     }
   }
 
-  private openFormChoice(form: Form, field: ChoiceField): void {
-    const index = field === "scope" ? SCOPES.indexOf(form.scope)
-      : form.metadata ? KINDS.indexOf(form.metadata.kind) : 0;
-    this.page = { kind: "choose", form, field, index: Math.max(0, index) };
-  }
-
   handleInput(data: string): void {
     if (this.disposed) return;
     const key = parseKey(data)?.toLowerCase();
@@ -514,7 +511,6 @@ export class PreferencePanel {
     }
     if (key === "ctrl+s") {
       if (this.page.kind === "form") { void this.save(this.page.form); return; }
-      if (this.page.kind === "choose") return;
       this.setNotice(this.managing ? "Library management only; no request sent."
         : this.purpose === "audit" ? "Read-only snapshot; no request sent."
         : this.purpose === "session" ? "Session choices are saved on Space; no request sent."
@@ -535,19 +531,9 @@ export class PreferencePanel {
     } else if (this.page.kind === "delete") {
       if (key === "y") void this.remove(this.page.entry);
       else if (cancel || key === "n") this.page = { kind: "list" };
-    } else if (this.page.kind === "form" || this.page.kind === "choose") {
+    } else if (this.page.kind === "form") {
       const step = this.keys.matches(data, "tui.select.up") ? -1 : this.keys.matches(data, "tui.select.down") ? 1 : 0;
-      const page = this.page;
-      if (page.kind === "form") this.handleForm(page.form, data, key, cancel, enter, step);
-      else if (cancel) this.page = { kind: "form", form: page.form };
-      else if (enter || key === "space") {
-        if (page.field === "scope") page.form.scope = SCOPES[page.index]!;
-        else page.form.metadata = { description: page.form.description.getValue(), kind: KINDS[page.index]!, activation: "manual" };
-        this.page = { kind: "form", form: page.form };
-      } else if (step) {
-        const count = page.field === "scope" ? SCOPES.length : KINDS.length;
-        page.index = (page.index + step + count) % count;
-      }
+      this.handleForm(this.page.form, data, key, cancel, enter, step);
     } else if (cancel) {
       if (this.focus === 0 && key !== "ctrl+\\") this.focus = 1;
       else this.back();
@@ -608,45 +594,78 @@ export class PreferencePanel {
     return prefix + this.theme.fg("text", value);
   }
 
-  private renderForm(form: Form, width: number, height: number): string[] {
-    const type = typeLabel(form.metadata);
-    const controls = {
-      options: `Options ${form.optionsOpen ? "▾" : "▸"} · ${form.scope} · ${type}`,
-      scope: `Scope: ${scopeLabel(form.scope)} ›`,
-      type: `Type: ${type} ›`,
-      save: "Save to library",
+  private renderChoiceField(form: Form, field: ChoiceField, width: number, height: number): string[] {
+    const { theme } = this;
+    const active = field === form.focus;
+    if (field === "scope" && form.kind === "library") {
+      return [focusLabel(theme, width, `Scope: ${scopeLabel(form.scope)} (fixed)`, false)];
+    }
+
+    const label = field === "scope" ? "Scope:" : "Type:";
+    const scopeLabels = SCOPES.map(scopeLabel);
+    const labels = field === "scope" ? scopeLabels : TYPE_LABELS;
+    const short = field === "scope" ? scopeLabels : SHORT_TYPES;
+    const selected = field === "scope" ? SCOPES.indexOf(form.scope)
+      : form.metadata ? KINDS.indexOf(form.metadata.kind) : -1;
+    const prefix = (active ? "" : "  ") + focusLabel(theme, width, label.padEnd(6), active) + " ";
+    const available = width - visibleWidth(prefix);
+    if (available < 1) return [focusLabel(theme, width, label, active)];
+
+    const cell = (name: string, index: number) => {
+      const checked = index === selected;
+      return theme.fg(checked ? "text" : "muted", `${checked ? "●" : "○"} ${name}`);
     };
-    const fields = formFields(form);
-    const count = Math.min(fields.length, Math.max(1, height - 1));
-    const start = Math.max(0, Math.min(fields.indexOf(form.focus) - 1, fields.length - count));
-    const visible = fields.slice(start, start + count);
-    return visible.flatMap((field) => {
-      const active = form.focus === field;
-      if (field === "name" || field === "description") {
-        return [this.textField(form[field], field === "name" ? "Name:" : "Description:", width, active)];
+    const pack = (names: readonly string[]) => {
+      const lines: string[] = [];
+      for (const [index, name] of names.entries()) {
+        const option = cell(name, index);
+        const last = lines.at(-1);
+        if (last && visibleWidth(last + "  " + option) <= available) lines[lines.length - 1] = last + "  " + option;
+        else lines.push(option);
       }
-      if (field === "instruction") {
-        const rows = height - visible.length;
-        if (rows < 1) {
-          const prefix = width > 1 ? focusLabel(this.theme, 1, "", active) : "";
-          return [prefix + form.body.render(width - visibleWidth(prefix), 1)[0]!];
-        }
-        return [focusLabel(this.theme, width, "Instruction:", active), ...form.body.render(width, rows)];
-      }
-      return [focusLabel(this.theme, width, controls[field], active)];
-    });
+      return lines;
+    };
+    const names = labels.map((name, i) => visibleWidth(name) + 2 <= available ? name : short[i]!);
+    const full = pack(names);
+    const lines = full.length <= height ? full : pack(short);
+    if (lines.length > height) {
+      const value = selected < 0 ? "Unclassified" : `● ${short[selected]}`;
+      return [prefix + theme.fg("text", truncateToWidth(value, available, "…"))];
+    }
+    const indent = " ".repeat(visibleWidth(prefix));
+    return lines.map((line, i) => (i === 0 ? prefix : indent) + truncateToWidth(line, available, "…"));
   }
 
-  private renderFormChoices(page: Extract<Page, { kind: "choose" }>, width: number, height: number): string[] {
-    const { field, form, index } = page;
-    const rows = field === "scope"
-      ? SCOPES.map((scope) => [scopeLabel(scope), scope === form.scope] as const)
-      : KINDS.map((kind) => [typeLabel({ kind, activation: "manual", description: "" }), kind === form.metadata?.kind] as const);
-    const note = field === "type" && KINDS[index] === "result" && height > rows.length
-      ? [this.theme.fg("muted", truncateToWidth(RESULT_NOTE_HINT, width, "…"))] : [];
-    const window = selectionWindow(rows.length, index, height - note.length);
-    return [...rows.slice(window.start, window.end).map(([label, selected], i) =>
-      focusLabel(this.theme, width, `${selected ? "●" : "○"} ${label}`, window.start + i === index)), ...note];
+  private renderForm(form: Form, width: number, height: number): string[] {
+    const scope = this.renderChoiceField(form, "scope", width, height);
+    const type = this.renderChoiceField(form, "type", width, height);
+    const fixedRows = scope.length + type.length + 4;
+    if (width >= 32 && height >= fixedRows + 2) {
+      const help = form.metadata ? TYPE_HELP[form.metadata.kind] : "Current type: Unclassified (legacy)";
+      type.push(this.theme.fg("muted", "  " + truncateToWidth(help, width - 2, "…")));
+    }
+
+    const active = form.focus === "instruction";
+    const instructionLabel = focusLabel(this.theme, width, "Instruction:", active);
+    const instruction = height > 1
+      ? [instructionLabel, ...form.body.render(width, Math.max(1, height - scope.length - type.length - 4))]
+      : form.body.editor.focused ? form.body.render(width, 1) : [instructionLabel];
+    const blocks: Record<FormField, string[]> = {
+      name: [this.textField(form.name, "Name:", width, form.focus === "name")],
+      instruction,
+      scope,
+      type,
+      description: [this.textField(form.description, "Description:", width, form.focus === "description")],
+      save: [focusLabel(this.theme, width, "Save to library", form.focus === "save")],
+    };
+    const rows = FORM_FIELDS.flatMap((field) => blocks[field]);
+    const focusStart = FORM_FIELDS.slice(0, FORM_FIELDS.indexOf(form.focus))
+      .reduce((index, field) => index + blocks[field].length, 0);
+    const focusEnd = focusStart + blocks[form.focus].length;
+    const maxStart = Math.max(0, rows.length - height);
+    const start = Math.min(form.top, maxStart);
+    form.top = Math.max(0, Math.min(focusStart, Math.max(start, focusEnd - height), maxStart));
+    return rows.slice(form.top, form.top + height);
   }
 
   render(width: number): string[] {
@@ -689,24 +708,17 @@ export class PreferencePanel {
       const actions = discard ? discardKeyHints(w, this.theme) : confirmationKeyHints(["Esc", "Cancel"], ["y", "Delete"], w, this.theme);
       const detail = discard ? [] : this.document(page.document, Math.min(w, 56)).slice(0, 5);
       return panelConfirmation(layout, this.theme.fg("warning", this.theme.bold(title)), actions, detail, border);
-    } else if (page.kind === "choose") {
-      title = page.field === "scope" ? "Choose scope" : "Choose type";
-      if (page.field === "type" && !page.form.metadata) subtitle = "Current type: Unclassified (legacy)";
-      renderBody = (h) => this.renderFormChoices(page, w, h);
-      hints = [w < 17 ? ["Esc", ""] : back, ["↑↓", w >= 33 ? "Move" : ""], [w >= 42 ? "Enter/Space" : "↵", "Choose"]];
     } else if (page.kind === "form") {
       const form = page.form;
       title = form.kind === "library" ? "Edit library entry" : "Save new preference";
-      subtitle = form.metadata?.kind === "result" ? RESULT_NOTE_HINT : "";
       renderBody = (h) => this.renderForm(form, w, h);
       const compact = w < 30;
       const editing = form.editing;
-      const action: KeyHint = [compact ? "↵" : editing ? "Enter" : "Enter/Space",
+      const action: KeyHint = [w < 46 ? "↵" : editing ? "Enter" : "Enter/Space",
         editing ? form.focus === "instruction" ? compact ? "NL" : "Newline" : "Next"
-          : form.focus === "options" ? form.optionsOpen ? "Hide" : "Show"
-          : form.focus === "scope" || form.focus === "type" ? "Choose" : form.focus === "save" ? "Save" : "Edit"];
-      hints = [["Esc", w < 20 ? "" : editing ? "Done" : "Back"], [compact ? "^S" : "Ctrl+S", w >= 66 ? "Save to library" : w >= 11 ? "Save" : ""],
-        ...(editing ? [] : [["↑↓", compact ? "" : "Fields"] as const]), action];
+          : form.focus === "scope" || form.focus === "type" ? w >= 72 ? "Next option" : "Next" : form.focus === "save" ? "Save" : "Edit"];
+      hints = [["Esc", w < 20 ? "" : editing ? "Done" : "Back"], [w < 36 ? "^S" : "Ctrl+S", w >= 72 ? "Save to library" : w >= 11 ? "Save" : ""],
+        ...(editing ? [] : [["↑↓", w >= 56 ? "Fields" : ""] as const]), action];
     } else {
       const entries = this.entries();
       this.index = Math.min(this.index, Math.max(0, entries.length - 1));
@@ -807,7 +819,7 @@ export class PreferencePanel {
     const feedback = this.theme.fg(subtitleColor, clean(`${severe ? "⚠ " : ""}${subtitle}`));
     const heading = (text: string) => this.theme.fg("text", this.theme.bold(text));
     let headline = heading(clean(title));
-    let actions = fittingKeyHints(hints, w, this.theme, w < 30 && (page.kind === "form" || page.kind === "choose") ? " " : " · ");
+    let actions = fittingKeyHints(hints, w, this.theme, w < 30 && page.kind === "form" ? " " : " · ");
     if (page.kind === "list" && layout.headerHeight > 0) {
       const shortTitle = managing ? "Library" : audit ? "Adopted" : this.purpose === "refine" ? "Unsent" : session ? "Session" : "Revision";
       const shownTitle = visibleWidth(title) + 3 + visibleWidth("Esc Tab ?") <= w ? title : shortTitle;
@@ -820,7 +832,7 @@ export class PreferencePanel {
       headline = heading(shownTitle) + (shownHints ? "   " + shownHints : "");
       actions = "";
     }
-    const formFeedback = (page.kind === "form" || page.kind === "choose") && !!subtitle;
+    const formFeedback = page.kind === "form" && !!subtitle;
     const chrome = panelHeader(layout, [formFeedback && layout.headerHeight === 1 ? feedback : headline,
       formFeedback ? feedback : ""], [], actions);
     const body = renderBody(chrome.layout.bodyHeight);

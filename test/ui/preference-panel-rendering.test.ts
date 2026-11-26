@@ -156,12 +156,8 @@ describe("preference rendering and responsiveness", () => {
     f.panel.handleInput("n"); check(["Enter/Space", "Edit"], ["↑↓", "Fields"], ["Esc", "Back"], ["Ctrl+S", "Save to library"]);
     f.panel.handleInput("Name"); f.panel.handleInput(enter);
     f.panel.handleInput(" "); check(["Enter", "Newline"], ["Esc", "Done"]);
-    f.panel.handleInput(esc); f.panel.handleInput(down); check(["Enter/Space", "Show"]);
-    f.panel.handleInput(enter); check(["Enter/Space", "Hide"]);
-    f.panel.handleInput(down); check(["Enter/Space", "Choose"]);
-    f.panel.handleInput(down); check(["Enter/Space", "Choose"]);
-    f.panel.handleInput(enter); check(["↑↓", "Move"], ["Enter/Space", "Choose"]);
-    f.panel.handleInput(esc);
+    f.panel.handleInput(esc); f.panel.handleInput(down); check(["Enter/Space", "Next option"]);
+    f.panel.handleInput(down); check(["Enter/Space", "Next option"]);
     f.panel.handleInput(down); check(["Enter/Space", "Edit"]);
     f.panel.handleInput(down); check(["Enter/Space", "Save"]);
     expect(text(f.panel, 20)).toContain("Esc ^S Save ↑↓");
@@ -191,9 +187,16 @@ describe("preference rendering and responsiveness", () => {
     expect(f.panel.render(100).join("\n")).toContain(CURSOR_MARKER);
     expect(highlightedRow(f.panel)).toContain("Instruction");
     f.panel.handleInput(esc);
-    for (const key of [down, " ", down, down]) f.panel.handleInput(key);
+    for (const key of [down, down]) f.panel.handleInput(key);
     expect(shortcuts().split(" · ").slice(0, 3)).toEqual(shared);
     expect(f.panel.render(100).join("\n")).not.toContain(renderFakeCursor(" ").split(" ")[0]);
+    const compact = text(f.panel, 40).split("\n");
+    const typeRow = compact.findIndex((line) => line.includes("› Type:"));
+    expect(typeRow).toBeGreaterThan(0);
+    expect(compact[typeRow]).toContain("○ Prompt rewriting");
+    expect(compact[typeRow + 1]).toContain("● Task requirements");
+    expect(compact[typeRow + 2]).toContain("○ Result notes");
+    expect(compact.join("\n")).toContain("↵ Next");
     f.panel.handleInput(esc);
     const lines = f.panel.render(100).map(stripVTControlCharacters);
     const question = lines.findIndex((line) => line.includes("Discard unsaved form?"));
@@ -205,8 +208,8 @@ describe("preference rendering and responsiveness", () => {
     f.panel.handleInput(esc);
     expect(text(f.panel)).toContain("Draft instr!uction");
     expect(text(f.panel)).toContain("Second line");
-    expect(highlightedRow(f.panel)).toContain("Type: Task requirements");
-    expect(shortcuts()).toContain("Enter/Space Choose");
+    expect(highlightedRow(f.panel)).toMatch(/Type:.*● Task requirements/);
+    expect(shortcuts()).toContain("Enter/Space Next option");
     expect(f.repo.save).not.toHaveBeenCalled();
   });
 
