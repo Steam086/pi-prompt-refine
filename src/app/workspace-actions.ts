@@ -20,7 +20,7 @@ interface WorkspaceActionsDependencies {
   controller: Pick<RefineController,
     "applyResult" | "deleteRecords" | "getAppliedRecordId" | "getCandidate" |
     "getCandidateToken" | "getGeneration" | "getTaskDisplayRecords" | "getModel" | "getOriginalRecord" | "getRecord" |
-    "getSessionId" | "getState" | "hasWorkspaceContent" | "isCandidateCurrent" | "updateDraftPreferences">;
+    "getRunElapsed" | "getSessionId" | "getState" | "hasWorkspaceContent" | "isCandidateCurrent" | "updateDraftPreferences">;
   config: Pick<RefineConfig, "preferencesKey" | "maxDraftChars" | "projectContext" | "context" | "maxOutputTokens" | "timeoutMs" | "thinkingLevel" | "systemPrompt">;
   setCompletionContext(ctx: ExtensionContext): void;
   persistConfig(ctx: ExtensionContext): Promise<boolean>;
@@ -139,6 +139,7 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
       usagePosition,
       tasks: {
         records: () => controller.getTaskDisplayRecords(),
+        elapsedSeconds: (id) => controller.getRunElapsed(id),
         launchModel: () => controller.getModel() ? displayModel(controller.getModel()!) : "No model",
         showOptimizerQuota,
         appliedId: () => controller.getAppliedRecordId(),

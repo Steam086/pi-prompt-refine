@@ -1,8 +1,9 @@
 import { stripVTControlCharacters } from "node:util";
-import { matchesKey, parseKey, sliceByColumn, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager, type KeyId } from "@earendil-works/pi-tui";
+import { matchesKey, parseKey, sliceByColumn, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager, type KeyId, type TuiMouseEvent } from "@earendil-works/pi-tui";
+import { ReadingMouse, type ReadingRegion } from "./ui/reading-mouse.js";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import type { TaskDisplayRecord } from "./history.js";
-import { taskGroups } from "./app/queries.js";
+import { runId, taskGroups, taskId } from "./app/queries.js";
 import type { HistoryStorageStatus } from "./history-store.js";
 import { fittingHints, panelHeader, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
 import { alignedKeyHints, fittingKeyHints, formatKeyHint, passiveHintLayout, type KeyHint } from "./key-hints.js";
@@ -14,7 +15,8 @@ import { renderTaskDocument } from "./ui/task-documents.js";
 import { renderInactivePreferences, renderTaskPreferences } from "./ui/task-preferences.js";
 
 export interface TaskPanelActions {
-  records(): TaskDisplayRecord[];
+  records(): readonly TaskDisplayRecord[];
+  elapsedSeconds?(id: number): number | undefined;
   appliedId(): number | undefined;
   activate(id: number): boolean;
   run(id: number): void;
@@ -37,6 +39,16 @@ export interface TaskPanelPosition {
   selectedTaskId?: number;
   scroll?: number;
   scrolls?: Record<string, number>;
+  topRowKey?: string;
+}
+
+interface TaskEntries {
+  source: readonly TaskDisplayRecord[];
+  rows: Row[];
+  positions: Map<string, number>;
+  prompts: number;
+  earlierCount: number;
+  earlierPending: number;
 }
 
 /** Two-level original/run tree. Selection and scroll belong to identities, never row indexes. */
@@ -61,10 +73,16 @@ export class TaskPanel {
   private compareId?: number;
   private original = false;
   private viewport = 1;
+  private listCapacity?: number;
+  private listSelectionKey?: string;
   private top = 0;
   private navigationDirection = 1;
+  private readonly projections = new Map<boolean, TaskEntries>();
+  private rowLines = new WeakMap<Row, { width: number; height: number; elapsed?: number; variants: Map<string, string[]> }>();
   private notice = "";
   private noticeColor: "muted" | "warning" | "error" = "muted";
+  private readonly readingMouse = new ReadingMouse();
+  private readingRegions: ReadingRegion[] = [];
   // Keep requested anchors separate from effective offsets. A taller viewport
   // may reveal earlier lines near the end, but must not erase the compact anchor.
   private renderedScrolls = new Map<string, number>();
@@ -87,17 +105,19 @@ export class TaskPanel {
     (!this.preferenceFocus || this.actions.inlinePreferences?.hints !== "search"); }
   /** Initial tree/summary demand only. Never select, render or clamp a live pane. */
   preferredBodyHeight(innerWidth: number): number {
-    const rows = this.entries();
-    const row = rows.find((item) => this.isSelected(item)) ?? rows.find((item) =>
-      !item.original && item.record.id === this.actions.appliedId()) ?? rows[0];
+    const entries = this.entries();
+    const row = this.rowAt(entries, this.selectionKey()) ?? this.defaultRow(entries);
     if (!row) return 3;
     const rightWidth = innerWidth >= 72 ? innerWidth - Math.min(innerWidth >= 120 ? 48 : 36, Math.floor(innerWidth / 3)) - 3 : innerWidth;
     const inline = this.inline(row);
     const summary = row.original ? this.originalHeight(row, rightWidth) + (inline ? 1 + inline.preferredHeight(row.record.id) : 0)
       : this.paneHeader(row, rightWidth).length + 3 + this.content.wrapped(sanitizeTerminalText(row.record.candidate?.text ?? row.record.input.draft), rightWidth).length;
-    return Math.max(rows.length, summary);
+    return Math.max(entries.rows.length, summary);
   }
-  invalidate(): void { this.content.invalidate(); }
+  invalidate(): void {
+    this.content.invalidate();
+    this.rowLines = new WeakMap();
+  }
   setNotice(text: string, color: "muted" | "warning" | "error" = "muted"): void { this.notice = text; this.noticeColor = color; }
   openList(): void {
     this.inspecting = false; this.compareId = undefined; this.reading = false; this.preferenceFocus = false; this.original = false;
@@ -106,10 +126,13 @@ export class TaskPanel {
   }
   /** Preserve the source and reading position while a revision owns focus. */
   snapshot(referenceOnly = false): TaskPanel {
-    const records = this.actions.records().map((record) => ({ ...record, input: { ...record.input },
-      candidate: record.candidate && { ...record.candidate } }));
+    const records = Object.freeze(this.actions.records().map((record) => ({
+      ...record, elapsedSeconds: this.elapsedSeconds(record), input: { ...record.input },
+      candidate: record.candidate && { ...record.candidate },
+    })));
     const appliedId = this.actions.appliedId();
-    const panel = new TaskPanel({ ...this.actions, inlinePreferences: undefined, records: () => records, appliedId: () => appliedId },
+    const panel = new TaskPanel({ ...this.actions, elapsedSeconds: undefined, inlinePreferences: undefined,
+      records: () => records, appliedId: () => appliedId },
       this.theme, this.rows, this.keys, this.usage, structuredClone(this.position), this.layout);
     panel.referenceOnly = referenceOnly;
     panel.inspecting = this.inspecting; panel.compareId = this.compareId; panel.reading = this.reading;
@@ -118,19 +141,44 @@ export class TaskPanel {
     panel.notice = this.notice; panel.noticeColor = this.noticeColor;
     return panel;
   }
-  private entries(allRounds = false, history = this.actions.records()): Row[] {
-    return taskGroups(history, allRounds || this.usage).flatMap((records) => {
+  private entries(allRounds = false, history = this.actions.records()): TaskEntries {
+    const all = allRounds || this.usage;
+    const cached = this.projections.get(all);
+    if (cached?.source === history) return cached;
+    const groups = taskGroups(history, all);
+    const rows = groups.flatMap((records) => {
       const source = records.find((r) => !r.input.revision) ?? records[0]!;
       const children = records.filter((r) => r.status !== "unsent").sort((a, b) => b.id - a.id);
       return [{ record: source, original: true, records },
         ...children.map((record) => ({ record, original: false, records }))];
     });
+    const earlier = this.usage ? [] : history.filter((record) => record.archivedAt !== undefined);
+    const entries = { source: history, rows, prompts: groups.length,
+      positions: new Map(rows.map((row, index) => [this.rowKey(row), index])),
+      earlierCount: new Set(earlier.map((record) => record.taskId)).size,
+      earlierPending: earlier.filter(pending).length };
+    // Published journal snapshots are immutable. Other readers may update rows in place.
+    if (Object.isFrozen(history)) this.projections.set(all, entries);
+    return entries;
   }
-  private rowKey(row: Row): string { return row.original ? `task-${row.record.taskId}` : `run-${row.record.id}`; }
-  private isSelected(row: Row): boolean {
-    return this.position.selectedTaskId !== undefined
-      ? row.original && row.record.taskId === this.position.selectedTaskId
-      : !row.original && row.record.id === this.position.selectedId;
+  private rowKey(row: Row): string { return row.original ? taskId(row.record.taskId) : runId(row.record.id); }
+  private selectionKey(): string {
+    return this.position.selectedTaskId !== undefined ? taskId(this.position.selectedTaskId)
+      : this.position.selectedId !== undefined ? runId(this.position.selectedId) : "";
+  }
+  private rowAt(entries: TaskEntries, key: string): Row | undefined {
+    return entries.rows[entries.positions.get(key) ?? -1];
+  }
+  private defaultRow(entries: TaskEntries): Row | undefined {
+    const appliedId = this.actions.appliedId();
+    return (appliedId === undefined ? undefined : this.rowAt(entries, runId(appliedId))) ?? entries.rows[0];
+  }
+  private elapsedSeconds(record: TaskDisplayRecord): number | undefined {
+    return (record.status === "generating" ? this.actions.elapsedSeconds?.(record.id) : undefined) ?? record.elapsedSeconds;
+  }
+  private withElapsed(row: Row): Row {
+    const elapsedSeconds = this.elapsedSeconds(row.record);
+    return elapsedSeconds === row.record.elapsedSeconds ? row : { ...row, record: { ...row.record, elapsedSeconds } };
   }
   private select(row: Row | undefined): void {
     if (!row) return;
@@ -141,10 +189,11 @@ export class TaskPanel {
     this.viewedRow = row;
     this.retainedEarlier = false;
   }
-  private selected(rows = this.entries()): Row | undefined {
-    let row = rows.find((item) => this.isSelected(item));
-    if (!row && !this.usage && this.viewedRow && this.isSelected(this.viewedRow)) {
-      row = this.entries(true).find((item) => this.rowKey(item) === this.rowKey(this.viewedRow!));
+  private selected(entries = this.entries()): Row | undefined {
+    const key = this.selectionKey();
+    let row = this.rowAt(entries, key);
+    if (!row && !this.usage && this.viewedRow && this.rowKey(this.viewedRow) === key) {
+      row = this.rowAt(this.entries(true, entries.source), key);
       if (row?.record.archivedAt !== undefined) {
         this.retainedEarlier = true;
         this.viewedRow = row;
@@ -153,7 +202,7 @@ export class TaskPanel {
     }
     this.retainedEarlier = false;
     if (!row) {
-      row = rows.find((item) => !item.original && item.record.id === this.actions.appliedId()) ?? rows[0];
+      row = this.defaultRow(entries);
       this.select(row);
     }
     this.viewedRow = row;
@@ -188,7 +237,7 @@ export class TaskPanel {
     this.actions.run(row.record.id);
     // Failed starts retain the original and focus. Successful starts follow only
     // this explicit target, never whichever candidate completed in the meantime.
-    const started = this.entries().find((item) => !item.original && item.record.id === row.record.id);
+    const started = this.rowAt(this.entries(), runId(row.record.id));
     if (started) {
       this.preferenceFocus = false; this.reading = false;
       this.actions.inlinePreferences?.setTarget(undefined, false);
@@ -218,9 +267,10 @@ export class TaskPanel {
       }
       return true;
     }
-    const inlineRow = this.selected();
+    const entries = this.entries();
+    const inlineRow = this.selected(entries);
     if (this.retainedEarlier && (key === "q" || key === "ctrl+\\" || this.keys.matches(data, "tui.select.cancel"))) {
-      this.openList(); this.selected();
+      this.openList(); this.selected(entries);
       return true;
     }
     const inline = this.inline(inlineRow);
@@ -256,7 +306,7 @@ export class TaskPanel {
     }
     if (key && !["up", "down", "pageup", "pagedown", "tab"].includes(key)) this.notice = "";
     this.noticeColor = this.notice ? this.noticeColor : "warning";
-    const row = this.selected();
+    const row = inlineRow;
     if (key === "d") {
       if (row && this.actions.deleteRecords) this.deletion = {
         ids: (row.original ? row.records : [row.record]).map((record) => record.id),
@@ -275,7 +325,7 @@ export class TaskPanel {
     }
     if (key === "tab") {
       if (this.compareId !== undefined && row) {
-        const other = this.entries(this.retainedEarlier).find((item) => !item.original && item.record.id === this.compareId);
+        const other = this.rowAt(this.entries(this.retainedEarlier, entries.source), runId(this.compareId));
         if (other) { this.compareId = row.record.id; this.select(other); }
       } else if (row && !this.inspecting && !this.retainedEarlier) this.reading = !this.reading;
       return true;
@@ -349,7 +399,8 @@ export class TaskPanel {
       this.notice = "Result unavailable or send pending · Select an actionable result";
       return true;
     }
-    const delta = key === "up" ? -1 : key === "down" ? 1 : key === "pageup" ? -this.viewport : key === "pagedown" ? this.viewport : 0;
+    const page = this.reading || this.inspecting || this.retainedEarlier ? this.viewport : this.listCapacity ?? 1;
+    const delta = key === "up" ? -1 : key === "down" ? 1 : key === "pageup" ? -page : key === "pagedown" ? page : 0;
     if (delta) {
       if (row && (this.reading || this.inspecting || this.retainedEarlier)) {
         if (this.inspecting && !this.usage && this.compareId === undefined && !row.original && row.record.candidate && this.original) {
@@ -361,8 +412,8 @@ export class TaskPanel {
       }
       else {
         this.navigationDirection = Math.sign(delta);
-        const rows = this.entries();
-        const index = rows.findIndex((item) => this.isSelected(item));
+        const { rows, positions } = entries;
+        const index = positions.get(this.selectionKey()) ?? -1;
         this.select(rows[Math.max(0, Math.min(rows.length - 1, index + delta))]);
       }
       return true;
@@ -385,15 +436,16 @@ export class TaskPanel {
     return this.content.originalHeight(row, width, this.headerOptions(row));
   }
   private paneHeader(row: Row, width: number): string[] {
-    return this.content.paneHeader(row, width, this.headerOptions(row));
+    return this.content.paneHeader(this.withElapsed(row), width, this.headerOptions(row));
   }
-  private pane(row: Row, width: number, height: number, active = true, previewDetails = false, showInline = true): string[] {
+  private pane(row: Row, width: number, height: number, active = true, previewDetails = false, showInline = true,
+    origin?: { x: number; y: number }): string[] {
     const inline = showInline && this.inline(row);
     if (inline) return renderInactivePreferences(inline, width, height, this.originalHeight(row, width),
-      (bounded) => this.pane(row, width, bounded, active, false, false));
+      (bounded) => this.pane(row, width, bounded, active, false, false, origin));
     const key = this.rowKey(row);
     if (previewDetails) this.position.scrolls ??= {};
-    const result = this.content.pane(row, width, height, {
+    const result = this.content.pane(this.withElapsed(row), width, height, {
       ...this.headerOptions(row), original: this.original, usage: this.usage,
       scroll: active ? this.position.scroll ?? 0 : this.position.scrolls?.[key] ?? 0,
       referenceScroll: this.position.scrolls?.[`${key}-reference`] ?? 0,
@@ -402,8 +454,27 @@ export class TaskPanel {
       for (const { reference, offset } of result.offsets) this.rememberRenderedScroll(`${key}${reference ? "-reference" : ""}`, offset);
       this.viewport = result.viewport;
     }
+    if (origin && height > 0) {
+      for (const document of result.documents) {
+        const scrollKey = document.reference ? `${key}-reference` : key;
+        let offset = document.offset;
+        this.readingRegions.push({
+          key: scrollKey, x: origin.x + document.x, y: origin.y + document.y, width: document.width, lines: document.lines,
+          scroll: (delta) => {
+            offset = Math.max(0, Math.min(document.maxOffset, offset + delta));
+            (this.position.scrolls ??= {})[scrollKey] = offset;
+            this.renderedScrolls.delete(scrollKey);
+            if (active && !document.reference) this.position.scroll = offset;
+          },
+        });
+      }
+    }
     return result.lines;
   }
+  handleReadingMouse(event: TuiMouseEvent, copy: (text: string) => void) {
+    return this.readingMouse.handle(event, copy);
+  }
+  clearReadingSelection(): void { this.readingMouse.clear(); }
   private renderDocument(width: number): string[] {
     const row = this.document!.kind === "help" ? this.selected() : undefined;
     const result = renderTaskDocument(this.layout(width), this.document!, {
@@ -416,7 +487,105 @@ export class TaskPanel {
     this.viewport = result.viewport;
     return result.lines;
   }
+  private renderList(entries: TaskEntries, selected: Row | undefined, width: number, height: number, rowHeight: number): string[] {
+    const { rows, positions } = entries;
+    const selectedKey = this.selectionKey();
+    const selectedIndex = positions.get(selectedKey) ?? 0;
+    const capacity = Math.max(1, Math.floor(height / rowHeight));
+    const anchored = Math.min(positions.get(this.position.topRowKey ?? "") ?? this.top, Math.max(0, rows.length - capacity));
+    const keepsSelection = selectedIndex >= anchored && selectedIndex < anchored + capacity;
+    const sameSelection = this.listSelectionKey === undefined || this.listSelectionKey === selectedKey;
+    this.top = this.position.topRowKey && sameSelection && keepsSelection && (this.listCapacity === undefined || this.listCapacity === capacity)
+      ? anchored : selectionWindow(rows.length, selectedIndex, capacity, anchored, undefined, 0, this.navigationDirection).start;
+    this.listSelectionKey = selectedKey;
+    this.listCapacity = capacity;
+    const topRow = rows[this.top];
+    this.position.topRowKey = topRow && this.rowKey(topRow);
+    return rows.slice(this.top, this.top + capacity).flatMap((row) => {
+      const active = row === selected;
+      const focusedTaskOriginal = row.original && !this.usage && row.record.taskId === selected?.record.taskId;
+      const summarizeCompact = focusedTaskOriginal && !selected?.original && rowHeight === 1;
+      const elapsed = rowHeight > 1 && !row.original ? this.elapsedSeconds(row.record) : undefined;
+      const variant = [active, focusedTaskOriginal, summarizeCompact].join(":");
+      let cache = this.rowLines.get(row);
+      if (!cache || cache.width !== width || cache.height !== rowHeight || cache.elapsed !== elapsed) {
+        cache = { width, height: rowHeight, elapsed, variants: new Map() };
+        this.rowLines.set(row, cache);
+      }
+      let lines = cache.variants.get(variant);
+      if (!lines) {
+        lines = this.renderListRow(row, width, rowHeight, { active, focusedTaskOriginal, summarizeCompact, elapsedSeconds: elapsed });
+        cache.variants.set(variant, lines);
+      }
+      return lines;
+    });
+  }
+  private renderListRow(row: Row, leftWidth: number, rowHeight: number,
+    { active, focusedTaskOriginal, summarizeCompact, elapsedSeconds }: {
+      active: boolean; focusedTaskOriginal: boolean; summarizeCompact: boolean; elapsedSeconds?: number;
+    }): string[] {
+    const { record } = row;
+    const old = record.archivedAt !== undefined;
+    const children = row.records.filter((record) => record.status !== "unsent");
+    const lastChild = record.id === Math.min(...children.map((record) => record.id));
+    const continuation = children.length > 0 && (row.original || !lastChild) ? "  │" : "   ";
+    const prefix = `${active ? "›" : " "} ${lastChild ? "└─" : "├─"} `;
+    const badge = this.content.badge(record);
+    const ambiguous = !row.original && rowHeight === 1 && row.records.some(({ input }) => input.model.id === record.input.model.id && input.model.provider !== record.input.model.provider);
+    const identity = ambiguous ? `#${record.id} ${record.input.model.id} · ${record.input.model.provider}` : record.input.model.id;
+    const model = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(identity), Math.max(1, leftWidth - visibleWidth(prefix + badge) - 1), "…"));
+    const draft = record.input.draft.replace(/\s+/g, " ") || "Empty prompt";
+    const cleanDraft = summarizeCompact ? sanitizeTerminalText(draft) : draft;
+    const summaryWidth = Math.max(1, leftWidth - 4);
+    const excerpt = summarizeCompact && visibleWidth(cleanDraft) > summaryWidth
+      ? stripVTControlCharacters(truncateToWidth(cleanDraft, Math.ceil(summaryWidth / 2), "…") + sliceByColumn(cleanDraft, visibleWidth(cleanDraft) - Math.floor(summaryWidth / 2), Math.floor(summaryWidth / 2))) : draft;
+    const label = row.original
+      ? `${active ? "›" : " "} ${record.status === "unsent" ? `○ Unsent ·${record.input.preferences?.length ? ` P:${record.input.preferences.length} ·` : ""}` : "▾"} ${old ? "Earlier · " : ""}${rowHeight > 1 ? "Original prompt" : excerpt}`
+      : `${prefix}${model}${" ".repeat(Math.max(1, leftWidth - visibleWidth(prefix + model + badge)))}${badge}`;
+    const clean = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(label), leftWidth, "…"));
+    const emphasize = (text: string) => active && rowHeight > 1 ? this.theme.bold(text) : text;
+    const primary = (text: string) => this.theme.fg("text", active ? this.theme.bold(text) : text);
+    // Selection survives a reading-focus change. Accent only the existing
+    // cursor, not model identities, tree guides or semantic status badges.
+    const cursor = active && clean.startsWith("›")
+      ? this.theme.fg("accent", this.theme.bold("›")) : primary(clean.slice(0, 1));
+    let text: string;
+    if (row.original) {
+      const earlierAt = old ? clean.indexOf("Earlier · ") : -1;
+      text = cursor + (earlierAt < 0 ? primary(clean.slice(1))
+        : primary(clean.slice(1, earlierAt)) + this.content.muted("Earlier · ") + primary(clean.slice(earlierAt + 10)));
+    } else {
+      const badgeAt = Math.min(clean.length, label.length - badge.length);
+      const gutterEnd = Math.min(visibleWidth(prefix), badgeAt);
+      const status = clean.slice(badgeAt);
+      text = cursor + primary(clean.slice(1, 2)) + this.content.muted(clean.slice(2, gutterEnd)) + primary(clean.slice(gutterEnd, badgeAt))
+        + emphasize(status.startsWith("⚠") ? this.theme.fg("warning", "⚠") + this.theme.fg(this.content.color(record), status.slice(1))
+          : this.theme.fg(this.content.color(record), status));
+    }
+    const highlight = (line: string) => active
+      ? this.theme.bg("selectedBg", line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line)))) : line;
+    if (rowHeight === 1) return [highlight(text)];
+    if (focusedTaskOriginal && children.length) {
+      const columns = leftWidth - 4;
+      const excerpt = truncateToWidth(sanitizeTerminalText(draft), columns * 2, "…");
+      const lines = wrapTextWithAnsi(excerpt, columns);
+      const guide = this.content.muted(continuation) + " ";
+      return [highlight(text), highlight(guide + this.theme.fg("text", lines[0] ?? "")), lines[1]
+        ? highlight(guide + this.theme.fg("text", truncateToWidth(lines.slice(1).join(" "), columns, "…"))) : this.content.muted(continuation.trimEnd())];
+    }
+    const detail = row.original ? this.theme.fg("text", sanitizeTerminalText(draft))
+      : this.content.muted(`#${record.id} · ${record.input.model.provider}${elapsedSeconds !== undefined ? ` · ${elapsedSeconds}s` : ""}`);
+    // Keep the parent/sibling spine through secondary lines and spacing,
+    // but stop after the final child so separate prompts never join together.
+    return [highlight(text),
+      highlight(truncateToWidth(this.content.muted(continuation) + (row.original ? " " : "  ") + detail, leftWidth, "…")),
+      this.content.muted(continuation.trimEnd())];
+  }
   render(width: number, _empty?: () => string[]): string[] {
+    this.readingRegions = [];
+    return this.readingMouse.render(this.renderPanel(width), this.readingRegions, this.theme);
+  }
+  private renderPanel(width: number): string[] {
     if (width < 1) return [];
     let layout = this.layout(width);
     if (this.document) return this.renderDocument(width);
@@ -428,16 +597,17 @@ export class TaskPanel {
       return chrome.render(body, (text) => this.theme.fg("borderMuted", text));
     }
     const tabs = workspaceTabs(layout, this.usage ? "Usage" : "Preview", this.theme);
-    const history = this.actions.records();
-    const rows = this.entries(false, history);
-    const selected = this.selected(rows);
+    const entries = this.entries();
+    const { rows, prompts, earlierCount, earlierPending } = entries;
+    const selected = this.selected(entries);
     const inline = this.inline(selected);
     this.actions.inlinePreferences?.setTarget(inline ? selected!.record.id : undefined, this.preferenceFocus);
     if (inline && this.preferenceFocus && selected) return renderTaskPreferences(selected, inline, layout, tabs, this.theme, this.content,
       (columns, rows) => this.pane(selected, columns, rows, true, false, false), this.canExpand() ? this.expansionHint?.() : undefined,
       this.actions.showOptimizerQuota?.());
     const previewDetails = this.inspecting && !this.usage && this.compareId === undefined && !!selected && !selected.original && !!selected.record.candidate;
-    const other = this.inspecting && this.compareId !== undefined ? this.entries(this.retainedEarlier).find((row) => !row.original && row.record.id === this.compareId) : undefined;
+    const other = this.inspecting && this.compareId !== undefined
+      ? this.rowAt(this.entries(this.retainedEarlier, entries.source), runId(this.compareId)) : undefined;
     const passiveHints = !this.inspecting && !this.retainedEarlier && !this.referenceOnly;
     const action = !this.inspecting && selected?.original && selected.record.status === "unsent" && (this.usage || selected.record.archivedAt === undefined) ? "Optimize" : "Inspect";
     const restored = selected?.record.input.contextUnavailable;
@@ -509,7 +679,6 @@ export class TaskPanel {
       const label = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(identity), space, "…"));
       inspectionSubtitle = prefix + this.content.heading(label) + this.content.muted(" · ") + hints;
     }
-    const prompts = rows.filter((row) => row.original).length;
     const runs = rows.length - prompts;
     const separator = this.content.muted(" · ");
     const model = passiveHints && !this.notice && action === "Optimize" ? this.refineModelLabel(layout.innerWidth) : "";
@@ -527,14 +696,11 @@ export class TaskPanel {
       ? this.content.muted(layout.innerWidth < 32 ? "Earlier → Usage" : layout.innerWidth < 72
         ? "Earlier · Usage → · Esc current" : "Earlier · kept open · Esc returns to current · History in Usage →") : this.inspecting
       ? inspectionSubtitle : browseStatus;
-    const earlier = this.usage ? [] : history.filter((record) => record.archivedAt !== undefined);
-    const earlierPending = earlier.filter(pending).length;
-    const earlierCount = new Set(earlier.map((record) => record.taskId)).size;
     const earlierLabel = `${earlierCount} earlier prompt${earlierCount === 1 ? "" : "s"}`;
     const historyHint = layout.innerWidth < 32 ? "History → Usage"
       : layout.innerWidth < 72 ? `History → Usage · ${earlierPending ? `${earlierPending} active` : earlierLabel}`
       : `History → Usage · ${earlierPending ? `${earlierPending} running / queued · ` : ""}${earlierLabel}`;
-    const showHistoryHint = earlier.length > 0 && !this.retainedEarlier && !this.notice && !this.inspecting && !this.referenceOnly;
+    const showHistoryHint = earlierCount > 0 && !this.retainedEarlier && !this.notice && !this.inspecting && !this.referenceOnly;
     // Separate history navigation from the page title and retain the compact fallback on narrow screens.
     const identity = this.retainedEarlier && selected && !selected.original
       ? this.content.muted(" · ") + this.content.heading(`#${selected.record.id} ${selected.record.input.model.id}`) : "";
@@ -569,89 +735,30 @@ export class TaskPanel {
     const split = !!selected && !this.inspecting && !this.retainedEarlier && layout.innerWidth >= 72;
     const leftWidth = split ? Math.min(layout.innerWidth >= 120 ? 48 : 36, Math.floor(layout.innerWidth / 3)) : layout.innerWidth;
     const rightWidth = split ? layout.innerWidth - leftWidth - 3 : layout.innerWidth;
-    const selectedIndex = Math.max(0, rows.findIndex((row) => this.isSelected(row)));
-    // Larger canvases give each identity a readable secondary line and a gap.
-    // Scroll in identities, not physical lines, so resize never changes the target.
     const rowHeight = split && layout.innerWidth >= 100 && height >= 24 ? 3 : 1;
-    const capacity = Math.max(1, Math.floor(height / rowHeight));
-    this.top = selectionWindow(rows.length, selectedIndex, capacity, this.top, undefined, 0, this.navigationDirection).start;
-    const list = rows.slice(this.top, this.top + capacity).flatMap((row) => {
-      const { record } = row;
-      const old = record.archivedAt !== undefined;
-      const active = this.isSelected(row);
-      const children = row.records.filter((record) => record.status !== "unsent");
-      const lastChild = record.id === Math.min(...children.map((record) => record.id));
-      const continuation = children.length > 0 && (row.original || !lastChild) ? "  │" : "   ";
-      const prefix = `${active ? "›" : " "} ${lastChild ? "└─" : "├─"} `;
-      const badge = this.content.badge(record);
-      const ambiguous = !row.original && rowHeight === 1 && row.records.some(({ input }) => input.model.id === record.input.model.id && input.model.provider !== record.input.model.provider);
-      const identity = ambiguous ? `#${record.id} ${record.input.model.id} · ${record.input.model.provider}` : record.input.model.id;
-      const model = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(identity), Math.max(1, leftWidth - visibleWidth(prefix + badge) - 1), "…"));
-      const draft = record.input.draft.replace(/\s+/g, " ") || "Empty prompt";
-      const focusedTaskOriginal = row.original && !this.usage && selected && record.taskId === selected.record.taskId;
-      const summarizeCompact = focusedTaskOriginal && !selected.original && rowHeight === 1;
-      const cleanDraft = summarizeCompact ? sanitizeTerminalText(draft) : draft;
-      const summaryWidth = Math.max(1, leftWidth - 4);
-      const excerpt = summarizeCompact && visibleWidth(cleanDraft) > summaryWidth
-        ? stripVTControlCharacters(truncateToWidth(cleanDraft, Math.ceil(summaryWidth / 2), "…") + sliceByColumn(cleanDraft, visibleWidth(cleanDraft) - Math.floor(summaryWidth / 2), Math.floor(summaryWidth / 2))) : draft;
-      const label = row.original
-        ? `${active ? "›" : " "} ${record.status === "unsent" ? `○ Unsent ·${record.input.preferences?.length ? ` P:${record.input.preferences.length} ·` : ""}` : "▾"} ${old ? "Earlier · " : ""}${rowHeight > 1 ? "Original prompt" : excerpt}`
-        : `${prefix}${model}${" ".repeat(Math.max(1, leftWidth - visibleWidth(prefix + model + badge)))}${badge}`;
-      const clean = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(label), leftWidth, "…"));
-      const emphasize = (text: string) => active && rowHeight > 1 ? this.theme.bold(text) : text;
-      const primary = (text: string) => this.theme.fg("text", active ? this.theme.bold(text) : text);
-      // Selection survives a reading-focus change. Accent only the existing
-      // cursor, not model identities, tree guides or semantic status badges.
-      const cursor = active && clean.startsWith("›")
-        ? this.theme.fg("accent", this.theme.bold("›")) : primary(clean.slice(0, 1));
-      let text: string;
-      if (row.original) {
-        const earlierAt = old ? clean.indexOf("Earlier · ") : -1;
-        text = cursor + (earlierAt < 0 ? primary(clean.slice(1))
-          : primary(clean.slice(1, earlierAt)) + this.content.muted("Earlier · ") + primary(clean.slice(earlierAt + 10)));
-      } else {
-        const badgeAt = Math.min(clean.length, label.length - badge.length);
-        const gutterEnd = Math.min(visibleWidth(prefix), badgeAt);
-        const status = clean.slice(badgeAt);
-        text = cursor + primary(clean.slice(1, 2)) + this.content.muted(clean.slice(2, gutterEnd)) + primary(clean.slice(gutterEnd, badgeAt))
-          + emphasize(status.startsWith("⚠") ? this.theme.fg("warning", "⚠") + this.theme.fg(this.content.color(record), status.slice(1))
-            : this.theme.fg(this.content.color(record), status));
-      }
-      const highlight = (line: string) => active
-        ? this.theme.bg("selectedBg", line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line)))) : line;
-      if (rowHeight === 1) return [highlight(text)];
-      if (focusedTaskOriginal && children.length) {
-        const columns = leftWidth - 4;
-        const excerpt = truncateToWidth(sanitizeTerminalText(draft), columns * 2, "…");
-        const lines = wrapTextWithAnsi(excerpt, columns);
-        const guide = this.content.muted(continuation) + " ";
-        return [highlight(text), highlight(guide + this.theme.fg("text", lines[0] ?? "")), lines[1]
-          ? highlight(guide + this.theme.fg("text", truncateToWidth(lines.slice(1).join(" "), columns, "…"))) : this.content.muted(continuation.trimEnd())];
-      }
-      const detail = row.original ? this.theme.fg("text", sanitizeTerminalText(draft))
-        : this.content.muted(`#${record.id} · ${record.input.model.provider}${record.elapsedSeconds !== undefined ? ` · ${record.elapsedSeconds}s` : ""}`);
-      // Keep the parent/sibling spine through secondary lines and spacing,
-      // but stop after the final child so separate prompts never join together.
-      return [highlight(text),
-        highlight(truncateToWidth(this.content.muted(continuation) + (row.original ? " " : "  ") + detail, leftWidth, "…")),
-        this.content.muted(continuation.trimEnd())];
-    });
+    const list = !this.inspecting && !this.retainedEarlier && (split || !this.reading && !this.preferenceFocus)
+      ? this.renderList(entries, selected, leftWidth, height, rowHeight) : [];
     let body: string[];
+    const bodyOrigin = {
+      x: chrome.layout.inset,
+      y: chrome.layout.topSeparatorHeight + chrome.layout.headerHeight + chrome.layout.separatorHeight + banners.length,
+    };
+    const origin = (x = 0, y = 0) => ({ x: bodyOrigin.x + x, y: bodyOrigin.y + y });
     // Exactly one layout owns the horizontal split: list + summary, Enter
     // details (result + reference), or Compare. Never nest detail columns inside
     // an existing pane, or render an unused pane that clamps its scroll offset.
     if (this.retainedEarlier && !this.inspecting && selected) {
-      body = this.pane(selected, layout.innerWidth, height);
+      body = this.pane(selected, layout.innerWidth, height, true, false, true, bodyOrigin);
     } else if (previewDetails && selected) {
-      body = this.pane(selected, layout.innerWidth, height, true, true);
+      body = this.pane(selected, layout.innerWidth, height, true, true, true, bodyOrigin);
     } else if (other && selected) {
       // A/B identities stay attached to runs when Tab swaps the action target.
       const letter = (row: Row) => row.record.id === Math.min(selected.record.id, other.record.id) ? "A" : "B";
       const identity = (row: Row) => `${letter(row)} · #${row.record.id}`;
       if (layout.innerWidth >= 72) {
         const half = Math.floor((layout.innerWidth - 3) / 2);
-        const right = this.pane(selected, half, height - 1);
-        const peer = this.pane(other, layout.innerWidth - half - 3, height - 1, false);
+        const right = this.pane(selected, half, height - 1, true, false, true, origin(0, 1));
+        const peer = this.pane(other, layout.innerWidth - half - 3, height - 1, false, false, true, origin(half + 3, 1));
         const label = truncateToWidth(this.content.heading(identity(selected)), half, "…");
         body = [label + " ".repeat(Math.max(0, half - visibleWidth(label))) + this.content.muted(" │ ") + this.content.heading(identity(other))];
         body.push(...Array.from({ length: height - 1 }, (_, i) => {
@@ -665,11 +772,13 @@ export class TaskPanel {
           const compact = (row: Row) => `${letter(row)}#${row.record.id}`;
           caption = this.content.heading(compact(selected)) + " " + peerLabel(compact(other));
         }
-        body = [caption, ...this.pane(selected, layout.innerWidth, height - 1)];
+        body = [caption, ...this.pane(selected, layout.innerWidth, height - 1, true, false, true, origin(0, 1))];
       }
     } else {
       const empty = this.usage ? "No records yet. Return to Preview to create a prompt." : "No current prompts.";
-      const right = selected ? this.pane(selected, rightWidth, height) : this.content.wrapped(this.content.muted(empty), rightWidth);
+      const reading = this.inspecting || this.reading || this.preferenceFocus;
+      const right = selected ? this.pane(selected, rightWidth, height, true, false, true,
+        split ? origin(leftWidth + 3) : reading ? bodyOrigin : undefined) : this.content.wrapped(this.content.muted(empty), rightWidth);
       body = Array.from({ length: height }, (_, i) => {
         if (!split) return this.inspecting || this.reading || this.preferenceFocus || !rows.length ? right[i] ?? "" : list[i] ?? "";
         const line = list[i] ?? "";

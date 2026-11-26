@@ -2,6 +2,7 @@ import type { Candidate, RefineRequestInput } from "./request-types.js";
 import type { TokenUsage } from "./usage.js";
 import type { BudgetReport } from "./budget.js";
 import type { SelectedPreference } from "./revision-preferences.js";
+import { immutable } from "./app/queries.js";
 
 export interface RefineRecord {
   id: number;
@@ -41,10 +42,19 @@ export class RefineHistory {
   private records: RefineRecord[] = [];
   private taskVersions = new Map<number, number>();
   private runVersions = new Map<number, number>();
+  private displayRecords?: { sessionId: string; records: readonly TaskDisplayRecord[] };
+  private readonly displayRows = new WeakMap<RefineRecord, TaskDisplayRecord>();
   taskVersion(id: number): number { return this.taskVersions.get(id) ?? 1; }
   runVersion(id: number): number { return this.runVersions.get(id) ?? 1; }
   private touchTask(id: number): void { this.taskVersions.set(id, this.taskVersion(id) + 1); }
-  private touchRun(id: number): void { this.runVersions.set(id, this.runVersion(id) + 1); }
+  private touchRun(record: RefineRecord): void {
+    this.runVersions.set(record.id, this.runVersion(record.id) + 1);
+    this.invalidateDisplay(record);
+  }
+  private invalidateDisplay(record?: RefineRecord): void {
+    this.displayRecords = undefined;
+    if (record) this.displayRows.delete(record);
+  }
   private pruneVersions(): void {
     const tasks = new Set(this.records.map((record) => record.taskId));
     const runs = new Set(this.records.map((record) => record.id));
@@ -55,6 +65,7 @@ export class RefineHistory {
 
   restore(records: RefineRecord[]): void {
     this.records = structuredClone(records.slice(-this.limit));
+    this.invalidateDisplay();
     this.taskVersions.clear();
     this.runVersions.clear();
     this.sequence = Math.max(this.sequence, ...this.records.map((record) => record.id));
@@ -79,6 +90,7 @@ export class RefineHistory {
       delete freshInput.sentInput;
     }
     this.records.push({ id, taskId, input: freshInput, originalInput, parentId, kind, createdAt: Date.now(), status });
+    this.invalidateDisplay();
     this.pruneVersions();
     return id;
   }
@@ -109,7 +121,7 @@ export class RefineHistory {
       if (record.input.sessionId === sessionId && record.input.roundId === roundId && record.archivedAt === undefined) {
         record.archivedAt = Date.now();
         changedTasks.add(record.taskId);
-        this.touchRun(record.id);
+        this.touchRun(record);
       }
     }
     for (const id of changedTasks) this.touchTask(id);
@@ -117,14 +129,17 @@ export class RefineHistory {
 
   setModel(id: number, model: RefineRequestInput["model"], thinkingLevel: RefineRequestInput["thinkingLevel"]): void {
     const record = this.records.find((item) => item.id === id);
-    if (record?.status === "unsent") { record.input.model = { ...model }; record.input.thinkingLevel = thinkingLevel; }
+    if (record?.status === "unsent") {
+      record.input.model = { ...model }; record.input.thinkingLevel = thinkingLevel;
+      this.invalidateDisplay(record);
+    }
   }
 
   editDraft(id: number, draft: string): void {
     const record = this.records.find((item) => item.id === id);
     if (record?.status !== "unsent") return;
     this.touchTask(record.taskId);
-    this.touchRun(record.id);
+    this.touchRun(record);
     record.input.draft = draft;
     record.originalInput = { ...structuredClone(record.input), draft };
     delete record.input.preparedInput;
@@ -137,7 +152,7 @@ export class RefineHistory {
     const record = this.records.find((item) => item.id === id);
     if (record?.status !== "unsent") return;
     this.touchTask(record.taskId);
-    this.touchRun(record.id);
+    this.touchRun(record);
     record.input.preferences = structuredClone([...selected]);
     record.input.editingInstruction = instruction || undefined;
     delete record.input.preparedInput;
@@ -149,11 +164,13 @@ export class RefineHistory {
 
   remove(ids: ReadonlySet<number>, sessionId: string): void {
     this.records = this.records.filter((record) => record.input.sessionId !== sessionId || !ids.has(record.id));
+    this.invalidateDisplay();
     this.pruneVersions();
   }
 
   removeDraft(id: number): void {
     this.records = this.records.filter((record) => record.id !== id || record.status !== "unsent");
+    this.invalidateDisplay();
     this.pruneVersions();
   }
 
@@ -162,7 +179,7 @@ export class RefineHistory {
     if (record) {
       if ((record.status === "unsent" && patch.status !== undefined && patch.status !== "unsent") ||
         (patch.archivedAt !== undefined && patch.archivedAt !== record.archivedAt)) this.touchTask(record.taskId);
-      this.touchRun(id);
+      this.touchRun(record);
       Object.assign(record, structuredClone(patch));
     }
   }
@@ -171,7 +188,10 @@ export class RefineHistory {
     const record = this.records.find((item) => item.id === id);
     if (record) {
       record.input.preparedInput = preparedInput;
-      if (diagnostics) record.input.projectDiagnostics = structuredClone(diagnostics);
+      if (diagnostics) {
+        record.input.projectDiagnostics = structuredClone(diagnostics);
+        this.invalidateDisplay(record);
+      }
       if (!record.input.revision) {
         const originalInput = { ...record.originalInput ?? record.input, preparedInput,
           ...(diagnostics ? { projectDiagnostics: structuredClone(diagnostics) } : {}) };
@@ -187,31 +207,45 @@ export class RefineHistory {
   captureBudget(id: number, budget: BudgetReport, sentInput?: string): void {
     const record = this.records.find((item) => item.id === id);
     if (!record) return;
-    this.touchRun(id);
+    this.touchRun(record);
     record.input.budget = structuredClone(budget);
     record.input.sentInput = sentInput;
   }
 
   listForDisplay(sessionId: string): TaskDisplayRecord[] {
-    return this.records.filter((record) => record.input.sessionId === sessionId).map((record) => {
-      const { input, candidate, usage } = record;
-      const warnings = input.projectDiagnostics?.warnings ?? input.project?.snapshot.warnings;
-      return {
-        id: record.id, taskId: record.taskId, kind: record.kind, status: record.status, parentId: record.parentId,
-        createdAt: record.createdAt, archivedAt: record.archivedAt, appliedAt: record.appliedAt,
-        acceptedAt: record.acceptedAt, sentAt: record.sentAt, elapsedSeconds: record.elapsedSeconds, error: record.error,
-        usage: usage && structuredClone(usage),
-        candidate: candidate && { text: candidate.text, ...(candidate.additional ? { additional: structuredClone(candidate.additional) } : {}) },
-        input: {
-          draft: input.draft, model: { ...input.model }, thinkingLevel: input.thinkingLevel,
-          roundId: input.roundId, contextUnavailable: input.contextUnavailable, editingInstruction: input.editingInstruction,
-          revision: input.revision && { instruction: input.revision.instruction, previousCandidate: input.revision.previousCandidate },
-          budget: input.budget && structuredClone(input.budget),
-          preferences: input.preferences?.map(({ name }) => ({ name })),
-          projectDiagnostics: warnings && { warnings: [...warnings] },
-        },
-      };
+    return structuredClone(this.displaySnapshot(sessionId).slice());
+  }
+
+  /** Shared by TUI views until display records change. The live clock is separate. */
+  displaySnapshot(sessionId: string): readonly TaskDisplayRecord[] {
+    if (this.displayRecords?.sessionId === sessionId) return this.displayRecords.records;
+    const records = Object.freeze(this.records.filter((record) => record.input.sessionId === sessionId).map((record) => this.displayRow(record)));
+    this.displayRecords = { sessionId, records };
+    return records;
+  }
+
+  private displayRow(record: RefineRecord): TaskDisplayRecord {
+    const cached = this.displayRows.get(record);
+    if (cached) return cached;
+    const { input, candidate, usage } = record;
+    const warnings = input.projectDiagnostics?.warnings ?? input.project?.snapshot.warnings;
+    const row = immutable<TaskDisplayRecord>({
+      id: record.id, taskId: record.taskId, kind: record.kind, status: record.status, parentId: record.parentId,
+      createdAt: record.createdAt, archivedAt: record.archivedAt, appliedAt: record.appliedAt,
+      acceptedAt: record.acceptedAt, sentAt: record.sentAt, elapsedSeconds: record.elapsedSeconds, error: record.error,
+      usage: usage && structuredClone(usage),
+      candidate: candidate && { text: candidate.text, ...(candidate.additional ? { additional: structuredClone(candidate.additional) } : {}) },
+      input: {
+        draft: input.draft, model: { ...input.model }, thinkingLevel: input.thinkingLevel,
+        roundId: input.roundId, contextUnavailable: input.contextUnavailable, editingInstruction: input.editingInstruction,
+        revision: input.revision && { instruction: input.revision.instruction, previousCandidate: input.revision.previousCandidate },
+        budget: input.budget && structuredClone(input.budget),
+        preferences: input.preferences?.map(({ name }) => ({ name })),
+        projectDiagnostics: warnings && { warnings: [...warnings] },
+      },
     });
+    this.displayRows.set(record, row);
+    return row;
   }
 
   list(sessionId: string, taskId?: number): RefineRecord[] {

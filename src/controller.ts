@@ -102,8 +102,8 @@ export class RefineController {
   getHistory(): RefineRecord[] {
     return this.withElapsed(this.journal.list(this.sessionId ?? ""));
   }
-  getTaskDisplayRecords(): TaskDisplayRecord[] {
-    return this.withElapsed(this.journal.listForDisplay(this.sessionId ?? ""));
+  getTaskDisplayRecords(): readonly TaskDisplayRecord[] {
+    return this.journal.displaySnapshot(this.sessionId ?? "");
   }
   private withElapsed<T extends { id: number; elapsedSeconds?: number }>(records: T[]): T[] {
     const running = new Map([...this.active.values()].map((run) => [run.request.recordId, run]));
