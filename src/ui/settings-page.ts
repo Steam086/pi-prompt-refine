@@ -6,7 +6,7 @@ import { formatKeyHint, passiveHintLayout, type KeyHint } from "../key-hints.js"
 import type { PromptInput } from "../prompt-input.js";
 import { sanitizeTerminalText } from "../presentation.js";
 import { DEFAULT_CONFIG } from "../config.js";
-import { NUMBER_SETTINGS, numberSettingValue, settingsDirty, type ContextSettings, type NumberSettingSpec } from "../settings.js";
+import { NUMBER_SETTINGS, numberSettingValue, settingsDirty, type ContextSettings, type NumberSettingSpec, type SettingsResult } from "../settings.js";
 import { OptimizationPromptPage, type OptimizationPromptTarget } from "./optimization-prompt-page.js";
 
 const instructionModes = ["first", "always", "off"] as const;
@@ -17,7 +17,6 @@ const instructionDescriptions = {
   off: "No Pi-loaded rules (e.g. AGENTS.md) are sent to the optimizer.",
 };
 
-export interface SettingsResult { message: string; persisted: boolean }
 export interface SettingsOptimizer { model: string; thinking: string; thinkingEnabled: boolean; thinkingDetail?: string }
 
 export interface SettingsPageActions {

@@ -1,14 +1,15 @@
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type { ModelRef, ProjectContextConfig } from "./config.js";
+import type { ModelRef, ProjectContextPolicy } from "./config.js";
 import type { BudgetReport } from "./budget.js";
 import type { HistorySnapshot, RevisionInput } from "./context.js";
 import type { TokenUsage } from "./usage.js";
 import type { ProjectSnapshot } from "./project-context.js";
 import type { ResultNote, SelectedPreference } from "./revision-preferences.js";
 
-interface RequestProjectContext { cwd: string; snapshot: ProjectSnapshot; revisionSnapshot?: ProjectSnapshot; config?: ProjectContextConfig }
+interface RequestProjectContext { cwd: string; snapshot: ProjectSnapshot; revisionSnapshot?: ProjectSnapshot; config?: ProjectContextPolicy }
 export type RefinePhase = "idle" | "generating" | "ready" | "error";
 export type RefineStopReason = "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred" | "pending" | "budget" | "network";
+export interface RunModel { model: ModelRef; thinking: ModelThinkingLevel }
 export interface RefineRequestInput {
   draft: string;
   revision?: RevisionInput;
@@ -92,4 +93,5 @@ export type TriggerResult =
   | ({ kind: "started"; requestId: number; queued: boolean } & RecordIdentity)
   | ({ kind: "captured"; version: number } & RecordIdentity)
   | { kind: "duplicate"; match: (RecordIdentity & { kind: "draft" | "run" }) | null }
-  | { kind: "ready" | "empty" | "too-long" | "no-model" | "stale-source" | "busy" };
+  | { kind: "busy"; reason: "send-pending" | "journal-capacity" }
+  | { kind: "ready" | "empty" | "too-long" | "no-model" | "stale-source" };

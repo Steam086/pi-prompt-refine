@@ -4,7 +4,7 @@ import { operationHintRows, type KeyHint } from "../key-hints.js";
 import { panelHeader, workspaceTabs, type PanelLayout } from "../panel-layout.js";
 import { sanitizeTerminalText } from "../presentation.js";
 import type { PromptInput } from "../prompt-input.js";
-import type { SettingsResult } from "./settings-page.js";
+import type { SettingsResult } from "../settings.js";
 
 export interface OptimizationPromptTarget {
   text: string;

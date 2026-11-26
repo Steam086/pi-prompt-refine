@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import ignore, { type Ignore } from "ignore";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ProjectContextConfig } from "./config.js";
+import type { ProjectContextPolicy } from "./config.js";
 
 interface ContextFile { path: string; content: string }
 interface SkillMetadata { name: string; description: string; disableModelInvocation?: boolean }
@@ -61,7 +61,7 @@ export function resourcesFromPrompt(prompt: string): { resources: HostResources;
 }
 
 /** Command contexts expose structured base inputs; shortcuts use current rendered Pi sections. */
-export function captureProjectContext(ctx: ExtensionContext, config: ProjectContextConfig, draft: string, followUp = false): ProjectSnapshot {
+export function captureProjectContext(ctx: ExtensionContext, config: ProjectContextPolicy, draft: string, followUp = false): ProjectSnapshot {
   if (!config.enabled) return { text: "", warnings: [], instructionCount: 0, skillCount: 0 };
   let resources: HostResources = {};
   let warnings: string[] = [];
@@ -133,7 +133,7 @@ function instructionRecord(file: { source: string; content: string }, budget: nu
   return { text: text.length <= budget ? text : "", incomplete: true };
 }
 
-export function formatProjectResources(resources: HostResources, config: ProjectContextConfig, draft: string, initialWarnings: string[] = []): ProjectSnapshot {
+export function formatProjectResources(resources: HostResources, config: ProjectContextPolicy, draft: string, initialWarnings: string[] = []): ProjectSnapshot {
   const warnings = [...initialWarnings];
   const reserve = Math.min(1100, Math.floor(config.maxChars / 2));
   let available = config.maxChars - reserve;
@@ -241,7 +241,7 @@ interface TreeOptions {
   skipDirectories?: ReadonlySet<string>;
 }
 
-export async function collectTree(cwd: string, draft: string, config: ProjectContextConfig["tree"], signal: AbortSignal, options: TreeOptions = {}): Promise<TreeSnapshot> {
+export async function collectTree(cwd: string, draft: string, config: ProjectContextPolicy["tree"], signal: AbortSignal, options: TreeOptions = {}): Promise<TreeSnapshot> {
   if (!config.enabled || signal.aborted) return { text: "", warnings: [] };
   const local = new AbortController();
   const combined = AbortSignal.any([signal, local.signal]);
@@ -343,7 +343,7 @@ export function directoryReferences(draft: string, maxReferences: number): { pat
 
 /** Explicit directories get first use of one shared tree budget, regardless of history. */
 export async function collectDirectoryContext(
-  cwd: string, draft: string, config: ProjectContextConfig, includeDefault: boolean, signal: AbortSignal,
+  cwd: string, draft: string, config: ProjectContextPolicy, includeDefault: boolean, signal: AbortSignal,
 ): Promise<TreeSnapshot> {
   const empty = (): TreeSnapshot => ({ text: "", warnings: [] });
   if (!config.enabled || signal.aborted) return empty();
@@ -473,7 +473,7 @@ export async function collectDirectoryContext(
   }
 }
 
-export function assembleProjectContext(snapshot: ProjectSnapshot, tree: TreeSnapshot, config: ProjectContextConfig): { text: string; warnings: string[] } {
+export function assembleProjectContext(snapshot: ProjectSnapshot, tree: TreeSnapshot, config: ProjectContextPolicy): { text: string; warnings: string[] } {
   const warnings = [...snapshot.warnings, ...tree.warnings];
   const treeHeader = "\n\nPROJECT TREE (names only, partial):\n";
   const warningHeader = (): string => {

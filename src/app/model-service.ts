@@ -1,71 +1,45 @@
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
-import type { RefineConfig } from "../config.js";
 import { modelKey } from "../config.js";
 import type { RefineController } from "../controller.js";
 import type { Failure, ModelIdentity, OptimizerDto, Thinking } from "./api.js";
+import type { createConfigService } from "./config-service.js";
 import type { ModelPort } from "./ports.js";
 
 export function createModelService(deps: {
-  controller: Pick<RefineController, "getModel" | "setModel" | "getState">;
-  config: Pick<RefineConfig, "model" | "thinkingLevel" | "modelThinkingLevels" | "favorites">;
+  controller: Pick<RefineController, "setModel" | "getState">;
+  config: Pick<ReturnType<typeof createConfigService>, "read" | "optimizerState" | "setOptimizer">;
   available(): Model<Api>[];
   sessionThinking(): Thinking | undefined;
-  persist(): Promise<boolean>;
-  changed(): void;
-  writable: boolean;
 }): ModelPort & { settled(): Promise<boolean> } {
-  let version = 1;
-  let observed = "";
-  let persistence: OptimizerDto["persistence"] = deps.writable ? "persisted" : "blocked";
-  let saveSequence = 0;
-  let latestSave = Promise.resolve(deps.writable);
+  let latestSave = Promise.resolve(deps.config.optimizerState().persistence !== "blocked");
   function optimizer(): OptimizerDto {
-    const model = deps.controller.getModel();
-    const signature = JSON.stringify([model, deps.config.thinkingLevel]);
-    if (observed && observed !== signature) version++;
-    observed = signature;
-    return { version, ...(model ? { model: { ...model } } : {}), thinking: deps.config.thinkingLevel ?? "inherit", persistence };
+    const { model, thinkingLevel } = deps.config.read();
+    return { ...deps.config.optimizerState(), ...(model ? { model: { ...model } } : {}), thinking: thinkingLevel ?? "inherit" };
   }
-  optimizer();
-  function resolve(ref = deps.controller.getModel(), thinking = deps.config.thinkingLevel): ReturnType<ModelPort["resolve"]> {
-    if (!ref) return { kind: "rejected", code: "no-model" } as const;
+  function resolve(ref = deps.config.read().model, thinking = deps.config.read().thinkingLevel): ReturnType<ModelPort["resolve"]> {
+    if (!ref) return { kind: "rejected", code: "no-model" };
     const model = deps.available().find((entry) => entry.provider === ref.provider && entry.id === ref.id);
-    if (!model) return { kind: "rejected", code: "model-unavailable" } as const;
+    if (!model) return { kind: "rejected", code: "model-unavailable" };
     return { model: { provider: model.provider, id: model.id },
       thinking: clampThinkingLevel(model, thinking ?? deps.sessionThinking() ?? "medium") };
   }
   return {
     optimizer, resolve, settled: () => latestSave,
-    list: () => deps.available().map((model) => ({ provider: model.provider, id: model.id, name: model.name,
-      thinkingLevels: getSupportedThinkingLevels(model), favorite: deps.config.favorites.some((ref) => modelKey(ref) === modelKey(model)) })),
+    list: () => {
+      const { favorites } = deps.config.read();
+      return deps.available().map((model) => ({ provider: model.provider, id: model.id, name: model.name,
+        thinkingLevels: getSupportedThinkingLevels(model), favorite: favorites.some((ref) => modelKey(ref) === modelKey(model)) }));
+    },
     configure(expectedVersion: number, model: ModelIdentity, thinking: Thinking | "inherit"): OptimizerDto | Failure {
-      if (expectedVersion !== optimizer().version) return { kind: "conflict", code: "optimizer-version" };
+      if (expectedVersion !== deps.config.optimizerState().version) return { kind: "conflict", code: "optimizer-version" };
       if (deps.controller.getState().pendingSend) return { kind: "rejected", code: "send-pending" };
       const selection = resolve(model, thinking === "inherit" ? deps.sessionThinking() ?? "medium" : thinking);
       if ("kind" in selection) return selection;
-      const previous = deps.controller.getModel();
-      if (previous && deps.config.modelThinkingLevels[modelKey(previous)] === undefined) {
-        const resolved = resolve(previous);
-        if (!("kind" in resolved)) deps.config.modelThinkingLevels[modelKey(previous)] = resolved.thinking;
-      }
+      const { model: current, modelThinkingLevels } = deps.config.read();
+      const previous = current && modelThinkingLevels[modelKey(current)] === undefined ? resolve(current) : undefined;
+      latestSave = deps.config.setOptimizer(selection.model, thinking === "inherit" ? undefined : selection.thinking,
+        selection.thinking, previous && !("kind" in previous) ? previous : undefined).catch(() => false);
       deps.controller.setModel(selection.model);
-      deps.config.model = selection.model;
-      deps.config.thinkingLevel = thinking === "inherit" ? undefined : selection.thinking;
-      deps.config.modelThinkingLevels[modelKey(model)] = selection.thinking;
-      persistence = deps.writable ? "pending" : "blocked";
-      const sequence = ++saveSequence;
-      deps.changed();
-      const save = deps.persist();
-      latestSave = save.catch(() => false);
-      void save.then((saved) => {
-        if (sequence !== saveSequence) return;
-        persistence = saved ? "persisted" : deps.writable ? "failed" : "blocked";
-        deps.changed();
-      }, () => {
-        if (sequence !== saveSequence) return;
-        persistence = "failed";
-        deps.changed();
-      });
       return optimizer();
     },
   };

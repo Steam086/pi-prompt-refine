@@ -279,6 +279,9 @@ export class RefineController {
     return structuredClone({ ...input, roundId: this.round.id, history: snapshot.history, project: snapshot.project,
       systemPrompt: snapshot.systemPrompt, generateTitle: snapshot.generateTitle, branchLeafId: snapshot.branchLeafId });
   }
+  private busy(): Extract<TriggerResult, { kind: "busy" }> {
+    return { kind: "busy", reason: this.pendingSend ? "send-pending" : "journal-capacity" };
+  }
   /** Capture is a zero-call operation and never changes the applied preview. */
   capture(input: RefineRequestInput): TriggerResult {
     // Keep inherited requirements editable even if a later limit change makes
@@ -288,7 +291,7 @@ export class RefineController {
     this.ensureSession(input.sessionId);
     const match = this.captureMatch(input.draft);
     if (match !== undefined) return { kind: "duplicate", match };
-    if (!this.journal.canStart()) return { kind: "busy" };
+    if (!this.journal.canStart()) return this.busy();
     const frozen = this.freezeRound(input);
     const receipt = this.addDraft(frozen);
     this.lastCapture = { kind: "draft", recordId: receipt.recordId };
@@ -299,7 +302,7 @@ export class RefineController {
   createDraft(input: RefineRequestInput): TriggerResult {
     if ((input.preferences?.length ?? 0) > PREFERENCE_SELECTION_LIMIT || input.draft.length > this.options.maxDraftChars) return { kind: "too-long" };
     this.ensureSession(input.sessionId);
-    if (!this.journal.canStart()) return { kind: "busy" };
+    if (!this.journal.canStart()) return this.busy();
     const receipt = this.addDraft(this.freezeRound(input));
     this.emitState();
     return receipt;
@@ -358,7 +361,7 @@ export class RefineController {
     if (source.input.revision) { delete input.preparedInput; delete input.projectDiagnostics; }
     const invalid = this.validate(input);
     if (invalid) return invalid;
-    if (this.pendingSend || !this.journal.canStart()) return { kind: "busy" };
+    if (this.pendingSend || !this.journal.canStart()) return this.busy();
     const duplicate = this.findDuplicateRun(input, source.taskId);
     if (duplicate) return duplicate;
     const recordId = this.journal.start(source.taskId, input, undefined, "refine");
@@ -366,7 +369,7 @@ export class RefineController {
     return this.launch(recordId, false);
   }
   trigger(input: RefineRequestInput, options: { force?: boolean; revisionToken?: CandidateToken; sameTask?: boolean } = {}): TriggerResult {
-    if (this.pendingSend) return { kind: input.revision ? "stale-source" : "busy" };
+    if (this.pendingSend) return input.revision ? { kind: "stale-source" } : this.busy();
     const invalid = this.validate(input);
     if (invalid) return invalid;
     if (input.revision && (!options.revisionToken || !this.isCandidateCurrent(options.revisionToken) ||
@@ -380,7 +383,7 @@ export class RefineController {
     const duplicate = this.findDuplicateRun(frozen);
     if (duplicate) return duplicate;
     if (!options.force && this.candidate && fingerprint(this.candidate) === fingerprint(frozen)) return { kind: "ready" };
-    if (!this.journal.canStart()) return { kind: "busy" };
+    if (!this.journal.canStart()) return this.busy();
     const taskId = (input.revision || options.sameTask) ? this.taskId! : ++this.taskSequence;
     const previous = (input.revision || options.sameTask) ? this.getCandidate() : undefined;
     const recordId = this.journal.start(taskId, frozen, input.revision ? this.candidate?.recordId : undefined);
@@ -391,7 +394,7 @@ export class RefineController {
   startRecord(id: number, model = this.currentModel, thinkingLevel?: ModelThinkingLevel): TriggerResult {
     const record = this.getRecord(id);
     if (!record || !model) return { kind: "stale-source" };
-    if (this.pendingSend) return { kind: "busy" };
+    if (this.pendingSend) return this.busy();
     if (record.status !== "unsent") return { kind: "duplicate", match: recordMatch(record) };
     const invalid = this.validate({ ...record.input, model, thinkingLevel });
     if (invalid) return invalid;
@@ -403,7 +406,7 @@ export class RefineController {
   rerunRecord(id: number, model = this.currentModel, thinkingLevel?: ModelThinkingLevel): TriggerResult {
     const record = this.getRecord(id);
     if (!record || !model || record.input.contextUnavailable) return { kind: "stale-source" };
-    if (this.pendingSend || !this.journal.canStart()) return { kind: "busy" };
+    if (this.pendingSend || !this.journal.canStart()) return this.busy();
     const input = { ...record.input, model, thinkingLevel };
     const duplicate = this.findDuplicateRun(input);
     if (duplicate) return duplicate;

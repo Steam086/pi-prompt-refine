@@ -1,7 +1,5 @@
-import type { RefineRequestInput } from "../request-types.js";
+import type { RefineRequestInput, RunModel } from "../request-types.js";
 import type { Failure, ModelIdentity, ModelOption, OptimizerDto, Snapshot, Thinking } from "./api.js";
-
-export interface RunModel { model: ModelIdentity; thinking: Thinking }
 
 /** Captures a new original using the host's current background and preferences. */
 export interface InputPort { capture(text: string, choice?: RunModel): RefineRequestInput }

@@ -57,9 +57,9 @@ export function createApplication(deps: {
     return located({ outcome, taskId: taskId(result.taskId), version: result.version }, result.recordId);
   }
   function rejectedTrigger(result: TriggerResult): Failure {
+    if (result.kind === "busy") return reject(result.reason);
     const code: Partial<Record<TriggerResult["kind"], FailureCode>> = {
       empty: "empty", "too-long": "too-long", "no-model": "no-model", "stale-source": "background-unavailable",
-      busy: controller.getState().pendingSend ? "send-pending" : "journal-capacity",
     };
     return reject(code[result.kind] ?? "not-editable");
   }

@@ -1,19 +1,18 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { RefineConfig } from "../config.js";
+import type { ConfigReader } from "../config.js";
 import { buildRefineSystemPrompt, selectHistory, type RevisionInput, type HistorySnapshot } from "../context.js";
 import { captureProjectContext } from "../project-context.js";
 import type { RefineController } from "../controller.js";
-import type { CandidateToken, RefineRequest, RefineRequestInput, TriggerResult } from "../request-types.js";
+import type { CandidateToken, RefineRequest, RefineRequestInput, RunModel, TriggerResult } from "../request-types.js";
 import { displayModel, effectiveThinkingLevel, sameModel } from "./model-utils.js";
 import { RESTORED_CONTEXT_HINT, type Notify, type NotifyCurrent } from "./contracts.js";
 import { composeRevision, PREFERENCE_SELECTION_LIMIT, type SelectedPreference } from "../revision-preferences.js";
-import type { RunModel } from "./ports.js";
 
 interface RequestFlowDependencies {
   controller: Pick<RefineController,
     "capture" | "getCandidate" | "getGeneration" | "getModel" | "getState" | "getTaskInput" |
     "hasSubmittedRunInRound" | "isCandidateCurrent" | "startRecord" | "trigger">;
-  config: Pick<RefineConfig, "maxDraftChars" | "context" | "projectContext" | "systemPrompt" | "thinkingLevel">;
+  readConfig: ConfigReader<"maxDraftChars" | "context" | "projectContext" | "systemPrompt" | "thinkingLevel">;
   useContext(ctx: ExtensionContext): void;
   setCompletionContext(ctx: ExtensionContext): void;
   canNameSession(ctx: ExtensionContext): boolean;
@@ -25,7 +24,7 @@ interface RequestFlowDependencies {
   initialPreferences(ctx: ExtensionContext): SelectedPreference[];
 }
 
-export function createRequestFlows({ controller, config, useContext, setCompletionContext,
+export function createRequestFlows({ controller, readConfig, useContext, setCompletionContext,
   canNameSession, modelSwitchBlocked, showPreview, updatePresentation, notify, notifyCurrent, initialPreferences }: RequestFlowDependencies) {
   let historySnapshot: HistorySnapshot | undefined;
   let projectLabel = "";
@@ -50,8 +49,9 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
   }
 
   function optimizationError(ctx: ExtensionContext, draft: string, selected = controller.getModel()): string | undefined {
+    const { maxDraftChars } = readConfig();
     if (!draft.trim()) return "The editor is empty; no refinement request was sent.";
-    if (draft.length > config.maxDraftChars) return `The draft exceeds ${config.maxDraftChars} characters; no request was sent, and the existing result was kept.`;
+    if (draft.length > maxDraftChars) return `The draft exceeds ${maxDraftChars} characters; no request was sent, and the existing result was kept.`;
     if (!selected) return "No optimizer model is configured; use /refine model to select a text-generation model first.";
     if (!ctx.modelRegistry.find(selected.provider, selected.id) || !ctx.modelRegistry.getAvailable().some((candidate) => sameModel(candidate, selected))) {
       return `Optimizer model is missing or unavailable: ${displayModel(selected)}; no request was sent, and the existing result was kept.`;
@@ -59,16 +59,12 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
     return undefined;
   }
 
-  function captureHistory(ctx: ExtensionContext): HistorySnapshot {
+  function captureOriginalInput(ctx: ExtensionContext, draft: string, choice?: RunModel): RefineRequestInput {
+    const { context, projectContext: projectConfig, systemPrompt } = readConfig();
     // Read text only from projected messages. The source entry still holds the unedited original.
     const entries = ctx.sessionManager.buildSessionProjection().entries.flatMap(({ sourceEntry, messages }) =>
       sourceEntry.type === "message" ? messages.map((message) => ({ type: "message", id: sourceEntry.id, message })) : []);
-    return selectHistory(entries, config.context.maxMessages, config.context.maxChars);
-  }
-
-  function captureOriginalInput(ctx: ExtensionContext, draft: string, choice?: RunModel): RefineRequestInput {
-    const history = captureHistory(ctx);
-    const projectConfig = config.projectContext;
+    const history = selectHistory(entries, context.maxMessages, context.maxChars);
     const project = projectConfig.enabled ? {
       cwd: ctx.cwd, snapshot: captureProjectContext(ctx, projectConfig, draft),
       revisionSnapshot: captureProjectContext(ctx, projectConfig, draft, true), config: structuredClone(projectConfig),
@@ -79,7 +75,7 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
       draft, model: choice?.model ?? controller.getModel() ?? { provider: "", id: "" },
       ...(choice ? { thinkingLevel: choice.thinking } : {}),
       ...(preferences.length ? { preferences, editingInstruction: composeRevision(preferences, "") } : {}),
-      generateTitle, systemPrompt: buildRefineSystemPrompt(generateTitle, config.systemPrompt),
+      generateTitle, systemPrompt: buildRefineSystemPrompt(generateTitle, systemPrompt),
       sessionId: ctx.sessionManager.getSessionId(), branchLeafId: ctx.sessionManager.getLeafId(), history,
       ...(project ? { project } : {}),
     };
@@ -103,16 +99,16 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
     }
     const selected = controller.getModel()!;
     const model = ctx.modelRegistry.find(selected.provider, selected.id)!;
+    const { maxDraftChars, thinkingLevel } = readConfig();
 
     setCompletionContext(ctx);
-    const input = captureOriginalInput(ctx, draft, { model: selected,
-      thinking: effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel) });
+    const input = captureOriginalInput(ctx, draft, { model: selected, thinking: effectiveThinkingLevel(model, thinkingLevel, ctx.thinkingLevel) });
     const previousContext = { historySnapshot, projectLabel, projectWarnings };
     historySnapshot = input.history;
     const project = input.project?.snapshot;
     projectLabel = project ? `${project.instructionCount} rules · ${project.skillCount} skills${input.project?.config?.tree.enabled && !input.history.text ? " · tree" : ""}` : "";
     projectWarnings = project?.warnings ?? [];
-    const defaultsTooLong = (input.editingInstruction?.length ?? 0) > config.maxDraftChars;
+    const defaultsTooLong = (input.editingInstruction?.length ?? 0) > maxDraftChars;
     const tooMany = (input.preferences?.length ?? 0) > PREFERENCE_SELECTION_LIMIT;
     let result = mode === "run" ? controller.trigger(input, { force }) : controller.capture(input);
     if (mode === "shortcut" && result.kind === "captured" && !controller.hasSubmittedRunInRound() && !defaultsTooLong) {
@@ -126,14 +122,14 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
     }
     if (result.kind === "empty") notify(ctx, "The editor is empty; no refinement request was sent.", "info");
     else if (result.kind === "too-long") notify(ctx, tooMany ? `Select at most ${PREFERENCE_SELECTION_LIMIT} preferences before optimizing; no request was sent.`
-      : `The draft or editing requirements exceed ${config.maxDraftChars} characters; no request was sent. Reduce the text or selection and try again.`, "warning");
+      : `The draft or editing requirements exceed ${maxDraftChars} characters; no request was sent. Reduce the text or selection and try again.`, "warning");
     else if (result.kind === "duplicate" || result.kind === "ready") {
       void showPreview(ctx).catch(() => notifyCurrent("Could not open the refinement panel; the main draft was not changed.", "warning"));
     }
     else if (result.kind === "busy") notify(ctx, "Work is pending or the 100-entry journal is full. Existing work kept.", "warning");
     if (result.kind === "captured" && defaultsTooLong) {
       const scope = input.preferences?.every((entry) => entry.selectionSource === "project-default") ? "Project defaults" : "Initial preferences";
-      notify(ctx, `${scope} exceed ${config.maxDraftChars} characters. Reduce the selection or use c to clear all in Preferences before optimizing.`, "warning");
+      notify(ctx, `${scope} exceed ${maxDraftChars} characters. Reduce the selection or use c to clear all in Preferences before optimizing.`, "warning");
     }
     return result;
   }
@@ -160,15 +156,16 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
     projectLabel = "Frozen input";
     projectWarnings = [];
     const result = controller.trigger({ ...input, model: selected,
-      thinkingLevel: effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel),
+      thinkingLevel: effectiveThinkingLevel(model, readConfig().thinkingLevel, ctx.thinkingLevel),
     }, { force: true, sameTask: true });
     if (result.kind !== "started") notify(ctx, "Same-input generation was not started; current results kept.", "warning");
   }
 
   function reviseCandidate(ctx: ExtensionContext, token: CandidateToken, instruction: string, resultNotes?: RevisionInput["resultNotes"]): string | undefined {
+    const { maxDraftChars, projectContext, thinkingLevel } = readConfig();
     if (!controller.isCandidateCurrent(token) || controller.getState().pendingSend) return "The result changed or is being sent. Reopen Revise for the current result.";
     if (!instruction.trim()) return "Enter revision instructions; the current result is unchanged.";
-    if (instruction.length > config.maxDraftChars) return `Revision instructions exceed ${config.maxDraftChars} characters; the current result is unchanged.`;
+    if (instruction.length > maxDraftChars) return `Revision instructions exceed ${maxDraftChars} characters; the current result is unchanged.`;
     const source = controller.getCandidate()!;
     if (source.contextUnavailable) return RESTORED_CONTEXT_HINT;
     const error = optimizationError(ctx, source.draft, source.model);
@@ -178,7 +175,7 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
     const project = source.project?.revisionSnapshot ?? source.project?.snapshot;
     const previousContext = { historySnapshot, projectLabel, projectWarnings };
     historySnapshot = source.history;
-    projectLabel = project ? `${project.instructionCount} rules · ${project.skillCount} skills${config.projectContext.tree.enabled && !source.history.text ? " · tree" : ""}` : "";
+    projectLabel = project ? `${project.instructionCount} rules · ${project.skillCount} skills${(source.project?.config ?? projectContext).tree.enabled && !source.history.text ? " · tree" : ""}` : "";
     projectWarnings = project?.warnings ?? [];
     setCompletionContext(ctx);
     const result = controller.trigger({
@@ -188,7 +185,7 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
       editingInstruction: source.editingInstruction,
       preferences: source.preferences,
       model: source.model,
-      thinkingLevel: effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel),
+      thinkingLevel: effectiveThinkingLevel(model, thinkingLevel, ctx.thinkingLevel),
       generateTitle,
       systemPrompt: source.systemPrompt,
       roundId: source.roundId,
