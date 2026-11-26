@@ -111,8 +111,8 @@ export class RefineHistory {
   getOriginal(id: number, sessionId: string): RefineRecord | undefined {
     const record = this.records.find((item) => item.id === id && item.input.sessionId === sessionId);
     if (!record) return undefined;
-    const source = this.records.find((item) =>
-      item.input.sessionId === sessionId && item.taskId === record.taskId && !item.input.revision) ?? record;
+    const group = this.records.filter((item) => item.input.sessionId === sessionId && item.taskId === record.taskId);
+    const source = selectTaskOriginal(group, record)!;
     return structuredClone({ ...source, input: source.originalInput ?? source.input });
   }
 
@@ -252,6 +252,16 @@ export class RefineHistory {
   list(sessionId: string, taskId?: number): RefineRecord[] {
     return structuredClone(this.records.filter((record) => record.input.sessionId === sessionId && (taskId === undefined || record.taskId === taskId)));
   }
+}
+
+export function selectTaskOriginal<T extends { input: { revision?: unknown } }>(
+  records: readonly T[], fallback: T | undefined = records[0],
+): T | undefined {
+  return records.find((record) => !record.input.revision) ?? fallback;
+}
+
+export function isEditableDraft(record: RefineRecord): boolean {
+  return record.status === "unsent" && record.archivedAt === undefined && !record.input.contextUnavailable;
 }
 
 /** Shared ordering, independent of focus, completion order and the presentation clock. */

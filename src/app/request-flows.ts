@@ -1,10 +1,11 @@
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ConfigReader } from "../config.js";
 import { buildRefineSystemPrompt, selectHistory, type RevisionInput, type HistorySnapshot } from "../context.js";
 import { captureProjectContext } from "../project-context.js";
 import type { RefineController } from "../controller.js";
 import type { CandidateToken, RefineRequest, RefineRequestInput, RunModel, TriggerResult } from "../request-types.js";
-import { displayModel, effectiveThinkingLevel, sameModel } from "./model-utils.js";
+import { displayModel, effectiveThinkingLevel, modelRef, resolveAvailableModel } from "./model-utils.js";
 import { RESTORED_CONTEXT_HINT, type Notify, type NotifyCurrent } from "./contracts.js";
 import { composeRevision, PREFERENCE_SELECTION_LIMIT, type SelectedPreference } from "../revision-preferences.js";
 
@@ -48,15 +49,16 @@ export function createRequestFlows({ controller, readConfig, useContext, setComp
     return `${warning}${history}${completeness}${project ? ` · ${project}` : ""}`;
   }
 
-  function optimizationError(ctx: ExtensionContext, draft: string, selected = controller.getModel()): string | undefined {
+  function checkOptimization(ctx: ExtensionContext, draft: string, selected = controller.getModel()): { model: Model<Api> } | { error: string } {
     const { maxDraftChars } = readConfig();
-    if (!draft.trim()) return "The editor is empty; no refinement request was sent.";
-    if (draft.length > maxDraftChars) return `The draft exceeds ${maxDraftChars} characters; no request was sent, and the existing result was kept.`;
-    if (!selected) return "No optimizer model is configured; use /refine model to select a text-generation model first.";
-    if (!ctx.modelRegistry.find(selected.provider, selected.id) || !ctx.modelRegistry.getAvailable().some((candidate) => sameModel(candidate, selected))) {
-      return `Optimizer model is missing or unavailable: ${displayModel(selected)}; no request was sent, and the existing result was kept.`;
+    if (!draft.trim()) return { error: "The editor is empty; no refinement request was sent." };
+    if (draft.length > maxDraftChars) return { error: `The draft exceeds ${maxDraftChars} characters; no request was sent, and the existing result was kept.` };
+    if (!selected) return { error: "No optimizer model is configured; use /refine model to select a text-generation model first." };
+    const selection = resolveAvailableModel(ctx.modelRegistry, selected);
+    if (selection.kind !== "available") {
+      return { error: `Optimizer model is missing or unavailable: ${displayModel(selected)}; no request was sent, and the existing result was kept.` };
     }
-    return undefined;
+    return { model: selection.model };
   }
 
   function captureOriginalInput(ctx: ExtensionContext, draft: string, choice?: RunModel): RefineRequestInput {
@@ -92,13 +94,13 @@ export function createRequestFlows({ controller, readConfig, useContext, setComp
     // Pi clears the editor on slash-command submission. Keep the supplied source
     // available for retry/accept/restore, but never overwrite another draft.
     if (!keepEditor && suppliedDraft !== undefined && !ctx.ui.getEditorText()) ctx.ui.setEditorText(draft);
-    const error = optimizationError(ctx, draft);
-    if (error) {
-      notify(ctx, error, draft.trim() ? "warning" : "info");
+    const check = checkOptimization(ctx, draft);
+    if ("error" in check) {
+      notify(ctx, check.error, draft.trim() ? "warning" : "info");
       return;
     }
-    const selected = controller.getModel()!;
-    const model = ctx.modelRegistry.find(selected.provider, selected.id)!;
+    const { model } = check;
+    const selected = modelRef(model);
     const { maxDraftChars, thinkingLevel } = readConfig();
 
     setCompletionContext(ctx);
@@ -147,16 +149,14 @@ export function createRequestFlows({ controller, readConfig, useContext, setComp
       notify(ctx, "The session branch changed; use r to capture a new input.", "warning");
       return;
     }
-    const error = optimizationError(ctx, input.draft);
-    if (error) { notify(ctx, error, "warning"); return; }
-    const selected = controller.getModel()!;
-    const model = ctx.modelRegistry.find(selected.provider, selected.id)!;
+    const check = checkOptimization(ctx, input.draft);
+    if ("error" in check) { notify(ctx, check.error, "warning"); return; }
     setCompletionContext(ctx);
     historySnapshot = input.history;
     projectLabel = "Frozen input";
     projectWarnings = [];
-    const result = controller.trigger({ ...input, model: selected,
-      thinkingLevel: effectiveThinkingLevel(model, readConfig().thinkingLevel, ctx.thinkingLevel),
+    const result = controller.trigger({ ...input, model: modelRef(check.model),
+      thinkingLevel: effectiveThinkingLevel(check.model, readConfig().thinkingLevel, ctx.thinkingLevel),
     }, { force: true, sameTask: true });
     if (result.kind !== "started") notify(ctx, "Same-input generation was not started; current results kept.", "warning");
   }
@@ -168,9 +168,8 @@ export function createRequestFlows({ controller, readConfig, useContext, setComp
     if (instruction.length > maxDraftChars) return `Revision instructions exceed ${maxDraftChars} characters; the current result is unchanged.`;
     const source = controller.getCandidate()!;
     if (source.contextUnavailable) return RESTORED_CONTEXT_HINT;
-    const error = optimizationError(ctx, source.draft, source.model);
-    if (error) return error;
-    const model = ctx.modelRegistry.find(source.model.provider, source.model.id)!;
+    const check = checkOptimization(ctx, source.draft, source.model);
+    if ("error" in check) return check.error;
     const generateTitle = source.generateTitle;
     const project = source.project?.revisionSnapshot ?? source.project?.snapshot;
     const previousContext = { historySnapshot, projectLabel, projectWarnings };
@@ -185,7 +184,7 @@ export function createRequestFlows({ controller, readConfig, useContext, setComp
       editingInstruction: source.editingInstruction,
       preferences: source.preferences,
       model: source.model,
-      thinkingLevel: effectiveThinkingLevel(model, thinkingLevel, ctx.thinkingLevel),
+      thinkingLevel: effectiveThinkingLevel(check.model, thinkingLevel, ctx.thinkingLevel),
       generateTitle,
       systemPrompt: source.systemPrompt,
       roundId: source.roundId,
@@ -213,5 +212,5 @@ export function createRequestFlows({ controller, readConfig, useContext, setComp
     if (projectWarnings.length) notify(ctx, projectWarnings.join("\n"), "warning");
     updatePresentation();
   }
-  return { optimizationError, captureOriginalInput, triggerOptimize, generateSameInput, reviseCandidate, contextLabel, clearContext, reportProject };
+  return { checkOptimization, captureOriginalInput, triggerOptimize, generateSameInput, reviseCandidate, contextLabel, clearContext, reportProject };
 }

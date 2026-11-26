@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { RefineController } from "../controller.js";
-import { taskGroups, type RefineRecord } from "../history.js";
+import { isEditableDraft, selectTaskOriginal, taskGroups, type RefineRecord } from "../history.js";
 import { immutable } from "../immutable.js";
 import type { TriggerResult } from "../request-types.js";
 import type { ApplicationApi, Binding, Failure, FailureCode, Hello, Mutation, MutationMeta, Query, QueryValue, Receipt, Reply, Snapshot } from "./api.js";
@@ -45,8 +45,7 @@ export function createApplication(deps: {
     return "kind" in selection ? selection.code : undefined;
   }
   function target(id: string, expected: number): RefineRecord | Failure {
-    const records = recordsFor(id);
-    const record = records.find((record) => !record.input.revision) ?? records[0];
+    const record = selectTaskOriginal(recordsFor(id));
     if (!record) return reject("not-found");
     if (controller.getTaskVersion(record.taskId) !== expected) return conflict("task-version");
     return record;
@@ -97,7 +96,7 @@ export function createApplication(deps: {
           if ("kind" in selection) return selection;
           return started(controller.runOriginal(record.id, selection.model, selection.thinking));
         }
-        if (record.status !== "unsent" || record.archivedAt !== undefined || record.input.contextUnavailable) return reject("not-editable");
+        if (!isEditableDraft(record)) return reject("not-editable");
         if (mutation.method === "discardDraft") {
           controller.removeDraft(record.id);
           return ok({ outcome: "removed", taskId: mutation.taskId, version: mutation.expectedVersion });

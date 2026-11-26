@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { selectHistory } from "../../src/context.js";
 import type { RefineRequestInput } from "../../src/controller.js";
-import { RefineHistory, type RefineRecord } from "../../src/history.js";
+import { RefineHistory, selectTaskOriginal, type RefineRecord } from "../../src/history.js";
 
 const input: RefineRequestInput = {
   draft: "Original 原文😀", model: { provider: "provider", id: "model" }, sessionId: "session", branchLeafId: "leaf",
@@ -104,5 +104,20 @@ describe("original snapshots", () => {
     expect(retained.input.preparedInput).toBe("Revision packet");
     expect(retained.originalInput?.preparedInput).toBe("Original packet");
     expect(retained.originalInput?.revision).toBeUndefined();
+  });
+
+  it("keeps the first retained revision for task views and the requested revision for journal lookups", () => {
+    const history = new RefineHistory(2);
+    const original = history.start(1, input);
+    history.update(original, { status: "generated" });
+    const revision = { previousCandidate: "Output", instruction: "Shorter" };
+    const first = history.start(1, { ...input, revision }, original);
+    history.update(first, { status: "generated" });
+    const second = history.start(1, { ...input, revision }, first);
+
+    expect(history.get(original, "session")).toBeUndefined();
+    expect(selectTaskOriginal(history.displaySnapshot("session"))?.id).toBe(first);
+    expect(history.getOriginal(second, "session")).toMatchObject({ id: second, input });
+    expect(history.getOriginal(second, "session")?.input.revision).toBeUndefined();
   });
 });

@@ -5,9 +5,11 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it, vi } from "vitest";
+import type { Hello, Receipt, Snapshot } from "../../src/app/api.js";
 import { type RefineConfig } from "../../src/config.js";
 import { REFINE_SYSTEM_PROMPT } from "../../src/context.js";
 import { workspaceHeight } from "../../src/workspace-overlay.js";
+import { requireValue, wireMutation, wireRequest } from "../support/application-wire.js";
 import { extensionHarnessEnvironment, shortcut, trigger } from "../support/extension-harness.js";
 import { flushPromises } from "../support/helpers.js";
 
@@ -498,5 +500,44 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(unavailable.notifications.join(" ")).toContain("is missing or unavailable");
     await shortcut(unavailable, "alt+m")(unavailable.context);
     expect(unavailable.notifications.join(" ")).toContain("No authorized text-generation models are available");
+  });
+
+  it("rejects a stale available model before native or application run admission", async () => {
+    const harness = await makeHarness();
+    vi.spyOn(harness.context.modelRegistry, "find").mockReturnValue(undefined);
+    const hello = requireValue(await wireRequest<Hello>(harness.events, { action: "hello", clientId: "reader" }));
+
+    await trigger(harness);
+    expect(harness.notifications.join(" ")).toContain("Optimizer model is missing or unavailable");
+    expect(await wireMutation(harness.events, hello, { method: "optimizeText", text: "Remote draft" }))
+      .toEqual({ kind: "rejected", code: "model-unavailable" });
+    const snapshot = requireValue(await wireRequest<Snapshot>(harness.events, {
+      action: "query", binding: hello.binding, query: { method: "snapshot", scope: "all" },
+    }));
+    expect(snapshot.tasks).toEqual([]);
+    expect(snapshot.runs).toEqual([]);
+    expect(harness.complete).not.toHaveBeenCalled();
+  });
+
+  it("uses the shared medium fallback after resetting an explicit thinking override to inherit", async () => {
+    const harness = await makeHarness({ reasoning: true, config: { thinkingLevel: "low" } });
+    const hello = requireValue(await wireRequest<Hello>(harness.events, { action: "hello", clientId: "reader" }));
+    const snapshot = () => wireRequest<Snapshot>(harness.events, {
+      action: "query", binding: hello.binding, query: { method: "snapshot", scope: "current" },
+    });
+    const { optimizer } = requireValue(await snapshot());
+    const configured = await wireMutation<Receipt>(harness.events, hello, {
+      method: "setDefaultOptimizer", model: optimizer.model!, expectedVersion: optimizer.version, thinking: "inherit",
+    });
+    expect(requireValue(configured)).toMatchObject({ outcome: "configured", optimizer: { thinking: "inherit" } });
+
+    await trigger(harness);
+    requireValue(await wireMutation<Receipt>(harness.events, hello, { method: "optimizeText", text: "Remote draft" }));
+    await flushPromises();
+    expect(harness.complete.mock.calls.map(([, , options]) => options)).toEqual([
+      expect.objectContaining({ reasoning: "medium" }),
+      expect.objectContaining({ reasoning: "medium" }),
+    ]);
+    await vi.waitFor(async () => expect(requireValue(await snapshot()).optimizer.persistence).toBe("persisted"));
   });
 });

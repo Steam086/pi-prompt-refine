@@ -1,4 +1,4 @@
-import type { RefineRecord } from "../history.js";
+import { isEditableDraft, selectTaskOriginal, type RefineRecord } from "../history.js";
 import type { TokenUsage } from "../usage.js";
 import type { Availability, FailureCode, RunDetail, RunSummary, TaskDetail, TaskSummary, UsageDto } from "./api.js";
 
@@ -6,8 +6,8 @@ import { taskId, runId } from "./operation-contract.js";
 
 const action = (reason?: FailureCode): Availability => reason ? { enabled: false, reason } : { enabled: true };
 export function taskSummary(records: readonly RefineRecord[], version: number, pendingSend: boolean, modelUnavailable?: FailureCode): TaskSummary {
-  const source = records.find((record) => !record.input.revision) ?? records[0]!;
-  const editable = source.status === "unsent" && source.archivedAt === undefined && !source.input.contextUnavailable;
+  const source = selectTaskOriginal(records)!;
+  const editable = isEditableDraft(source);
   return {
     id: taskId(source.taskId), version, displayNumber: source.taskId, roundId: source.input.roundId,
     archived: source.archivedAt !== undefined, excerpt: (source.originalInput ?? source.input).draft.slice(0, 160),
@@ -22,7 +22,7 @@ export function taskSummary(records: readonly RefineRecord[], version: number, p
   };
 }
 export function taskDetail(records: readonly RefineRecord[], version: number, pendingSend: boolean, modelUnavailable?: FailureCode): TaskDetail {
-  const source = records.find((record) => !record.input.revision) ?? records[0]!;
+  const source = selectTaskOriginal(records)!;
   const original = source.originalInput ?? source.input;
   return { ...taskSummary(records, version, pendingSend, modelUnavailable), text: original.draft,
     initialInstruction: original.editingInstruction, selectedNames: (original.preferences ?? []).map((entry) => entry.name) };

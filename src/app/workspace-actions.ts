@@ -13,7 +13,7 @@ import type { TaskPanelPosition } from "../task-panel.js";
 import type { createRequestFlows } from "./request-flows.js";
 import type { createConfigService } from "./config-service.js";
 import type { SessionPreferences } from "./session-preferences.js";
-import { displayModel, effectiveThinkingLevel, sameModel, thinkingSource } from "./model-utils.js";
+import { displayModel, effectiveThinkingLevel, modelRef, sameModel, thinkingSource } from "./model-utils.js";
 import { RESTORED_CONTEXT_HINT, type Notify, type WorkspaceSelection } from "./contracts.js";
 
 type WorkspaceOptions = ConstructorParameters<typeof RefineWorkspace>[4];
@@ -27,7 +27,7 @@ interface WorkspaceActionsDependencies {
   setCompletionContext(ctx: ExtensionContext): void;
   saveOptimizer(model: RefineRequestInput["model"], thinking: NonNullable<RefineRequestInput["thinkingLevel"]> | "inherit"): Promise<boolean>;
   historyStorage(ctx: ExtensionContext, sessionId: string): HistoryStorageStatus;
-  optimizationError(ctx: ExtensionContext, draft: string): string | undefined;
+  checkOptimization: ReturnType<typeof createRequestFlows>["checkOptimization"];
   operations: TuiOperations;
   triggerOptimize: ReturnType<typeof createRequestFlows>["triggerOptimize"];
   reviseCandidate(ctx: ExtensionContext, token: CandidateToken, instruction: string, resultNotes?: RevisionInput["resultNotes"]): string | undefined;
@@ -49,7 +49,7 @@ interface WorkspaceMount {
 }
 
 export function createWorkspaceActions({ controller, readConfig, settings, setCompletionContext,
-  historyStorage, optimizationError, operations, triggerOptimize, reviseCandidate,
+  historyStorage, checkOptimization, operations, triggerOptimize, reviseCandidate,
   registeredModels, showOptimizerQuota, notify, preferenceRepository, sessionPreferences, saveOptimizer }: WorkspaceActionsDependencies) {
   // Runtime-only drafts survive overlay mounts, but never enter history persistence.
   const inputDrafts = new Map<string, string>();
@@ -61,13 +61,11 @@ export function createWorkspaceActions({ controller, readConfig, settings, setCo
       const record = controller.getRecord(id);
       if (!record) return;
       if (record.input.contextUnavailable) { notify(ctx, RESTORED_CONTEXT_HINT, "info"); return; }
-      const error = optimizationError(ctx, record.input.draft);
-      if (error) { notify(ctx, error, "warning"); return; }
-      const selected = controller.getModel()!;
-      const model = ctx.modelRegistry.find(selected.provider, selected.id)!;
+      const check = checkOptimization(ctx, record.input.draft);
+      if ("error" in check) { notify(ctx, check.error, "warning"); return; }
       setCompletionContext(ctx);
-      const thinking = effectiveThinkingLevel(model, readConfig().thinkingLevel, ctx.thinkingLevel);
-      const result = operations.start(id, selected, thinking);
+      const thinking = effectiveThinkingLevel(check.model, readConfig().thinkingLevel, ctx.thinkingLevel);
+      const result = operations.start(id, modelRef(check.model), thinking);
       if (result.kind !== "started") notify(ctx, `Request not started (${result.kind}); existing work kept.`, "info");
     };
     const currentSession = () => !isClosed() && ctx.sessionManager.getSessionId() === sessionId && controller.getSessionId() === sessionId;
@@ -238,8 +236,8 @@ export function createWorkspaceActions({ controller, readConfig, settings, setCo
       },
       submit: (text) => {
         if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId) return "Session changed; no request sent.";
-        const error = optimizationError(ctx, text);
-        if (error) return error;
+        const check = checkOptimization(ctx, text);
+        if ("error" in check) return check.error;
         const result = triggerOptimize(ctx, true, text, true, controller.hasWorkspaceContent() ? "capture" : "run");
         return result && ["started", "captured", "duplicate", "ready"].includes(result.kind) ? undefined : "Could not add input; existing work kept.";
       },

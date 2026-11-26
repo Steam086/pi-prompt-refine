@@ -101,7 +101,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     rememberComparisonThinking: configuration.rememberComparisonThinking,
     startOriginal: (id, model, thinking, version) => operations.start(id, model, thinking, version),
     taskVersion: (id) => operations.version(id), optimizerVersion: () => modelService.optimizer().version,
-    optimizationError: (...args) => requests.optimizationError(...args),
+    checkOptimization: (...args) => requests.checkOptimization(...args),
     taskPositions, usagePositions, notify, notifyCurrent, notifyIfSameSession,
   });
   const requests = createRequestFlows({
@@ -118,7 +118,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
   }
   const modelService = createModelService({
     controller, config: configuration,
-    available: () => executionContext().modelRegistry.getAvailable(),
+    registry: () => executionContext().modelRegistry,
     sessionThinking: () => executionContext().thinkingLevel,
   });
   const application = createApplication({
@@ -142,7 +142,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
   const showOptimizerQuota = () => !optimizerRequestAttempted && !!controller.getModel();
   const workspaceActions = createWorkspaceActions({
     controller, readConfig, settings: configuration, setCompletionContext, historyStorage: lifecycle.historyStorage,
-    optimizationError: requests.optimizationError, operations, saveOptimizer,
+    checkOptimization: requests.checkOptimization, operations, saveOptimizer,
     triggerOptimize: requests.triggerOptimize, reviseCandidate: requests.reviseCandidate,
     registeredModels: models.registeredModels, showOptimizerQuota,
     notify, preferenceRepository, sessionPreferences,

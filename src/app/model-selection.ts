@@ -7,8 +7,9 @@ import { REFINE_OVERLAY_OPTIONS } from "../workspace-overlay.js";
 import type { RefineController } from "../controller.js";
 import type { TaskPanelPosition } from "../task-panel.js";
 import { RESTORED_CONTEXT_HINT, type ModelPickerPresenter, type Notify, type NotifyCurrent, type NotifyIfSameSession } from "./contracts.js";
+import type { createRequestFlows } from "./request-flows.js";
 
-import { sameModel, modelRef, displayModel, effectiveThinkingLevel, thinkingSource } from "./model-utils.js";
+import { sameModel, modelRef, displayModel, effectiveThinkingLevel, resolveAvailableModel, thinkingSource } from "./model-utils.js";
 export { sameModel, modelRef, displayModel, effectiveThinkingLevel, thinkingSource } from "./model-utils.js";
 
 /** Availability/authentication is owned by Pi; this only searches and labels its chat models. */
@@ -44,7 +45,7 @@ interface ModelSelectionDependencies {
   useContext(ctx: ExtensionContext): void;
   setCompletionContext(ctx: ExtensionContext): void;
   rememberComparisonThinking(model: ModelRef, level: ModelThinkingLevel): Promise<boolean> | undefined;
-  optimizationError(ctx: ExtensionContext, draft: string, selected?: ModelRef): string | undefined;
+  checkOptimization: ReturnType<typeof createRequestFlows>["checkOptimization"];
   taskPositions: Map<string, TaskPanelPosition>;
   usagePositions: Map<string, TaskPanelPosition>;
   notify: Notify;
@@ -53,7 +54,7 @@ interface ModelSelectionDependencies {
 }
 
 export function createModelSelection({ controller, readConfig, useContext, setCompletionContext,
-  rememberComparisonThinking, optimizationError, taskPositions, usagePositions, notify, notifyCurrent,
+  rememberComparisonThinking, checkOptimization, taskPositions, usagePositions, notify, notifyCurrent,
   notifyIfSameSession, saveOptimizer, startOriginal, optimizerVersion, taskVersion }: ModelSelectionDependencies) {
   const recentRunModels = new Map<string, string[]>();
   function registeredModels(ctx: ExtensionContext): Model<Api>[] {
@@ -210,20 +211,22 @@ export function createModelSelection({ controller, readConfig, useContext, setCo
       notifyIfSameSession(startSessionId, "The session or result changed while the model picker was open; the previous selection was not applied.");
       return;
     }
-    const model = registeredModels(ctx).find((candidate) => displayModel(modelRef(candidate)) === selection.modelKey);
-    if (!model || !ctx.modelRegistry.find(model.provider, model.id)) {
+    const selectedModel = available.find((candidate) => displayModel(modelRef(candidate)) === selection.modelKey);
+    const lookup = selectedModel && resolveAvailableModel(ctx.modelRegistry, selectedModel);
+    if (lookup?.kind !== "available") {
       notify(ctx, "The selected model is no longer available; reopen the model picker.", "warning");
       return;
     }
+    const { model } = lookup;
 
     if (modelSwitchBlocked(ctx)) return;
     if (source) {
       const current = controller.getOriginalRecord(runId!);
       if (!current || current.input.draft !== source.input.draft) return;
-      const error = optimizationError(ctx, source.input.draft, modelRef(model));
-      if (error) { notify(ctx, error, "warning"); return; }
+      const check = checkOptimization(ctx, source.input.draft, modelRef(model));
+      if ("error" in check) { notify(ctx, check.error, "warning"); return; }
       setCompletionContext(ctx);
-      const thinking = effectiveThinkingLevel(model, selection.thinkingLevel, ctx.thinkingLevel);
+      const thinking = effectiveThinkingLevel(check.model, selection.thinkingLevel, ctx.thinkingLevel);
       const result = startOriginal(runId!, modelRef(model), thinking, sourceVersion);
       if (result.kind === "started" || result.kind === "duplicate") {
         recentRunModels.set(startSessionId, [selection.modelKey, ...recent.filter((key) => key !== selection.modelKey)].slice(0, 12));

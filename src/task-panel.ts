@@ -2,7 +2,7 @@ import { stripVTControlCharacters } from "node:util";
 import { matchesKey, parseKey, sliceByColumn, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager, type KeyId, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { ReadingMouse, type ReadingRegion } from "./ui/reading-mouse.js";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { taskGroups, type TaskDisplayRecord } from "./history.js";
+import { selectTaskOriginal, taskGroups, type TaskDisplayRecord } from "./history.js";
 import { runId, taskId } from "./app/operation-contract.js";
 import type { HistoryStorageStatus } from "./history-store.js";
 import { fittingHints, panelHeader, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
@@ -147,7 +147,7 @@ export class TaskPanel {
     if (cached?.source === history) return cached;
     const groups = taskGroups(history, all);
     const rows = groups.flatMap((records) => {
-      const source = records.find((r) => !r.input.revision) ?? records[0]!;
+      const source = selectTaskOriginal(records)!;
       const children = records.filter((r) => r.status !== "unsent").sort((a, b) => b.id - a.id);
       return [{ record: source, original: true, records },
         ...children.map((record) => ({ record, original: false, records }))];

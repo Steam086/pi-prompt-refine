@@ -8,12 +8,12 @@ import { preserveDroppedTuiReference } from "../reference-preservation.js";
 import { budgetRequest } from "../budget.js";
 import { assembleProjectContext, collectDirectoryContext, type TreeSnapshot } from "../project-context.js";
 import { readRunUsage } from "../usage.js";
-import { displayModel, sameModel } from "./model-utils.js";
+import { displayModel, resolveAvailableModel, type ModelRegistryLookup } from "./model-utils.js";
 import { directoryJobKeys, type createContextJobs } from "./context-jobs.js";
 import { finalResponseText, isTransportError } from "./provider-response.js";
 
 type CompletionContext = { sessionManager: Pick<ExtensionContext["sessionManager"], "getSessionId">;
-  modelRegistry: Pick<ExtensionContext["modelRegistry"], "find" | "getAvailable" | "isUsingOAuth" | "streamSimple"> };
+  modelRegistry: ModelRegistryLookup & Pick<ExtensionContext["modelRegistry"], "isUsingOAuth" | "streamSimple"> };
 interface CompletionDependencies<Context extends CompletionContext> {
   readConfig: ConfigReader<"maxOutputTokens" | "projectContext">;
   getContext(): Context | undefined;
@@ -34,10 +34,12 @@ export function createCompletion<Context extends CompletionContext>({ readConfig
     if (!ctx || ctx.sessionManager.getSessionId() !== request.sessionId || getSessionId() !== request.sessionId) {
       throw new Error("Execution context unavailable or stale");
     }
-    const model = ctx.modelRegistry.find(request.model.provider, request.model.id);
-    if (!model) throw new Error(`Unknown model ${displayModel(request.model)}`);
-    const available = ctx.modelRegistry.getAvailable().some((candidate) => sameModel(candidate, request.model));
-    if (!available) throw new Error(`Model is not currently available: ${displayModel(request.model)}`);
+    const selection = resolveAvailableModel(ctx.modelRegistry, request.model);
+    if (selection.kind !== "available") {
+      const ref = displayModel(request.model);
+      throw new Error(selection.kind === "unknown" ? `Unknown model ${ref}` : `Model is not currently available: ${ref}`);
+    }
+    const { model } = selection;
 
     const systemPrompt = request.systemPrompt;
     // Freeze runtime limits before asynchronous directory collection. Settings
