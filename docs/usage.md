@@ -45,7 +45,7 @@
 
 ## 保存与复用编辑要求（Preferences）
 
-在 Preview 按 `p`：高亮可编辑 Unsent 时只修改该原稿，否则修改本会话后续新 prompt 的选择。`Space` 即时保存勾选，`g` 单独设项目默认，Esc 只返回。按 `l` 管理库不改已有快照；在 Usage 的运行上按 `p` 只读审计。返回 Unsent 按 Enter，或返回 Revise 按 Ctrl+S，才会提交请求。[项目默认与选择详情](preference-selection.md)
+在 Preview 按 `p`。高亮可编辑 Unsent 时只修改该原稿，否则修改本会话后续新 prompt 的选择。`Space` 即时保存勾选，`g` 单独设项目默认，Esc 只返回。在 **Library** 列表用 `n`、`e`、`d` 管理库条目，已捕获的快照会保留。在 Usage 的运行上按 `p` 打开只读审计。返回 Unsent 按 Enter，或返回 Revise 按 Ctrl+S，才会提交请求。[项目默认与选择详情](preference-selection.md)
 
 **In Your Own Words** 可显示模型对原稿的理解。可在 Preferences 中选择该内置项，或通过 **Add** 创建自定义附注。[Result notes 使用方式](preference-selection.md#result-notes)
 

@@ -39,13 +39,13 @@ Unsent 和会话的完整选择器都可按 `g` 切换高亮条目的项目默�
 
 ## 完整面板：All 与 Selected only
 
-Tab 在搜索和列表之间切换，Enter 可阅读全文。按 `l` 进入库管理，Esc 回到选择器；库管理不改变已捕获的快照。返回原稿按 Enter，或返回 Revise 按 Ctrl+S，才提交模型请求。在 Revise 可先打开 **Review full requirements** 检查组合要求。
+Tab 在搜索和列表之间切换，Space 保存当前选择，Enter 阅读高亮条目的全文。库管理快捷键位于 **Library** 标题下方，库操作保留已捕获的快照。返回原稿按 Enter，或返回 Revise 按 Ctrl+S，才提交模型请求。在 Revise 可先打开 **Review full requirements** 检查组合要求。
 
-在 Library 或 Actions 按 `s` 切换 **All**／**Selected only**。后者从空搜索开始，按提交顺序展示已选快照，方便发现被筛选隐藏的项目。搜索匹配名称、描述和正文。Enter 可核对 **Selected snapshot** 和 **Current library entry**，库发生变更时要先取消再勾选才能采用新版。[搜索与排序回归](../test/unit/revision-preferences.test.ts) · [快照回归](../test/ui/preference-panel-audit.test.ts)
+在列表按 `s` 切换 **All**／**Selected only**。后者从空搜索开始，按提交顺序展示已选快照，方便发现被筛选隐藏的项目。搜索匹配名称、描述和正文。Enter 可核对 **Selected snapshot** 和 **Current library entry**，库发生变更时要先取消再勾选才能采用新版。[搜索与排序回归](../test/unit/revision-preferences.test.ts) · [快照回归](../test/ui/preference-panel-audit.test.ts)
 
 ## 新条目保存后定位
 
-在库管理中用 `n` **Add** 创建、`e` **Edit** 修改、`d` **Delete** 删除。Add 高亮名称，Edit 高亮正文。用 ↑／↓ 浏览字段，按 Enter／Space 编辑文本，或在 **Type** 和 **Scope** 行按显示顺序切换选项。实心圆标出当前选项。**Scope** 可在 Add 时修改。Esc 从文本编辑返回字段列表，Ctrl+S 保存到库。Add 可以带入本次自由输入，保存后面板会定位新条目，需显式勾选才使用。保存失败可修正表单后再试。外部写入冲突时刷新后重试。跨作用域复用可复制正文，再到目标作用域 Add。
+在 **Library** 列表用 `n` **Add** 创建、`e` **Edit** 修改、`d` **Delete** 删除。Add 高亮名称，Edit 高亮正文。用 ↑／↓ 浏览字段，按 Enter／Space 编辑文本，或在 **Type** 和 **Scope** 行按显示顺序切换选项。实心圆标出当前选项。**Scope** 可在 Add 时修改。Esc 从文本编辑返回字段列表，Ctrl+S 保存到库。Add 可以带入本次自由输入，保存后面板会定位新条目，需显式勾选才使用。保存失败可修正表单后再试。外部写入冲突时刷新后重试。跨作用域复用可复制正文，再到目标作用域 Add。
 
 ## 库文件与旧版兼容
 

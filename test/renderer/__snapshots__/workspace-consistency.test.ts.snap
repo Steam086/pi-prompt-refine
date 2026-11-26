@@ -171,12 +171,13 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │                                                       │
 ╰───────────────────────────────────────────────────────╯
 
-=== Preferences / choose ===
+=== Preferences ===
 ╭───────────────────────────────────────────────────────╮
 │  Preferences · This revision   Esc Back Tab ? Keys    │
 │  ───────────────────────────────────────────────────  │
 │  Search:                                              │
 │  Library 1/1 · 0 selected · Kept on return            │
+│  n Add · e Edit · d Delete                            │
 │  Unclassified                                         │
 │  › [ ] Preserve 中文😀                        Global  │
 │                                                       │
@@ -184,25 +185,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │                                                       │
 │                                                       │
 │                                                       │
-│                                                       │
-│  Space Toggle · Enter Read · l Manage library         │
-╰───────────────────────────────────────────────────────╯
-
-=== Preferences / library ===
-╭───────────────────────────────────────────────────────╮
-│  Preferences library   Esc Back · Tab Focus · ? Keys  │
-│  ───────────────────────────────────────────────────  │
-│  Search:                                              │
-│  Library 1/1 · 0 selected (read-only)                 │
-│  n Add · e Edit · d Delete                            │
-│  Unclassified                                         │
-│  ›     Preserve 中文😀                        Global  │
-│                                                       │
-│                                                       │
-│                                                       │
-│                                                       │
-│                                                       │
-│  Enter Read · s Selected only                         │
+│  Space Toggle · Enter Read · s Selected only          │
 ╰───────────────────────────────────────────────────────╯
 
 === Preferences / read ===

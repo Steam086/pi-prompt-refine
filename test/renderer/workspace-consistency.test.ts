@@ -292,14 +292,10 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
           tui.renderNow();
           expect(strip(screenLines(tui).join("\n"))).toContain("Preserve 中文😀");
         });
-        const preferences = frame("Preferences / choose").join("\n");
+        const preferences = frame("Preferences").join("\n");
         operationHint(preferences, "Space", "Toggle");
-        operationHint(preferences, "l", "Manage library");
-        input("l");
-        const library = frame("Preferences / library").join("\n");
-        expect(strip(library)).toContain("n Add · e Edit · d Delete");
-        expect(strip(library)).not.toContain("Space Toggle");
-        input("\x1b");
+        for (const [key, label] of [["n", "Add"], ["e", "Edit"], ["d", "Delete"]] as const) operationHint(preferences, key, label);
+        expect(strip(preferences)).toContain("n Add · e Edit · d Delete");
         expect(preferences).toContain(theme.fg("text", theme.bold("Preserve 中文😀")));
         input("\r");
         const reading = frame("Preferences / read").join("\n");

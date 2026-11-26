@@ -76,11 +76,13 @@ describe("explicit candidate revision", () => {
     });
     h.panelInput(" "); expect(h.panelLines(100).join("\n")).toContain("[x] In Your Own Words");
     h.panelInput(" "); expect(h.panelLines(100).join("\n")).toContain("[ ] In Your Own Words");
-    h.panelInput("l"); h.panelInput("n"); h.panelInput("First 中文😀"); h.panelInput("\t"); h.panelInput("Keep literal commands.");
+    h.panelInput("n"); h.panelInput("First 中文😀"); h.panelInput("\t"); h.panelInput("Keep literal commands.");
     h.panelInput("\x13");
     await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Saved; not selected"));
+    expect(h.panelLines(100).join("\n")).toContain("[ ] First 中文😀");
     h.panelInput(" "); h.panelInput("\x1b[13;3u"); h.panelInput("\x13");
-    expect(h.panelLines().join("\n")).toContain("Library management only");
+    expect(h.panelLines(100).join("\n")).toContain("[x] First 中文😀");
+    expect(h.panelLines().join("\n")).toContain("Session choices are saved on Space");
     h.panelInput("e"); h.panelInput("\x1b[Z"); h.panelInput("Renamed "); h.panelInput("\x13");
     await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Saved to library"));
     expect((await store.load()).entries).toEqual([expect.objectContaining({ name: "Renamed First 中文😀", body: "Keep literal commands." })]);
@@ -88,7 +90,7 @@ describe("explicit candidate revision", () => {
     h.panelInput("d"); h.panelInput("y");
     await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Deleted from library"));
     expect((await store.load()).entries).toEqual([]);
-    h.panelInput("\x1b"); h.panelInput("\x1b"); h.panelInput("q"); await view;
+    h.panelInput("\x1b"); h.panelInput("q"); await view;
     expect(h.getEditor()).toBe(""); expect(h.complete).not.toHaveBeenCalled();
     expect(h.editorWrites).toEqual([]); expect(h.sent).toEqual([]);
   });
@@ -126,7 +128,7 @@ describe("explicit candidate revision", () => {
       }
     }
     h.panelInput("p"); await vi.waitFor(() => expect(output()).toContain("[ ] Frozen 中文😀"));
-    h.panelInput("l"); h.panelInput("e"); h.panelInput("\x1b[Z"); h.panelInput("Changed "); h.panelInput("\x13");
+    h.panelInput("e"); h.panelInput("\x1b[Z"); h.panelInput("Changed "); h.panelInput("\x13");
     await vi.waitFor(() => expect(output()).toContain("Saved to library"));
     expect(output()).toContain("Changed Frozen 中文😀");
     h.panelInput("d"); h.panelInput("y");
@@ -134,12 +136,16 @@ describe("explicit candidate revision", () => {
     expect((await store.load()).entries).toEqual([]);
     finishes[0]!(refinement("Done")); await flushPromises();
     expect(h.complete).toHaveBeenCalledTimes(5);
-    h.panelInput("\x1b"); h.panelInput("\x1b"); h.panelInput("\x1b[C");
+    h.panelInput("\x1b"); h.panelInput("\x1b[C");
     h.panelInput("p"); await vi.waitFor(() => {
       expect(output()).toContain("1 selected (read-only)");
       expect(output()).not.toContain("Working…");
     });
     expect(output()).toContain("Adopted preferences"); expect(output()).not.toContain("g Project default");
+    expect(output()).not.toMatch(/n Add|e Edit|d Delete/);
+    for (const key of ["n", "e", "d", "y"]) h.panelInput(key);
+    expect(output()).toContain("Adopted preferences");
+    expect((await store.load()).entries).toEqual([]);
     h.panelInput(" "); expect(output()).toContain("Read-only snapshot");
     h.panelInput("\r"); expect(output()).toContain("Source deleted"); expect(output()).toContain(entry.body);
     h.panelInput("\x1b"); h.panelInput("\x1b"); h.panelInput("\x1b[D");
@@ -178,7 +184,7 @@ describe("explicit candidate revision", () => {
     view = h.command("", h.context); h.panelInput("p");
     await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("[ ] In Your Own Words"));
     expect(h.panelLines().join("\n")).toContain("Preferences · This session");
-    h.panelInput("l"); h.panelInput("n"); h.panelInput("Unsaved form");
+    h.panelInput("n"); h.panelInput("Unsaved form");
     h.handlers.get("session_before_switch")?.[0]?.({}, h.context); await view;
     h.panelInput("\x1b[Z"); h.panelInput("\r"); h.panelInput("\x1b[13;3u");
     expect((await new PreferenceStore(h.agentDir, h.context.cwd).load()).entries).toEqual([]);
@@ -259,7 +265,6 @@ describe("explicit candidate revision", () => {
     await vi.waitFor(() => expect(output()).toContain("0 selected"));
     await vi.waitFor(() => expect(output()).not.toContain("Working…"));
     if (selectBefore) h.panelInput(" ");
-    h.panelInput("l");
     if (change === "delete") {
       h.panelInput("d"); h.panelInput("y");
       await vi.waitFor(() => expect(output()).toContain("Deleted from library"));
@@ -269,7 +274,6 @@ describe("explicit candidate revision", () => {
       h.panelInput("Updated body. "); h.panelInput("\x13");
       await vi.waitFor(() => expect(output()).toContain(change === "add" ? "Saved; not selected" : "Saved to library"));
     }
-    h.panelInput("\x1b");
     expect(output()).toContain(`${selectBefore ? 1 : 0} selected`);
     h.panelInput("\x1b"); h.panelInput("\x1b"); h.panelInput("\x1b");
     h.panelInput("\x1b[A"); h.panelInput("\x1b[A"); h.panelInput("\x1b[Z");
@@ -531,13 +535,11 @@ describe("explicit candidate revision", () => {
     find(entry.name); h.panelInput(" ");
     find(other.name); h.panelInput(" ");
     expect(output()).toContain("2 selected");
-    find(entry.name); h.panelInput("l"); h.panelInput("e");
+    find(entry.name); h.panelInput("e");
     h.panelInput("\x01"); h.panelInput("Updated: "); h.panelInput("\x13");
     await vi.waitFor(() => expect(output()).toContain("Saved to library"));
-    h.panelInput(" ");
-    expect(output()).toContain("Esc: return to the chooser.");
-    expect(output()).toContain("2 selected (read-only)");
-    h.panelInput("\x1b"); h.panelInput("s"); find(entry.name); h.panelInput("\r");
+    expect(output()).toContain("2 selected");
+    h.panelInput("s"); find(entry.name); h.panelInput("\r");
     expect(output()).toContain("Library changed; snapshot kept");
     expect(output()).toContain(entry.body);
     h.panelInput("\x1b"); h.panelInput(" ");  // Deselect the old snapshot.

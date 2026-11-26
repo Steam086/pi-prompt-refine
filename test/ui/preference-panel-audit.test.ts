@@ -95,11 +95,17 @@ describe("selected-only preference audit", () => {
     expect(text(f.panel).split(a.body)).toHaveLength(2); // Mode change invalidates the document cache.
   });
 
-  it("keeps selected-view edit and delete confirmation bound to the actual current source", async () => {
+  it("keeps selected snapshots separate from Edit and Delete on the current source", async () => {
     const current = { ...a, version: 2, name: "Current source", body: "Current instruction" };
     const selected = selectPreference(a);
     const f = setup([selected], "", "dark", [current]); await loaded(f.panel); f.panel.handleInput("s");
-    f.panel.handleInput("l"); f.panel.handleInput("e"); f.panel.handleInput("\x05");
+    for (const key of ["n", "e", "d"]) f.panel.handleInput(key);
+    expect(text(f.panel)).toContain("Selected only");
+    expect(text(f.panel)).not.toMatch(/n Add|e Edit|d Delete/);
+    expect(f.repo.save).not.toHaveBeenCalled();
+    expect(f.repo.remove).not.toHaveBeenCalled();
+    f.panel.handleInput("s");
+    f.panel.handleInput("e"); f.panel.handleInput("\x05");
     expect(text(f.panel)).toContain("Name: Current source");
     expect(text(f.panel)).toContain(current.body);
     save(f.panel); await loaded(f.panel);
@@ -110,7 +116,7 @@ describe("selected-only preference audit", () => {
     expect(confirmation).toContain("Delete library entry?");
     f.panel.handleInput("y"); await loaded(f.panel);
     expect(f.repo.remove).toHaveBeenCalledWith({ ...current, version: 3 });
-    f.panel.handleInput(esc);
+    f.panel.handleInput("s");
     expect(text(f.panel)).toContain("1 selected");
     expect(f.updateSelection).not.toHaveBeenCalled();
   });
@@ -191,9 +197,10 @@ describe("selected-only preference audit", () => {
     expect(f.panel.render(100).join("\n")).toContain(formatKeyHint(["Space", "Deselect"], f.theme));
     f.panel.handleInput("/"); f.panel.handleInput("s");
     expect(text(f.panel)).toContain("Search: s");
+    expect(text(f.panel)).not.toContain("Search: Search:");
     expect(text(f.panel)).toContain("Selected only ");
     expect(f.panel.render(100).slice(-2).join("\n")).not.toContain(formatKeyHint(["s", "All"], f.theme));
-    f.panel.handleInput(enter); f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput("s");
+    f.panel.handleInput(enter); f.panel.handleInput("s"); f.panel.handleInput("n"); f.panel.handleInput("s");
     expect(text(f.panel)).toContain("Name: s");
     f.panel.handleInput(tab); f.panel.handleInput("s");
     expect(f.repo.save).not.toHaveBeenCalled();
@@ -201,32 +208,29 @@ describe("selected-only preference audit", () => {
 });
 
 describe("new preference save identity and reveal", () => {
-  it.each(["query", "selected", "both", "none"])("reveals the returned NEW identity at Library focus under %s without selecting it", async (mode) => {
+  it.each([true, false])("reveals the returned NEW identity without selecting it (filtered: %s)", async (filtered) => {
     const f = setup([selectPreference(b)]); await loaded(f.panel);
-    if (mode === "query" || mode === "both") search(f.panel, "No match");
-    if (mode === "selected" || mode === "both") f.panel.handleInput("s");
-    if (mode === "both") search(f.panel, "Missing snapshot");
-    f.panel.handleInput("l"); f.panel.handleInput(tab); f.panel.handleInput("n"); f.panel.handleInput(a.name);
+    if (filtered) search(f.panel, "No match");
+    f.panel.handleInput("n"); f.panel.handleInput(a.name);
     save(f.panel); await loaded(f.panel);
-    expect(text(f.panel)).not.toContain("Selected only ");
+    expect(text(f.panel)).toContain("Library 1/3");
     expect(text(f.panel)).not.toContain("Search: No match");
     expect(text(f.panel)).toContain("Saved; not selected.");
-    expect(text(f.panel).includes("Filters reset to All.")).toBe(mode !== "none");
-    expect(highlightedRow(f.panel)?.trim()).toMatch(/^›\s+Concise 中文/);
-    expect(highlightedRow(f.panel)).not.toMatch(/\[[x ]\]/);
+    expect(text(f.panel).includes("Filters reset to All.")).toBe(filtered);
+    expect(highlightedRow(f.panel)?.trim()).toMatch(/^›\s+\[ \] Concise 中文/);
     f.panel.handleInput(enter);
     expect(text(f.panel)).toContain("project · new");
     expect(text(f.panel)).toContain("Extra");
-    f.panel.handleInput(esc); f.panel.handleInput(esc);
+    f.panel.handleInput(esc);
     expect(text(f.panel)).toContain(`[x] ${b.name}`);
     expect(f.updateSelection).not.toHaveBeenCalled();
   });
 
   it("keeps a NEW form, filters and snapshots on failure, then reveals a successful retry", async () => {
     const original = [selectPreference(a)]; const f = setup(original); await loaded(f.panel);
-    search(f.panel, "Literal"); f.panel.handleInput("s"); search(f.panel, "Concise");
+    search(f.panel, "Literal");
     f.repo.save.mockRejectedValueOnce(new Error("Disk full"));
-    f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput("Retry me"); save(f.panel); await loaded(f.panel);
+    f.panel.handleInput("n"); f.panel.handleInput("Retry me"); save(f.panel); await loaded(f.panel);
     expect(text(f.panel)).toContain("Save new preference");
     expect(text(f.panel)).toContain("Name: Retry me");
     expect(text(f.panel)).toContain("Disk full");
@@ -235,7 +239,6 @@ describe("new preference save identity and reveal", () => {
     save(f.panel); await loaded(f.panel);
     expect(text(f.panel)).toContain("Filters reset to All.");
     expect(highlightedRow(f.panel)).toContain("Retry me");
-    f.panel.handleInput(esc);
     expect(text(f.panel)).toContain(`[x] ${a.name}`);
     expect(f.updateSelection).not.toHaveBeenCalled();
   });
@@ -245,14 +248,14 @@ describe("new preference save identity and reveal", () => {
     search(f.panel, "Hidden");
     if (failure === "throw") f.repo.load.mockRejectedValueOnce(new Error("Offline"));
     else f.repo.load.mockResolvedValueOnce({ entries: [a], errors: { project: "Offline" } });
-    f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput("Saved offline"); save(f.panel); await loaded(f.panel);
+    f.panel.handleInput("n"); f.panel.handleInput("Saved offline"); save(f.panel); await loaded(f.panel);
     expect(text(f.panel)).toContain("Refresh failed after save; not selected.");
     expect(text(f.panel)).toContain("Filters reset to All.");
     expect(highlightedRow(f.panel)).toContain("Saved offline");
     f.panel.handleInput(enter);
     expect(text(f.panel)).toContain("Library unavailable");
     expect(text(f.panel)).toContain("project · new");
-    f.panel.handleInput(esc); f.panel.handleInput(esc);
+    f.panel.handleInput(esc);
     expect(listRows(f.panel).find((row) => row.includes(a.name))).toContain("[x]");
     expect(f.updateSelection).not.toHaveBeenCalled();
   });
@@ -260,20 +263,23 @@ describe("new preference save identity and reveal", () => {
   it("reports a concurrently removed saved identity rather than highlighting another same-name entry as it", async () => {
     const f = setup(); await loaded(f.panel);
     f.repo.load.mockResolvedValueOnce({ entries: [a, b], errors: {} });
-    f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput(a.name); save(f.panel); await loaded(f.panel);
+    f.panel.handleInput("n"); f.panel.handleInput(a.name); save(f.panel); await loaded(f.panel);
     expect(text(f.panel)).toContain("Saved entry no longer in library; could not reveal it.");
     expect(text(f.panel)).toContain("0 selected");
   });
 
-  it("keeps edit query, selected-only mode and focus semantics while preserving the selected snapshot", async () => {
+  it("preserves the library query and selected snapshot after editing", async () => {
     const selected = [selectPreference(b), selectPreference(a)]; const f = setup(selected); await loaded(f.panel);
-    f.panel.handleInput("s"); search(f.panel, "Concise"); f.panel.handleInput("l"); f.panel.handleInput(tab);
+    search(f.panel, "Concise");
+    f.panel.handleInput("s"); search(f.panel, "中文"); f.panel.handleInput("s");
     f.panel.handleInput("e"); f.panel.handleInput(backTab); f.panel.handleInput(" renamed"); save(f.panel); await loaded(f.panel);
-    expect(text(f.panel)).toContain("› e Edit");
-    expect(text(f.panel)).toContain("Selected only ");
     expect(text(f.panel)).toContain("Search: Concise");
+    expect(highlightedRow(f.panel)).toContain("renamed");
     expect(listRows(f.panel)).toHaveLength(1);
-    f.panel.handleInput(esc);
+    f.panel.handleInput("s");
+    expect(text(f.panel)).toContain("Selected only ");
+    expect(text(f.panel)).not.toContain("Search: Concise");
+    search(f.panel, "中文");
     expect(highlightedRow(f.panel)).toContain(`[x] ! ${a.name}`);
     expect(f.updateSelection).not.toHaveBeenCalled();
   });

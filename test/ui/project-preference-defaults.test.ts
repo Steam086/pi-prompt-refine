@@ -15,7 +15,7 @@ describe.each(["dark", "light"])("project default controls (%s)", (themeName) =>
       return structuredClone(f.library);
     });
     Object.assign(f.repo, { setProjectDefault });
-    f.panel.handleInput("l"); f.panel.handleInput("g");
+    f.panel.handleInput("g");
     await vi.waitFor(() => expect(text(f.panel)).toContain("Project default enabled"));
     let lines = f.panel.render(100);
     expect(lines.join("\n")).toContain(f.theme.fg("muted", "* "));
@@ -24,14 +24,12 @@ describe.each(["dark", "light"])("project default controls (%s)", (themeName) =>
     expect(f.panel.render(100).join("\n")).toContain(f.theme.fg("muted", "Project default: On · future drafts"));
     f.panel.handleInput(esc);
     expect(lines.join("\n")).toContain(formatKeyHint(["g", "Project default"], f.theme));
-    expect(lines.join("\n")).not.toContain(formatKeyHint(["c", "Clear all"], f.theme));
+    expect(lines.join("\n")).toContain(formatKeyHint(["c", "Clear all"], f.theme));
     for (const action of [["n", "Add"], ["e", "Edit"], ["d", "Delete"]] as const) {
       expect(lines.join("\n")).toContain(formatKeyHint(action, f.theme));
     }
-    f.panel.handleInput(" "); expect(text(f.panel)).toContain("[x] * Concise 中文");
+    expect(text(f.panel)).toContain("[x] * Concise 中文");
     expect(f.updateSelection).not.toHaveBeenCalled();
-    f.panel.handleInput(esc);
-    expect(f.panel.render(100).join("\n")).toContain(formatKeyHint(["c", "Clear all"], f.theme));
     f.panel.handleInput(" "); expect(text(f.panel)).toContain("[ ] * Concise 中文");
     f.panel.handleInput("/"); f.panel.handleInput("Literal"); f.panel.handleInput(enter);
     f.panel.handleInput("c"); expect(text(f.panel)).toContain("Selection cleared");
@@ -51,7 +49,7 @@ describe.each(["dark", "light"])("project default controls (%s)", (themeName) =>
   it("keeps save failure feedback semantic and visible at narrow/short sizes without changing selection", async () => {
     const f = setup([selectPreference(a)], "", themeName); await loaded(f.panel);
     Object.assign(f.repo, { setProjectDefault: vi.fn(async () => { throw new Error("Disk unavailable 中文😀\x1b[999C"); }) });
-    f.panel.handleInput("l"); f.panel.handleInput("g"); await vi.waitFor(() => expect(text(f.panel)).toContain("Project default not saved"));
+    f.panel.handleInput("g"); await vi.waitFor(() => expect(text(f.panel)).toContain("Project default not saved"));
     for (const [width, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [100, 40]]) {
       f.terminal.rows = rows!;
       const lines = f.panel.render(width!);

@@ -1,7 +1,7 @@
 import { decodeKittyPrintable, getKeybindings, Input, parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { focusLabel, panelConfirmation, panelHeader, panelLayout, type PanelLayoutProvider } from "./panel-layout.js";
-import { confirmationKeyHints, discardKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
+import { confirmationKeyHints, discardKeyHints, fittingKeyHints, type KeyHint } from "./key-hints.js";
 import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
@@ -45,6 +45,7 @@ const ACTIONS = [
   { id: "edit", key: "e", label: "Edit" },
   { id: "delete", key: "d", label: "Delete" },
 ] as const;
+const MANAGEMENT_HINTS: KeyHint[] = ACTIONS.map(({ key, label }) => [key, label]);
 const KINDS = ["rewrite", "task", "result"] as const;
 const SCOPES = ["project", "global"] as const;
 const TYPE_LABELS = KINDS.map((kind) => preferenceGroup({ metadata: { kind, description: "", activation: "manual" } }));
@@ -72,7 +73,6 @@ function cycleChoice<T>(values: readonly T[], current?: T): T {
 
 type PreferencePanelActions = { back(): void; updateSelection?(selected: SelectedPreference[]): string | undefined; session?: SessionPreferenceTarget };
 
-/** Draft selection and library management have separate controls; neither submits a request. */
 export class PreferencePanel {
   private page: Page = { kind: "list" };
   private library: PreferenceLibrary = { entries: [], errors: {} };
@@ -80,14 +80,12 @@ export class PreferencePanel {
   private selectedSearch = new Input({ prompt: "" });
   private get search(): Input { return this.selectedOnly ? this.selectedSearch : this.allSearch; }
   private selected: SelectedPreference[];
-  private libraryMode = false;
-  private get managing(): boolean { return this.purpose === "manage" || this.libraryMode; }
-  private get selectable(): boolean { return !this.managing && this.purpose !== "audit"; }
+  private get selectable(): boolean { return this.purpose !== "manage" && this.purpose !== "audit"; }
+  private get canManageEntries(): boolean { return this.purpose !== "audit" && !this.selectedOnly; }
   private get projectDefaultsEditable(): boolean {
-    return !!this.repository.setProjectDefault && (this.managing || this.purpose === "refine" || this.purpose === "session");
+    return !!this.repository.setProjectDefault && this.purpose !== "audit";
   }
-  private focus = 1;
-  private actionIndex = 0;
+  private focus: "search" | "list" = "list";
   private index = 0;
   private top = 0;
   private navigationDirection = 1;
@@ -95,7 +93,7 @@ export class PreferencePanel {
   private allView: { index: number; top: number; direction: number; key?: string } = { index: 0, top: 0, direction: 1 };
   private contentVersion = 0;
   private entriesCache?: { query: string; version: number; entries: RevisionPreference[] };
-  private descriptionCache?: { entry: RevisionPreference; version: number; compact: boolean; managing: boolean; document: PreferenceDocument };
+  private descriptionCache?: { entry: RevisionPreference; version: number; compact: boolean; document: PreferenceDocument };
   private documents: { document: PreferenceDocument; width: number; lines: string[] }[] = [];
   private notice = "";
   private noticeColor: "muted" | "warning" | "error" = "muted";
@@ -121,7 +119,7 @@ export class PreferencePanel {
 
   set focused(value: boolean) { this.hasFocus = value; this.updateFocus(); }
   private updateFocus(): void {
-    const searching = this.hasFocus && this.page.kind === "list" && this.focus === 0;
+    const searching = this.hasFocus && this.page.kind === "list" && this.focus === "search";
     this.allSearch.focused = searching && !this.selectedOnly;
     this.selectedSearch.focused = searching && this.selectedOnly;
     const form = "form" in this.page ? this.page.form : undefined;
@@ -168,7 +166,7 @@ export class PreferencePanel {
       this.navigationDirection = 1;
       this.selectedOnly = true;
       // Each audit starts unfiltered, including snapshots hidden by the all-view query.
-      this.selectedSearch = new Input({ prompt: "Search: " });
+      this.selectedSearch = new Input({ prompt: "" });
       this.index = 0;
       this.top = 0;
       this.contentVersion++;
@@ -251,12 +249,6 @@ export class PreferencePanel {
     else if (this.selected.length >= PREFERENCE_SELECTION_LIMIT) this.setNotice(`Select at most ${PREFERENCE_SELECTION_LIMIT} preferences for one ${this.purpose === "refine" ? "refinement" : "revision"}.`, "warning");
     else this.updateSelection([...this.selected, selectPreference(entry)]);
   }
-  private back(): void {
-    if (this.libraryMode) {
-      this.libraryMode = false;
-      this.focus = 1;
-    } else this.actions.back();
-  }
   private async toggleProjectDefault(): Promise<void> {
     const entry = this.highlighted();
     if (!entry || !this.repository.setProjectDefault) return;
@@ -275,9 +267,8 @@ export class PreferencePanel {
     return this.library.entries.find((item) => preferenceKey(item) === preferenceKey(entry));
   }
   private description(entry: RevisionPreference, compact = false): PreferenceDocument {
-    const managing = this.managing;
     if (this.descriptionCache?.entry === entry && this.descriptionCache.version === this.contentVersion &&
-      this.descriptionCache.compact === compact && this.descriptionCache.managing === managing) return this.descriptionCache.document;
+      this.descriptionCache.compact === compact) return this.descriptionCache.document;
     const local = this.local(entry);
     const source = this.source(entry);
     const changed = local && source && (source.version !== local.version || source.body !== local.sourceBody || source.name !== local.name ||
@@ -331,22 +322,22 @@ export class PreferencePanel {
         ] : [{ text: `${local.metadata.kind} · ${preferenceSelectionLabel(local)} · ${local.metadata.description}`, color: "muted" as const }] : []),
         gap, { text: local.body, color: "text" });
     }
-    this.descriptionCache = { entry, version: this.contentVersion, compact, managing, document };
+    this.descriptionCache = { entry, version: this.contentVersion, compact, document };
     return document;
   }
   private read(title: string, document: PreferenceDocument): void { this.page = { kind: "read", title, document, scroll: 0 }; }
   private listHelp(): PreferenceDocument {
     return [
-      "Tab / Shift+Tab   Move between controls",
+      "Tab / Shift+Tab   Switch between list and Search",
       "Esc   Back (leave Search first)",
       "/   Search by name or instruction",
       "↑↓ / PgUp / PgDn   Browse entries",
-      "Enter   Read the highlighted entry or activate a control",
+      "Enter   Read the highlighted entry (leave Search first)",
       ...(this.purpose !== "audit" ? ["s   Switch between All and Selected only"] : []),
-      ...(this.selectable ? ["Space   Save the highlighted selection", "c   Clear selections", "l   Manage library"] : []),
+      ...(this.selectable ? ["Space   Save the highlighted selection", "c   Clear selections"] : []),
       ...(this.projectDefaultsEditable ? ["g   Toggle the highlighted project default"] : []),
       ...(this.selectable && this.actions.session ? ["r   Follow the project default for this item"] : []),
-      ...(this.managing ? ["n / e / d   Add, edit, or delete a library entry", "←→   Move between library actions"] : []),
+      ...(this.purpose !== "audit" ? ["n / e / d   Add, edit, or delete in Library (All)"] : []),
     ].map((text) => ({ text, color: "text" }));
   }
   private bodyText(form: Form): string {
@@ -424,13 +415,10 @@ export class PreferencePanel {
       if (this.disposed) return;
       this.page = { kind: "list" }; this.setNotice("Saved to library; current selection unchanged.");
       if (form.kind === "new") {
-        const reset = this.selectedOnly || !!this.search.getValue().trim();
-        this.selectedOnly = false;
+        const reset = !!this.allSearch.getValue().trim();
         this.allSearch = new Input({ prompt: "" });
-        this.allView = { index: 0, top: 0, direction: 1, key: preferenceKey(saved) };
         this.top = 0;
         this.navigationDirection = 1;
-        this.focus = 1;
         // The write result is authoritative even if the subsequent read fails.
         this.library.entries = this.library.entries.filter((entry) => preferenceKey(entry) !== preferenceKey(saved)).concat(saved);
         this.contentVersion++;
@@ -506,12 +494,12 @@ export class PreferencePanel {
     if (key && /(^|\+)f\d+$/.test(key)) return;
     const cancel = this.keys.matches(data, "tui.select.cancel") || key === "ctrl+\\";
     if (this.busy) {
-      if (cancel && this.page.kind === "list") { this.back(); this.redraw(); }
+      if (cancel && this.page.kind === "list") { this.actions.back(); this.redraw(); }
       return;
     }
     if (key === "ctrl+s") {
       if (this.page.kind === "form") { void this.save(this.page.form); return; }
-      this.setNotice(this.managing ? "Library management only; no request sent."
+      this.setNotice(this.purpose === "manage" ? "Library management only; no request sent."
         : this.purpose === "audit" ? "Read-only snapshot; no request sent."
         : this.purpose === "session" ? "Session choices are saved on Space; no request sent."
         : this.purpose === "refine" ? "Return to the Unsent original and press Enter to refine." : "Return to Revise to request revision with Ctrl+S.");
@@ -535,30 +523,27 @@ export class PreferencePanel {
       const step = this.keys.matches(data, "tui.select.up") ? -1 : this.keys.matches(data, "tui.select.down") ? 1 : 0;
       this.handleForm(this.page.form, data, key, cancel, enter, step);
     } else if (cancel) {
-      if (this.focus === 0 && key !== "ctrl+\\") this.focus = 1;
-      else this.back();
+      if (this.focus === "search" && key !== "ctrl+\\") this.focus = "list";
+      else this.actions.back();
     } else if (key === "alt+enter") return;
     else if (key === "tab" || key === "shift+tab") {
-      const regions = this.managing ? 3 : 2;
-      this.focus = (this.focus + (key === "tab" ? 1 : regions - 1)) % regions;
-    } else if (this.focus === 0) {
-      if (enter || key === "down") this.focus = 1;
+      this.focus = this.focus === "search" ? "list" : "search";
+    } else if (this.focus === "search") {
+      if (enter || key === "down") this.focus = "list";
       else { this.search.handleInput(data); this.index = 0; this.top = 0; this.navigationDirection = 1; }
     } else if (key === "s" && this.purpose !== "audit") this.toggleView();
     else if (key === "?") this.read("Preferences keys", this.listHelp());
     else if (key === "c" && this.selectable) {
       const cleared = this.actions.session ? this.changeSessionSelection({ kind: "clear" }) : this.selected.length && this.updateSelection([]);
       if (cleared) this.setNotice("Selection cleared; project defaults unchanged.");
-    } else if (key === "g" && this.projectDefaultsEditable && this.focus === 1) void this.toggleProjectDefault();
-    else if (key === "r" && this.selectable && this.actions.session && this.focus === 1) {
+    } else if (key === "g" && this.projectDefaultsEditable) void this.toggleProjectDefault();
+    else if (key === "r" && this.selectable && this.actions.session) {
       const entry = this.highlighted();
       if (entry && this.changeSessionSelection({ kind: "inherit", key: preferenceKey(entry) })) this.setNotice("Session now follows the project default for this item.");
-    } else if (key === "/") this.focus = 0;
-    else if (key === "l" && this.selectable) this.libraryMode = true;
-    else if (this.managing && ACTIONS.some((action) => action.key === key)) {
-      this.actionIndex = ACTIONS.findIndex((action) => action.key === key);
-      this.activate(ACTIONS[this.actionIndex]!.id);
-    } else if (this.focus === 1) {
+    } else if (key === "/") this.focus = "search";
+    else {
+      const action = this.canManageEntries && ACTIONS.find((action) => action.key === key);
+      if (action) { this.activate(action.id); this.redraw(); return; }
       const max = Math.max(0, this.entries().length - 1);
       if (key === "up" || key === "pageup" || key === "home") this.navigationDirection = -1;
       else if (key === "down" || key === "pagedown" || key === "end") this.navigationDirection = 1;
@@ -570,17 +555,13 @@ export class PreferencePanel {
       else if (key === "end") this.index = max;
       else if (key === "space") {
         if (this.selectable) this.toggle();
-        else this.setNotice(this.libraryMode ? "Esc: return to the chooser." : this.purpose === "audit" ? "Read-only snapshot. Edit choices in Preview."
+        else this.setNotice(this.purpose === "audit" ? "Read-only snapshot. Edit choices in Preview."
           : "Select an Unsent original or open Revise to change preferences.", "warning");
       } else if (enter) {
         const entry = this.highlighted();
-        if (entry) this.read(this.purpose === "audit" ? "Adopted preference" : this.managing || this.purpose === "session" ? "Preference details"
+        if (entry) this.read(this.purpose === "audit" ? "Adopted preference" : this.purpose === "manage" || this.purpose === "session" ? "Preference details"
           : this.purpose === "refine" ? "Full editing instruction" : "Full revision instruction", this.description(entry));
       }
-    } else {
-      if (key === "left" || key === "up") this.actionIndex = (this.actionIndex + ACTIONS.length - 1) % ACTIONS.length;
-      else if (key === "right" || key === "down") this.actionIndex = (this.actionIndex + 1) % ACTIONS.length;
-      else if (enter) this.activate(ACTIONS[this.actionIndex]!.id);
     }
     this.redraw();
   }
@@ -674,9 +655,11 @@ export class PreferencePanel {
     const { innerWidth: w } = layout;
     const clean = (text: string) => sanitizeTerminalText(text);
     const wrap = (text: string, columns = w) => wrapTextWithAnsi(clean(text), columns);
-    const { managing, selectable } = this;
+    const { selectable } = this;
+    const managing = this.purpose === "manage";
     const audit = this.purpose === "audit";
     const session = this.purpose === "session";
+    const searching = this.focus === "search";
     const target = this.purpose === "refine" ? "Unsent original" : session ? "This session" : "This revision";
     const selectionLabel = `${this.selected.length} selected`;
     const selectionScope = !selectable ? " (read-only)" : session ? " · Future prompts" : " · Kept on return";
@@ -685,10 +668,9 @@ export class PreferencePanel {
     let subtitleColor: DocumentPart["color"] = "muted";
     let renderBody: (height: number) => string[];
     const viewHint: KeyHint = ["s", this.selectedOnly ? "All" : "Selected only"];
-    const toggle: KeyHint | undefined = this.focus === 1 && selectable && (!this.selectedOnly || this.selected.length)
+    const toggle: KeyHint | undefined = !searching && selectable && (!this.selectedOnly || this.selected.length)
       ? ["Space", this.selectedOnly ? "Deselect" : "Toggle"] : undefined;
-    const project: KeyHint | undefined = this.focus === 1 && this.projectDefaultsEditable ? ["g", "Project default"] : undefined;
-    const selectionActions = [toggle, project].filter((hint): hint is KeyHint => !!hint);
+    const project: KeyHint | undefined = !searching && this.projectDefaultsEditable ? ["g", "Project default"] : undefined;
     const border = (line: string) => this.theme.fg("borderMuted", line);
     const back: KeyHint = ["Esc", "Back"];
     let hints: KeyHint[] = [back, ["Tab", "Focus"], ["?", "Keys"]];
@@ -727,38 +709,23 @@ export class PreferencePanel {
         ? "No selections" : !this.library.entries.length && !this.selected.length
           ? "Library is empty" : !entries.length ? "No matches" : "";
       renderBody = (h) => {
-        const splitCandidate = w >= 76;
-        const toolbarWidth = splitCandidate ? Math.floor(w * 0.43) : w;
-        const toolbar: string[] = [];
-        let actionRow = 0;
-        if (managing) {
-          const separator = this.theme.fg("muted", " · ");
-          for (const [i, action] of ACTIONS.entries()) {
-            const active = this.focus === 2 && i === this.actionIndex;
-            const styled = active ? focusLabel(this.theme, toolbarWidth, `${action.key} ${action.label}`, true)
-              : truncateToWidth(formatKeyHint([this.focus === 0 ? "" : action.key, action.label], this.theme), toolbarWidth, "…");
-            const last = toolbar.at(-1);
-            if (last && visibleWidth(last + separator + styled) <= toolbarWidth) toolbar[toolbar.length - 1] = last + separator + styled;
-            else toolbar.push(styled);
-            if (active) actionRow = toolbar.length - 1;
-          }
-        }
-        const context: KeyHint[] = this.focus === 0 ? [["Enter", "Browse"], ["Esc", "End search"]]
-          : this.focus === 2 ? [["←→", "Choose action"], ["Enter", "Open"]]
-          : [...selectionActions, ...(this.selectedOnly && !audit ? [viewHint] : []), ["Enter", "Read"],
-            ...(selectable ? [["l", "Manage library"] as const, ["c", "Clear all"] as const] : []),
-            ...(!this.selectedOnly && !audit ? [viewHint] : [])];
-        const shortSelection = this.focus === 1 && selectionActions.length === 2 && h < 6;
-        const room = h >= toolbar.length + 3 && (!shortSelection || h >= 4);
-        const split = room && h >= toolbar.length + 6 && splitCandidate;
-        const leftWidth = split ? toolbarWidth : w;
+        const context: KeyHint[] = searching ? [["Enter", "Browse"], ["Esc", "End search"]]
+          : [...(toggle ? [toggle] : []), ...(this.selectedOnly && !audit ? [viewHint] : []), ["Enter", "Read"],
+            ...(project ? [project] : []), ...(!this.selectedOnly && !audit ? [viewHint] : []),
+            ...(selectable ? [["c", "Clear all"] as const] : [])];
+        const shortSelection = !!toggle && !!project && h < 6;
         const contextHints = shortSelection ? fittingKeyHints([["Space", ""], ["g", "Default"]], w, this.theme)
           : fittingKeyHints(context, w, this.theme);
         const statusRows = subtitle ? [feedback] : [];
-        const controls = !!contextHints && (h >= toolbar.length + statusRows.length + 5 || shortSelection);
-        const available = Math.max(1, h - (room ? toolbar.length + 2 : 0)
-          - statusRows.length - Number(controls));
-        const search = [this.textField(this.search, "Search:", leftWidth, this.focus === 0)];
+        const footer = contextHints && (h >= statusRows.length + 5 || shortSelection) ? [contextHints] : [];
+        const height = h - statusRows.length - footer.length;
+        const room = height >= 3;
+        const split = height >= 5 && w >= 76;
+        const leftWidth = split ? Math.floor(w * 0.43) : w;
+        const managementHints = this.canManageEntries && height >= 4
+          ? fittingKeyHints(MANAGEMENT_HINTS, leftWidth, this.theme, " · ", searching ? "secondary-compact" : "primary") : "";
+        const available = Math.max(1, height - (room ? 2 + Number(!!managementHints) : 0));
+        const search = [this.textField(this.search, "Search:", leftWidth, searching)];
         const window = selectionWindow(entries.length, this.index, available, this.top,
           this.selectedOnly ? undefined : (index) => preferenceGroup(entries[index]!), available >= 10 ? 1 : 0, this.navigationDirection);
         this.top = window.start;
@@ -768,7 +735,7 @@ export class PreferencePanel {
           if (typeof row === "string") return this.theme.fg("text", this.theme.bold(truncateToWidth(row, leftWidth, "…")));
           const entry = entries[row]!;
           const current = row === this.index;
-          const active = this.focus === 1 && current;
+          const active = !searching && current;
           const local = this.local(entry);
           const source = this.source(entry);
           const unavailable = !!this.library.errors[entry.scope];
@@ -782,9 +749,7 @@ export class PreferencePanel {
         });
         if (!entries.length) list.push(...wrap(status, leftWidth).map((line) => this.theme.fg(errors.length ? "error" : "muted", line)));
         if (!room) {
-          const active = this.focus === 0 ? search : this.focus === 2
-            ? toolbar.slice(Math.min(actionRow, Math.max(0, toolbar.length - h))) : list;
-          return [...statusRows, ...active.slice(0, Math.max(1, h - statusRows.length - Number(controls))), ...(controls ? [contextHints] : [])];
+          return [...statusRows, ...(searching ? search : list).slice(0, Math.max(1, height)), ...footer];
         }
         const rightWidth = split ? w - leftWidth - 3 : w;
         const detail = split && entries[this.index] ? this.document(this.description(entries[this.index]!, true), rightWidth) : [];
@@ -794,11 +759,10 @@ export class PreferencePanel {
         const suffix = [count, compactCount].find((label) => visibleWidth(headingText + label) <= leftWidth);
         const heading = truncateToWidth(suffix ? headingText + suffix
           : selectable ? this.theme.fg("muted", selectionLabel) : headingText, leftWidth, "");
-        const left = [...search, heading, ...toolbar, ...list];
-        const footer = controls ? [contextHints] : [];
-        if (!split) return [...statusRows, ...Array.from({ length: h - statusRows.length - footer.length }, (_, i) => left[i] ?? ""), ...footer];
+        const left = [...search, heading, ...(managementHints ? [managementHints] : []), ...list];
+        if (!split) return [...statusRows, ...Array.from({ length: height }, (_, i) => left[i] ?? ""), ...footer];
         const divider = this.theme.fg("borderMuted", " │ ");
-        return [...statusRows, ...Array.from({ length: h - statusRows.length - footer.length }, (_, i) => {
+        return [...statusRows, ...Array.from({ length: height }, (_, i) => {
           const line = left[i] ?? "";
           return line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line))) + divider + (detail[i] ?? "");
         }), ...footer];
@@ -828,7 +792,7 @@ export class PreferencePanel {
       const bare: KeyHint[] = [["Esc", ""], ["Tab", ""], ["?", ""]];
       const [controls, separator] = visibleWidth(fittingKeyHints(hints, Infinity, this.theme)) <= hintWidth ? [hints, " · "]
         : visibleWidth(fittingKeyHints(compact, Infinity, this.theme, " ")) <= hintWidth ? [compact, " "] : [bare, " "];
-      const shownHints = fittingKeyHints(this.focus === 0 ? controls.slice(0, 2) : controls, hintWidth, this.theme, separator);
+      const shownHints = fittingKeyHints(searching ? controls.slice(0, 2) : controls, hintWidth, this.theme, separator);
       headline = heading(shownTitle) + (shownHints ? "   " + shownHints : "");
       actions = "";
     }

@@ -51,7 +51,7 @@ describe("project defaults through the extension", () => {
     h.panelInput("n"); h.panelInput("Existing draft"); h.panelInput("\r");
     const output = () => h.panelLines(100).join("\n");
     h.panelInput("p"); await vi.waitFor(() => expect(output()).not.toContain("Working…"));
-    expect(output()).toContain("Space Toggle · g Project default");
+    expect(output()).toContain("Space Toggle · Enter Read · g Project default");
     h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default enabled"));
     expect(output()).toContain("[ ] * Default 中文😀");
     expect((await store.load()).projectDefaults).toEqual([preferenceKey(entry)]);
@@ -228,8 +228,8 @@ describe("project defaults through the extension", () => {
     h.panelInput("n"); h.panelInput("Captured with default"); h.panelInput("\r");
     const output = () => h.panelLines(100).join("\n");
     h.panelInput("p"); await vi.waitFor(() => expect(output()).not.toContain("Working…"));
-    h.panelInput("l"); h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default disabled"));
-    h.panelInput("\x1b"); h.panelInput("\x1b"); expect(output()).toContain("Preferences · 1 selected");
+    h.panelInput("g"); await vi.waitFor(() => expect(output()).toContain("Project default disabled"));
+    h.panelInput("\x1b"); expect(output()).toContain("Preferences · 1 selected");
     h.panelInput("\r"); await flushPromises();
     const frozen = JSON.parse((h.complete.mock.calls[0] as any[])[1].messages[0].content[0].text);
     expect(frozen.editing_instruction).toContain(entry.body);

@@ -253,11 +253,11 @@ describe("Unsent preference selection", () => {
     const f = unsentWorkspaceSetup("alt+p", true); const w = f.workspace;
     w.handleInput(altP); expect(text(w)).not.toContain("Bring back");
     w.handleInput("p"); await loaded(w);
-    w.handleInput("l"); w.handleInput("n"); w.handleInput("New entry"); w.handleInput(tab);
+    w.handleInput("n"); w.handleInput("New entry"); w.handleInput(tab);
     expect(text(w)).not.toContain(f.originals[0]!.input.draft);
     for (const key of ["p", "i", "f", enter]) w.handleInput(key);
     expect(f.run).not.toHaveBeenCalled(); expect(f.complete).not.toHaveBeenCalled();
-    w.handleInput(esc); w.handleInput(esc); w.handleInput("y"); w.handleInput(esc);
+    w.handleInput(esc); w.handleInput(esc); w.handleInput("y");
     expect(text(w)).toContain("Preferences · Unsent original");
     w.handleInput(" "); w.handleInput(esc);
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(a)]);
@@ -409,9 +409,9 @@ describe("workspace preference integration", () => {
     const pasted = "中文 😀 command --literal\n".repeat(100);
     w.handleInput("f"); w.handleInput(`\x1b[200~${pasted}\x1b[201~`);
     w.handleInput(altP); await loaded(w);
-    w.handleInput("l"); w.handleInput("n"); w.handleInput("Paste"); save(w); await loaded(w);
+    w.handleInput("n"); w.handleInput("Paste"); save(w); await loaded(w);
     expect(f.repo.save.mock.calls[0]![1].body).toBe(pasted);
-    w.handleInput(" "); w.handleInput(esc); w.handleInput(esc); w.handleInput(ctrlS);
+    w.handleInput(esc); w.handleInput(ctrlS);
     expect(f.submit).toHaveBeenLastCalledWith(pasted);
   });
   it("offers a focusable Preferences control without a binding and removes result p", async () => {

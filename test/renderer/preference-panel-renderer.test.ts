@@ -35,11 +35,11 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
     };
     try {
       tui.addChild(panel); tui.setFocus(panel); tui.start(); await settle(); render();
-      input("l"); input("g"); await settle(); expect(render()).toContain("Project default enabled");
+      input("g"); await settle(); expect(render()).toContain("Project default enabled");
       expect(panel.render(100).join("\n")).toContain(theme.fg("muted", "* "));
-      input(" "); expect(render()).toContain("[x] * Default");
+      expect(render()).toContain("[x] * Default");
       expect(updateSelection).not.toHaveBeenCalled();
-      input("\x1b"); input(" "); expect(render()).toContain("[ ] * Default");
+      input(" "); expect(render()).toContain("[ ] * Default");
       input("\r"); input("\x1b[6~"); render(); input("\x1b[5~"); input("\x1b");
       for (const [columns, rows] of [[100, 40], [40, 16], [20, 8], [12, 6], [100, 40]]) {
         Object.assign(terminal, { columns, rows }); panel.invalidate(); render();
@@ -173,7 +173,8 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
         const focused = lines.find((line) => stripVTControlCharacters(line).includes("› [x]"))!;
         expect(focused).toContain(theme.bg("selectedBg", "").split("\x1b[49m")[0]);
       }
-      input("l"); input("n"); input("Saved 中文😀");
+      input("s"); expect(render()).toContain("Search: Second");
+      input("n"); input("Saved 中文😀");
       for (const field of ["Name", "Instruction", "Scope", "Type", "Description", "Save"]) {
         Object.assign(terminal, { columns: 100, rows: 40 }); panel.invalidate();
         const frame = render();
@@ -190,13 +191,12 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
       input("\r");
       for (let i = 0; i < 4; i++) await Promise.resolve();
       expect(render()).toContain("Filters reset to All.");
-      expect(render()).toMatch(/›\s+Saved 中文😀/);
-      expect(render()).not.toContain("[ ] Saved 中文😀");
+      expect(render()).toMatch(/›\s+\[ \] Saved 中文😀/);
       expect(entries.find((entry) => entry.id === "returned-identity")?.metadata).toEqual({
         kind: "task", description: "Saved 中文😀", activation: "manual",
       });
       input("\r"); expect(render()).toContain("project · returned-identity");
-      input("\x1b"); input("\x1b");
+      input("\x1b");
       expect(render()).toContain("2 selected");
       expect(updateSelection).not.toHaveBeenCalled();
       input("\x1b"); expect(close).toHaveBeenCalledExactlyOnceWith();
@@ -224,7 +224,7 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
         Object.assign(terminal, { columns, rows }); panel.invalidate();
         input("\x1b[6~"); render(); input("\x1b[5~"); render();
       }
-      input("\x1b"); input("e"); input("\x1b[Z"); input("Edited "); input("\x13");
+      input("\x1b"); input("s"); input("e"); input("\x1b[Z"); input("Edited "); input("\x13");
       for (let i = 0; i < 4; i++) await Promise.resolve();
       expect(render()).toContain("Saved to library");
       // Storage recovery names the real Add action, including in a short warning row.
