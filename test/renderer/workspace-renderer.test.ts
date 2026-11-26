@@ -100,7 +100,7 @@ describe("workspace terminal rendering", () => {
       }
       for (const cursor of [8, 9, 10, 11, 12]) {
         workspace.openSettings(undefined, cursor);
-        for (const key of ["\r", "\x15", "中文😀", "\r", "\t", "\r"]) {
+        for (const key of ["\r", "\x15", "中文😀", "\r", "\x1b[B", " ", "\x1b"]) {
           input(key);
           const frame = renderFrame();
           expect(frame).toHaveLength(initialHeight);
@@ -125,8 +125,12 @@ describe("workspace terminal rendering", () => {
         for (const key of [
           "\t", "\x1b[6~", "\t", "\x1b[B", "\r", "\x1b[6~", "f", "中文😀", "\r", "keep", "\x13", "\x1b", "o", "\x1b", // Task browser and applied result
           "\x1b[C", "\x1b[B", "\t", "\x1b[6~", "\r", "\x1b", // Unified Usage and Apply
-          "\x1b[C", ...Array<string>(6).fill("\x1b[B"), ...Array<string>(6).fill("\x1b[A"), "\t", ...Array<string>(3).fill("\x1b[B"), "\t", "\x1b[C", "i", "\x1b",
         ]) {
+          input(key);
+          expect(renderFrame()).toHaveLength(initialHeight);
+        }
+        workspace.openSettings(undefined, 9);
+        for (const key of ["\x1b[B", "\x1b[A", "\x1b[B", "\x1b[C", "i", "\x1b"]) {
           input(key);
           expect(renderFrame()).toHaveLength(initialHeight);
         }
@@ -178,8 +182,13 @@ describe("workspace terminal rendering", () => {
       taskPosition.selectedTaskId = undefined; taskPosition.selectedId = 2;
       workspace.openResult(); input("f"); input("\x1bp");
       await Promise.resolve();
-      for (const key of [" ", "\r", "\x1b[6~", "\x1b", "l", "\t", "\x1b[C", "\x1b[D", "\t", "\t", "n", "Saved name", "\t", "\r", "中文",
-        "\t", "\t", "\r", "\t", "中文😀 description", "\t", "\r", "\t", "\x13", "\x1b", "n", "\x1b", "y", "\x1b", "\x1b"]) {
+      for (const key of [" ", "\r", "\x1b[6~", "\x1b", "l", "n", "Saved name", "\r", "中文",
+        "\x1b", "\x1b[B", " ", "\x1b[B", "\x1b[B", "\r", "\x1b[A", " ", "\x1b[B", "中文😀 description", "\x13"]) {
+        input(key);
+        expect(renderFrame()).toHaveLength(initialHeight);
+      }
+      for (let i = 0; i < 4; i++) await Promise.resolve();
+      for (const key of ["n", "Discard this", "\x1b", "\x1b", "y", "\x1b", "\x1b"]) {
         input(key);
         expect(renderFrame()).toHaveLength(initialHeight);
       }

@@ -222,7 +222,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     input("\x1b[D"); input(" "); // Stage a change to project instructions.
     input("\t"); input("\x1b[B"); input("\x1b[B");
     expect(frame()).toContain("› Optimization prompt");
-    expect(frame()).toContain("Enter: Edit");
+    expect(frame()).toContain("Enter/Space: Edit");
     input("\r");
     expect(frame()).toContain(original);
     expect(frame()).toContain("Refine only · Applies next round");
@@ -392,7 +392,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\t");
     harness.panelInput("\x1b[B");
     expect(harness.panelLines().join("\n")).toMatch(/Thinking +medium/);
-    expect(picker()).toContain("Enter: Cycle");
+    expect(picker()).toContain("Enter/Space: Cycle");
     harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Thinking level saved"));
     expect(harness.panelLines().join("\n")).toMatch(/Thinking +high/);

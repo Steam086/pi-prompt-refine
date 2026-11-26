@@ -114,11 +114,11 @@ describe("Settings budgets and limits", () => {
     for (const preset of spec.presets) {
       f.workspace.handleInput("\r");
       f.value("invalid");
-      f.workspace.handleInput("\t");
+      f.workspace.handleInput("\x1b[B");
       expect(f.text()).toContain("Value: invalid");
       for (let i = 0; i < spec.presets.indexOf(preset); i++) f.workspace.handleInput("\x1b[B");
       expect(f.text()).toContain(`› Preset: ${preset}`);
-      f.workspace.handleInput("\r");
+      f.workspace.handleInput(" ");
       expect(f.text()).toContain(`› Value: ${preset}`);
       f.workspace.handleInput("\r");
       const row = f.workspace.render(100).map(stripVTControlCharacters).find((line) => line.includes(`› ${spec.label}`));
@@ -141,6 +141,10 @@ describe("Settings budgets and limits", () => {
       Object.assign(terminal, { columns, rows });
       expect(workspace.render(columns!).join("\n")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold("› Preset: 0 (1/5)"))));
     }
+    workspace.handleInput("\x1b");
+    expect(f.text()).toContain("› Value: 23");
+    workspace.handleInput("\x1b[B");
+    expect(f.text()).toContain("› Preset: 0");
     actions.saveContext.mockRejectedValueOnce(new Error("Unavailable"));
     workspace.handleInput("\x13");
     await vi.waitFor(() => expect(f.text()).toContain("Could not save settings"));

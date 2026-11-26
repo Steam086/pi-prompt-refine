@@ -227,7 +227,7 @@ export class PreviewPanel implements Component {
       paragraph("Requests can run in parallel. Switching is paused only while a Pi send is pending. Usage Enter applies a result here; it never writes to Pi.", "muted");
       helpLine(["o", "Original"], ["v", "Formatted/source"]);
       helpLine(["↑↓", "Scroll"], ["PgUp/PgDn", "Page"]);
-      helpLine(["i", "Input"], ["Tab", "Settings group (Context / Optimizer)"]);
+      helpLine(["i", "Input"], ["↑↓", "Settings rows (Context / Optimizer)"]);
       helpLine(["←/→", "In Settings: adjacent group, then page at group boundary"]);
       helpLine(["q", "Back"], ["?", "Hide help"]);
       paragraph("Enter won't send", "muted");

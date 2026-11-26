@@ -76,7 +76,8 @@ describe("shared refine workspace", () => {
     workspace.handleInput("\x1b[C");
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Default model");
     workspace.handleInput("\x1b[A");
-    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Draft character limit");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› History characters");
+    workspace.handleInput("\x1b[B");
     workspace.handleInput("\x1b[C");
     expect(workspace.render(100)).toEqual(preview);
     expect(actions.submit).not.toHaveBeenCalled();
@@ -160,25 +161,25 @@ describe("shared refine workspace", () => {
     expect(actions.chooseModel).not.toHaveBeenCalled();
   });
 
-  it.each([8, 16, 40])("keeps the selected group row visible after arrow navigation at %i rows", (rows) => {
+  it.each([8, 16, 40])("keeps the selected row visible when Up and Down cross groups at %i rows", (rows) => {
     const { workspace, theme } = create(rows, "dark", true);
-    workspace.openSettings(undefined, 2);
+    workspace.openSettings(undefined, 9);
     for (const width of [20, 40, 100]) {
       workspace.render(width);
-      workspace.handleInput("\x1b[C");
+      workspace.handleInput("\x1b[B");
       const optimizer = workspace.render(width);
       expect(stripVTControlCharacters(textOf(optimizer))).toContain(width < 100 ? "› Model" : "› Default model");
-      workspace.handleInput("\x1b[D");
+      workspace.handleInput("\x1b[A");
       const context = workspace.render(width);
-      expect(stripVTControlCharacters(textOf(context))).toContain(width < 40 ? "› Skill meta" : "› Skill metadata");
+      expect(stripVTControlCharacters(textOf(context))).toContain(width < 40 ? "› History ch" : "› History characters");
       for (const line of [...context, ...optimizer]) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       if (rows === 40 && width === 100) {
         for (const frame of [context, optimizer]) {
-          expect(textOf(frame)).toContain(formatKeyHint(["Tab", "Next group"], theme, 1, "secondary"));
+          expect(textOf(frame)).toContain(formatKeyHint(["↑↓", "Move"], theme, 1, "secondary"));
           expect(stripVTControlCharacters(textOf(frame))).not.toMatch(/[←→]:/);
         }
-        expect(textOf(context)).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Context "))));
-        expect(textOf(optimizer)).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Optimizer "))));
+        expect(textOf(context)).toContain(theme.fg("text", theme.bold("Context")));
+        expect(textOf(optimizer)).toContain(theme.fg("text", theme.bold("Optimizer")));
       }
     }
   });
@@ -220,11 +221,11 @@ describe("shared refine workspace", () => {
     optimizer.mockRestore();
   });
 
-  it("wraps up/down within the current group and restores the requested optimizer row", () => {
+  it("uses arrows across both groups and wraps at the ends of the list", () => {
     const { workspace } = create(40, "dark", true);
     workspace.openSettings(undefined, 6);
     workspace.handleInput("\x1b[A");
-    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› History characters");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Draft character limit");
     workspace.handleInput("\x1b[B");
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Project context");
     workspace.handleInput("\x1b[B");
@@ -237,7 +238,12 @@ describe("shared refine workspace", () => {
     workspace.handleInput("\x1b[B");
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Draft character limit");
     workspace.handleInput("\x1b[B");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Project context");
+    workspace.openSettings(undefined, 9);
+    workspace.handleInput("\x1b[B");
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Default model");
+    workspace.handleInput("\x1b[A");
+    expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› History characters");
   });
 
   it("reuses settings frames without re-querying the optimizer on arrow input", () => {
@@ -245,9 +251,9 @@ describe("shared refine workspace", () => {
     const optimizer = vi.spyOn(actions, "optimizer");
     const paint = vi.spyOn(theme, "fg");
     workspace.openSettings();
-    for (let i = 0; i < 7; i++) { workspace.render(100); workspace.handleInput("\x1b[B"); }
+    for (let i = 0; i < 13; i++) { workspace.render(100); workspace.handleInput("\x1b[B"); }
     paint.mockClear();
-    for (let i = 0; i < 14; i++) { workspace.render(100); workspace.handleInput("\x1b[B"); }
+    for (let i = 0; i < 26; i++) { workspace.render(100); workspace.handleInput("\x1b[B"); }
     expect(paint.mock.calls.filter(([color]) => color !== "borderMuted")).toEqual([]);
     expect(optimizer).toHaveBeenCalledOnce();
     paint.mockRestore();

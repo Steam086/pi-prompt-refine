@@ -3,7 +3,7 @@ import { stripVTControlCharacters } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { panelLayout } from "../../src/panel-layout.js";
 import { composeRevision, selectPreference, type RevisionPreference } from "../../src/revision-preferences.js";
-import { a, b, backTab, bringBack, ctrlS, down, enter, esc, highlightedRow, left, loaded, right, save, search, setup, tab, text } from "../support/preference-panel.js";
+import { a, b, backTab, bringBack, ctrlS, down, enter, esc, highlightedRow, loaded, right, save, search, setup, tab, text, up } from "../support/preference-panel.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -57,9 +57,11 @@ describe("Library purpose groups", () => {
   it("creates a custom result note and shows its destination while choosing the type", async () => {
     const f = setup([], "Name the unresolved question."); await loaded(f.panel);
     f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput("Open question");
-    for (const key of [tab, tab, enter, tab, tab, right]) f.panel.handleInput(key);
-    expect(text(f.panel)).toContain("● Result notes");
+    for (const key of [enter, down, " ", down, down, enter, down]) f.panel.handleInput(key);
+    expect(text(f.panel)).toContain("› ○ Result notes");
     expect(text(f.panel)).toContain("Shown in Result only.");
+    f.panel.handleInput(" ");
+    expect(text(f.panel)).toContain("Type: Result notes");
     f.panel.handleInput(ctrlS);
     await loaded(f.panel);
     expect(f.repo.save).toHaveBeenCalledWith("project", { name: "Open question", body: "Name the unresolved question.",
@@ -220,6 +222,7 @@ describe("three-action preference library", () => {
     f.panel.handleInput("l"); f.panel.handleInput("e");
     f.panel.handleInput(backTab);
     f.panel.handleInput("\x05"); f.panel.handleInput("\x15"); f.panel.handleInput("Renamed 中文😀");
+    f.panel.handleInput(esc); expect(text(f.panel)).not.toContain("Discard unsaved form?");
     f.panel.handleInput(esc); expect(text(f.panel)).toContain("Discard unsaved form?");
     f.panel.handleInput("n"); expect(text(f.panel)).toContain("Name: Renamed 中文😀");
     expect(f.repo.save).not.toHaveBeenCalled();
@@ -245,12 +248,23 @@ describe("three-action preference library", () => {
   it.each(["dark", "light"])("edits classification/description with manual-only selection and bounds each field (%s)", async (themeName) => {
     const f = setup([], "Preserve existing structure.", themeName); await loaded(f.panel);
     f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput("Structure");
-    for (const key of [tab, tab, enter, tab, tab]) f.panel.handleInput(key);
-    expect(text(f.panel)).toContain("Type: ○ Prompt rewriting  ● Task requirements  ○ Result notes");
-    f.panel.handleInput(left);
-    expect(text(f.panel)).toContain("Type: ● Prompt rewriting  ○ Task requirements  ○ Result notes");
-    f.panel.handleInput(enter); f.panel.handleInput("并列问题 😀");
-    f.panel.handleInput(tab); // Description -> Save, with no adoption control.
+    for (const key of [esc, down, down, " ", down, enter]) f.panel.handleInput(key);
+    expect(text(f.panel)).toContain("› ● Project");
+    f.panel.handleInput(down); f.panel.handleInput(" ");
+    expect(text(f.panel)).toContain("› Scope: Global");
+    f.panel.handleInput(down); f.panel.handleInput(" ");
+    expect(text(f.panel)).toContain("Choose type");
+    expect(text(f.panel)).toContain("› ● Task requirements");
+    expect(text(f.panel)).toContain("○ Result notes");
+    f.panel.handleInput(up);
+    expect(text(f.panel)).toContain("› ○ Prompt rewriting");
+    f.panel.handleInput(ctrlS);
+    expect(f.repo.save).not.toHaveBeenCalled();
+    f.panel.handleInput(esc);
+    expect(text(f.panel)).toContain("› Type: Task requirements");
+    for (const key of [enter, up, enter]) f.panel.handleInput(key);
+    expect(text(f.panel)).toContain("› Type: Prompt rewriting");
+    for (const key of [down, " ", "并列问题 😀", enter]) f.panel.handleInput(key);
     expect(text(f.panel)).toContain("› Save to library");
     expect(text(f.panel)).not.toContain("Adoption:");
     for (let field = 0; field < 7; field++) {
@@ -264,7 +278,7 @@ describe("three-action preference library", () => {
     }
     f.terminal.rows = 40;
     f.panel.handleInput(enter); await loaded(f.panel);
-    expect(f.repo.save).toHaveBeenCalledWith("project", { name: "Structure", body: "Preserve existing structure.",
+    expect(f.repo.save).toHaveBeenCalledWith("global", { name: "Structure", body: "Preserve existing structure.",
       metadata: { kind: "rewrite", description: "并列问题 😀", activation: "manual" } }, undefined);
     expect(f.close).not.toHaveBeenCalled();
     expect(text(f.panel)).toContain("0 selected");
@@ -371,6 +385,7 @@ describe("three-action preference library", () => {
     f.repo.save.mockRejectedValueOnce(new Error("Conflict: changed elsewhere"));
     f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput("New title"); save(f.panel); await loaded(f.panel);
     expect(text(f.panel)).toContain("Conflict"); expect(text(f.panel)).toContain("New title");
+    f.panel.handleInput(esc); expect(text(f.panel)).toContain("› Name: New title");
     f.panel.handleInput(esc); expect(text(f.panel)).toContain("Discard unsaved form?");
     f.panel.handleInput(esc); expect(text(f.panel)).toContain("New title");
     f.panel.handleInput(esc); f.panel.handleInput("y");

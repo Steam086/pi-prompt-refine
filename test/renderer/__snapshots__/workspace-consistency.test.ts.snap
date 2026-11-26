@@ -40,7 +40,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │  Settings              Preview    Usage    Settings   │
 │  Context changes take effect next round               │
 │  ───────────────────────────────────────────────────  │
-│   Context    Optimizer                                │
+│  Context                                              │
 │    Project context: [x] On                            │
 │  › Project instructions: Always ›                     │
 │    Directory tree: [ ] Off                            │
@@ -49,7 +49,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │    History messages: 12 messages ›                    │
 │    History characters: 16000 characters ›             │
 │  Pi-loaded rules (e.g. AGENTS.md) may go to the…      │
-│  Esc: Close  Ctrl+S: Save  Tab: Group  Enter: Change  │
+│  Esc: Close  Ctrl+S: Save  ↑↓: Move  ↵/Space: Change  │
 ╰───────────────────────────────────────────────────────╯
 
 === Settings / Optimizer ===
@@ -57,7 +57,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │  Settings              Preview    Usage    Settings   │
 │                                                       │
 │  ───────────────────────────────────────────────────  │
-│   Context    Optimizer                                │
+│  Optimizer                                            │
 │    Default model: provider/rewrite-model ›            │
 │    Thinking: high ›                                   │
 │    Optimization prompt ›                              │
@@ -66,7 +66,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │  › Draft character limit: 16000 characters ›          │
 │  Oversized drafts and revision instructions are       │
 │  rejected, not truncated. Existing work is kept.      │
-│  Esc: Close  Ctrl+S: Save  Tab: Group  Enter: Edit    │
+│  Esc: Close  Ctrl+S: Save  ↑↓: Move  ↵/Space: Edit    │
 ╰───────────────────────────────────────────────────────╯
 
 === Settings / number ===
@@ -83,7 +83,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │                                                       │
 │                                                       │
 │                                                       │
-│  Esc: Cancel  Ctrl+S: Save  Tab: Focus  Enter: Stage  │
+│  Esc: Cancel  Ctrl+S: Save  ↑↓: Presets  ↵: Stage     │
 ╰───────────────────────────────────────────────────────╯
 
 === Settings / validation ===
@@ -100,7 +100,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │                                                       │
 │                                                       │
 │                                                       │
-│  Esc: Cancel  Ctrl+S: Save  Tab: Focus  Enter: Stage  │
+│  Esc: Cancel  Ctrl+S: Save  ↑↓: Presets  ↵: Stage     │
 ╰───────────────────────────────────────────────────────╯
 
 === Result details ===

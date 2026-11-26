@@ -1,4 +1,4 @@
-import { Input, parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
+import { decodeKittyPrintable, getKeybindings, Input, parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { focusLabel, panelConfirmation, panelHeader, panelLayout, type PanelLayoutProvider } from "./panel-layout.js";
 import { confirmationKeyHints, discardKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
@@ -10,7 +10,9 @@ import type { SessionPreferenceChange, SessionPreferenceTarget } from "./app/ses
 import { preferenceGroup, preferenceGroupOrder, RESULT_NOTE_HINT, composeRevision, preferenceContentKey, preferenceKey, preferenceSelectionLabel, preferenceValidationIssue, searchPreferences, selectPreference, PREFERENCE_SELECTION_LIMIT,
   type PreferenceLibrary, type PreferenceMetadata, type PreferenceRepository, type PreferenceScope, type PreferenceValue, type RevisionPreference, type SelectedPreference } from "./revision-preferences.js";
 
-type FormField = "name" | "instruction" | "options" | "scope" | "type" | "description" | "save";
+type TextField = "name" | "instruction" | "description";
+type ChoiceField = "scope" | "type";
+type FormField = TextField | ChoiceField | "options" | "save";
 type Form = {
   kind: "new" | "library";
   expected?: RevisionPreference;
@@ -27,6 +29,7 @@ type Form = {
   initialEditorBody: string;
   initial: string;
   focus: FormField;
+  editing: boolean;
   optionsOpen: boolean;
 };
 
@@ -42,6 +45,7 @@ type DocumentPart = { text: string; color: "text" | "muted" | "warning" | "error
 type PreferenceDocument = DocumentPart[];
 type Page = { kind: "list" } | { kind: "read"; title: string; document: PreferenceDocument; scroll: number }
   | { kind: "form"; form: Form } | { kind: "discard"; form: Form }
+  | { kind: "choose"; form: Form; field: ChoiceField; index: number }
   | { kind: "delete"; entry: RevisionPreference; document: PreferenceDocument };
 type Action = "new" | "edit" | "delete";
 const ACTIONS = [
@@ -51,9 +55,16 @@ const ACTIONS = [
 ] as const;
 const KINDS = ["rewrite", "task", "result"] as const;
 const SCOPES = ["project", "global"] as const;
-function nextChoice<T>(choices: readonly T[], value: T | undefined, step: number): T {
-  const index = value === undefined ? (step > 0 ? -1 : 0) : choices.indexOf(value);
-  return choices[(index + step + choices.length) % choices.length]!;
+const textEditBindings = ["cursorLineStart", "cursorLineEnd", "deleteToLineStart", "deleteToLineEnd",
+  "deleteCharBackward", "deleteCharForward", "yank"] as const;
+const isTextField = (field: FormField): field is TextField => field === "name" || field === "instruction" || field === "description";
+const typeLabel = (metadata?: PreferenceMetadata) => metadata ? preferenceGroup({ metadata }) : "Unclassified (legacy)";
+const scopeLabel = (scope: PreferenceScope) => scope === "project" ? "Project" : "Global";
+
+function moveFormFocus(form: Form, step: number): void {
+  const fields = formFields(form);
+  form.focus = fields[(fields.indexOf(form.focus) + step + fields.length) % fields.length]!;
+  form.editing = false;
 }
 
 type PreferencePanelActions = { back(): void; updateSelection?(selected: SelectedPreference[]): string | undefined; session?: SessionPreferenceTarget };
@@ -110,11 +121,12 @@ export class PreferencePanel {
     const searching = this.hasFocus && this.page.kind === "list" && this.focus === 0;
     this.allSearch.focused = searching && !this.selectedOnly;
     this.selectedSearch.focused = searching && this.selectedOnly;
-    const form = this.page.kind === "form" || this.page.kind === "discard" ? this.page.form : undefined;
+    const form = "form" in this.page ? this.page.form : undefined;
     if (form) {
-      form.name.focused = this.hasFocus && this.page.kind === "form" && form.focus === "name";
-      form.body.editor.focused = this.hasFocus && this.page.kind === "form" && form.focus === "instruction";
-      form.description.focused = this.hasFocus && this.page.kind === "form" && form.focus === "description";
+      const editing = this.hasFocus && this.page.kind === "form" && form.editing;
+      form.name.focused = editing && form.focus === "name";
+      form.body.editor.focused = editing && form.focus === "instruction";
+      form.description.focused = editing && form.focus === "description";
     }
   }
   dispose(): void { this.focused = false; this.disposed = true; }
@@ -122,7 +134,7 @@ export class PreferencePanel {
     this.allSearch.invalidate();
     this.selectedSearch.invalidate();
     this.documents = [];
-    if (this.page.kind === "form") this.page.form.body.editor.invalidate();
+    if ("form" in this.page) this.page.form.body.editor.invalidate();
   }
   private redraw(): void { if (!this.disposed) { this.updateFocus(); this.tui.requestRender(); } }
   private entries(): RevisionPreference[] {
@@ -367,7 +379,7 @@ export class PreferencePanel {
       description, rawDescription, initialEditorDescription: description.getValue(),
       metadata: entry ? entry.metadata && structuredClone(entry.metadata) : { kind: "task", description: "", activation: "manual" },
       expected: kind === "library" ? structuredClone(entry) : undefined, initial: "",
-      focus: kind === "library" ? "instruction" : "name", optionsOpen: false };
+      focus: kind === "library" ? "instruction" : "name", editing: false, optionsOpen: false };
     form.initial = this.stamp(form);
     this.page = { kind: "form", form }; this.setNotice("");
   }
@@ -398,6 +410,7 @@ export class PreferencePanel {
     const issue = preferenceValidationIssue(value);
     if (issue) {
       form.focus = issue.field;
+      form.editing = isTextField(issue.field);
       if (issue.field === "type" || issue.field === "description") form.optionsOpen = true;
       this.setNotice(issue.message, "warning");
       this.redraw();
@@ -448,6 +461,48 @@ export class PreferencePanel {
     finally { this.busy = false; this.redraw(); }
   }
 
+  private handleForm(form: Form, data: string, key: string | undefined, cancel: boolean, enter: boolean, step: number): void {
+    if (key === "tab" || key === "shift+tab") {
+      moveFormFocus(form, key === "tab" ? 1 : -1);
+    } else if (cancel) {
+      if (form.editing) form.editing = false;
+      else this.page = this.stamp(form) === form.initial ? { kind: "list" } : { kind: "discard", form };
+    } else if (form.editing && isTextField(form.focus)) {
+      if (enter && form.focus !== "instruction") moveFormFocus(form, 1);
+      else this.editFormField(form, form.focus, data, enter);
+    } else if (step) {
+      moveFormFocus(form, step);
+    } else if (enter || key === "space") {
+      if (isTextField(form.focus)) form.editing = true;
+      else if (form.focus === "options") form.optionsOpen = !form.optionsOpen;
+      else if (form.focus === "save") void this.save(form);
+      else this.openFormChoice(form, form.focus);
+    } else if (isTextField(form.focus) &&
+      (data.startsWith("\x1b[200~") || decodeKittyPrintable(data) !== undefined || /^[^\p{Cc}]+$/u.test(data) ||
+        textEditBindings.some((action) => getKeybindings().matches(data, `tui.editor.${action}`)))) {
+      form.editing = true;
+      this.editFormField(form, form.focus, data, false);
+    }
+  }
+
+  private editFormField(form: Form, field: TextField, data: string, enter: boolean): void {
+    if (field === "instruction") {
+      if (enter) form.body.editor.insertTextAtCursor("\n");
+      else form.body.editor.handleInput(data);
+    } else {
+      const input = form[field];
+      const before = input.getValue();
+      input.handleInput(data);
+      if (field === "description" && input.getValue() !== before) form.metadata ??= { kind: "task", description: "", activation: "manual" };
+    }
+  }
+
+  private openFormChoice(form: Form, field: ChoiceField): void {
+    const index = field === "scope" ? SCOPES.indexOf(form.scope)
+      : form.metadata ? KINDS.indexOf(form.metadata.kind) : 0;
+    this.page = { kind: "choose", form, field, index: Math.max(0, index) };
+  }
+
   handleInput(data: string): void {
     if (this.disposed) return;
     const key = parseKey(data)?.toLowerCase();
@@ -459,6 +514,7 @@ export class PreferencePanel {
     }
     if (key === "ctrl+s") {
       if (this.page.kind === "form") { void this.save(this.page.form); return; }
+      if (this.page.kind === "choose") return;
       this.setNotice(this.managing ? "Library management only; no request sent."
         : this.purpose === "audit" ? "Read-only snapshot; no request sent."
         : this.purpose === "session" ? "Session choices are saved on Space; no request sent."
@@ -479,31 +535,18 @@ export class PreferencePanel {
     } else if (this.page.kind === "delete") {
       if (key === "y") void this.remove(this.page.entry);
       else if (cancel || key === "n") this.page = { kind: "list" };
-    } else if (this.page.kind === "form") {
-      const form = this.page.form;
-      const step = key === "left" || key === "up" ? -1 : key === "right" || key === "down" ? 1 : 0;
-      if (cancel) this.page = this.stamp(form) === form.initial ? { kind: "list" } : { kind: "discard", form };
-      else if (key === "tab" || key === "shift+tab") form.focus = nextChoice(formFields(form), form.focus, key === "tab" ? 1 : -1);
-      else if (form.focus === "save" && enter) void this.save(form);
-      else if (form.focus === "options" && (enter || key === "space")) form.optionsOpen = !form.optionsOpen;
-      else if (form.focus === "scope" || form.focus === "type") {
-        if (enter) form.focus = nextChoice(formFields(form), form.focus, 1);
-        else if (step && form.focus === "scope" && form.kind === "new") form.scope = nextChoice(SCOPES, form.scope, step);
-        else if (step && form.focus === "type") {
-          form.metadata = { description: form.description.getValue(), kind: nextChoice(KINDS, form.metadata?.kind, step), activation: "manual" };
-        }
-      } else if (form.focus === "description") {
-        if (enter) form.focus = "save";
-        else {
-          const before = form.description.getValue();
-          form.description.handleInput(data);
-          if (form.description.getValue() !== before) form.metadata ??= { kind: "task", description: "", activation: "manual" };
-        }
-      } else if (form.focus === "instruction") {
-        if (enter) form.body.editor.insertTextAtCursor("\n");
-        else form.body.editor.handleInput(data);
-      } else if (form.focus === "name") {
-        if (enter) form.focus = "instruction"; else form.name.handleInput(data);
+    } else if (this.page.kind === "form" || this.page.kind === "choose") {
+      const step = this.keys.matches(data, "tui.select.up") ? -1 : this.keys.matches(data, "tui.select.down") ? 1 : 0;
+      const page = this.page;
+      if (page.kind === "form") this.handleForm(page.form, data, key, cancel, enter, step);
+      else if (cancel) this.page = { kind: "form", form: page.form };
+      else if (enter || key === "space") {
+        if (page.field === "scope") page.form.scope = SCOPES[page.index]!;
+        else page.form.metadata = { description: page.form.description.getValue(), kind: KINDS[page.index]!, activation: "manual" };
+        this.page = { kind: "form", form: page.form };
+      } else if (step) {
+        const count = page.field === "scope" ? SCOPES.length : KINDS.length;
+        page.index = (page.index + step + count) % count;
       }
     } else if (cancel) {
       if (this.focus === 0 && key !== "ctrl+\\") this.focus = 1;
@@ -566,72 +609,44 @@ export class PreferencePanel {
   }
 
   private renderForm(form: Form, width: number, height: number): string[] {
-    const type = form.metadata ? preferenceGroup({ metadata: form.metadata }) : "Unclassified (legacy)";
+    const type = typeLabel(form.metadata);
     const controls = {
       options: `Options ${form.optionsOpen ? "▾" : "▸"} · ${form.scope} · ${type}`,
+      scope: `Scope: ${scopeLabel(form.scope)} ›`,
+      type: `Type: ${type} ›`,
       save: "Save to library",
     };
     const fields = formFields(form);
     const count = Math.min(fields.length, Math.max(1, height - 1));
     const start = Math.max(0, Math.min(fields.indexOf(form.focus) - 1, fields.length - count));
     const visible = fields.slice(start, start + count);
-    let extraRows = Math.max(0, height - visible.length);
-    const choices: Partial<Record<"scope" | "type", string[]>> = {};
-    for (const field of ["type", "scope"] as const) {
-      if (!visible.includes(field)) continue;
-      const rows = this.formChoiceRows(form, field, width, extraRows + 1);
-      choices[field] = rows;
-      extraRows -= rows.length - 1;
-    }
     return visible.flatMap((field) => {
       const active = form.focus === field;
       if (field === "name" || field === "description") {
         return [this.textField(form[field], field === "name" ? "Name:" : "Description:", width, active)];
       }
       if (field === "instruction") {
-        const rows = extraRows;
+        const rows = height - visible.length;
         if (rows < 1) {
           const prefix = width > 1 ? focusLabel(this.theme, 1, "", active) : "";
           return [prefix + form.body.render(width - visibleWidth(prefix), 1)[0]!];
         }
         return [focusLabel(this.theme, width, "Instruction:", active), ...form.body.render(width, rows)];
       }
-      if (field === "scope" || field === "type") return choices[field]!;
       return [focusLabel(this.theme, width, controls[field], active)];
     });
   }
 
-  private formChoiceRows(form: Form, field: "scope" | "type", width: number, rows: number): string[] {
-    if (field === "scope") return this.formChoices("Scope", SCOPES, form.scope, form.focus === "scope", width,
-      (value) => value, (value) => value, rows);
-    return this.formChoices("Type", KINDS, form.metadata?.kind, form.focus === "type", width,
-      (kind) => preferenceGroup({ metadata: { kind, activation: "manual", description: "" } }),
-      (kind) => ({ rewrite: "Rewrite", task: "Task", result: "Result" })[kind], rows);
-  }
-
-  private formChoices<T>(label: string, choices: readonly T[], selected: T | undefined, focused: boolean, width: number,
-    full: (value: T) => string, short: (value: T) => string, height = Infinity): string[] {
-    const theme = this.theme;
-    const cell = (choice: T, name: (value: T) => string) => {
-      const text = `${choice === selected ? "●" : "○"} ${name(choice)}`;
-      return choice !== selected ? theme.fg("muted", text)
-        : focused ? theme.bg("selectedBg", theme.fg("text", theme.bold(text))) : theme.fg("text", text);
-    };
-    const prefix = focusLabel(theme, width, `${label}:`, focused) + " ";
-    const legacyLabel = focused ? theme.bg("selectedBg", theme.fg("text", "Unclassified (legacy)"))
-      : theme.fg("muted", "Unclassified (legacy)");
-    const legacy = selected === undefined ? legacyLabel + theme.fg("muted", " · ") : "";
-    for (const name of [full, short]) {
-      const row = prefix + legacy + choices.map((choice) => cell(choice, name)).join("  ");
-      if (visibleWidth(row) <= width) return [row];
-    }
-    if (choices.length + Number(!!legacy) > height) {
-      return [prefix + (selected === undefined ? theme.fg("muted", "Unclassified") : cell(selected, short))];
-    }
-    const indent = " ".repeat(visibleWidth(prefix));
-    const rows = choices.map((choice, i) => (i || legacy ? indent : prefix) + cell(choice,
-      visibleWidth(prefix) + 2 + visibleWidth(full(choice)) <= width ? full : short));
-    return legacy ? [prefix + legacyLabel, ...rows] : rows;
+  private renderFormChoices(page: Extract<Page, { kind: "choose" }>, width: number, height: number): string[] {
+    const { field, form, index } = page;
+    const rows = field === "scope"
+      ? SCOPES.map((scope) => [scopeLabel(scope), scope === form.scope] as const)
+      : KINDS.map((kind) => [typeLabel({ kind, activation: "manual", description: "" }), kind === form.metadata?.kind] as const);
+    const note = field === "type" && KINDS[index] === "result" && height > rows.length
+      ? [this.theme.fg("muted", truncateToWidth(RESULT_NOTE_HINT, width, "…"))] : [];
+    const window = selectionWindow(rows.length, index, height - note.length);
+    return [...rows.slice(window.start, window.end).map(([label, selected], i) =>
+      focusLabel(this.theme, width, `${selected ? "●" : "○"} ${label}`, window.start + i === index)), ...note];
   }
 
   render(width: number): string[] {
@@ -674,20 +689,24 @@ export class PreferencePanel {
       const actions = discard ? discardKeyHints(w, this.theme) : confirmationKeyHints(["Esc", "Cancel"], ["y", "Delete"], w, this.theme);
       const detail = discard ? [] : this.document(page.document, Math.min(w, 56)).slice(0, 5);
       return panelConfirmation(layout, this.theme.fg("warning", this.theme.bold(title)), actions, detail, border);
+    } else if (page.kind === "choose") {
+      title = page.field === "scope" ? "Choose scope" : "Choose type";
+      if (page.field === "type" && !page.form.metadata) subtitle = "Current type: Unclassified (legacy)";
+      renderBody = (h) => this.renderFormChoices(page, w, h);
+      hints = [w < 17 ? ["Esc", ""] : back, ["↑↓", w >= 33 ? "Move" : ""], [w >= 42 ? "Enter/Space" : "↵", "Choose"]];
     } else if (page.kind === "form") {
       const form = page.form;
       title = form.kind === "library" ? "Edit library entry" : "Save new preference";
       subtitle = form.metadata?.kind === "result" ? RESULT_NOTE_HINT : "";
       renderBody = (h) => this.renderForm(form, w, h);
       const compact = w < 30;
-      const action: KeyHint = form.focus === "scope" || form.focus === "type"
-        ? [this.formChoiceRows(form, form.focus, w, Infinity).length > 1 ? "↑↓" : "←→", compact ? "" : "Choose"]
-        : [compact ? "↵" : "Enter", {
-          name: "Next", instruction: compact ? "NL" : "Newline",
-          options: form.optionsOpen ? "Hide options" : "Show options", description: "Next", save: "Save",
-        }[form.focus]];
-      hints = [w < 20 ? ["Esc", ""] : back, [compact ? "^S" : "Ctrl+S", w >= 60 ? "Save to library" : w >= 11 ? "Save" : ""],
-        ["Tab", compact ? "" : "Fields"], action];
+      const editing = form.editing;
+      const action: KeyHint = [compact ? "↵" : editing ? "Enter" : "Enter/Space",
+        editing ? form.focus === "instruction" ? compact ? "NL" : "Newline" : "Next"
+          : form.focus === "options" ? form.optionsOpen ? "Hide" : "Show"
+          : form.focus === "scope" || form.focus === "type" ? "Choose" : form.focus === "save" ? "Save" : "Edit"];
+      hints = [["Esc", w < 20 ? "" : editing ? "Done" : "Back"], [compact ? "^S" : "Ctrl+S", w >= 66 ? "Save to library" : w >= 11 ? "Save" : ""],
+        ...(editing ? [] : [["↑↓", compact ? "" : "Fields"] as const]), action];
     } else {
       const entries = this.entries();
       this.index = Math.min(this.index, Math.max(0, entries.length - 1));
@@ -788,7 +807,7 @@ export class PreferencePanel {
     const feedback = this.theme.fg(subtitleColor, clean(`${severe ? "⚠ " : ""}${subtitle}`));
     const heading = (text: string) => this.theme.fg("text", this.theme.bold(text));
     let headline = heading(clean(title));
-    let actions = fittingKeyHints(hints, w, this.theme, w < 30 && page.kind === "form" ? " " : " · ");
+    let actions = fittingKeyHints(hints, w, this.theme, w < 30 && (page.kind === "form" || page.kind === "choose") ? " " : " · ");
     if (page.kind === "list" && layout.headerHeight > 0) {
       const shortTitle = managing ? "Library" : audit ? "Adopted" : this.purpose === "refine" ? "Unsent" : session ? "Session" : "Revision";
       const shownTitle = visibleWidth(title) + 3 + visibleWidth("Esc Tab ?") <= w ? title : shortTitle;
@@ -801,7 +820,7 @@ export class PreferencePanel {
       headline = heading(shownTitle) + (shownHints ? "   " + shownHints : "");
       actions = "";
     }
-    const formFeedback = page.kind === "form" && !!subtitle;
+    const formFeedback = (page.kind === "form" || page.kind === "choose") && !!subtitle;
     const chrome = panelHeader(layout, [formFeedback && layout.headerHeight === 1 ? feedback : headline,
       formFeedback ? feedback : ""], [], actions);
     const body = renderBody(chrome.layout.bodyHeight);

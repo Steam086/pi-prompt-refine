@@ -9,7 +9,7 @@ import { type PreferenceLibrary, type PreferenceRepository, type RevisionPrefere
 import { RefineWorkspace } from "../../src/workspace.js";
 import { getThemeByName } from "./pi-theme.js";
 
-export const esc = "\x1b", enter = "\r", tab = "\t", backTab = "\x1b[Z", down = "\x1b[B", left = "\x1b[D", right = "\x1b[C";
+export const esc = "\x1b", enter = "\r", tab = "\t", backTab = "\x1b[Z", up = "\x1b[A", down = "\x1b[B", left = "\x1b[D", right = "\x1b[C";
 
 export const ctrlS = "\x13", altP = "\x1bp", bringBack = "\x1b[13;3u";
 

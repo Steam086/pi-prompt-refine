@@ -109,7 +109,8 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         expect(hintStrip, name).not.toContain("\x1b[1m");
         expect(hintStrip, name).toContain(`${theme.fg("muted", `${action[0]}:`)} ${theme.fg("muted", action[1])}`);
         expect(bodyText(lines[divider + 1]!), name).not.toBe("");
-        expect(strip(hintStrip), name).not.toMatch(/\s(?:Space|←|→|↑↓|b|d|p|m|f): /);
+        expect(strip(hintStrip), name).not.toMatch(/\s(?:Space|←|→|b|d|p|m|f): /);
+        if (active === "Settings") expect(strip(hintStrip), name).toMatch(/↑↓: (?:Move|Presets)/);
         if (active === "Preview") expect(hintStrip).toContain(`${theme.fg("muted", "a:")} ${theme.fg("muted", "Editor only")}`);
         if (active !== "Settings") expect(strip(hintStrip)).toContain("?: Help");
         expect(divider, name).toBe(row + 2);
@@ -172,11 +173,14 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         const focusedSetting = settings.find((line) => strip(line).includes("› Project instructions"));
         expect(focusedSetting).toContain(theme.getBgAnsi("selectedBg"));
         expect(focusedSetting).toMatch(/\x1b\[1mProject instructions *\x1b\[22m/);
-        input("\t"); input("\x1b[A");
+        for (let i = 0; i < 6; i++) input("\x1b[B");
+        const model = frame("Settings / cross-group focus", false).map(strip).join("\n");
+        expect(model).toMatch(/› Default model:? +provider\/rewrite-model/);
+        input("\x1b[B");
+        expect(frame("Settings / thinking focus", false).map(strip).join("\n")).toMatch(/› Thinking:? +high/);
+        for (let i = 0; i < 4; i++) input("\x1b[B");
         const optimizer = passivePage("Settings / Optimizer", "Settings", ["Ctrl+S", "Save"]);
         const optimizerText = optimizer.map(strip).join("\n");
-        expect(optimizerText).toMatch(/Default model:? +provider\/rewrite-model/);
-        expect(optimizerText).toMatch(/Thinking:? +high/);
         expect(optimizerText).not.toContain("Advanced");
         expect(optimizerText).toMatch(/› Draft character limit:? +16000 characters/);
         expect(optimizerText.replace(/\s*│\n│\s*/g, " ")).toContain("Oversized drafts and revision instructions are rejected, not truncated.");
@@ -228,9 +232,9 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         expect(strip(frame("Optimization prompt / cancel edit", false).join("\n"))).toContain("› Optimization prompt");
         expect(savePrompt).toHaveBeenCalledTimes(1);
         expect(saveContext).not.toHaveBeenCalled();
-        input("\x1b[B"); input("\x1b[B"); input("\x1b[B"); input("\t");
-        input("\x1b[A"); input("\x1b[A"); input("\r"); // Reach History characters from Project instructions.
+        input("\x1b[A"); input("\x1b[A"); input("\x1b[A"); input("\r"); // From Optimization prompt to History characters.
         const number = passivePage("Settings / number", "Settings", ["Esc", "Cancel"]);
+        expect(strip(frameHints(number).join("\n"))).toMatch(/(?:Enter|↵): Stage/);
         const rule = number.findIndex((line, index) => index > 0 && /^─+$/u.test(strip(line).slice(1, -1).trim()));
         expect(strip(number[rule + 1])).toContain("› Value: 16000");
         input("\x15"); input("-1"); input("\r");

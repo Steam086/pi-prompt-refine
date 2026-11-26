@@ -18,13 +18,13 @@ describe("shared refine workspace", () => {
     }
   });
 
-  it.each(["dark", "light"])("renders aligned columns, group tabs and full row focus in %s", (name) => {
+  it.each(["dark", "light"])("renders aligned columns, group headings and full row focus in %s", (name) => {
     const { workspace, theme } = create(40, name, true);
     workspace.openSettings();
     const rendered = workspace.render(100);
     const lines = rendered.map(stripVTControlCharacters);
     expect(rendered[1]).toContain(theme.fg("text", theme.bold("Settings")));
-    expect(textOf(rendered)).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Context "))));
+    expect(textOf(rendered)).toContain(theme.fg("text", theme.bold("Context")));
     const rules = lines.find((line) => line.includes("Project instructions"))!;
     const tree = lines.find((line) => line.includes("Directory tree"))!;
     const skills = lines.find((line) => line.includes("Skill metadata"))!;
@@ -32,11 +32,11 @@ describe("shared refine workspace", () => {
     expect(tree.indexOf("[x] On")).toBe(skills.indexOf("[ ] Off"));
     expect(rules.indexOf("AGENTS.md")).toBe(tree.indexOf("Default tree"));
     expect(tree.indexOf("Default tree")).toBe(skills.indexOf("Skill names"));
-    expect(textOf(lines)).not.toContain("Model");
+    expect(textOf(lines)).toContain("Default model");
     const before = lines.findIndex((line) => line.includes("Directory tree"));
     workspace.handleInput("\x1b[B");
     expect(workspace.render(100).findIndex((line) => line.includes("Directory tree"))).toBe(before);
-    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["Tab", "Next group"], theme, 1, "secondary"));
+    expect(textOf(workspace.render(100))).toContain(formatKeyHint(["↑↓", "Move"], theme, 1, "secondary"));
   });
 
   it.each(["dark", "light"])("keeps a continuous highlight around clipped Unicode values in %s", (name) => {
@@ -97,9 +97,9 @@ describe("shared refine workspace", () => {
     expect(settings[1]).toContain(theme.fg("text", theme.bold("Settings")));
     expect(frameHeader(main).join("\n")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Preview "))));
     expect(frameHeader(settings).join("\n")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Settings "))));
-    expect(textOf(settings)).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Context "))));
+    expect(textOf(settings)).toContain(theme.fg("text", theme.bold("Context")));
     expect(footer(main)[0]).toContain(formatKeyHint(["a", "Accept"], theme));
-    expect(footer(settings)[0]).toContain(formatKeyHint(["Enter", "Change"], theme, 1, "secondary"));
+    expect(footer(settings)[0]).toContain(formatKeyHint(["Enter/Space", "Change"], theme, 1, "secondary"));
     expect(main).toHaveLength(settings.length);
   });
 
@@ -281,7 +281,7 @@ describe("shared refine workspace", () => {
     const { workspace } = create(40, "dark", true);
     workspace.openSettings(undefined, cursor);
     const hints = footer(workspace.render(100)).map((line) => stripVTControlCharacters(line).replace(/^│|│$/g, "").trim());
-    expect(hints).toEqual([`Esc: Close  Ctrl+S: Save  Tab: Next group  Enter: ${cursor === 3 ? "Choose" : "Change"}`]);
+    expect(hints).toEqual([`Esc: Close  Ctrl+S: Save  ↑↓: Move  Enter/Space: ${cursor === 3 ? "Choose" : "Change"}`]);
   });
 
   it.each(["dark", "light"])("aligns Settings hints across groups, dirty/disabled states and resize in %s", (name) => {
@@ -294,9 +294,9 @@ describe("shared refine workspace", () => {
           const lines = workspace.render(width);
           const footerRows = footer(lines);
           const hints = footerRows.map(stripVTControlCharacters).join("\n");
-          const action = cursor === 3 ? "Choose" : cursor === 4 ? undefined : cursor === 5 ? "Edit" : "Change";
+          const action = cursor === 3 ? "Choose" : cursor === 4 ? undefined : cursor === 5 ? "Edit" : cursor === 0 ? "Change" : "Toggle";
           const back = dirty ? "Discard" : "Close";
-          expect(hints).not.toMatch(/(?:Space|←|→|↑↓):|\t/);
+          expect(hints).not.toMatch(/(?:←|→):|\t/);
           expect(hints).toMatch(/(?:Ctrl\+S:|\^S) Save/);
           expect(hints).toMatch(new RegExp(`Esc:? ${back}`));
           if (width >= 80) expect(footerRows).toHaveLength(1);
@@ -305,9 +305,9 @@ describe("shared refine workspace", () => {
           for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
           if (width >= 80) {
             expect(hints).toContain(`Esc: ${back}`);
-            if (optimizer) expect(hints).toContain("Tab: Next group");
-            if (action) expect(hints).toContain(`Enter: ${action}`);
-            if (!action) expect(hints).not.toContain("Enter:");
+            expect(hints).toContain("↑↓: Move");
+            if (action) expect(hints).toContain(`Enter/Space: ${action}`);
+            if (!action) expect(hints).not.toContain("Enter/Space:");
             expect(footerRows[0]).toContain(formatKeyHint(["Ctrl+S", "Save"], theme, 1, "secondary"));
             expect(footerRows[0]).toContain(formatKeyHint(["Esc", dirty ? "Discard…" : "Close"], theme, 1, "secondary"));
           }
@@ -334,9 +334,9 @@ describe("shared refine workspace", () => {
       expect(footer(workspace.render(24)).map(stripVTControlCharacters).join("\n")).toMatch(/Esc:? Discard/);
     }
     terminal.rows = 5;
-    expect(stripVTControlCharacters(footer(workspace.render(40)).at(-1)!).trim()).toBe("Esc Discard · ^S Save · Tab Group");
+    expect(stripVTControlCharacters(footer(workspace.render(40)).at(-1)!).trim()).toBe("Esc Discard · ^S Save · ↑↓");
     workspace.openSettings();
-    expect(stripVTControlCharacters(footer(workspace.render(40)).at(-1)!).trim()).toBe("Esc Close · ^S Save · Tab Group");
+    expect(stripVTControlCharacters(footer(workspace.render(40)).at(-1)!).trim()).toBe("Esc Close · ^S Save · ↑↓ · ↵ Choose");
     expect(stripVTControlCharacters(footer(workspace.render(12)).at(-1)!).trim()).toBe("Esc ^S Save");
   });
 
@@ -506,7 +506,7 @@ describe("shared refine workspace", () => {
     const bg = vi.spyOn(theme, "bg");
     workspace.render(100);
     const selected = bg.mock.calls.filter(([color]) => color === "selectedBg");
-    expect(selected).toHaveLength(3); // Page, group and keyboard focus.
+    expect(selected).toHaveLength(2); // Workspace tab and keyboard focus.
     const focus = selected.filter(([, text]) => stripVTControlCharacters(text).startsWith("› "));
     expect(focus).toHaveLength(1);
     expect(visibleWidth(focus[0]![1])).toBe(panelLayout(100, 40).innerWidth);

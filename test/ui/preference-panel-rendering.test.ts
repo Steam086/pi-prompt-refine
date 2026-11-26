@@ -153,20 +153,23 @@ describe("preference rendering and responsiveness", () => {
     f.panel.handleInput("l");
     for (const hint of [["n", "Add"], ["e", "Edit"], ["d", "Delete"]] as KeyHint[]) expect(f.panel.render(100).join("\n")).toContain(formatKeyHint(hint, f.theme));
     f.panel.handleInput(enter); check(["↑↓ / PgUp / PgDn", "Scroll"], ["Esc", "Back"]); f.panel.handleInput(esc);
-    f.panel.handleInput("n"); check(["Enter", "Next"], ["Tab", "Fields"], ["Esc", "Back"], ["Ctrl+S", "Save to library"]);
-    f.panel.handleInput("Name"); f.panel.handleInput(tab); check(["Enter", "Newline"]);
-    f.panel.handleInput(tab); check(["Enter", "Show options"]);
-    f.panel.handleInput(enter); check(["Enter", "Hide options"]);
-    f.panel.handleInput(tab); check(["←→", "Choose"]);
-    f.panel.handleInput(tab); check(["←→", "Choose"]);
-    f.panel.handleInput(tab); check(["Enter", "Next"]);
-    f.panel.handleInput(tab); check(["Enter", "Save"]);
-    expect(text(f.panel, 20)).toContain("Esc ^S Save Tab");
+    f.panel.handleInput("n"); check(["Enter/Space", "Edit"], ["↑↓", "Fields"], ["Esc", "Back"], ["Ctrl+S", "Save to library"]);
+    f.panel.handleInput("Name"); f.panel.handleInput(enter);
+    f.panel.handleInput(" "); check(["Enter", "Newline"], ["Esc", "Done"]);
+    f.panel.handleInput(esc); f.panel.handleInput(down); check(["Enter/Space", "Show"]);
+    f.panel.handleInput(enter); check(["Enter/Space", "Hide"]);
+    f.panel.handleInput(down); check(["Enter/Space", "Choose"]);
+    f.panel.handleInput(down); check(["Enter/Space", "Choose"]);
+    f.panel.handleInput(enter); check(["↑↓", "Move"], ["Enter/Space", "Choose"]);
+    f.panel.handleInput(esc);
+    f.panel.handleInput(down); check(["Enter/Space", "Edit"]);
+    f.panel.handleInput(down); check(["Enter/Space", "Save"]);
+    expect(text(f.panel, 20)).toContain("Esc ^S Save ↑↓");
     f.panel.handleInput(esc); check(["y", "Discard"], ["Esc", "Keep editing"]);
     f.panel.handleInput("y"); f.panel.handleInput("d"); check(["y", "Delete"], ["Esc", "Cancel"]);
   });
 
-  it.each(["dark", "light"])("anchors list and form shortcuts through Tab and centers discard with the safe shortcut first (%s)", async (theme) => {
+  it.each(["dark", "light"])("anchors form shortcuts across arrow navigation and centers discard with the safe shortcut first (%s)", async (theme) => {
     const f = setup([], "", theme, [a], "manage"); await loaded(f.panel);
     for (const width of [40, 58, 100]) {
       const header = () => frameHeader(f.panel.render(width)).map(stripVTControlCharacters);
@@ -180,12 +183,15 @@ describe("preference rendering and responsiveness", () => {
     }
     f.panel.handleInput("?"); expect(text(f.panel)).toContain("Preferences keys");
     expect(text(f.panel)).toContain("n / e / d"); f.panel.handleInput(esc);
-    f.panel.handleInput("n"); f.panel.handleInput("Draft name"); f.panel.handleInput(tab);
-    f.panel.handleInput("Draft instruction");
+    f.panel.handleInput("n"); f.panel.handleInput("Draft name"); f.panel.handleInput(enter);
     const shortcuts = () => frameHeader(f.panel.render(100)).map(stripVTControlCharacters)[1]!;
     const shared = shortcuts().split(" · ").slice(0, 3);
+    expect(f.panel.render(100).join("\n")).not.toContain(CURSOR_MARKER);
+    for (const key of [" ", "Draft instruction", enter, "Second line", "\x1b[A", "!"]) f.panel.handleInput(key);
     expect(f.panel.render(100).join("\n")).toContain(CURSOR_MARKER);
-    for (const key of [tab, enter, tab, tab]) f.panel.handleInput(key);
+    expect(highlightedRow(f.panel)).toContain("Instruction");
+    f.panel.handleInput(esc);
+    for (const key of [down, " ", down, down]) f.panel.handleInput(key);
     expect(shortcuts().split(" · ").slice(0, 3)).toEqual(shared);
     expect(f.panel.render(100).join("\n")).not.toContain(renderFakeCursor(" ").split(" ")[0]);
     f.panel.handleInput(esc);
@@ -197,8 +203,10 @@ describe("preference rendering and responsiveness", () => {
     expect(actions.trim()).toBe("Esc Keep editing · y Discard");
     expect(Math.abs(actions.indexOf("Esc") - (100 - visibleWidth(actions.trim())) / 2)).toBeLessThanOrEqual(1);
     f.panel.handleInput(esc);
-    expect(text(f.panel)).toContain("Draft instruction");
-    expect(shortcuts()).toContain("←→ Choose");
+    expect(text(f.panel)).toContain("Draft instr!uction");
+    expect(text(f.panel)).toContain("Second line");
+    expect(highlightedRow(f.panel)).toContain("Type: Task requirements");
+    expect(shortcuts()).toContain("Enter/Space Choose");
     expect(f.repo.save).not.toHaveBeenCalled();
   });
 
@@ -217,9 +225,9 @@ describe("preference rendering and responsiveness", () => {
     f.panel.handleInput("l"); check(); f.panel.handleInput(tab); check(); f.panel.handleInput(tab); check();
     expect(f.panel.render(100).join("\n")).toContain(CURSOR_MARKER);
     f.panel.handleInput(enter); f.panel.handleInput(enter); check(); f.panel.handleInput(esc);
-    f.panel.handleInput("n"); check(); f.panel.handleInput(tab); check();
+    f.panel.handleInput("n"); check(); f.panel.handleInput(down); f.panel.handleInput(enter); check();
     expect(f.panel.render(100).join("\n")).toContain(CURSOR_MARKER);
-    f.panel.handleInput("Edited"); f.panel.handleInput(esc); check();
+    f.panel.handleInput("Edited"); f.panel.handleInput(esc); f.panel.handleInput(esc); check();
     f.terminal.rows = 8;
     expect(f.panel.render(20).join("\n")).toContain(formatKeyHint(["Esc", ""], f.theme));
   });
@@ -287,7 +295,7 @@ describe("preference rendering and responsiveness", () => {
       expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
       expect(stripVTControlCharacters(lines.join("\n"))).toContain("Write conflict");
       expect(lines.join("\n")).toContain(f.theme.fg("error", "⚠ Write conflict 中文😀").split("⚠")[0]);
-      if (rows >= 8) expect(lines.join("\n")).toContain(formatKeyHint(["Esc", width < 24 ? "" : "Back"], f.theme));
+      if (rows >= 8) expect(lines.join("\n")).toContain(formatKeyHint(["Esc", width < 24 ? "" : "Done"], f.theme));
     }
     const failure = setup([], "Extra", name); await loaded(failure.panel);
     failure.library.errors.project = "Permission denied";

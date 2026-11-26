@@ -257,7 +257,7 @@ describe("Unsent preference selection", () => {
     expect(text(w)).not.toContain(f.originals[0]!.input.draft);
     for (const key of ["p", "i", "f", enter]) w.handleInput(key);
     expect(f.run).not.toHaveBeenCalled(); expect(f.complete).not.toHaveBeenCalled();
-    w.handleInput(esc); w.handleInput("y"); w.handleInput(esc);
+    w.handleInput(esc); w.handleInput(esc); w.handleInput("y"); w.handleInput(esc);
     expect(text(w)).toContain("Preferences · Unsent original");
     w.handleInput(" "); w.handleInput(esc);
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(a)]);

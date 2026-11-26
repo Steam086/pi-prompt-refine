@@ -102,6 +102,7 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
       expect(current).toEqual({ ...original, version: 2 });
       const expected = structuredClone(current);
       input("e"); input("\x1b[Z"); input("\x05"); input("\x15"); input("Renamed 中文😀"); render();
+      input("\x1b"); expect(render()).not.toContain("Discard unsaved form?");
       input("\x1b"); expect(render()).toContain("Discard unsaved form?");
       input("n"); expect(render()).toContain("Renamed 中文😀");
       expect(save).toHaveBeenCalledTimes(2);
@@ -237,7 +238,7 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
         expect(panel.render(columns!).join("\n")).toContain(theme.fg("error", "⚠").split("⚠")[0] + "⚠");
       }
       expect(render()).toContain("Unsaved");
-      input("\x1b"); input("y"); // Explicitly discard only the failed form.
+      input("\x1b"); input("\x1b"); input("y"); // Explicitly discard only the failed form.
       input("d"); expect(render()).toContain("Delete library entry?");
       input("n"); expect(current).toHaveLength(1);
       input("d"); input("y"); for (let i = 0; i < 4; i++) await Promise.resolve();

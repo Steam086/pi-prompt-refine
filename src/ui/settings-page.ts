@@ -1,7 +1,7 @@
 import { stripVTControlCharacters } from "node:util";
 import { parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { focusLabel, panelConfirmation, panelHeader, panelTabs, workspaceTabs, type PanelLayout, type PanelLayoutProvider } from "../panel-layout.js";
+import { focusLabel, panelConfirmation, panelHeader, workspaceTabs, type PanelLayout, type PanelLayoutProvider } from "../panel-layout.js";
 import { discardKeyHints, passiveHeaderHints, type KeyHint } from "../key-hints.js";
 import type { PromptInput } from "../prompt-input.js";
 import { sanitizeTerminalText } from "../presentation.js";
@@ -161,22 +161,31 @@ export class SettingsPage {
     const { spec, input } = editor;
     const key = parseKey(data);
     const enter = this.keys.matches(data, "tui.input.submit");
+    const up = this.keys.matches(data, "tui.select.up");
+    const down = this.keys.matches(data, "tui.select.down");
     if (key === "escape" || key === "ctrl+\\" || this.keys.matches(data, "tui.select.cancel")) {
-      this.closeNumber();
+      if (editor.preset === undefined) this.closeNumber();
+      else {
+        editor.preset = undefined;
+        this.focused = this.hasFocus;
+      }
     } else if (key === "tab" || key === "shift+tab") {
       editor.preset = editor.preset === undefined ? Math.max(0, spec.presets.indexOf(Number(input.editor.getExpandedText()))) : undefined;
       this.focused = this.hasFocus;
+    } else if (up || down) {
+      const text = input.editor.getExpandedText().trim();
+      const current = text ? spec.presets.indexOf(Number(text)) : -1;
+      const index = editor.preset ?? (current < 0 ? (up ? 0 : -1) : current);
+      editor.preset = (index + (up ? -1 : 1) + spec.presets.length) % spec.presets.length;
+      this.focused = this.hasFocus;
     } else if (key !== "ctrl+s" && editor.preset !== undefined) {
-      if (enter) {
+      if (enter || key === "space") {
         input.editor.setText(String(spec.presets[editor.preset]));
         editor.preset = undefined;
         editor.error = "";
         this.settingsNotice = "";
         this.settingsFailed = false;
         this.focused = this.hasFocus;
-      } else if (this.keys.matches(data, "tui.select.up") || this.keys.matches(data, "tui.select.down")) {
-        const step = this.keys.matches(data, "tui.select.up") ? -1 : 1;
-        editor.preset = (editor.preset + step + spec.presets.length) % spec.presets.length;
       }
     } else if (enter || key === "ctrl+s") {
       const text = input.editor.getExpandedText().trim();
@@ -222,12 +231,13 @@ export class SettingsPage {
     const { spec, input, error, preset } = this.numberInput!;
     const active = preset !== undefined;
     const layout = this.layout(width);
-    const action = active ? "Use preset" : "Stage";
-    const hints: KeyHint[] = [["Esc", "Cancel"], ["Ctrl+S", layout.innerWidth >= 100 ? "Save settings" : "Save"],
-      ["Tab", "Focus"], ["Enter", action]];
-    const compact: KeyHint[] = [["Esc", layout.innerWidth >= 18 ? "Cancel" : ""], ["^S", layout.innerWidth >= 11 ? "Save" : ""],
-      ["Tab", ""], ["↵", active ? "Use" : "Stage"]];
-    if (active) { hints.push(["↑↓", "Choose"]); compact.push(["↑↓", "Choose"]); }
+    const shortAction = active ? "Use" : "Stage";
+    const submit: KeyHint = layout.innerWidth >= (active ? 62 : 52)
+      ? active ? ["Enter/Space", "Use preset"] : ["Enter", "Stage"] : ["↵", shortAction];
+    const hints: KeyHint[] = [["Esc", active ? "Back" : "Cancel"], ["Ctrl+S", layout.innerWidth >= 100 ? "Save settings" : "Save"],
+      ["↑↓", "Presets"], submit];
+    const compact: KeyHint[] = [["Esc", layout.innerWidth >= 18 ? active ? "Back" : "Cancel" : ""], ["^S", layout.innerWidth >= 11 ? "Save" : ""],
+      ["↑↓", ""], ["↵", shortAction]];
     const { tabs, footer } = this.hintLayout(layout, this.saving ? [] : hints, this.saving ? [] : compact);
     const { innerWidth } = layout;
     const theme = this.theme;
@@ -352,11 +362,13 @@ export class SettingsPage {
       else if (this.cursor === 5) this.openOptimizationPrompt();
       else this.cycleThinking();
     } else {
-      const rows = this.settingsGroups[this.settingsGroup]!.rows;
+      const groups = this.settingsGroups;
+      const rows = groups.flatMap((group) => group.rows);
       const index = rows.indexOf(this.cursor);
-      if (this.keys.matches(data, "tui.select.up")) this.cursor = rows[(index + rows.length - 1) % rows.length]!;
-      else if (this.keys.matches(data, "tui.select.down")) this.cursor = rows[(index + 1) % rows.length]!;
-      else return true;
+      const direction = this.keys.matches(data, "tui.select.up") ? -1 : this.keys.matches(data, "tui.select.down") ? 1 : 0;
+      if (!direction) return true;
+      this.groupCursors[groups[this.settingsGroup]!.memory] = this.cursor;
+      this.cursor = rows[(index + direction + rows.length) % rows.length]!;
       this.detailPage = 0;
       this.detailPages = 1;
       this.tui.requestRender();
@@ -391,22 +403,22 @@ export class SettingsPage {
     const groups = this.settingsGroups;
     const group = groups[this.settingsGroup]!.label;
     const action = this.cursor === 4 ? (optimizer?.thinkingEnabled ? "Cycle" : undefined)
-      : this.cursor === 3 ? "Choose" : this.cursor === 5 || NUMBER_SETTINGS[this.cursor] ? "Edit" : "Change";
+      : this.cursor === 3 ? "Choose" : this.cursor === 5 || NUMBER_SETTINGS[this.cursor] ? "Edit"
+      : this.cursor === 0 ? "Change" : "Toggle";
     const enterHint = (key: string): KeyHint[] => action ? [[key, action]] : [];
     // Saving has a fixed key and an explicit scope, independent of row focus.
     const close: KeyHint = ["Esc", dirty ? "Discard…" : "Close"];
     const compactClose: KeyHint = ["Esc", innerWidth < (dirty ? 19 : 17) ? "" : dirty ? "Discard" : "Close"];
-    const groupHints: KeyHint[] = groups.length > 1 ? [["Tab", innerWidth >= 72 ? "Next group" : "Group"]] : [];
     const { tabs, footer } = this.hintLayout(layout,
-      this.saving ? [] : [close, ["Ctrl+S", "Save"], ...groupHints, ...enterHint("Enter")],
-      this.saving ? [] : [compactClose, ["^S", innerWidth >= 11 ? "Save" : ""], ...groupHints, ...enterHint("↵")]);
+      this.saving ? [] : [close, ["Ctrl+S", "Save"], ["↑↓", "Move"], ...enterHint(innerWidth >= 58 ? "Enter/Space" : "↵/Space")],
+      this.saving ? [] : [compactClose, ["^S", innerWidth >= 11 ? "Save" : ""], ["↑↓", ""], ...enterHint("↵")]);
     const timing = group === "Context" && this.cursor !== 12 ? "Context changes take effect next round" : "";
     const status = notice || theme.fg("muted", timing);
     const header = [layout.headerHeight === 1 && notice ? status : theme.fg("text", theme.bold("Settings")), status];
     const chrome = panelHeader(layout, header, layout.headerHeight === 1 && notice ? [] : tabs, footer);
     const contentHeight = chrome.layout.bodyHeight;
-    // Keep top-level navigation fixed; the subordinate group strip is compact.
-    const rows = panelTabs({ ...layout, bodyHeight: Math.min(7, contentHeight) }, groups.map((group) => group.label), this.settingsGroup, theme);
+    const rows: string[] = [];
+    const optimizerRows = groups.find((section) => section.label === "Optimizer")?.rows ?? [];
     let focusStart = 0;
     let focusEnd = 0;
     let focusedDetail = "";
@@ -429,7 +441,7 @@ export class SettingsPage {
       const suffix = affordance && innerWidth >= 20 ? ` ${affordance}` : "";
       const labelColor = dimmed ? "dim" : "text";
       const valueColor = dimmed ? "dim" : active || index === 3 ? "text" : "muted";
-      const fitPriority = group === "Optimizer" || index === 12;
+      const fitPriority = optimizerRows.includes(index) || index === 12;
       const suffixWidth = visibleWidth(suffix);
       let content: string;
       let valueClipped: boolean;
@@ -471,7 +483,7 @@ export class SettingsPage {
       rows.push(active ? theme.bg("selectedBg", rendered + " ".repeat(Math.max(0, innerWidth - visibleWidth(rendered)))) : rendered);
       if (active) focusEnd = rows.length;
     };
-    if (group === "Context") {
+    const addContext = () => {
       const enabled = this.selected.enabled ?? this.settingsContextEnabled;
       const checkbox = (on: boolean) => on ? "[x] On" : "[ ] Off";
       // Inactive children remain editable; their choices take effect when project context is on.
@@ -495,7 +507,9 @@ export class SettingsPage {
       add(7, "Directory references", projectCheckbox(references), "Names from @directory refs", "", !enabled);
       if (this.cursor === 7) focusedDetail = "Lists names only, not file contents. Separate from the default tree.";
       if (!enabled) rows.push(theme.fg("warning", "Project context is off. Conversation history is unaffected."));
-    } else if (group === "Optimizer" && optimizer) {
+    };
+    const addOptimizer = () => {
+      if (!optimizer) return;
       add(3, "Default model", optimizer.model, "", "›", false, { shortLabel: "Model",
         detail: optimizer.model === "Not configured" ? "Choose a model. Refine does not use the main agent's model." : "" });
       add(4, "Thinking", optimizer.thinking, "", optimizer.thinkingEnabled ? "›" : "", !optimizer.thinkingEnabled,
@@ -503,15 +517,20 @@ export class SettingsPage {
       if (this.actions.editSystemPrompt) add(5, "Optimization prompt", "", "Applies next round", "›", false, {
         shortLabel: "Prompt", detail: "Refine's rewrite policy, not the main agent's prompt. Applies next round.",
       });
-    }
-    for (const index of groups[this.settingsGroup]!.rows) {
-      const spec = NUMBER_SETTINGS[index];
-      if (!spec) continue;
-      const value = numberSettingValue(this.selected, spec.field) / spec.scale;
-      add(index, spec.label, value === 0 ? "Off" : `${value} ${spec.unit}`, spec.summary ?? "", "›", false, {
-        detail: spec.description, shortLabel: spec.shortLabel, shortValue: spec.shortUnit ? `${value}${spec.shortUnit}` : undefined,
-      });
-      if (this.cursor === index && index < 10) focusedDetail = spec.description;
+    };
+    for (const section of groups) {
+      if (groups.length > 1) rows.push(theme.fg("text", theme.bold(section.label)));
+      if (section.label === "Context") addContext();
+      else addOptimizer();
+      for (const index of section.rows) {
+        const spec = NUMBER_SETTINGS[index];
+        if (!spec) continue;
+        const value = numberSettingValue(this.selected, spec.field) / spec.scale;
+        add(index, spec.label, value === 0 ? "Off" : `${value} ${spec.unit}`, spec.summary ?? "", "›", false, {
+          detail: spec.description, shortLabel: spec.shortLabel, shortValue: spec.shortUnit ? `${value}${spec.shortUnit}` : undefined,
+        });
+        if (this.cursor === index && index < 10) focusedDetail = spec.description;
+      }
     }
     const details = focusedDetail ? wrapTextWithAnsi(sanitizeTerminalText(focusedDetail), innerWidth) : [];
     const usualDetailHeight = contentHeight >= 12 ? 2 : contentHeight >= 3 ? 1 : 0;
@@ -543,9 +562,10 @@ export class SettingsPage {
     }
     if (!layout.headerHeight && notice) body[0] = status;
     const lines = chrome.render(body, (text) => theme.fg("borderMuted", text));
-    if (this.settingsFrames.size >= 12) this.settingsFrames.clear();
-    this.settingsFrames.set(`${this.cursor}:${this.settingsScrollTop}:${this.detailPage}`,
-      { lines, scrollTop: this.settingsScrollTop, detailPages: this.detailPages });
+    const frame = { lines, scrollTop: this.settingsScrollTop, detailPages: this.detailPages };
+    this.settingsFrames.set(frameKey, frame);
+    this.settingsFrames.set(`${this.cursor}:${this.settingsScrollTop}:${this.detailPage}`, frame);
+    while (this.settingsFrames.size > 32) this.settingsFrames.delete(this.settingsFrames.keys().next().value!);
     return lines;
   }
 }

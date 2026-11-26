@@ -389,7 +389,7 @@ describe("result reading panel", () => {
     const first = panel.render(100).join("\n");
     panel.page(1);
     const text = first + "\n" + panel.render(100).join("\n");
-    for (const hint of ["follow-up", "Edit candidate (no model call)", "x/d Stop request / discard result", "z Restore", "r Refine", "m Model", "c Cycle task models + favorites", "o Original", "v Formatted/source", "i Input", "←/→ Page", "Tab Settings group", "Enter won't send", "Nothing to restore"]) {
+    for (const hint of ["follow-up", "Edit candidate (no model call)", "x/d Stop request / discard result", "z Restore", "r Refine", "m Model", "c Cycle task models + favorites", "o Original", "v Formatted/source", "i Input", "←/→ Page", "↑↓ Settings rows", "Enter won't send", "Nothing to restore"]) {
       expect(text).toContain(hint);
     }
     panel.toggleHelp();
