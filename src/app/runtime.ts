@@ -1,5 +1,6 @@
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { configPath, loadConfig, saveConfig, type RefineConfig } from "../config.js";
+import { configPath, loadConfig, saveConfig } from "../config.js";
+import { REFINE_SYSTEM_PROMPT } from "../context.js";
 import { BackgroundStatus, renderBackgroundStatus } from "../background-status.js";
 import { RefineController } from "../controller.js";
 import type { ControllerState } from "../request-types.js";
@@ -19,6 +20,7 @@ import { createCommands } from "./commands.js";
 import { createApplication } from "./application.js";
 import { createApplicationEvents } from "./events.js";
 import { createModelService } from "./model-service.js";
+import { createConfigService } from "./config-service.js";
 import { createTuiOperations } from "../adapters/tui-operations.js";
 import { createRpcSlash } from "../adapters/rpc-slash.js";
 import type { ModelIdentity, Thinking } from "./api.js";
@@ -27,14 +29,25 @@ import type { ModelIdentity, Thinking } from "./api.js";
 export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMessage" | "getSessionName" | "setSessionName">) {
   const filePath = configPath(getAgentDir());
   const loaded = await loadConfig(filePath);
-  const config: RefineConfig = loaded.config;
-  const configWritable = loaded.warnings.length === 0;
   let currentUiContext: ExtensionContext | undefined;
   let completionContext: ExtensionContext | undefined;
   let lifecycleSequence = 0;
   let optimizerRequestAttempted = false;
   const events = createApplicationEvents();
-  let saveQueue: Promise<void> = Promise.resolve();
+  const configuration = createConfigService(loaded.config, {
+    defaultSystemPrompt: REFINE_SYSTEM_PROMPT,
+    write: loaded.warnings.length ? undefined : (snapshot) => saveConfig(filePath, snapshot),
+    changed: () => events.changed(),
+    unsaved: (reason) => {
+      if (reason === "failed") {
+        notifyCurrent("This setting is effective now, but writing prompt-refine.json failed; it was not persisted.", "warning");
+      } else if (currentUiContext) {
+        notify(currentUiContext, "The configuration file contains errors and was not overwritten. This setting is only effective for the current process. Fix the configuration and /reload.", "warning");
+      }
+    },
+  });
+  const readConfig = configuration.read;
+  const config = readConfig();
   let generatingRequestId: number | undefined;
   let progressTimer: ReturnType<typeof setInterval> | undefined;
   const backgroundStatus = new BackgroundStatus();
@@ -51,10 +64,13 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
   const setCompletionContext = (ctx: ExtensionContext) => { completionContext = ctx; };
   const presentation = () => updatePresentation(controller.getState());
   const controller: RefineController = new RefineController({
-    get timeoutMs() { return config.timeoutMs; },
-    get maxDraftChars() { return config.maxDraftChars; },
-    get maxOutputChars() { return Math.max(config.maxDraftChars, config.maxOutputTokens * 32); },
-    onState: (state) => {
+    get timeoutMs() { return readConfig().timeoutMs; },
+    get maxDraftChars() { return readConfig().maxDraftChars; },
+    get maxOutputChars() {
+      const { maxDraftChars, maxOutputTokens } = readConfig();
+      return Math.max(maxDraftChars, maxOutputTokens * 32);
+    },
+    onState: () => {
       lifecycle.saveHistory();
       events.changed(true);
     },
@@ -64,7 +80,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
 
   const contextJobs = createContextJobs(() => controller.getHistory());
   const complete = createCompletion<ExtensionContext>({
-    config, getContext: () => completionContext, getSessionId: () => controller.getSessionId(),
+    readConfig, getContext: () => completionContext, getSessionId: () => controller.getSessionId(),
     directorySnapshot: contextJobs.directorySnapshot,
     capturePreparedInput: (...args) => controller.capturePreparedInput(...args),
     captureBudget: (...args) => controller.captureBudget(...args),
@@ -81,14 +97,15 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     getSessionName: () => pi.getSessionName(), setSessionName: (name) => pi.setSessionName(name), notify,
   });
   const models = createModelSelection({
-    controller, config, useContext, setCompletionContext, persistConfig, saveOptimizer,
+    controller, readConfig, useContext, setCompletionContext, saveOptimizer,
+    rememberComparisonThinking: configuration.rememberComparisonThinking,
     startOriginal: (id, model, thinking, version) => operations.start(id, model, thinking, version),
     taskVersion: (id) => operations.version(id), optimizerVersion: () => modelService.optimizer().version,
     optimizationError: (...args) => requests.optimizationError(...args),
     taskPositions, usagePositions, notify, notifyCurrent, notifyIfSameSession,
   });
   const requests = createRequestFlows({
-    controller, config, useContext, setCompletionContext,
+    controller, readConfig, useContext, setCompletionContext,
     canNameSession: lifecycle.canNameSession, modelSwitchBlocked: models.modelSwitchBlocked,
     showPreview: (ctx) => host.showPreview(ctx), updatePresentation: presentation, notify, notifyCurrent,
     initialPreferences: (ctx) => preferenceRepository(ctx).getDefaultPreferences(sessionPreferences.overrides(ctx.sessionManager.getSessionId())),
@@ -100,14 +117,13 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     return completionContext;
   }
   const modelService = createModelService({
-    controller, config, writable: configWritable,
+    controller, config: configuration,
     available: () => executionContext().modelRegistry.getAvailable(),
     sessionThinking: () => executionContext().thinkingLevel,
-    persist: () => persistConfig(executionContext()), changed: () => events.changed(),
   });
   const application = createApplication({
-    controller, events, models: modelService, maxDraftChars: () => config.maxDraftChars,
-    input: { capture: (text) => requests.draftInput(executionContext(), text) },
+    controller, events, models: modelService, maxDraftChars: () => readConfig().maxDraftChars,
+    input: { capture: (text, choice) => requests.captureOriginalInput(executionContext(), text, choice) },
     storage: { summary: () => {
       const status = lifecycle.historyStorage(executionContext(), controller.getSessionId()!);
       return { state: status.state, savedCount: status.savedIds.length, omittedCount: status.omittedIds.length,
@@ -121,18 +137,18 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     return modelService.settled();
   }
   const editor = createEditorActions({
-    controller, config, useContext, sendUserMessage: (...args) => pi.sendUserMessage(...args), notify, notifyIfSameSession,
+    controller, readConfig, useContext, sendUserMessage: (...args) => pi.sendUserMessage(...args), notify, notifyIfSameSession,
   });
   const showOptimizerQuota = () => !optimizerRequestAttempted && !!controller.getModel();
   const workspaceActions = createWorkspaceActions({
-    controller, config, setCompletionContext, persistConfig, historyStorage: lifecycle.historyStorage,
+    controller, readConfig, settings: configuration, setCompletionContext, historyStorage: lifecycle.historyStorage,
     optimizationError: requests.optimizationError, operations, saveOptimizer,
     triggerOptimize: requests.triggerOptimize, reviseCandidate: requests.reviseCandidate,
     registeredModels: models.registeredModels, showOptimizerQuota,
     notify, preferenceRepository, sessionPreferences,
   });
   const host = createWorkspaceHost({
-    controller, config, openHint, taskPositions, usagePositions, useContext,
+    controller, readConfig, openHint, taskPositions, usagePositions, useContext,
     canNameSession: lifecycle.canNameSession,
     updatePresentation: presentation,
     acknowledge: (sessionId) => { backgroundStatus.update(sessionId, controller.getHistory(), true, openHint); },
@@ -200,26 +216,6 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     if (controller.getSessionId() === sessionId) notifyCurrent(message, "warning");
   }
 
-  async function persistConfig(ctx: ExtensionContext): Promise<boolean> {
-    events.changed();
-    if (!configWritable) {
-      notify(ctx, "The configuration file contains errors and was not overwritten. This setting is only effective for the current process. Fix the configuration and /reload.", "warning");
-      return false;
-    }
-    const snapshot = structuredClone(config);
-    const write = saveQueue.then(() => saveConfig(filePath, snapshot));
-    saveQueue = write.catch(() => undefined);
-    try {
-      await write;
-      events.changed();
-      return true;
-    } catch {
-      events.changed();
-      notifyCurrent("This setting is effective now, but writing prompt-refine.json failed; it was not persisted.", "warning");
-      return false;
-    }
-  }
-
   return {
     shortcuts: config.shortcuts,
     ...commands,
@@ -257,7 +253,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
       async shutdown(ctx: ExtensionContext) {
         lifecycleSequence++;
         invalidateBinding();
-        await lifecycle.shutdown(ctx);
+        await Promise.all([lifecycle.shutdown(ctx), configuration.flush()]);
         if (progressTimer) clearInterval(progressTimer);
         progressTimer = undefined;
         events.clear();

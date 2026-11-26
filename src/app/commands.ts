@@ -10,7 +10,7 @@ import type { Notify } from "./contracts.js";
 
 interface CommandDependencies {
   controller: Pick<RefineController,
-    "cancelAndDismiss" | "getAppliedRecordId" | "getHistory" | "getModel" | "getSubmission" | "hasCapturedDraft">;
+    "cancelAndDismiss" | "getAppliedRecordId" | "getHistory" | "getModel" | "hasCapturedDraft">;
   taskPositions: Map<string, TaskPanelPosition>;
   useContext(ctx: ExtensionContext): void;
   host: Pick<ReturnType<typeof createWorkspaceHost>, "showPreview" | "isInteracting">;
@@ -47,7 +47,7 @@ export function createCommands({ controller, taskPositions, useContext, host, re
         : record.id === (position?.selectedId ?? controller.getAppliedRecordId()));
       // Opening with an editor draft is an explicit navigation intent. Background
       // updates still preserve selection; a newly captured prompt must not inherit it.
-      const targetId = result?.kind === "captured" ? result.recordId : result && controller.getSubmission(result)?.recordId;
+      const targetId = result?.kind === "captured" || result?.kind === "started" ? result.recordId : undefined;
       let target = records.find((record) => record.id === targetId);
       let original = result?.kind !== "started";
       if (!target && knownDraft) {

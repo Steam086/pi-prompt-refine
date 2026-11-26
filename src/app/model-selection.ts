@@ -1,7 +1,7 @@
 import { parseKey, SelectList, type SelectItem } from "@earendil-works/pi-tui";
 import { getSupportedThinkingLevels, type Api, type Model, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { modelKey, type ModelRef, type RefineConfig } from "../config.js";
+import { modelKey, type ModelRef, type ConfigReader } from "../config.js";
 import { renderOverlayModelPicker, type ModelChoice } from "../model-picker.js";
 import { REFINE_OVERLAY_OPTIONS } from "../workspace-overlay.js";
 import type { RefineController } from "../controller.js";
@@ -36,14 +36,14 @@ interface ModelSelectionDependencies {
   saveOptimizer(model: ModelRef, thinking: ModelThinkingLevel | "inherit", expectedVersion?: number): Promise<boolean>;
   optimizerVersion(): number;
   taskVersion(id: number): number;
-  startOriginal(id: number, model: ModelRef, thinking: ModelThinkingLevel, expectedVersion: number): { kind: string };
+  startOriginal(id: number, model: ModelRef, thinking: ModelThinkingLevel, expectedVersion: number): { kind: string; recordId?: number };
   controller: Pick<RefineController,
     "getGeneration" | "getHistory" | "getModel" | "getOriginalRecord" | "getRecord" | "getSessionId" |
     "getState" | "getTaskModels">;
-  config: Pick<RefineConfig, "model" | "modelThinkingLevels" | "thinkingLevel" | "favorites">;
+  readConfig: ConfigReader<"modelThinkingLevels" | "thinkingLevel" | "favorites">;
   useContext(ctx: ExtensionContext): void;
   setCompletionContext(ctx: ExtensionContext): void;
-  persistConfig(ctx: ExtensionContext): Promise<boolean>;
+  rememberComparisonThinking(model: ModelRef, level: ModelThinkingLevel): Promise<boolean> | undefined;
   optimizationError(ctx: ExtensionContext, draft: string, selected?: ModelRef): string | undefined;
   taskPositions: Map<string, TaskPanelPosition>;
   usagePositions: Map<string, TaskPanelPosition>;
@@ -52,17 +52,10 @@ interface ModelSelectionDependencies {
   notifyIfSameSession: NotifyIfSameSession;
 }
 
-export function createModelSelection({ controller, config, useContext, setCompletionContext,
-  persistConfig, optimizationError, taskPositions, usagePositions, notify, notifyCurrent,
+export function createModelSelection({ controller, readConfig, useContext, setCompletionContext,
+  rememberComparisonThinking, optimizationError, taskPositions, usagePositions, notify, notifyCurrent,
   notifyIfSameSession, saveOptimizer, startOriginal, optimizerVersion, taskVersion }: ModelSelectionDependencies) {
   const recentRunModels = new Map<string, string[]>();
-  function rememberThinking(model: ModelRef, level: ModelThinkingLevel): boolean {
-    const key = modelKey(model);
-    if (config.modelThinkingLevels[key] === level) return false;
-    config.modelThinkingLevels[key] = level;
-    return true;
-  }
-
   function registeredModels(ctx: ExtensionContext): Model<Api>[] {
     return ctx.modelRegistry.getAvailable();
   }
@@ -84,11 +77,12 @@ export function createModelSelection({ controller, config, useContext, setComple
     const taskRecords = source ? controller.getHistory().filter((record) => record.taskId === source.taskId) : [];
     const taskModels = source ? taskRecords.map((record) => modelKey(record.input.model)) : controller.getTaskModels().map(modelKey);
     const recent = recentRunModels.get(ctx.sessionManager.getSessionId()) ?? [];
+    const { favorites } = readConfig();
     const available = registeredModels(ctx).slice().sort((a, b) => {
       const rank = (model: ModelRef) => source
         ? (baseline && sameModel(model, baseline.input.model) ? 1000 : recent.includes(modelKey(model)) ? recent.indexOf(modelKey(model))
-          : config.favorites.some((favorite) => modelKey(favorite) === modelKey(model)) ? 100 : 200)
-        : taskModels.includes(modelKey(model)) ? 0 : config.favorites.some((favorite) => modelKey(favorite) === modelKey(model)) ? 1 : 2;
+          : favorites.some((favorite) => modelKey(favorite) === modelKey(model)) ? 100 : 200)
+        : taskModels.includes(modelKey(model)) ? 0 : favorites.some((favorite) => modelKey(favorite) === modelKey(model)) ? 1 : 2;
       return rank(a) - rank(b);
     });
     if (available.length === 0) {
@@ -108,8 +102,8 @@ export function createModelSelection({ controller, config, useContext, setComple
       // Edits belong to individual models and stay local until confirmation.
       const thinkingEdits = new Map<string, ModelThinkingLevel>();
       const thinkingOverride = (model: ModelRef): ModelThinkingLevel | undefined =>
-        thinkingEdits.get(modelKey(model)) ?? config.modelThinkingLevels[modelKey(model)] ??
-        baseline?.input.thinkingLevel ?? config.thinkingLevel;
+        thinkingEdits.get(modelKey(model)) ?? readConfig().modelThinkingLevels[modelKey(model)] ??
+        baseline?.input.thinkingLevel ?? readConfig().thinkingLevel;
       const cycleThinkingKeys = keybindings.getKeys("app.thinking.cycle")
         .map((key) => key.split("+").map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join("+"))
         .join("/");
@@ -121,7 +115,7 @@ export function createModelSelection({ controller, config, useContext, setComple
         if (levels.length === 1 && levels[0] === "off") return "Thinking level: not supported by this model";
         const override = thinkingOverride(model);
         const level = effectiveThinkingLevel(model, override, ctx.thinkingLevel);
-        const source = !thinkingEdits.has(modelKey(model)) && config.modelThinkingLevels[modelKey(model)] !== undefined
+        const source = !thinkingEdits.has(modelKey(model)) && readConfig().modelThinkingLevels[modelKey(model)] !== undefined
           ? "Last used for this model" : thinkingSource(override, ctx.thinkingLevel);
         return `Thinking level: ${level} · ${source}`;
       };
@@ -162,7 +156,7 @@ export function createModelSelection({ controller, config, useContext, setComple
               const running = runs.find((record) => record.status === "generating" || record.status === "queued");
               const latest = running ?? runs.at(-1);
               const status = latest ? ({ generating: "Running", queued: "Queued", generated: "Done", error: "Failed", cancelled: "Cancelled", interrupted: "Interrupted", unsent: "Unsent" })[latest.status] : "";
-              const favorite = config.favorites.some((model) => displayModel(model) === item.value);
+              const favorite = favorites.some((model) => displayModel(model) === item.value);
               return { ...item, description: [item.description, status, recent.includes(item.value) ? "Recent" : favorite ? "Favorite" : ""].filter(Boolean).join(" · ") };
             }),
             selectedKey: list.getSelectedItem()?.value,
@@ -234,17 +228,16 @@ export function createModelSelection({ controller, config, useContext, setComple
       if (result.kind === "started" || result.kind === "duplicate") {
         recentRunModels.set(startSessionId, [selection.modelKey, ...recent.filter((key) => key !== selection.modelKey)].slice(0, 12));
         if (result.kind === "duplicate") {
-          const existing = controller.getHistory().find((record) => record.taskId === source.taskId && sameModel(model, record.input.model) &&
-            record.input.thinkingLevel === thinking && !record.input.revision && ["queued", "generating"].includes(record.status));
-          if (existing) {
+          if (result.recordId !== undefined) {
             const positions = runUsage ? usagePositions : taskPositions;
             const position = positions.get(startSessionId) ?? {};
-            Object.assign(position, { selectedId: existing.id, selectedTaskId: undefined, scroll: 0 });
+            Object.assign(position, { selectedId: result.recordId, selectedTaskId: undefined, scroll: 0 });
             positions.set(startSessionId, position);
           }
           notify(ctx, "This model is already running for the original prompt.", "info");
         }
-        if (rememberThinking(model, thinking)) await persistConfig(ctx);
+        const save = rememberComparisonThinking(model, thinking);
+        if (save) await save;
       } else notify(ctx, `Request not started (${result.kind}); existing work kept.`, "warning");
       return;
     }
@@ -255,17 +248,22 @@ export function createModelSelection({ controller, config, useContext, setComple
     const firstSelection = !controller.getModel();
     const selected = modelRef(model);
     const currentModel = controller.getModel();
+    const { thinkingLevel: override, modelThinkingLevels } = readConfig();
     const changed = !currentModel || !sameModel(currentModel, selected) ||
-      (selection.thinkingLevel !== undefined && selection.thinkingLevel !== config.thinkingLevel) ||
-      config.modelThinkingLevels[modelKey(model)] !== effectiveThinkingLevel(model, selection.thinkingLevel, ctx.thinkingLevel);
+      (selection.thinkingLevel !== undefined && selection.thinkingLevel !== override) ||
+      modelThinkingLevels[modelKey(model)] !== effectiveThinkingLevel(model, selection.thinkingLevel, ctx.thinkingLevel);
     if (!changed) {
-      const level = effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel);
-      notify(ctx, `${displayModel(selected)} is already the current optimizer model; thinking level: ${level} (${thinkingSource(config.thinkingLevel, ctx.thinkingLevel)}).`, "info");
+      const level = effectiveThinkingLevel(model, override, ctx.thinkingLevel);
+      notify(ctx, `${displayModel(selected)} is already the current optimizer model; thinking level: ${level} (${thinkingSource(override, ctx.thinkingLevel)}).`, "info");
       return;
     }
-    const persisted = await saveOptimizer(selected, selection.thinkingLevel ?? config.thinkingLevel ?? "inherit", sourceVersion);
-    const level = effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel);
-    const levelSource = thinkingSource(config.thinkingLevel, ctx.thinkingLevel);
+    const save = saveOptimizer(selected, selection.thinkingLevel ?? override ?? "inherit", sourceVersion);
+    const savedVersion = optimizerVersion();
+    const persisted = await save;
+    if (optimizerVersion() !== savedVersion) return;
+    const { thinkingLevel: savedLevel } = readConfig();
+    const level = effectiveThinkingLevel(model, savedLevel, ctx.thinkingLevel);
+    const levelSource = thinkingSource(savedLevel, ctx.thinkingLevel);
     const thinking = getSupportedThinkingLevels(model).length === 1 ? "not supported by this model" : `${level} (${levelSource})`;
     const current = controller.getModel();
     if (controller.getSessionId() === startSessionId && ctx.sessionManager.getSessionId() === startSessionId && current?.provider === selected.provider && current.id === selected.id) {
@@ -288,7 +286,8 @@ export function createModelSelection({ controller, config, useContext, setComple
     }
     if (modelSwitchBlocked(ctx)) return;
     const available = new Set(registeredModels(ctx).map(modelKey));
-    const refs = [...controller.getTaskModels(), ...config.favorites.filter((favorite) => available.has(modelKey(favorite))),
+    const { favorites, modelThinkingLevels, thinkingLevel } = readConfig();
+    const refs = [...controller.getTaskModels(), ...favorites.filter((favorite) => available.has(modelKey(favorite))),
       ...(controller.getModel() ? [controller.getModel()!] : [])];
     const usable = [...new Map(refs.map((ref) => [modelKey(ref), ref])).values()];
     if (usable.length < 2) {
@@ -299,10 +298,10 @@ export function createModelSelection({ controller, config, useContext, setComple
     const currentIndex = usable.findIndex((favorite) => modelKey(favorite) === (current ? modelKey(current) : ""));
     const next = usable[(currentIndex + 1) % usable.length];
     if (!next) return;
-    await saveOptimizer(next, config.modelThinkingLevels[modelKey(next)] ?? config.thinkingLevel ?? "inherit");
+    await saveOptimizer(next, modelThinkingLevels[modelKey(next)] ?? thinkingLevel ?? "inherit");
     if (controller.getModel() && !sameModel(controller.getModel()!, next)) return;
     notifyCurrent(`Optimizer model switched to ${displayModel(next)}; the main session model is unchanged.`, "info");
   }
 
-  return { selectModel, cycleModel, modelSwitchBlocked, registeredModels, rememberThinking };
+  return { selectModel, cycleModel, modelSwitchBlocked, registeredModels };
 }

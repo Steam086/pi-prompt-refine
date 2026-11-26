@@ -14,6 +14,7 @@ const outputCode = ts.transpileModule(outputSource, { compilerOptions: { module:
 const outputModule = `data:text/javascript;base64,${Buffer.from(outputCode).toString("base64")}`;
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText
   .replace('"./wire.js"', JSON.stringify(new URL("../dist/server/src/adapters/wire.js", import.meta.url).href))
+  .replace('"../app/operation-contract.js"', JSON.stringify(new URL("../dist/server/src/app/operation-contract.js", import.meta.url).href))
   .replace('"./json-output.js"', JSON.stringify(outputModule));
 const { createSessionEventsBridge } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 

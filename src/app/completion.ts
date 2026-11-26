@@ -1,6 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage, UserMessage } from "@earendil-works/pi-ai";
-import type { RefineConfig } from "../config.js";
+import type { ConfigReader } from "../config.js";
 import type { RefineController } from "../controller.js";
 import type { RefineRequest, RefineCompletion } from "../request-types.js";
 import { buildRefineInput, parseRefineOutput, runInstructions } from "../context.js";
@@ -15,7 +15,7 @@ import { finalResponseText, isTransportError } from "./provider-response.js";
 type CompletionContext = { sessionManager: Pick<ExtensionContext["sessionManager"], "getSessionId">;
   modelRegistry: Pick<ExtensionContext["modelRegistry"], "find" | "getAvailable" | "isUsingOAuth" | "streamSimple"> };
 interface CompletionDependencies<Context extends CompletionContext> {
-  config: Pick<RefineConfig, "maxOutputTokens" | "projectContext">;
+  readConfig: ConfigReader<"maxOutputTokens" | "projectContext">;
   getContext(): Context | undefined;
   getSessionId(): string | undefined;
   directorySnapshot: ReturnType<typeof createContextJobs>["directorySnapshot"];
@@ -27,7 +27,7 @@ interface CompletionDependencies<Context extends CompletionContext> {
   notifyIfSameSession(sessionId: string, message: string): void;
 }
 
-export function createCompletion<Context extends CompletionContext>({ config, getContext, getSessionId, directorySnapshot,
+export function createCompletion<Context extends CompletionContext>({ readConfig, getContext, getSessionId, directorySnapshot,
   capturePreparedInput, captureBudget, onOptimizerRequest, reportProject, notify, notifyIfSameSession }: CompletionDependencies<Context>) {
   return async (request: RefineRequest, signal: AbortSignal): Promise<RefineCompletion> => {
     const ctx = getContext();
@@ -42,11 +42,11 @@ export function createCompletion<Context extends CompletionContext>({ config, ge
     const systemPrompt = request.systemPrompt;
     // Freeze runtime limits before asynchronous directory collection. Settings
     // changes must not alter a request that has already started.
-    const outputLimit = config.maxOutputTokens;
+    const { maxOutputTokens: outputLimit, projectContext } = readConfig();
     const { notes, promptInstruction } = runInstructions(request.editingInstruction, request.preferences, request.revision);
     let projectText = "";
     let diagnostics = request.projectDiagnostics;
-    const projectConfig = structuredClone(request.project?.config ?? config.projectContext);
+    const projectConfig = request.project?.config ?? projectContext;
     if (request.project && request.preparedInput === undefined) {
       // History gates only the default tree; explicit @directories are independent.
       const project = request.project;

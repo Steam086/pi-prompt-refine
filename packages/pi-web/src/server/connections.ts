@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { JsonValue, PiWebHostPiSessionConnection, PiWebHostPiSessionEventsV1, PiWebHostPiSessionSelection } from "@jmfederico/pi-web/server-plugin-api";
-import { identity, isRecord, REQUEST_EVENT, RESPONSE_EVENT, INVALIDATION_EVENT } from "../../../../src/adapters/wire.js";
+import { identity, isRecord } from "../../../../src/app/operation-contract.js";
+import { REQUEST_EVENT, RESPONSE_EVENT, INVALIDATION_EVENT } from "../../../../src/adapters/wire.js";
 
 const TTL = 60_000;
 interface Pending { resolve(value: JsonValue): void; reject(error: Error): void; cleanup(): void }

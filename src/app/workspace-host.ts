@@ -1,6 +1,7 @@
 import { parseKey, type Component } from "@earendil-works/pi-tui";
+import { copyToClipboard } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { RefineConfig } from "../config.js";
+import type { ConfigReader } from "../config.js";
 import { RefineWorkspace } from "../workspace.js";
 import { REFINE_OVERLAY_OPTIONS } from "../workspace-overlay.js";
 import { PreviewPanel, type PreviewOptions } from "../preview.js";
@@ -8,7 +9,7 @@ import type { RefineController } from "../controller.js";
 import type { CandidateToken, ControllerState } from "../request-types.js";
 import type { TaskPanelPosition } from "../task-panel.js";
 import { truncatedOutputHint } from "../usage.js";
-import { effectiveThinkingLevel, sameModel } from "./model-selection.js";
+import { effectiveThinkingLevel, sameModel } from "./model-utils.js";
 import type { createEditorActions } from "./editor-actions.js";
 import type { createModelSelection } from "./model-selection.js";
 import type { createRequestFlows } from "./request-flows.js";
@@ -33,7 +34,7 @@ interface WorkspaceHostDependencies {
     "cancelAndDismiss" | "cycleCandidate" | "getCandidate" | "getCandidatePosition" | "getCandidateToken" |
     "getDisplayedInput" | "getGeneration" | "getModel" | "getRequestSource" | "getRestore" | "getSessionId" |
     "getState" | "getViewedAccepted" | "isCandidateCurrent" | "stopRequest">;
-  config: Pick<RefineConfig, "thinkingLevel">;
+  readConfig: ConfigReader<"thinkingLevel">;
   openHint: string;
   taskPositions: Map<string, TaskPanelPosition>;
   usagePositions: Map<string, TaskPanelPosition>;
@@ -49,7 +50,7 @@ interface WorkspaceHostDependencies {
   notifyCurrent: NotifyCurrent;
 }
 
-export function createWorkspaceHost({ controller, config, openHint, taskPositions, usagePositions,
+export function createWorkspaceHost({ controller, readConfig, openHint, taskPositions, usagePositions,
   useContext, canNameSession, updatePresentation, acknowledge, workspaceActions,
   editor, models, requests, notify, notifyCurrent }: WorkspaceHostDependencies) {
   const { acceptCandidate, editCandidate, restoreDraft, sendCandidate } = editor;
@@ -96,7 +97,7 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
           // Saved results and in-flight requests must not inherit later setting changes.
           const thinkingLevel = displayed ? displayed.thinkingLevel
             : state.phase === "generating" || state.phase === "error" ? state.thinkingLevel
-            : registeredModel ? effectiveThinkingLevel(registeredModel, config.thinkingLevel, ctx.thinkingLevel) : undefined;
+            : registeredModel ? effectiveThinkingLevel(registeredModel, readConfig().thinkingLevel, ctx.thinkingLevel) : undefined;
           displayedToken = controller.getCandidateToken();
           return {
             state: { ...state, usage: state.phase === "error" ? state.usage : displayed?.usage ?? state.usage, model },
@@ -158,7 +159,11 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
         const workspace: RefineWorkspace = new RefineWorkspace(panel, tui, theme, keybindings, workspaceActions({
           ctx, sessionId, isClosed: () => closed, isUsage: () => workspace.isUsage(),
           position, usagePosition, openModelPicker, finish: (value) => finish(value),
-        }));
+        }), (text) => {
+          void copyToClipboard(text).catch(() => {
+            if (!closed) notify(ctx, "Could not copy the selected text.", "warning");
+          });
+        });
         const finish = (value?: WorkspaceSelection) => {
           if (closed) return;
           closed = true;
@@ -192,6 +197,7 @@ export function createWorkspaceHost({ controller, config, openHint, taskPosition
           get focused() { return focused; },
           set focused(value: boolean) { focused = value; workspace.focused = value && !choosingModel; },
           render: (width) => modelPicker ? modelPicker.render(width) : workspace.render(width),
+          handleMouse: (event) => !closed && !choosingModel ? workspace.handleMouse(event) : undefined,
           invalidate: () => { workspace.invalidate(); modelPicker?.invalidate(); },
           handleInput(data) {
             if (closed) return;

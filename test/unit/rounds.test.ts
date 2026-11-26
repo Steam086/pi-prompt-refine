@@ -61,7 +61,7 @@ describe("round workspace", () => {
     controller.startRecord(archived.recordId);
     expect(controller.hasSubmittedRunInRound()).toBe(false);
     const result = controller.startRecord(current.recordId);
-    expect(controller.getSubmission(result)).toEqual({ recordId: current.recordId, queued: true });
+    expect(result).toMatchObject({ kind: "started", recordId: current.recordId, taskId: current.taskId, queued: true });
     expect(jobs).toHaveLength(1);
     expect(controller.hasSubmittedRunInRound()).toBe(true);
     controller.deleteRecords([current.recordId]);

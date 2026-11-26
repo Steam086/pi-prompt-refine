@@ -1,6 +1,6 @@
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { RefineConfig } from "../config.js";
+import type { ConfigReader } from "../config.js";
 import { REFINE_SYSTEM_PROMPT, type RevisionInput } from "../context.js";
 import type { PreferenceStore } from "../preference-store.js";
 import type { RefineController } from "../controller.js";
@@ -11,8 +11,9 @@ import type { RefineWorkspace } from "../workspace.js";
 import type { RevisionDraft } from "../revision-preferences.js";
 import type { TaskPanelPosition } from "../task-panel.js";
 import type { createRequestFlows } from "./request-flows.js";
+import type { createConfigService } from "./config-service.js";
 import type { SessionPreferences } from "./session-preferences.js";
-import { displayModel, effectiveThinkingLevel, sameModel, thinkingSource } from "./model-selection.js";
+import { displayModel, effectiveThinkingLevel, sameModel, thinkingSource } from "./model-utils.js";
 import { RESTORED_CONTEXT_HINT, type Notify, type WorkspaceSelection } from "./contracts.js";
 
 type WorkspaceOptions = ConstructorParameters<typeof RefineWorkspace>[4];
@@ -20,10 +21,10 @@ interface WorkspaceActionsDependencies {
   controller: Pick<RefineController,
     "applyResult" | "deleteRecords" | "getAppliedRecordId" | "getCandidate" |
     "getCandidateToken" | "getGeneration" | "getTaskDisplayRecords" | "getModel" | "getOriginalRecord" | "getRecord" |
-    "getSessionId" | "getState" | "hasWorkspaceContent" | "isCandidateCurrent" | "updateDraftPreferences">;
-  config: Pick<RefineConfig, "preferencesKey" | "maxDraftChars" | "projectContext" | "context" | "maxOutputTokens" | "timeoutMs" | "thinkingLevel" | "systemPrompt">;
+    "getRunElapsed" | "getSessionId" | "getState" | "hasWorkspaceContent" | "isCandidateCurrent" | "updateDraftPreferences">;
+  readConfig: ConfigReader<"preferencesKey" | "maxDraftChars" | "projectContext" | "thinkingLevel" | "systemPrompt">;
+  settings: Pick<ReturnType<typeof createConfigService>, "contextSettings" | "saveContext" | "saveSystemPrompt">;
   setCompletionContext(ctx: ExtensionContext): void;
-  persistConfig(ctx: ExtensionContext): Promise<boolean>;
   saveOptimizer(model: RefineRequestInput["model"], thinking: NonNullable<RefineRequestInput["thinkingLevel"]> | "inherit"): Promise<boolean>;
   historyStorage(ctx: ExtensionContext, sessionId: string): HistoryStorageStatus;
   optimizationError(ctx: ExtensionContext, draft: string): string | undefined;
@@ -47,7 +48,7 @@ interface WorkspaceMount {
   finish(value?: WorkspaceSelection): void;
 }
 
-export function createWorkspaceActions({ controller, config, setCompletionContext, persistConfig,
+export function createWorkspaceActions({ controller, readConfig, settings, setCompletionContext,
   historyStorage, optimizationError, operations, triggerOptimize, reviseCandidate,
   registeredModels, showOptimizerQuota, notify, preferenceRepository, sessionPreferences, saveOptimizer }: WorkspaceActionsDependencies) {
   // Runtime-only drafts survive overlay mounts, but never enter history persistence.
@@ -65,14 +66,14 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
       const selected = controller.getModel()!;
       const model = ctx.modelRegistry.find(selected.provider, selected.id)!;
       setCompletionContext(ctx);
-      const thinking = effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel);
+      const thinking = effectiveThinkingLevel(model, readConfig().thinkingLevel, ctx.thinkingLevel);
       const result = operations.start(id, selected, thinking);
       if (result.kind !== "started") notify(ctx, `Request not started (${result.kind}); existing work kept.`, "info");
     };
     const currentSession = () => !isClosed() && ctx.sessionManager.getSessionId() === sessionId && controller.getSessionId() === sessionId;
     return {
-      preferences: { repository: preferenceRepository(ctx), key: config.preferencesKey, get maxChars() { return config.maxDraftChars; } },
-      sessionPreferences: sessionPreferences.target(sessionId, currentSession, () => config.maxDraftChars),
+      preferences: { repository: preferenceRepository(ctx), key: readConfig().preferencesKey, get maxChars() { return readConfig().maxDraftChars; } },
+      sessionPreferences: sessionPreferences.target(sessionId, currentSession, () => readConfig().maxDraftChars),
       draftPreferences: (id, original) => {
         if (!currentSession()) return undefined;
         const source = id === undefined ? undefined : original ? controller.getOriginalRecord(id) : controller.getRecord(id);
@@ -113,7 +114,7 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
           text,
           save: (value) => {
             if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId || controller.getSessionId() !== sessionId) return "Session changed; draft not saved.";
-            if (value.length > config.maxDraftChars) return `The draft exceeds ${config.maxDraftChars} characters.`;
+            if (value.length > readConfig().maxDraftChars) return `The draft exceeds ${readConfig().maxDraftChars} characters.`;
             return operations.update(targetId, targetVersion, value) ? undefined : "The draft or conversation context changed; cancel and reopen to edit a new copy.";
           },
           cancel: () => {
@@ -139,6 +140,7 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
       usagePosition,
       tasks: {
         records: () => controller.getTaskDisplayRecords(),
+        elapsedSeconds: (id) => controller.getRunElapsed(id),
         launchModel: () => controller.getModel() ? displayModel(controller.getModel()!) : "No model",
         showOptimizerQuota,
         appliedId: () => controller.getAppliedRecordId(),
@@ -156,83 +158,59 @@ export function createWorkspaceActions({ controller, config, setCompletionContex
           else notify(ctx, "Result unavailable or send pending; nothing accepted.", "warning");
         },
       },
-      context: () => ({
-        instructions: !config.projectContext.instructionsEnabled ? "off" : config.projectContext.instructionsOnFollowUp ? "always" : "first",
-        tree: config.projectContext.tree.enabled,
-        skills: config.projectContext.skillsEnabled,
-        enabled: config.projectContext.enabled,
-        referencedDirectories: config.projectContext.referencedDirectories.enabled,
-        maxMessages: config.context.maxMessages,
-        historyMaxChars: config.context.maxChars,
-        maxOutputTokens: config.maxOutputTokens,
-        timeoutMs: config.timeoutMs,
-        maxDraftChars: config.maxDraftChars,
-      }),
-      contextEnabled: () => config.projectContext.enabled,
+      context: settings.contextSettings,
+      contextEnabled: () => readConfig().projectContext.enabled,
       optimizer: () => {
+        const { thinkingLevel } = readConfig();
         const ref = controller.getModel();
         const model = registeredModels(ctx).find((candidate) => ref && sameModel(candidate, ref));
         const thinkingEnabled = !!model && getSupportedThinkingLevels(model).length > 1;
         return {
           model: ref ? displayModel(ref) : "Not configured",
           thinking: !model ? "Unavailable" : !thinkingEnabled ? "Fixed"
-            : effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel),
+            : effectiveThinkingLevel(model, thinkingLevel, ctx.thinkingLevel),
           thinkingDetail: !model ? "To change thinking, select an available model first."
             : !thinkingEnabled ? "Thinking is fixed for this model."
-            : `${thinkingSource(config.thinkingLevel, ctx.thinkingLevel)}. Changes save immediately.`,
+            : `${thinkingSource(thinkingLevel, ctx.thinkingLevel)}. Changes save immediately.`,
           thinkingEnabled,
         };
       },
       chooseModel: () => openModelPicker(undefined, "settings"),
       editSystemPrompt: () => {
-        const inSession = () => !isClosed() && ctx.sessionManager.getSessionId() === sessionId && controller.getSessionId() === sessionId;
-        if (!inSession()) return undefined;
+        if (!currentSession()) return undefined;
         const generation = controller.getGeneration();
-        const original = config.systemPrompt;
+        const original = readConfig().systemPrompt;
         return {
           text: original ?? REFINE_SYSTEM_PROMPT,
           save: async (text) => {
-            // Opening the editor captures authority; confirming after a session,
-            // generation or policy change must not overwrite the new state.
-            if (!inSession() || controller.getGeneration() !== generation || config.systemPrompt !== original) {
+            if (!currentSession() || controller.getGeneration() !== generation) {
               return { message: "Not persisted · Context or policy changed. Reopen to edit.", persisted: false };
             }
-            if (!text.trim()) return { message: "Not persisted · Prompt cannot be empty.", persisted: false };
-            if (text === (original ?? REFINE_SYSTEM_PROMPT)) return { message: "No optimization prompt changes.", persisted: true };
-            config.systemPrompt = text;
-            const persisted = await persistConfig(ctx);
-            return { message: persisted ? "Optimization prompt saved · Applies next round"
-              : "Not persisted · Policy applied in this process only", persisted };
+            switch (await settings.saveSystemPrompt(original, text)) {
+              case "stale": return { message: "Not persisted · Context or policy changed. Reopen to edit.", persisted: false };
+              case "empty": return { message: "Not persisted · Prompt cannot be empty.", persisted: false };
+              case "unchanged": return { message: "No optimization prompt changes.", persisted: true };
+              case "saved": return { message: "Optimization prompt saved · Applies next round", persisted: true };
+              case "memory-only": return { message: "Not persisted · Policy applied in this process only", persisted: false };
+            }
           },
         };
       },
       cycleThinking: async () => {
-        if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId) return { message: "Session changed; settings not saved.", persisted: false };
+        if (!currentSession()) return { message: "Session changed; settings not saved.", persisted: false };
         const ref = controller.getModel();
         const model = registeredModels(ctx).find((candidate) => ref && sameModel(candidate, ref));
         if (!model) return { message: "Choose an available model first.", persisted: false };
         const levels = getSupportedThinkingLevels(model);
         if (levels.length <= 1) return { message: "Thinking level is fixed for this model.", persisted: false };
-        const current = effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel);
+        const current = effectiveThinkingLevel(model, readConfig().thinkingLevel, ctx.thinkingLevel);
         const next = levels[(levels.indexOf(current) + 1) % levels.length]!;
         const persisted = await saveOptimizer(ref!, next);
         return { message: persisted ? "Thinking level saved" : "Not persisted · Thinking applied in this process only", persisted };
       },
       saveContext: async (selected) => {
-        if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId) return { message: "Session changed; settings not saved.", persisted: false };
-        config.projectContext.instructionsEnabled = selected.instructions !== "off";
-        // Off leaves the saved follow-up preference intact.
-        if (selected.instructions !== "off") config.projectContext.instructionsOnFollowUp = selected.instructions === "always";
-        config.projectContext.tree.enabled = selected.tree;
-        config.projectContext.skillsEnabled = selected.skills;
-        config.projectContext.enabled = selected.enabled ?? config.projectContext.enabled;
-        config.projectContext.referencedDirectories.enabled = selected.referencedDirectories ?? config.projectContext.referencedDirectories.enabled;
-        config.context.maxMessages = selected.maxMessages ?? config.context.maxMessages;
-        config.context.maxChars = selected.historyMaxChars ?? config.context.maxChars;
-        config.maxOutputTokens = selected.maxOutputTokens ?? config.maxOutputTokens;
-        config.timeoutMs = selected.timeoutMs ?? config.timeoutMs;
-        config.maxDraftChars = selected.maxDraftChars ?? config.maxDraftChars;
-        const persisted = await persistConfig(ctx);
+        if (!currentSession()) return { message: "Session changed; settings not saved.", persisted: false };
+        const persisted = await settings.saveContext(selected);
         return { message: persisted ? "Settings saved · Context applies to next round; limits apply to new work"
           : "Not persisted · Settings applied in this process only", persisted };
       },

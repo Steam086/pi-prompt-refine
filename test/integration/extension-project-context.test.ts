@@ -1,13 +1,57 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
+import type { Hello, Receipt } from "../../src/app/api.js";
 import { DEFAULT_CONFIG } from "../../src/config.js";
+import { BUILTIN_PREFERENCES, PreferenceStore } from "../../src/preference-store.js";
+import { requireValue, wireMutation, wireRequest } from "../support/application-wire.js";
 import { extensionHarnessEnvironment, projectConfig, resourcePrompt, shortcut, trigger } from "../support/extension-harness.js";
 import { flushPromises } from "../support/helpers.js";
 
 const { makeHarness } = extensionHarnessEnvironment();
 
 describe("project context injection", () => {
+  it("captures the same provider input through the shortcut, remote optimization and remote draft creation", async () => {
+    const text = "Explain the project layout";
+    const policy = "Keep the original question intact.";
+    const requests = [];
+    for (const entry of ["shortcut", "optimize", "draft"] as const) {
+      const harness = await makeHarness({ mode: entry === "shortcut" ? "tui" : "rpc",
+        config: { projectContext: projectConfig(false), systemPrompt: policy } });
+      const preferences = new PreferenceStore(harness.agentDir, harness.context.cwd, BUILTIN_PREFERENCES);
+      const entryPreference = await preferences.save("project", { name: "Answer scope", body: "Preserve the requested scope." });
+      await preferences.setProjectDefault(entryPreference, true);
+      await harness.reload();
+      vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
+      harness.setEditorText(text);
+      if (entry === "shortcut") await trigger(harness);
+      else {
+        const hello = requireValue(await wireRequest<Hello>(harness.events, { action: "hello", clientId: entry }));
+        if (entry === "optimize") requireValue(await wireMutation(harness.events, hello, { method: "optimizeText", text }));
+        else {
+          const draft = requireValue(await wireMutation<Receipt>(harness.events, hello, { method: "createDraft", text }));
+          assert(draft.outcome === "captured");
+          expect(harness.complete).not.toHaveBeenCalled();
+          requireValue(await wireMutation(harness.events, hello, { method: "startRun", taskId: draft.taskId, expectedVersion: draft.version }));
+        }
+      }
+      await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledOnce());
+      const { systemPrompt, messages, tools } = (harness.complete.mock.calls[0] as any[])[1];
+      requests.push({ systemPrompt, content: messages[0].content, tools });
+      expect(harness.editorWrites).toEqual([]);
+      expect(harness.sent).toEqual([]);
+    }
+    const native = requests[0]!;
+    expect(requests).toEqual([native, native, native]);
+    expect(native.systemPrompt).toContain(policy);
+    expect(native.tools).toEqual([]);
+    expect(JSON.parse(native.content[0].text)).toMatchObject({
+      draft: text, editing_instruction: expect.stringContaining("Preserve the requested scope."),
+      conversation: expect.objectContaining({ items: expect.arrayContaining([expect.objectContaining({ text: "visible answer" })]) }),
+      project_context: expect.stringContaining("Use the project venv."),
+    });
+  });
+
   it.each([
     { history: true, tree: true }, { history: true, tree: false },
     { history: false, tree: true }, { history: false, tree: false },

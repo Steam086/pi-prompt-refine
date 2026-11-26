@@ -1,18 +1,7 @@
-import { DEFAULT_CONFIG } from "./config.js";
+import { DEFAULT_CONFIG, type ContextSettings } from "./config.js";
+export type { ContextSettings } from "./config.js";
 
-/** Shared draft survives model/policy child pages; saving is always explicit. */
-export interface ContextSettings {
-  instructions: "first" | "always" | "off";
-  tree: boolean;
-  skills: boolean;
-  enabled?: boolean;
-  referencedDirectories?: boolean;
-  maxMessages?: number;
-  historyMaxChars?: number;
-  maxOutputTokens?: number;
-  timeoutMs?: number;
-  maxDraftChars?: number;
-}
+export interface SettingsResult { message: string; persisted: boolean }
 
 export type NumberSetting = "maxMessages" | "historyMaxChars" | "maxOutputTokens" | "timeoutMs" | "maxDraftChars";
 export interface NumberSettingSpec {

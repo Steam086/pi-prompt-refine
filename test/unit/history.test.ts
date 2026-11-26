@@ -48,6 +48,34 @@ describe("runtime request journal", () => {
     expect(history.get(1, "session")).toMatchObject({ input: { model: input.model, preparedInput: "Prepared packet",
       projectDiagnostics: { warnings: ["Directory limit reached"] } }, usage: source.usage });
   });
+  it("reuses immutable display rows until the corresponding visible record changes", () => {
+    const history = new RefineHistory(3);
+    history.restore([record(1), { ...record(2), status: "unsent", candidate: undefined }]);
+    const before = history.displaySnapshot("session");
+    expect(history.displaySnapshot("session")).toBe(before);
+    expect(Object.isFrozen(before)).toBe(true);
+    expect(Object.isFrozen(before[0]!.input.model)).toBe(true);
+    history.captureInput(1, "Updated packet");
+    expect(history.displaySnapshot("session")).toBe(before);
+
+    history.captureInput(1, "Updated packet", { referencedDirectoryCount: 1, warnings: ["Context warning"] });
+    const withWarning = history.displaySnapshot("session");
+    expect(withWarning[0]).not.toBe(before[0]);
+    expect(withWarning[0]!.input.projectDiagnostics?.warnings).toEqual(["Context warning"]);
+    expect(withWarning[1]).toBe(before[1]);
+
+    history.setModel(2, { provider: "other", id: "model" }, "high");
+    const withModel = history.displaySnapshot("session");
+    expect(withModel[0]).toBe(withWarning[0]);
+    expect(withModel[1]!.input.model.provider).toBe("other");
+    expect(before[1]!.input.model.provider).toBe("provider");
+    expect(history.displaySnapshot("other")).toEqual([]);
+
+    history.removeDraft(2);
+    expect(history.displaySnapshot("session")).toEqual([withModel[0]]);
+    history.restore([record(1)]);
+    expect(history.displaySnapshot("session")[0]).not.toBe(withModel[0]);
+  });
   it("never evicts unsent, queued or running work and archives only the matching round/session", () => {
     const history = new RefineHistory(3);
     history.start(1, input, undefined, "refine", "unsent");

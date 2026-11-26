@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Failure, Lease, OperationStatus, Receipt, Reply } from "./api.js";
-import { immutable } from "./queries.js";
+import { immutable } from "../immutable.js";
 
 interface Entry { fingerprint: string; result?: Reply<Receipt>; promise: Promise<Reply<Receipt>> }
 interface ClientLease extends Lease { clientId: string; entries: Map<string, Entry> }

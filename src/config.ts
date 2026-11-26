@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { KeyId } from "@earendil-works/pi-tui";
+import type { DeepReadonly } from "./immutable.js";
 
 export interface ModelRef {
   provider: string;
@@ -57,6 +58,22 @@ export interface RefineConfig {
   projectContext: ProjectContextConfig;
   maxDraftChars: number;
   maxOutputTokens: number;
+}
+
+export type ConfigReader<K extends keyof RefineConfig = keyof RefineConfig> = () => DeepReadonly<Pick<RefineConfig, K>>;
+export type ProjectContextPolicy = DeepReadonly<ProjectContextConfig>;
+
+export interface ContextSettings {
+  instructions: "first" | "always" | "off";
+  tree: boolean;
+  skills: boolean;
+  enabled?: boolean;
+  referencedDirectories?: boolean;
+  maxMessages?: number;
+  historyMaxChars?: number;
+  maxOutputTokens?: number;
+  timeoutMs?: number;
+  maxDraftChars?: number;
 }
 
 export interface LoadedConfig {
@@ -364,7 +381,7 @@ export function configPath(agentDir: string): string {
   return join(agentDir, "prompt-refine.json");
 }
 
-export async function saveConfig(filePath: string, config: RefineConfig): Promise<void> {
+export async function saveConfig(filePath: string, config: DeepReadonly<RefineConfig>): Promise<void> {
   const dir = dirname(filePath);
   const tempPath = join(dir, `.prompt-refine.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`);
   await mkdir(dir, { recursive: true });

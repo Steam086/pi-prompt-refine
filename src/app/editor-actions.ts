@@ -1,5 +1,5 @@
 import type { ExtensionContext, ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { RefineConfig } from "../config.js";
+import type { ConfigReader } from "../config.js";
 import type { RefineController } from "../controller.js";
 import type { CandidateToken } from "../request-types.js";
 import type { Notify, NotifyIfSameSession } from "./contracts.js";
@@ -8,14 +8,14 @@ interface EditorActionsDependencies {
   controller: Pick<RefineController,
     "acceptCandidate" | "beginSend" | "failSend" | "getCandidate" | "getRestore" | "getRestoreToken" |
     "isCandidateCurrent" | "isRestoreCurrent" | "restoreDraft" | "updateCandidate">;
-  config: Pick<RefineConfig, "maxDraftChars" | "maxOutputTokens">;
+  readConfig: ConfigReader<"maxDraftChars" | "maxOutputTokens">;
   useContext(ctx: ExtensionContext): void;
   sendUserMessage: ExtensionAPI["sendUserMessage"];
   notify: Notify;
   notifyIfSameSession: NotifyIfSameSession;
 }
 
-export function createEditorActions({ controller, config, useContext, sendUserMessage,
+export function createEditorActions({ controller, readConfig, useContext, sendUserMessage,
   notify, notifyIfSameSession }: EditorActionsDependencies) {
   let directSendConfirmed = false;
 
@@ -65,7 +65,8 @@ export function createEditorActions({ controller, config, useContext, sendUserMe
       notifyIfSameSession(token.sessionId, "Candidate or session changed. Edits not applied.");
       return;
     }
-    if (edited.length > Math.max(config.maxDraftChars, config.maxOutputTokens * 32)) {
+    const { maxDraftChars, maxOutputTokens } = readConfig();
+    if (edited.length > Math.max(maxDraftChars, maxOutputTokens * 32)) {
       notify(ctx, "Edit too long. Candidate unchanged.", "warning");
       return;
     }

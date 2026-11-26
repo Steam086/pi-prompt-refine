@@ -28,6 +28,7 @@ export interface TaskPane {
   lines: string[];
   viewport: number;
   offsets: { reference: boolean; offset: number }[];
+  documents: { reference: boolean; x: number; y: number; width: number; lines: string[]; offset: number; maxOffset: number }[];
 }
 
 /** Literal task documents and their bounded wrapping cache; never owns a selected identity. */
@@ -212,9 +213,11 @@ export class TaskContent {
     const available = Math.max(1, height - fixed.length);
     // Overflow diagnostics belong to the scrollable document, never a clipped header.
     const lines = this.wrapped([...header.slice(Math.max(0, height - 2)), ...body].join("\n"), bodyWidth);
-    const offset = Math.min(options.scroll, Math.max(0, lines.length - available));
-    return { lines: [...fixed, ...lines.slice(offset, offset + available)], viewport: available,
-      offsets: [{ reference: false, offset }] };
+    const maxOffset = Math.max(0, lines.length - available);
+    const offset = Math.min(options.scroll, maxOffset);
+    const visible = lines.slice(offset, offset + available);
+    return { lines: [...fixed, ...visible], viewport: available, offsets: [{ reference: false, offset }],
+      documents: [{ reference: false, x: 0, y: fixed.length, width: bodyWidth, lines: visible, offset, maxOffset }] };
   }
   /** Preview keeps reference material separate from the result and Usage details. */
   private previewDetails(row: TaskRow, width: number, height: number, header: string[], options: PaneOptions): TaskPane {
@@ -227,6 +230,7 @@ export class TaskContent {
     if (height > fixed.length + 2) fixed.push("");
     const available = Math.max(1, height - fixed.length);
     const offsets: TaskPane["offsets"] = [];
+    const documents: TaskPane["documents"] = [];
     const literal = (text: string) => this.theme.fg("text", sanitizeTerminalText(text));
     const result = [...header.slice(Math.max(0, height - 2)), this.heading(record.kind === "revise" ? "Revised result" : "Result")
       + resultNoteHint(record.candidate?.additional, this.theme), "", literal(record.candidate!.text),
@@ -242,18 +246,21 @@ export class TaskContent {
     }
     reference.push("", this.muted(`Round ${record.input.roundId ?? "?"} · Task ${record.taskId}${record.archivedAt !== undefined ? " · Earlier context" : ""}`));
     if (record.input.contextUnavailable) reference.push(this.muted("Restored history · background not saved. Press i to copy the original into the current round."));
-    const clip = (body: string[], columns: number, isReference: boolean): string[] => {
+    const clip = (body: string[], columns: number, isReference: boolean, x = 0): string[] => {
       const lines = this.wrapped(body.join("\n"), columns);
-      const offset = Math.min(isReference ? options.referenceScroll : options.scroll, Math.max(0, lines.length - available));
+      const maxOffset = Math.max(0, lines.length - available);
+      const offset = Math.min(isReference ? options.referenceScroll : options.scroll, maxOffset);
+      const visible = lines.slice(offset, offset + available);
       offsets.push({ reference: isReference, offset });
-      return lines.slice(offset, offset + available);
+      documents.push({ reference: isReference, x, y: fixed.length, width: columns, lines: visible, offset, maxOffset });
+      return visible;
     };
-    if (!wide) return { lines: [...fixed, ...clip(options.original ? reference : result, width, options.original)], viewport: available, offsets };
+    if (!wide) return { lines: [...fixed, ...clip(options.original ? reference : result, width, options.original)], viewport: available, offsets, documents };
     const left = clip(result, leftWidth, false);
-    const right = clip(reference, rightWidth, true);
+    const right = clip(reference, rightWidth, true, leftWidth + 3);
     return { lines: [...fixed, ...Array.from({ length: available }, (_, i) => {
       const line = left[i] ?? "";
       return line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line))) + this.muted(" │ ") + (right[i] ?? "");
-    })], viewport: available, offsets };
+    })], viewport: available, offsets, documents };
   }
 }

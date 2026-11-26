@@ -8,6 +8,8 @@ The workspace has three tabs: **Preview** for the current round, **Usage** for c
 
 Scroll within the workspace to read long results. The frame stays stable as you switch pages and may cover part of the Pi footer in a short terminal.
 
+With Pi's mouse support enabled, wheel over a document to scroll its pane. Drag across visible text to copy from that pane. The current action target stays selected.
+
 | To… | Do this |
 | --- | --- |
 | Refine from the Pi editor | With an optimizer selected, type a new draft and press `Ctrl+\`. The first rewrite of the round starts immediately with the current session choices, including inherited project defaults. Later new drafts open as **Unsent**. |

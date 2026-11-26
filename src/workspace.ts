@@ -1,4 +1,4 @@
-import { parseKey, type Component, type Focusable, type KeybindingsManager, type KeyId, type TUI } from "@earendil-works/pi-tui";
+import { parseKey, type Component, type Focusable, type KeybindingsManager, type KeyId, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { PreviewPanel } from "./preview.js";
 import { panelHeader, WORKSPACE_PAGES, type WorkspacePage } from "./panel-layout.js";
@@ -14,12 +14,11 @@ import { PreferencePanel } from "./preference-panel.js";
 import { InlinePreferences } from "./inline-preferences.js";
 import type { PreferenceRepository, RevisionDraft, SelectedPreference } from "./revision-preferences.js";
 import { canonicalShortcut } from "./config.js";
-import type { ContextSettings } from "./settings.js";
-import { SettingsPage, type SettingsOptimizer, type SettingsPageActions, type SettingsResult } from "./ui/settings-page.js";
+import type { ContextSettings, SettingsResult } from "./settings.js";
+import { SettingsPage, type SettingsOptimizer, type SettingsPageActions } from "./ui/settings-page.js";
 import { RevisePage, type RevisionTarget } from "./ui/revise-page.js";
 import type { SessionPreferenceTarget } from "./app/session-preferences.js";
-export type { SettingsResult } from "./ui/settings-page.js";
-export type { ContextSettings } from "./settings.js";
+export type { ContextSettings, SettingsResult } from "./settings.js";
 
 interface WorkspaceActions {
   preferences?: { repository: PreferenceRepository; key: KeyId | null; maxChars: number };
@@ -30,7 +29,7 @@ interface WorkspaceActions {
   /** Session-owned text, independent of request snapshots and revision feedback. */
   inputDraft?: { text: string; save(text: string): void };
   inputCaptureOnly?(): boolean;
-  history?(): TaskDisplayRecord[];
+  history?(): readonly TaskDisplayRecord[];
   historyStorage?(): HistoryStorageStatus;
   tasks?: TaskPanelActions;
   taskPosition?: TaskPanelPosition;
@@ -85,6 +84,7 @@ export class RefineWorkspace implements Component, Focusable {
     private readonly theme: Theme,
     private readonly keys: KeybindingsManager,
     private readonly actions: WorkspaceActions,
+    private readonly copyReadingText?: (text: string) => void,
   ) {
     this.usageContent = new TaskContent(theme);
     this.panel.setLayoutProvider(this.layout);
@@ -332,6 +332,8 @@ export class RefineWorkspace implements Component, Focusable {
   /** Unhandled keys go to the host for overlay dismissal or guarded actions. */
   handleInput(data: string): boolean {
     if (this.disposed) return true;
+    this.taskPanel?.clearReadingSelection();
+    this.historyPanel?.clearReadingSelection();
     if (this.preferencePanel) { this.preferencePanel.handleInput(data); return true; }
     if (this.settings.editingNumber) { this.settings.handleInput(data); return true; }
     const key = parseKey(data);
@@ -402,6 +404,14 @@ export class RefineWorkspace implements Component, Focusable {
       return true;
     }
     return false;
+  }
+
+  handleMouse(event: TuiMouseEvent) {
+    if (this.disposed || !this.hasFocus || this.preferencePanel || !this.copyReadingText) return;
+    const panel = this.mode === "main" ? this.taskPanel : this.mode === "usage" ? this.historyPanel : undefined;
+    if (!panel) return;
+    const edge = workspaceViewport(this.outerWidth ?? event.width, this.tui.terminal.rows).framed ? 1 : 0;
+    return panel.handleReadingMouse({ ...event, x: event.x - edge, y: event.y - edge }, this.copyReadingText);
   }
 
   render(width: number): string[] {

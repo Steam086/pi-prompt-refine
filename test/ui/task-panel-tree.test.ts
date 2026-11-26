@@ -1,16 +1,81 @@
 import { getKeybindings, visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { RefineRecord } from "../../src/history.js";
+import { RefineHistory, type RefineRecord } from "../../src/history.js";
 import { panelLayout } from "../../src/panel-layout.js";
 import { sanitizeTerminalText } from "../../src/presentation.js";
 import { TaskPanel } from "../../src/task-panel.js";
+import { TaskContent } from "../../src/ui/task-content.js";
 import { workspaceLayout } from "../../src/workspace-overlay.js";
 import { getThemeByName } from "../support/pi-theme.js";
 import { create, record } from "../support/task-panel.js";
 
 afterEach(() => vi.restoreAllMocks());
 describe("prompt tree and inspection", () => {
+  it("retains the visible top row when a new run arrives above it, including after reopening Usage", () => {
+    const records = Array.from({ length: 32 }, (_, index) => record(index + 1));
+    const f = create("dark", true, records);
+    f.position.selectedId = 15;
+    f.size.rows = 24;
+    const layout = (width: number) => workspaceLayout(width, f.size.rows);
+    const panel = () => new TaskPanel(f.actions, f.theme, () => f.size.rows, getKeybindings(), true, f.position, layout);
+    const left = (view: TaskPanel) => view.render(100)
+      .filter((line) => line.includes(f.theme.fg("muted", " │ ")))
+      .map((line) => stripVTControlCharacters(line.split(f.theme.fg("muted", " │ "))[0]!));
+    const opened = panel();
+    const before = left(opened);
+    const top = f.position.topRowKey;
+    expect(before[0]).toMatch(/model-\d+/);
+    expect(before.some((line) => line.includes("›") && line.includes("model-15"))).toBe(true);
+
+    records.push(record(33));
+    expect(left(opened)).toEqual(before);
+    expect(left(opened)).toEqual(before);
+    expect(left(panel())).toEqual(before);
+    expect(f.position).toMatchObject({ selectedId: 15, topRowKey: top });
+    expect(f.actions.run).not.toHaveBeenCalled();
+  });
+
+  it("reuses unchanged tree-row styling during navigation and displays live time without changing the projection", () => {
+    const records = Array.from({ length: 30 }, (_, index) => record(index + 1));
+    records[15]!.status = "generating";
+    records[15]!.elapsedSeconds = undefined;
+    records[15]!.candidate = undefined;
+    const f = create("dark", true, records);
+    const journal = new RefineHistory();
+    journal.restore(records);
+    f.position.selectedId = 16;
+    f.size.rows = 60;
+    let elapsed = 31;
+    const content = new TaskContent(f.theme);
+    const badge = vi.spyOn(content, "badge");
+    const panel = new TaskPanel({ ...f.actions, records: () => journal.displaySnapshot("session"),
+      elapsedSeconds: (id) => id === 16 ? elapsed : undefined }, f.theme, () => f.size.rows, getKeybindings(), true,
+    f.position, (width) => workspaceLayout(width, f.size.rows), undefined, content);
+    const frame = () => stripVTControlCharacters(panel.render(160).join("\n"));
+    const snapshot = journal.displaySnapshot("session");
+    expect(frame()).toContain("#16 · openai-codex · 31s");
+    panel.handleInput("\x1b[B");
+    frame();
+    panel.handleInput("\x1b[A");
+    frame();
+    badge.mockClear();
+    elapsed = 32;
+    expect(frame()).toContain("#16 · openai-codex · 32s");
+    expect(journal.displaySnapshot("session")).toBe(snapshot);
+    expect(badge.mock.calls.every(([row]) => row.id === 16)).toBe(true);
+
+    panel.handleInput("\x1b[B");
+    frame();
+    panel.handleInput("\x1b[A");
+    frame();
+    badge.mockClear();
+    panel.handleInput("\x1b[B");
+    frame();
+    expect(badge.mock.calls.every(([row]) => row.id === 15)).toBe(true);
+    expect(f.position.selectedId).toBe(15);
+  });
+
   it.each(["dark", "light"])("emphasizes selection independently of reading focus and Done status (%s)", (name) => {
     for (const original of [true, false]) {
       const f = create(name);
