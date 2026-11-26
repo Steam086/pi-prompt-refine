@@ -4,6 +4,7 @@ import { createApplicationEvents } from "../../src/app/events.js";
 import { RefineController } from "../../src/controller.js";
 import { selectPreference } from "../../src/revision-preferences.js";
 import type { Hello, Mutation, Receipt, Reply, RunDetail, Snapshot, TaskDetail } from "../../src/app/api.js";
+import type { InputPort } from "../../src/app/ports.js";
 import { input, model } from "../support/controller.js";
 import { flushPromises, success } from "../support/helpers.js";
 
@@ -17,7 +18,10 @@ function fixture() {
   const complete = vi.fn<ConstructorParameters<typeof RefineController>[0]["complete"]>(() => new Promise<never>(() => {}));
   const controller = new RefineController({ complete, onState: () => events.changed(), maxDraftChars: 100_000, timeoutMs: 60_000 });
   controller.setSession("session-1");
-  const capture = vi.fn((text: string) => input(text, { systemPrompt: "PRIVATE-SYSTEM", history: { ...input("").history, text: "PRIVATE-HISTORY" } }));
+  const capture = vi.fn<InputPort["capture"]>((text, choice) => input(text, {
+    systemPrompt: "PRIVATE-SYSTEM", history: { ...input("").history, text: "PRIVATE-HISTORY" },
+    ...(choice ? { model: choice.model, thinkingLevel: choice.thinking } : {}),
+  }));
   const app = createApplication({ controller, events, input: { capture }, maxDraftChars: () => 100_000,
     models: { list: () => [{ ...model, name: "Model", thinkingLevels: ["off"], favorite: false }],
       resolve: (selected = model, thinking = "off") => ({ model: selected, thinking }),
@@ -114,8 +118,9 @@ describe("shared application contract", () => {
       const text = "same original";
       const note = selectPreference({ scope: "global", id: "note", name: "Review", version: 1, body: "First note",
         metadata: { kind: "result", description: "", activation: "manual" } });
-      const capture = (body: string) => f.capture.mockImplementation((draft) => input(draft, {
+      const capture = (body: string) => f.capture.mockImplementation((draft, choice) => input(draft, {
         preferences: [{ ...note, body }], editingInstruction: "Same editing requirements",
+        ...(choice ? { model: choice.model, thinkingLevel: choice.thinking } : {}),
       }));
       capture(note.body);
       expect(f.app.local({ method: "createDraft", text })).toMatchObject({ recordId: 1, value: { taskId: "task-1" } });

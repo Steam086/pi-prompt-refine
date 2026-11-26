@@ -83,7 +83,7 @@ export function createApplication(deps: {
         if (!mutation.text.trim()) return reject("empty");
         const selection = deps.models.resolve();
         if ("kind" in selection) return selection;
-        return created(controller.capture({ ...deps.input.capture(mutation.text), model: selection.model, thinkingLevel: selection.thinking }));
+        return created(controller.capture(deps.input.capture(mutation.text, selection)));
       }
       case "updateDraft": case "copyToCurrent": case "discardDraft": case "startRun": {
         const record = target(mutation.taskId, mutation.expectedVersion);
@@ -108,8 +108,7 @@ export function createApplication(deps: {
         if (!mutation.text.trim()) return reject("empty");
         const selection = deps.models.resolve(mutation.model, mutation.thinking);
         if ("kind" in selection) return selection;
-        const input = { ...deps.input.capture(mutation.text), model: selection.model, thinkingLevel: selection.thinking };
-        return started(controller.trigger(input, { force: true }));
+        return started(controller.trigger(deps.input.capture(mutation.text, selection), { force: true }));
       }
       case "stopRun": {
         const record = controller.getRecord(localId(mutation.runId, "run")!);

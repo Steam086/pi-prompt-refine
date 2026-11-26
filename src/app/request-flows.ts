@@ -7,6 +7,7 @@ import type { CandidateToken, RefineRequest, RefineRequestInput, TriggerResult }
 import { displayModel, effectiveThinkingLevel, sameModel } from "./model-utils.js";
 import { RESTORED_CONTEXT_HINT, type Notify, type NotifyCurrent } from "./contracts.js";
 import { composeRevision, PREFERENCE_SELECTION_LIMIT, type SelectedPreference } from "../revision-preferences.js";
+import type { RunModel } from "./ports.js";
 
 interface RequestFlowDependencies {
   controller: Pick<RefineController,
@@ -65,23 +66,23 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
     return selectHistory(entries, config.context.maxMessages, config.context.maxChars);
   }
 
-  function draftInput(ctx: ExtensionContext, draft: string): RefineRequestInput {
+  function captureOriginalInput(ctx: ExtensionContext, draft: string, choice?: RunModel): RefineRequestInput {
     const history = captureHistory(ctx);
-    const project = config.projectContext.enabled ? captureProjectContext(ctx, config.projectContext, draft) : undefined;
+    const projectConfig = config.projectContext;
+    const project = projectConfig.enabled ? {
+      cwd: ctx.cwd, snapshot: captureProjectContext(ctx, projectConfig, draft),
+      revisionSnapshot: captureProjectContext(ctx, projectConfig, draft, true), config: structuredClone(projectConfig),
+    } : undefined;
+    const preferences = initialPreferences(ctx);
     const generateTitle = canNameSession(ctx);
     return {
-      draft, model: controller.getModel() ?? { provider: "", id: "" },
-      ...defaultSelection(ctx),
+      draft, model: choice?.model ?? controller.getModel() ?? { provider: "", id: "" },
+      ...(choice ? { thinkingLevel: choice.thinking } : {}),
+      ...(preferences.length ? { preferences, editingInstruction: composeRevision(preferences, "") } : {}),
       generateTitle, systemPrompt: buildRefineSystemPrompt(generateTitle, config.systemPrompt),
       sessionId: ctx.sessionManager.getSessionId(), branchLeafId: ctx.sessionManager.getLeafId(), history,
-      ...(project ? { project: { cwd: ctx.cwd, snapshot: project,
-        revisionSnapshot: captureProjectContext(ctx, config.projectContext, draft, true), config: structuredClone(config.projectContext) } } : {}),
+      ...(project ? { project } : {}),
     };
-  }
-
-  function defaultSelection(ctx: ExtensionContext): Pick<RefineRequestInput, "preferences" | "editingInstruction"> {
-    const preferences = initialPreferences(ctx);
-    return preferences.length ? { preferences, editingInstruction: composeRevision(preferences, "") } : {};
   }
 
   function triggerOptimize(ctx: ExtensionContext, force = false, suppliedDraft?: string, keepEditor = false,
@@ -104,26 +105,13 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
     const model = ctx.modelRegistry.find(selected.provider, selected.id)!;
 
     setCompletionContext(ctx);
-    const history = captureHistory(ctx);
+    const input = captureOriginalInput(ctx, draft, { model: selected,
+      thinking: effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel) });
     const previousContext = { historySnapshot, projectLabel, projectWarnings };
-    historySnapshot = history;
-    const project = config.projectContext.enabled ? captureProjectContext(ctx, config.projectContext, draft) : undefined;
-    projectLabel = project ? `${project.instructionCount} rules · ${project.skillCount} skills${config.projectContext.tree.enabled && !history.text ? " · tree" : ""}` : "";
+    historySnapshot = input.history;
+    const project = input.project?.snapshot;
+    projectLabel = project ? `${project.instructionCount} rules · ${project.skillCount} skills${input.project?.config?.tree.enabled && !input.history.text ? " · tree" : ""}` : "";
     projectWarnings = project?.warnings ?? [];
-    const generateTitle = canNameSession(ctx);
-    const input = {
-      draft,
-      ...defaultSelection(ctx),
-      model: selected,
-      thinkingLevel: effectiveThinkingLevel(model, config.thinkingLevel, ctx.thinkingLevel),
-      generateTitle,
-      systemPrompt: buildRefineSystemPrompt(generateTitle, config.systemPrompt),
-      sessionId: ctx.sessionManager.getSessionId(),
-      branchLeafId: ctx.sessionManager.getLeafId(),
-      history,
-      ...(project ? { project: { cwd: ctx.cwd, snapshot: project,
-        revisionSnapshot: captureProjectContext(ctx, config.projectContext, draft, true), config: structuredClone(config.projectContext) } } : {}),
-    };
     const defaultsTooLong = (input.editingInstruction?.length ?? 0) > config.maxDraftChars;
     const tooMany = (input.preferences?.length ?? 0) > PREFERENCE_SELECTION_LIMIT;
     let result = mode === "run" ? controller.trigger(input, { force }) : controller.capture(input);
@@ -228,5 +216,5 @@ export function createRequestFlows({ controller, config, useContext, setCompleti
     if (projectWarnings.length) notify(ctx, projectWarnings.join("\n"), "warning");
     updatePresentation();
   }
-  return { optimizationError, draftInput, triggerOptimize, generateSameInput, reviseCandidate, contextLabel, clearContext, reportProject };
+  return { optimizationError, captureOriginalInput, triggerOptimize, generateSameInput, reviseCandidate, contextLabel, clearContext, reportProject };
 }

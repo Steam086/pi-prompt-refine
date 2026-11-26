@@ -107,7 +107,7 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
   });
   const application = createApplication({
     controller, events, models: modelService, maxDraftChars: () => config.maxDraftChars,
-    input: { capture: (text) => requests.draftInput(executionContext(), text) },
+    input: { capture: (text, choice) => requests.captureOriginalInput(executionContext(), text, choice) },
     storage: { summary: () => {
       const status = lifecycle.historyStorage(executionContext(), controller.getSessionId()!);
       return { state: status.state, savedCount: status.savedIds.length, omittedCount: status.omittedIds.length,
