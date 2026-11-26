@@ -49,7 +49,7 @@ describe("Revise visual hierarchy and feedback", () => {
     const before = output(w);
     expect(before).toContain(f.theme.fg("text", f.theme.bold("Revise current result")) + f.theme.fg("muted", ` · ${f.label}`));
     expect(before).not.toContain(f.theme.bold(f.label));
-    expect(before).toContain(f.theme.fg("muted", "Revision not submitted"));
+    expect(before).not.toContain("Revision not submitted");
     expect(before).not.toContain("Selected snapshots + additional requirements");
     expect(before.split("\n").find((line) => line.includes("Preferences: None"))).toContain("Review full requirements");
     expect(before).toContain(f.theme.bg("selectedBg", f.theme.fg("text", f.theme.bold("› Additional requirements:"))));
@@ -70,7 +70,7 @@ describe("Revise visual hierarchy and feedback", () => {
     expect(output(w)).toContain(formatKeyHint(["Enter", "Review"], f.theme));
     w.handleInput(tab); expect(output(w)).toContain(CURSOR_MARKER);
     w.handleInput(esc);
-    expect(strip(output(w))).toContain("↑↓ scroll result");
+    expect(strip(output(w))).toContain("o Reference");
     w.handleInput("f"); expect(output(w)).toContain("文字😀");
   });
 

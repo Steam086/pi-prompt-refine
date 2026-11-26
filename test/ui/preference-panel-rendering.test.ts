@@ -179,7 +179,7 @@ describe("preference rendering and responsiveness", () => {
     f.panel.handleInput("?"); expect(text(f.panel)).toContain("Preferences keys");
     expect(text(f.panel)).toContain("n / e / d"); f.panel.handleInput(esc);
     f.panel.handleInput("n"); f.panel.handleInput("Draft name"); f.panel.handleInput(enter);
-    const shortcuts = () => frameHeader(f.panel.render(100)).map(stripVTControlCharacters)[1]!;
+    const shortcuts = () => stripVTControlCharacters(f.panel.render(100).at(-1)!);
     const shared = shortcuts().split(" · ").slice(0, 3);
     expect(f.panel.render(100).join("\n")).not.toContain(CURSOR_MARKER);
     for (const key of [" ", "Draft instruction", enter, "Second line", "\x1b[A", "!"]) f.panel.handleInput(key);

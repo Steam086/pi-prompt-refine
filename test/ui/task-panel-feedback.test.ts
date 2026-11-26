@@ -51,7 +51,7 @@ describe("short and narrow feedback", () => {
     for (let i = 0; i < 40; i++) {
       // At eight terminal rows the document viewport is one line, so assemble
       // that viewport rather than inserting repeated frame chrome into the text.
-      all += stripVTControlCharacters(panel.render(40).at(-1)!).trim() + " ";
+      all += stripVTControlCharacters(panel.render(40).at(-2)!).trim() + " ";
       panel.handleInput("\x1b[B");
     }
     expect(all).toContain("Press i to copy into current round");
@@ -69,15 +69,16 @@ describe("short and narrow feedback", () => {
     panel.handleInput("\r");
     for (const width of [20, 40, 80, 100]) {
       const output = text(width);
-      const destination = width === 20 ? "→editor" : "Editor only";
+      const destination = width <= 40 ? "Editor" : "Editor only";
       expect(output).toContain(`a ${destination}`);
-      expect(output).toMatch(/s Send(?: to Pi)?/);
+      expect(output).toMatch(width === 20 ? /\bs(?: |$)/m : /s Send(?: to Pi)?/);
       if (width > 20) {
-        expect(output).toMatch(/\? (Help|Actions)/);
+        expect(output).toContain("?");
         expect(output).toContain("Esc Back");
       }
       const styled = panel.render(width).join("\n");
-      const hints = [["a", destination], ["s", width < 48 ? "Send" : "Send to Pi"]];
+      const hints = [["a", destination]];
+      if (width > 20) hints.push(["s", width < 48 ? "Send" : "Send to Pi"]);
       if (width > 20) hints.push(["Esc", "Back"]);
       for (const [key, label] of hints) {
         expect(styled).toContain(theme.fg("text", theme.bold(key!)) + " " + theme.fg("muted", label!));
@@ -94,12 +95,12 @@ describe("short and narrow feedback", () => {
     expect(position.selectedId).toBe(1);
     panel.handleInput("\x1b");
     size.rows = 8;
-    expect(text(40)).toContain("a Editor only"); expect(text(40)).toContain("s Send");
-    expect(text(40)).toContain("? Help"); expect(text(40)).not.toContain("Enter Inspect");
+    expect(text(40)).toContain("a Editor"); expect(text(40)).toContain("s Send");
+    expect(text(40)).toContain("?"); expect(text(40)).not.toContain("Enter Inspect");
     panel.handleInput("o");
     size.rows = 24;
     expect(text(20)).toContain("Original prompt");
-    expect(text(20)).toContain("a Result→editor");
+    expect(text(20)).toContain("a Editor");
     panel.handleInput("a"); expect(actions.accept).toHaveBeenCalledWith(1);
   });
 
@@ -175,7 +176,7 @@ describe("top action hints", () => {
         const layout = panelLayout(width, rows);
         const empty = frame.find((line) => line.includes(usage ? "No records" : "No current"))!;
         expect(stripVTControlCharacters(empty).startsWith(" ".repeat(layout.inset) + "No ")).toBe(true);
-        if (width === 120) expect(empty).toContain(f.theme.fg("muted", usage ? "No records yet. Return to Preview to create a prompt." : "No current prompts."));
+        if (width === 120) expect(empty).toContain(f.theme.fg("muted", usage ? "No records yet." : "No current prompts."));
         expect(text).not.toContain("│");
         for (const unavailable of ["0 prompts", "0 runs", "↑↓ select", "↑↓ scroll", "Inspect", "i Edit", "m Model", "Tab Read"]) {
           expect(text).not.toContain(unavailable);

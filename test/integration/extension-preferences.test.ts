@@ -172,7 +172,7 @@ describe("explicit candidate revision", () => {
     expect(h.panelLines().join("\n")).toContain("Adopted preferences");
     expect(h.panelLines().join("\n")).not.toContain("Library only");
     h.panelInput(" "); h.panelInput("\x1b[13;3u"); h.panelInput("s");
-    expect(h.panelLines().join("\n")).toContain("No selections");
+    expect(h.panelLines().join("\n")).toContain("No adopted preferences");
     expect(h.panelLines().join("\n")).not.toContain("Bring back");
     h.panelInput("\x1b"); h.panelInput("q"); h.panelInput("q"); await view;
     expect(h.complete).toHaveBeenCalledTimes(1); expect(h.sent).toEqual([]); expect(h.editorWrites).toEqual([]);

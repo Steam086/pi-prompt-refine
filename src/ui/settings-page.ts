@@ -237,7 +237,7 @@ export class SettingsPage {
     const hints: KeyHint[] = [["Esc", active ? "Back" : "Cancel"], ["Ctrl+S", layout.innerWidth >= 100 ? "Save settings" : "Save"],
       ["↑↓", "Presets"], submit];
     const compact: KeyHint[] = [["Esc", layout.innerWidth >= 18 ? active ? "Back" : "Cancel" : ""], ["^S", layout.innerWidth >= 11 ? "Save" : ""],
-      ["↑↓", ""], ["↵", shortAction]];
+      ["↵", layout.innerWidth >= 24 ? shortAction : ""], ["↑↓", ""]];
     const { tabs, footer } = this.hintLayout(layout, this.saving ? [] : hints, this.saving ? [] : compact);
     const { innerWidth } = layout;
     const theme = this.theme;
@@ -399,13 +399,16 @@ export class SettingsPage {
     const action = this.cursor === 4 ? (optimizer?.thinkingEnabled ? "Cycle" : undefined)
       : this.cursor === 3 ? "Choose" : this.cursor === 5 || NUMBER_SETTINGS[this.cursor] ? "Edit"
       : this.cursor === 0 ? "Change" : "Toggle";
-    const enterHint = (key: string): KeyHint[] => action ? [[key, action]] : [];
+    const enterHint = (key: string, keyOnly = false): KeyHint[] => action ? [[key, keyOnly ? "" : action]] : [];
     // Saving has a fixed key and an explicit scope, independent of row focus.
     const close: KeyHint = ["Esc", dirty ? "Discard…" : "Close"];
     const compactClose: KeyHint = ["Esc", innerWidth < (dirty ? 19 : 17) ? "" : dirty ? "Discard" : "Close"];
+    const groupHints: KeyHint[] = groups.length > 1 ? [["Tab", "Group"]] : [];
     const { tabs, footer } = this.hintLayout(layout,
-      this.saving ? [] : [close, ["Ctrl+S", "Save"], ["↑↓", "Move"], ...enterHint(innerWidth >= 58 ? "Enter/Space" : "↵/Space")],
-      this.saving ? [] : [compactClose, ["^S", innerWidth >= 11 ? "Save" : ""], ["↑↓", ""], ...enterHint("↵")]);
+      this.saving ? [] : [close, ["Ctrl+S", "Save"], ["↑↓", "Move"], ...enterHint(innerWidth >= 58 ? "Enter/Space" : "↵/Space"),
+        ["←→", "Tabs"], ...groupHints],
+      this.saving ? [] : [compactClose, ["^S", innerWidth >= 11 ? "Save" : ""], ["↑↓", ""], ...enterHint("↵", innerWidth < 28),
+        ["←→", innerWidth >= 35 ? "Tabs" : ""], ...groupHints]);
     const timing = group === "Context" && this.cursor !== 12 ? "Context changes take effect next round" : "";
     const status = notice || theme.fg("muted", timing);
     const header = [layout.headerHeight === 1 && notice ? status : theme.fg("text", theme.bold("Settings")), status];

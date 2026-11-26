@@ -5,8 +5,8 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { selectTaskOriginal, taskGroups, type TaskDisplayRecord } from "./history.js";
 import { runId, taskId } from "./app/operation-contract.js";
 import type { HistoryStorageStatus } from "./history-store.js";
-import { fittingHints, panelConfirmation, panelHeader, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
-import { confirmationKeyHints, fittingKeyHints, formatKeyHint, passiveHeaderHints, type KeyHint } from "./key-hints.js";
+import { fittingHints, focusLabel, panelConfirmation, panelHeader, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
+import { confirmationKeyHints, fittingKeyHints, passiveHeaderHints, type KeyHint } from "./key-hints.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
 import type { InlinePreferences } from "./inline-preferences.js";
@@ -616,9 +616,8 @@ export class TaskPanel {
     const back: KeyHint = ["Esc", passiveHints ? "Close" : "Back"];
     // Reading the original does not change the action target. Name the result
     // explicitly here, even when the selected result itself is off screen.
-    const editorHint = this.original && run?.candidate
-      ? (layout.innerWidth < 40 ? "Result→editor" : "Result to editor only")
-      : layout.innerWidth < 20 ? "→editor" : "Editor only";
+    const editorHint = this.inspecting && layout.innerWidth < 44 ? "Editor"
+      : this.original && run?.candidate ? "Result to editor only" : "Editor only";
     const compact = (hints: KeyHint[]): KeyHint[] => hints.map(([key, label]) => [key === "Enter" ? "↵" : key, label === "Send to Pi" ? "Send" : label]);
     const actionWidth = layout.innerWidth;
     let footer: string;
@@ -632,8 +631,9 @@ export class TaskPanel {
       const focus: KeyHint[] = inline ? [["Tab", "Preferences"], ["o", (this.reading ? "Select" : "Read original").padEnd("Read original".length)]]
         : selected ? [["Tab", (this.reading ? "Select" : "Read").padEnd("Select".length)]] : [];
       footer = passiveHeaderHints(
-        [back, ...primary, ["?", "Help"], ...preferences, ...focus],
-        [actionWidth < 9 || stop && actionWidth < 36 ? ["Esc", ""] : back, ...compact(primary), ["?", "Help"], ...preferences, ...focus], actionWidth, this.theme);
+        [back, ...primary, ["?", "Help"], ...preferences, ...focus, ["←→", "Tabs"]],
+        [actionWidth < 9 || stop && actionWidth < 36 ? ["Esc", ""] : back, ...compact(primary), ["?", "Help"],
+          ["←→", actionWidth < 34 ? "" : "Tabs"], ...preferences, ...focus], actionWidth, this.theme);
     } else {
       const primary: KeyHint[] = !selected ? [["n", "New"]] : [
         ...(!this.inspecting ? [["Enter", action] as const] : []),
@@ -644,42 +644,38 @@ export class TaskPanel {
       if (stop) primary.unshift(["x", "Stop"]);
       if (run?.candidate) primary.unshift(["a", editorHint], ...(this.inspecting ? [["s", "Send to Pi"] as const] : []));
       if (selected && this.actions.deleteRecords) primary.push(["d", "Delete"]);
-      const secondary: KeyHint[] = [back, ["?", layout.innerWidth < 56 ? "Help" : "Actions"]];
+      const secondary: KeyHint[] = [];
       if (this.usage && this.actions.historyStorage) secondary.push(["b", "Storage"]);
       if (this.canExpand()) {
         const expansion = this.expansionHint?.();
         if (expansion) secondary.push(expansion);
       }
       if (run?.candidate && !this.inspecting && !restored && this.actions.revise) secondary.push(["f", "Revise"]);
-      if (previewDetails && (layout.headerHeight < 2 || this.notice)) secondary.push(["o", this.original ? "Result" : "Reference"]);
-      if (other && layout.innerWidth >= 72) secondary.push(["Tab", "Switch result"]);
       if (this.inspecting && selected && run?.candidate) {
         if (selected.records.some((record) => record.id !== run.id && record.candidate)) secondary.push(["c", other ? "Next comparison" : "Compare"]);
         secondary.push(["e", "Edit result"], ...(!restored ? [["f", "Revise"] as const] : []));
       }
-      const actions = actionWidth < 44 ? compact(primary) : primary;
+      const actions = actionWidth < 60 ? compact(primary) : primary;
       const firstActions = run?.candidate && this.inspecting ? actions.slice(0, 2) : actions.slice(0, 1);
-      const essential: KeyHint[] = actionWidth < 23 && run?.candidate ? [...firstActions, ["Esc", ""]] : [back, ...firstActions];
-      footer = fittingKeyHints([...essential, ...secondary.slice(1, 2), ...actions.filter((item) => !essential.includes(item)),
-        ...secondary.slice(2)], actionWidth, this.theme, actionWidth < 44 ? " " : " · ");
+      const readingAction: KeyHint | undefined = other ? ["Tab", actionWidth < 64 ? "Switch" : "Switch result"]
+        : previewDetails || this.inspecting && this.usage && run?.candidate
+          ? ["o", this.original ? "Result" : actionWidth < 48 ? "Ref" : "Reference"] : undefined;
+      if (this.inspecting) secondary.unshift(["↑↓", previewDetails ? this.original ? "Scroll reference" : "Scroll result" : "Scroll"]);
+      const narrow = actionWidth < 34 && !!run?.candidate && this.inspecting;
+      const view: KeyHint[] = readingAction ? [actionWidth < 30 ? [readingAction[0], ""] : readingAction] : [];
+      const essential: KeyHint[] = narrow
+        ? [["Esc", ""], ["a", "Editor"], ...view, ["s", actionWidth < 23 ? "" : "Send"]]
+        : [back, ...firstActions, ...view];
+      const help: KeyHint = ["?", actionWidth < 56 && this.inspecting ? "" : "Help"];
+      const remaining = actions.filter(([key]) => !essential.some(([shown]) => key === shown));
+      const contextual = restored && this.inspecting ? remaining.filter(([key]) => key === "i" || key === "p") : [];
+      footer = fittingKeyHints([...essential, ...contextual, help, ...remaining.filter((hint) => !contextual.includes(hint)),
+        ...secondary], actionWidth, this.theme, actionWidth < 44 ? " " : " · ");
     }
     const title = this.inspecting ? (other ? "Compare results" : "Prompt details") : this.usage ? "Usage · All rounds" : "Prompt refine · Tasks";
     const feedback = this.notice ? this.theme.fg(this.noticeColor, sanitizeTerminalText(this.notice)) : "";
-    let inspectionSubtitle = "";
-    if (this.inspecting && selected) {
-      const scroll = formatKeyHint(["↑↓", `scroll${previewDetails ? (this.original ? " reference" : " result") : ""}`], this.theme);
-      const reference = previewDetails ? formatKeyHint(["o", this.original ? "Result" : "Reference"], this.theme) : "";
-      const prefix = !selected.original && layout.innerWidth >= 48 ? this.content.muted("Selected: ") : "";
-      const identity = !selected.original ? `#${selected.record.id} ${selected.record.input.model.id}` : "Original prompt";
-      const fullHints = scroll + (reference ? this.content.muted(" · ") + reference : "");
-      let hints = visibleWidth(prefix + fullHints) + 15 <= layout.innerWidth ? fullHints : reference || scroll;
-      if (visibleWidth(prefix + hints) + 7 > layout.innerWidth) {
-        hints = previewDetails ? formatKeyHint(["o", this.original ? "Result" : "Ref"], this.theme) : formatKeyHint(["↑↓", ""], this.theme);
-      }
-      const space = Math.max(0, layout.innerWidth - visibleWidth(prefix + hints) - 3);
-      const label = stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(identity), space, "…"));
-      inspectionSubtitle = prefix + this.content.heading(label) + this.content.muted(" · ") + hints;
-    }
+    const inspectionSubtitle = this.inspecting && run && !other
+      ? this.theme.fg("text", stripVTControlCharacters(truncateToWidth(sanitizeTerminalText(`#${run.id} · ${run.input.model.id}`), layout.innerWidth, "…"))) : "";
     const runs = rows.length - prompts;
     const separator = this.content.muted(" · ");
     const model = passiveHints && !this.notice && action === "Optimize" ? this.refineModelLabel(layout.innerWidth) : "";
@@ -702,8 +698,8 @@ export class TaskPanel {
       : layout.innerWidth < 72 ? `History → Usage · ${earlierPending ? `${earlierPending} active` : earlierLabel}`
       : `History → Usage · ${earlierPending ? `${earlierPending} running / queued · ` : ""}${earlierLabel}`;
     const showHistoryHint = earlierCount > 0 && !this.retainedEarlier && !this.notice && !this.inspecting && !this.referenceOnly;
-    const identity = this.retainedEarlier && selected && !selected.original
-      ? this.content.heading(`#${selected.record.id} ${selected.record.input.model.id}`) : "";
+    const identity = this.retainedEarlier && run
+      ? this.theme.fg("text", `#${run.id} ${sanitizeTerminalText(run.input.model.id)}`) : "";
     const history = showHistoryHint ? this.content.muted(historyHint) : "";
     const earlier = layout.innerWidth < 72 ? this.content.muted("Earlier · Esc current") : subtitle;
     const status = this.retainedEarlier ? fittingHints([earlier, identity].filter(Boolean), layout.innerWidth, separator)
@@ -752,30 +748,29 @@ export class TaskPanel {
     } else if (previewDetails && selected) {
       body = this.pane(selected, layout.innerWidth, height, true, true, true, bodyOrigin);
     } else if (other && selected) {
-      // A/B identities stay attached to runs when Tab swaps the action target.
-      const letter = (row: Row) => row.record.id === Math.min(selected.record.id, other.record.id) ? "A" : "B";
-      const identity = (row: Row) => `${letter(row)} · #${row.record.id}`;
+      const [a, b] = selected.record.id < other.record.id ? [selected, other] : [other, selected];
+      const active = (row: Row) => row === selected && !this.referenceOnly;
+      const label = (row: Row, compact = false) => `${row === a ? "A" : "B"}${compact ? "" : " · "}#${row.record.id}`;
       if (layout.innerWidth >= 72) {
         const half = Math.floor((layout.innerWidth - 3) / 2);
-        const right = this.pane(selected, half, height - 1, true, false, true, origin(0, 1));
-        const peer = this.pane(other, layout.innerWidth - half - 3, height - 1, false, false, true, origin(half + 3, 1));
-        const label = truncateToWidth(this.content.heading(identity(selected)), half, "…");
-        body = [label + " ".repeat(Math.max(0, half - visibleWidth(label))) + this.content.muted(" │ ") + this.content.heading(identity(other))];
+        const rightWidth = layout.innerWidth - half - 3;
+        const left = this.pane(a, half, height - 1, a === selected, false, true, origin(0, 1));
+        const right = this.pane(b, rightWidth, height - 1, b === selected, false, true, origin(half + 3, 1));
+        const caption = focusLabel(this.theme, half, label(a), active(a));
+        body = [caption + " ".repeat(Math.max(0, half - visibleWidth(caption))) + this.content.muted(" │ ")
+          + focusLabel(this.theme, rightWidth, label(b), active(b))];
         body.push(...Array.from({ length: height - 1 }, (_, i) => {
-          const line = right[i] ?? "";
-          return line + " ".repeat(Math.max(0, half - visibleWidth(line))) + this.content.muted(" │ ") + (peer[i] ?? "");
+          const line = left[i] ?? "";
+          return line + " ".repeat(Math.max(0, half - visibleWidth(line))) + this.content.muted(" │ ") + (right[i] ?? "");
         }));
       } else {
-        const peerLabel = (label: string) => this.referenceOnly ? this.content.muted(label) : formatKeyHint(["Tab", label], this.theme);
-        let caption = this.content.heading(identity(selected)) + this.content.muted(" · ") + peerLabel(identity(other));
-        if (visibleWidth(caption) > layout.innerWidth) {
-          const compact = (row: Row) => `${letter(row)}#${row.record.id}`;
-          caption = this.content.heading(compact(selected)) + " " + peerLabel(compact(other));
-        }
+        const compact = visibleWidth(`› ${label(a)}   ${label(b)}`) > layout.innerWidth;
+        const choice = (row: Row) => (active(row) ? "" : "  ") + focusLabel(this.theme, layout.innerWidth, label(row, compact), active(row));
+        const caption = `${choice(a)} ${choice(b)}`;
         body = [caption, ...this.pane(selected, layout.innerWidth, height - 1, true, false, true, origin(0, 1))];
       }
     } else {
-      const empty = this.usage ? "No records yet. Return to Preview to create a prompt." : "No current prompts.";
+      const empty = this.usage ? "No records yet." : "No current prompts.";
       const reading = this.inspecting || this.reading || this.preferenceFocus;
       const right = selected ? this.pane(selected, rightWidth, height, true, false, true,
         split ? origin(leftWidth + 3) : reading ? bodyOrigin : undefined) : this.content.wrapped(this.content.muted(empty), rightWidth);

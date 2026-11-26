@@ -487,8 +487,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
   });
 
   it("presents an overlay model picker without changing the model on cancel", async () => {
-    const harness = await makeHarness();
-    harness.setCustomAction("\x1b");
+    const harness = await makeHarness({ reasoning: true });
+    harness.setCustomAction(["\x1b"]);
     await harness.command("model", harness.context);
     expect(harness.panelLines().join("\n")).toContain("Choose optimizer model");
     expect(harness.panelLines().join("\n")).toContain("Optimizer only · Main session unchanged");

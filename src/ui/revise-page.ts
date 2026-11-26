@@ -169,7 +169,7 @@ export class RevisePage {
     const identity = this.revisionTarget?.label ? theme.fg("muted", sanitizeTerminalText(` · ${this.revisionTarget.label}`)) : "";
     const selected = this.revisionSelected.length ? `${this.revisionSelected.length} · ${this.revisionSelected.map((item) => item.name + (item.body !== item.sourceBody ? "*" : "")).join(", ")}` : "None";
     const status = this.inputError || this.options.preferencesKeyNotice.trim()
-      || `Revision not submitted${this.revisionSelected.some((item) => item.body !== item.sourceBody) ? " · * Edited for this revision only" : ""}`;
+      || (this.revisionSelected.some((item) => item.body !== item.sourceBody) ? "* Edited for this revision only" : "");
     const warning = !!(this.inputError || this.options.preferencesKeyNotice);
     const feedback = theme.fg(warning ? "warning" : "muted", sanitizeTerminalText(`${warning ? "⚠ " : ""}${status}`));
     const control = (label: string, active: boolean) => focusLabel(theme, layout.innerWidth, label, active);

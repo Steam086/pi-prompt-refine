@@ -164,7 +164,7 @@ export function createModelSelection({ controller, readConfig, useContext, setCo
             title: source ? "Run original with another model" : "Choose optimizer model",
             subtitle: source ? "Same original and conversation context · Default model unchanged" : "Optimizer only · Main session unchanged",
             query, fromSettings, thinkingStatus: statusFor(model),
-            thinkingKeys: !fromSettings || canCycleThinking ? cycleThinkingKeys : "", run: !!source,
+            thinkingKeys: canCycleThinking ? cycleThinkingKeys : "", run: !!source,
           }, width, tui.terminal.rows, theme);
         },
         invalidate: () => list.invalidate(),

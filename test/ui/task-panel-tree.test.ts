@@ -394,7 +394,7 @@ describe("prompt tree and inspection", () => {
         if (width! >= 40) {
           expect(stripVTControlCharacters(frame.join("\n"))).toContain("Earlier");
           expect(stripVTControlCharacters(frame.join("\n"))).toContain("Result 1");
-          if (width! >= 100) expect(frame.join("\n")).toContain(f.theme.fg("text", f.theme.bold("#1 model-1")));
+          if (width! >= 100) expect(frame.join("\n")).toContain(f.theme.fg("text", "#1 model-1"));
         }
       }
       f.records[1]!.candidate!.text = "Late old result";

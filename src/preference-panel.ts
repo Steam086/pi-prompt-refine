@@ -662,15 +662,12 @@ export class PreferencePanel {
     const searching = this.focus === "search";
     const target = this.purpose === "refine" ? "Unsent original" : session ? "This session" : "This revision";
     const selectionLabel = `${this.selected.length} selected`;
-    const selectionScope = !selectable ? " (read-only)" : session ? " · Future prompts" : " · Kept on return";
+    const selectionScope = !selectable ? " (read-only)" : session ? " · Future prompts" : "";
     let title = managing ? "Preferences library" : audit ? "Adopted preferences" : `Preferences · ${target}`;
     let subtitle = "";
     let subtitleColor: DocumentPart["color"] = "muted";
     let renderBody: (height: number) => string[];
     const viewHint: KeyHint = ["s", this.selectedOnly ? "All" : "Selected only"];
-    const toggle: KeyHint | undefined = !searching && selectable && (!this.selectedOnly || this.selected.length)
-      ? ["Space", this.selectedOnly ? "Deselect" : "Toggle"] : undefined;
-    const project: KeyHint | undefined = !searching && this.projectDefaultsEditable ? ["g", "Project default"] : undefined;
     const border = (line: string) => this.theme.fg("borderMuted", line);
     const back: KeyHint = ["Esc", "Back"];
     let hints: KeyHint[] = [back, ["Tab", "Focus"], ["?", "Keys"]];
@@ -705,14 +702,19 @@ export class PreferencePanel {
       const entries = this.entries();
       this.index = Math.min(this.index, Math.max(0, entries.length - 1));
       const errors = Object.values(this.library.errors);
-      const status = errors.length ? errors.join(" · ") : this.selectedOnly && !this.selected.length
-        ? "No selections" : !this.library.entries.length && !this.selected.length
+      const status = this.selectedOnly && !this.selected.length
+        ? audit ? "No adopted preferences" : "No selections" : !this.library.entries.length && !this.selected.length
           ? "Library is empty" : !entries.length ? "No matches" : "";
+      const source = entries[this.index] && this.source(entries[this.index]!);
+      const toggle: KeyHint | undefined = !searching && selectable && entries.length
+        ? ["Space", this.selectedOnly ? "Deselect" : "Toggle"] : undefined;
+      const project: KeyHint | undefined = !searching && this.projectDefaultsEditable && entries.length ? ["g", "Project default"] : undefined;
       renderBody = (h) => {
-        const context: KeyHint[] = searching ? [["Enter", "Browse"], ["Esc", "End search"]]
-          : [...(toggle ? [toggle] : []), ...(this.selectedOnly && !audit ? [viewHint] : []), ["Enter", "Read"],
-            ...(project ? [project] : []), ...(!this.selectedOnly && !audit ? [viewHint] : []),
-            ...(selectable ? [["c", "Clear all"] as const] : [])];
+        const view = !audit && (selectable || this.selected.length) ? [viewHint] : [];
+        const context: KeyHint[] = searching ? [["Enter", "Browse"]]
+          : [...(toggle ? [toggle] : []), ...(this.selectedOnly ? view : []), ...(entries.length ? [["Enter", "Read"] as const] : []),
+            ...(project ? [project] : []), ...(!this.selectedOnly ? view : []),
+            ...(selectable && this.selected.length ? [["c", "Clear all"] as const] : [])];
         const shortSelection = !!toggle && !!project && h < 6;
         const contextHints = shortSelection ? fittingKeyHints([["Space", ""], ["g", "Default"]], w, this.theme)
           : fittingKeyHints(context, w, this.theme);
@@ -722,9 +724,10 @@ export class PreferencePanel {
         const room = height >= 3;
         const split = height >= 5 && w >= 76;
         const leftWidth = split ? Math.floor(w * 0.43) : w;
-        const managementHints = this.canManageEntries && height >= 4
-          ? fittingKeyHints(MANAGEMENT_HINTS, leftWidth, this.theme, " · ", searching ? "secondary-compact" : "primary") : "";
-        const available = Math.max(1, height - (room ? 2 + Number(!!managementHints) : 0));
+        const managementRow = this.canManageEntries && height >= 4;
+        const managementHints = managementRow && !searching
+          ? fittingKeyHints(MANAGEMENT_HINTS.slice(0, !source ? 1 : source.scope === "builtin" ? 2 : 3), leftWidth, this.theme) : "";
+        const available = Math.max(1, height - (room ? 2 + Number(managementRow) : 0));
         const search = [this.textField(this.search, "Search:", leftWidth, searching)];
         const window = selectionWindow(entries.length, this.index, available, this.top,
           this.selectedOnly ? undefined : (index) => preferenceGroup(entries[index]!), available >= 10 ? 1 : 0, this.navigationDirection);
@@ -747,19 +750,21 @@ export class PreferencePanel {
             selected: !!local, selectionEditable: selectable, focused: active, cursor, warning,
             projectDefault: this.library.projectDefaults?.includes(preferenceKey(entry)) }, this.theme);
         });
-        if (!entries.length) list.push(...wrap(status, leftWidth).map((line) => this.theme.fg(errors.length ? "error" : "muted", line)));
+        if (!entries.length && !errors.length) list.push(...wrap(status, leftWidth).map((line) => this.theme.fg("muted", line)));
         if (!room) {
           return [...statusRows, ...(searching ? search : list).slice(0, Math.max(1, height)), ...footer];
         }
         const rightWidth = split ? w - leftWidth - 3 : w;
         const detail = split && entries[this.index] ? this.document(this.description(entries[this.index]!, true), rightWidth) : [];
-        const headingText = this.theme.fg("text", this.theme.bold(`${audit ? "Adopted" : this.selectedOnly ? "Selected only" : "Library"} ${entries.length ? this.index + 1 : 0}/${entries.length}`));
+        const countLabel = ` ${entries.length ? this.index + 1 : 0}/${entries.length}`;
+        const headingText = this.theme.fg("text", this.theme.bold(`${audit ? "Adopted" : this.selectedOnly ? "Selected only" : "Library"}${countLabel}`));
         const count = this.theme.fg("muted", ` · ${selectionLabel}${selectionScope}`);
         const compactCount = this.theme.fg("muted", ` · ${selectionLabel}`);
-        const suffix = [count, compactCount].find((label) => visibleWidth(headingText + label) <= leftWidth);
+        const suffix = !managing || this.selected.length
+          ? [count, compactCount].find((label) => visibleWidth(headingText + label) <= leftWidth) : undefined;
         const heading = truncateToWidth(suffix ? headingText + suffix
           : selectable ? this.theme.fg("muted", selectionLabel) : headingText, leftWidth, "");
-        const left = [...search, heading, ...(managementHints ? [managementHints] : []), ...list];
+        const left = [...search, heading, ...(managementRow ? [managementHints] : []), ...list];
         if (!split) return [...statusRows, ...Array.from({ length: height }, (_, i) => left[i] ?? ""), ...footer];
         const divider = this.theme.fg("borderMuted", " │ ");
         return [...statusRows, ...Array.from({ length: height }, (_, i) => {

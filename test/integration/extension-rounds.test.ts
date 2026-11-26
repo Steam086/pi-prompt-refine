@@ -64,7 +64,7 @@ describe("multi-model preview and unified Usage", () => {
     const reference = harness.panelLines(24).join("\n");
     expect(reference).toContain("Draft A");
     expect(reference).not.toContain("Second candidate");
-    expect(reference).toContain("a Result→editor");
+    expect(reference).toContain("a Editor");
     expect(harness.editorWrites).toEqual([]);
     expect(harness.sent).toEqual([]);
     harness.panelInput("a");

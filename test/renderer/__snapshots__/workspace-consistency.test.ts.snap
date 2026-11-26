@@ -106,7 +106,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 === Result details ===
 ╭───────────────────────────────────────────────────────╮
 │  Prompt details        Preview    Usage    Settings   │
-│  Selected: #1 model-1 · o Reference                   │
+│  #1 · model-1                                         │
 │  ───────────────────────────────────────────────────  │
 │  model-1 · ✓ Done                                     │
 │  openai-codex · Thinking xhigh · 23s · ↑2.3k ↓670 ·   │
@@ -117,13 +117,13 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │  Result 1                                             │
 │  Literal **正文** 中文😀                              │
 │  Another line�[31m                                    │
-│  Esc Back · a Editor only · s Send to Pi · ? Help     │
+│  Esc Back · a Editor only · s Send · o Reference · ?  │
 ╰───────────────────────────────────────────────────────╯
 
 === Result notes ===
 ╭───────────────────────────────────────────────────────╮
 │  Prompt details        Preview    Usage    Settings   │
-│  Selected: #1 model-1 · o Reference                   │
+│  #1 · model-1                                         │
 │  ───────────────────────────────────────────────────  │
 │  model-1 · ✓ Done                                     │
 │  openai-codex · Thinking xhigh · 23s · ↑2.3k ↓670 ·   │
@@ -134,15 +134,15 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │                                                       │
 │  Limits                                               │
 │  Note unavailable for this run.                       │
-│  Esc Back · a Editor only · s Send to Pi · ? Help     │
+│  Esc Back · a Editor only · s Send · o Reference · ?  │
 ╰───────────────────────────────────────────────────────╯
 
 === Compare ===
 ╭───────────────────────────────────────────────────────╮
 │  Compare results       Preview    Usage    Settings   │
-│  Selected: #1 model-1 · ↑↓ scroll                     │
+│                                                       │
 │  ───────────────────────────────────────────────────  │
-│  A · #1 · Tab B · #2                                  │
+│  › A · #1   B · #2                                    │
 │  model-1                                      ✓ Done  │
 │  openai-codex · Thinking xhigh                        │
 │  23s · ↑2.3k ↓670 · Cost —                            │
@@ -151,13 +151,12 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │                                                       │
 │  Result 1                                             │
 │  Literal **正文** 中文😀                              │
-│  Esc Back · a Editor only · s Send to Pi · ? Help     │
+│  Esc Back · a Editor only · s Send · Tab Switch · ?   │
 ╰───────────────────────────────────────────────────────╯
 
 === Revise ===
 ╭───────────────────────────────────────────────────────╮
-│  Revise · #1 · model-1   Revision not submitted       │
-│  Esc Back · Ctrl+S Revise · Tab Focus                 │
+│  Revise · #1 · model-1                                │
 │  ───────────────────────────────────────────────────  │
 │  Preferences: None · Review full requirements         │
 │  › Additional requirements:                           │
@@ -169,6 +168,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │                                                       │
 │                                                       │
 │                                                       │
+│  Esc Back · Ctrl+S Revise · Tab Focus                 │
 ╰───────────────────────────────────────────────────────╯
 
 === Preferences ===
@@ -176,7 +176,7 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │  Preferences · This revision   Esc Back Tab ? Keys    │
 │  ───────────────────────────────────────────────────  │
 │  Search:                                              │
-│  Library 1/1 · 0 selected · Kept on return            │
+│  Library 1/1 · 0 selected                             │
 │  n Add · e Edit · d Delete                            │
 │  Unclassified                                         │
 │  › [ ] Preserve 中文😀                        Global  │
@@ -191,7 +191,6 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 === Preferences / read ===
 ╭───────────────────────────────────────────────────────╮
 │  Full revision instruction                            │
-│  Esc Back · ↑↓ / PgUp / PgDn Scroll                   │
 │  ───────────────────────────────────────────────────  │
 │  Preserve 中文😀                                      │
 │  global · literal                                     │
@@ -203,5 +202,6 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │                                                       │
 │                                                       │
 │                                                       │
+│  Esc Back · ↑↓ / PgUp / PgDn Scroll                   │
 ╰───────────────────────────────────────────────────────╯"
 `;

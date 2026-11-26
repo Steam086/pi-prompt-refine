@@ -10,7 +10,7 @@ import { create, record } from "../support/task-panel.js";
 afterEach(() => vi.restoreAllMocks());
 describe("prompt tree and inspection", () => {
 
-  it.each(["dark", "light"])("reserves detail navigation beside long Unicode model identities (%s)", (name) => {
+  it.each(["dark", "light"])("keeps details navigation in the footer beside a clipped Unicode identity (%s)", (name) => {
     const source = record(); source.input.model.id = "模型😀\x1b[31m".repeat(20);
     const { panel, theme, position } = create(name, false, [source]);
     panel.handleInput("\r");
@@ -19,7 +19,7 @@ describe("prompt tree and inspection", () => {
       const subtitle = frameHeader(lines).find((line) => line.includes("#1"))!;
       expect(stripVTControlCharacters(subtitle)).toContain("#1");
       expect(stripVTControlCharacters(subtitle)).toContain("…");
-      expect(subtitle).toContain(formatKeyHint(["o", width === 20 ? "Ref" : "Reference"], theme));
+      expect(lines.at(-1)).toContain(formatKeyHint(["o", width < 40 ? "" : width === 40 ? "Ref" : "Reference"], theme));
       expect(lines.every((line) => visibleWidth(line) <= Math.min(width, 100))).toBe(true);
       expect(lines.join("\n")).not.toContain("\x1b[31m");
       expect(position.selectedId).toBe(1);
@@ -41,13 +41,17 @@ describe("prompt tree and inspection", () => {
         expect(lines).toHaveLength(panelLayout(width, size.rows).height);
         expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
         expect(position.selectedId).toBe(selected);
+        const active = selected === 1 ? "A" : "B";
+        const target = width === 20 ? `${active}#${selected}` : `${active} · #${selected}`;
+        expect(lines.join("\n")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(`› ${target}`))));
+        expect(lines.at(-1)).toContain(formatKeyHint(["Tab", width < 40 ? "" : width < 76 ? "Switch" : "Switch result"], theme));
         if (width < 76) {
           expect(output).toContain(`Result ${selected}`);
           expect(output).not.toContain(`Result ${3 - selected}`);
-          const peer = selected === 1 ? "B" : "A";
-          expect(lines.join("\n")).toContain(formatKeyHint(["Tab", width === 20 ? `${peer}#${3 - selected}` : `${peer} · #${3 - selected}`], theme));
         } else {
-          expect(output).toContain("Result 1"); expect(output).toContain("Result 2");
+          const panes = output.split("\n").filter((line) => line.includes(" │ ")).map((line) => line.split(" │ "));
+          expect(panes.map(([left]) => left).join("\n")).toContain("Result 1");
+          expect(panes.map(([, right]) => right).join("\n")).toContain("Result 2");
         }
       }
       panel.handleInput("a"); expect(actions.accept).toHaveBeenLastCalledWith(selected);
@@ -143,11 +147,13 @@ describe("prompt tree and inspection", () => {
     const heading = (text: string) => theme.fg("text", theme.bold(text));
     const muted = (text: string) => theme.fg("muted", text);
     const output = panel.render(100).join("\n");
-    for (const label of ["Prompt details", "#2 模型😀�[1m", "Revised result", "Original prompt", "Revision instruction"]) {
+    for (const label of ["Prompt details", "Revised result", "Original prompt", "Revision instruction"]) {
       expect(output).toContain(heading(label));
     }
     expect(output).toContain(theme.bg("selectedBg", heading(" Preview ")));
-    for (const label of ["Selected: ", " Usage ", " Settings ", "openai-codex · Thinking xhigh", "23s", "Revision of run #1", " │ ", " · "]) {
+    expect(output).toContain(theme.fg("text", "#2 · 模型😀�[1m"));
+    expect(output).not.toContain(theme.bold("#2 · 模型😀�[1m"));
+    for (const label of [" Usage ", " Settings ", "openai-codex · Thinking xhigh", "23s", "Revision of run #1", " │ ", " · "]) {
       expect(output).toContain(muted(label));
     }
     expect(output).toContain(theme.fg("borderMuted", "─".repeat(panelLayout(100, size.rows).innerWidth)));
@@ -157,7 +163,7 @@ describe("prompt tree and inspection", () => {
       expect(output).toContain(theme.fg("text", label));
       expect(output).not.toContain(theme.bold(label));
     }
-    for (const [key, label] of [["↑↓", "scroll result"], ["o", "Reference"], ["i", "Edit original"], ["a", "Editor only"], ["s", "Send to Pi"]] as const) {
+    for (const [key, label] of [["o", "Reference"], ["i", "Edit original"], ["a", "Editor only"], ["s", "Send to Pi"]] as const) {
       expect(output).toContain(heading(key));
       expect(output).toContain(muted(label));
       expect(output).not.toContain(theme.bold(label));
@@ -175,7 +181,7 @@ describe("prompt tree and inspection", () => {
       const lines = panel.render(width);
       expect(lines).toHaveLength(panelLayout(width, rows).height);
       expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
-      expect(lines.some((line) => line.includes(heading("Esc") + " " + muted("Back")))).toBe(true);
+      expect(lines.at(-1)).toContain(formatKeyHint(["Esc", width === 28 ? "" : "Back"], theme));
     }
     size.rows = 40;
     panel.handleInput("d");

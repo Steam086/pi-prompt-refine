@@ -103,11 +103,12 @@ describe.each(["regular", "fullscreen"] as const)("TUI layout regressions (%s)",
       view = tasks; input("\r");
       expect(render()).toContain(formatKeyHint(["o", "Reference"], theme));
       input("c");
-      for (const [columns, rows] of [[100, 40], [40, 24], [28, 12], [20, 12], [180, 80], [100, 40]] as const) {
+      for (const [columns, rows] of [[100, 40], [40, 24], [32, 12], [28, 12], [20, 12], [180, 80], [100, 40]] as const) {
         Object.assign(terminal, { columns, rows });
         const output = render();
         expect(strip(output)).toContain(columns === 20 ? "A#1" : "A · #1");
         expect(strip(output)).toContain(columns === 20 ? "B#2" : "B · #2");
+        expect(output.split("\n").at(-1)).toContain(formatKeyHint(["Tab", ""], theme));
         expect(position.selectedId).toBe(1);
       }
       input("\x1b[B"); render();

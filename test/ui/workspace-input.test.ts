@@ -18,7 +18,7 @@ describe("shared refine workspace", () => {
       expect(stripVTControlCharacters(lines.join("\n"))).toContain("Rejected");
       expect(lines.join("\n")).toContain(theme.fg("warning", "").split("\x1b[39m")[0]);
       expect(lines.join("\n")).not.toContain("\x1b[31m");
-      if (rows >= 8) expect(footer(lines).join("\n")).toContain(formatKeyHint(["Esc", "Back"], theme));
+      if (rows >= 8) expect(footer(lines).join("\n")).toContain(formatKeyHint(["Esc", width < 40 ? "" : "Back"], theme));
     }
     terminal.rows = 40;
     expect(textOf(workspace.render(100))).toContain("Retained draft 中文😀");
@@ -28,7 +28,7 @@ describe("shared refine workspace", () => {
   it.each(["dark", "light"])("shares footer key styles with the reading and input pages in %s", (name) => {
     const { workspace, panel, theme } = create(40, name, true);
     const main = textOf(workspace.render(100));
-    for (const hint of [["a", "Accept"], ["e", "Edit"], ["f", "Revise"], ["q", "Back"], ["?", "Help"]] as const) {
+    for (const hint of [["a", "Editor only"], ["e", "Edit"], ["f", "Revise"], ["Esc", "Back"], ["?", "Help"]] as const) {
       expect(main).toContain(formatKeyHint(hint, theme));
     }
     panel.toggleHelp();

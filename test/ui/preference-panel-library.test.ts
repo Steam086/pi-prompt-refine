@@ -177,7 +177,7 @@ describe("Preferences management without selection", () => {
     f.panel.handleInput(ctrlS); await loaded(f.panel);
     expect(f.repo.save).toHaveBeenCalledOnce();
     f.panel.handleInput(" ");
-    expect(text(f.panel)).toContain("0 selected (read-only)");
+    expect(text(f.panel)).not.toContain("0 selected");
     f.panel.handleInput(" "); f.panel.handleInput(bringBack); f.panel.handleInput(ctrlS);
     expect(f.close).not.toHaveBeenCalled();
     f.panel.handleInput(esc); expect(f.close.mock.calls).toEqual([[]]);
@@ -288,7 +288,7 @@ describe("three-action preference library", () => {
     expect(f.repo.save).toHaveBeenCalledOnce();
   });
 
-  it("anchors all three library hints while Tab switches between list and Search", async () => {
+  it("keeps library hints below the heading and hides them while Search owns the keys", async () => {
     const f = setup(); await loaded(f.panel);
     expect(text(f.panel)).toContain("Preferences · This revision");
     expect(highlightedRow(f.panel)).toContain(a.name);
@@ -307,7 +307,9 @@ describe("three-action preference library", () => {
     expect(lines[0]).not.toMatch(/n Add|e Edit|d Delete/);
     for (const key of [tab, backTab]) {
       f.panel.handleInput(key);
-      expect(text(f.panel).split("\n")[heading + 1]).toBe(lines[heading + 1]);
+      const searching = text(f.panel).split("\n");
+      expect(searching[heading + 1]!.split("│")[0]!.trim()).toBe("");
+      expect(searching.at(-1)).toContain("Enter Browse");
       expect(f.panel.render(100).join("\n")).toContain(CURSOR_MARKER);
       f.panel.handleInput(key);
       expect(highlightedRow(f.panel)).toContain(a.name);

@@ -117,7 +117,7 @@ describe("overlay workspace lifecycle", () => {
       f.workspace.handleInput("f");
       expect(f.text()).toContain("Read-only reference");
       expect(f.text()).toContain("Editor only");
-      expect(f.text()).toContain("Revision not submitted");
+      expect(f.text()).toContain("Additional requirements");
       const inputStart = f.frame().findIndex((line) => strip(line).includes("Additional requirements:"));
       expect(f.frame().length - inputStart - 2).toBeGreaterThanOrEqual(5);
       f.workspace.handleInput("\x05");

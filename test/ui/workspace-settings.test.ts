@@ -98,7 +98,7 @@ describe("shared refine workspace", () => {
     expect(frameHeader(main).join("\n")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Preview "))));
     expect(frameHeader(settings).join("\n")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold(" Settings "))));
     expect(textOf(settings)).toContain(theme.fg("text", theme.bold("Context")));
-    expect(footer(main)[0]).toContain(formatKeyHint(["a", "Accept"], theme));
+    expect(footer(main)[0]).toContain(formatKeyHint(["a", "Editor only"], theme));
     expect(footer(settings)[0]).toContain(formatKeyHint(["Enter/Space", "Change"], theme, 1, "secondary"));
     expect(main).toHaveLength(settings.length);
   });
@@ -281,7 +281,7 @@ describe("shared refine workspace", () => {
     const { workspace } = create(40, "dark", true);
     workspace.openSettings(undefined, cursor);
     const hints = footer(workspace.render(100)).map((line) => stripVTControlCharacters(line).replace(/^│|│$/g, "").trim());
-    expect(hints).toEqual([`Esc: Close  Ctrl+S: Save  ↑↓: Move  Enter/Space: ${cursor === 3 ? "Choose" : "Change"}`]);
+    expect(hints).toEqual([`Esc: Close  Ctrl+S: Save  ↑↓: Move  Enter/Space: ${cursor === 3 ? "Choose" : "Change"}  ←→: Tabs  Tab: Group`]);
   });
 
   it.each(["dark", "light"])("aligns Settings hints across groups, dirty/disabled states and resize in %s", (name) => {
@@ -296,7 +296,9 @@ describe("shared refine workspace", () => {
           const hints = footerRows.map(stripVTControlCharacters).join("\n");
           const action = cursor === 3 ? "Choose" : cursor === 4 ? undefined : cursor === 5 ? "Edit" : cursor === 0 ? "Change" : "Toggle";
           const back = dirty ? "Discard" : "Close";
-          expect(hints).not.toMatch(/(?:←|→):|\t/);
+          expect(hints).not.toContain("\t");
+          if (width >= 100) expect(hints).toContain("←→: Tabs");
+          if (width >= 100) expect(hints.includes("Tab: Group")).toBe(optimizer);
           expect(hints).toMatch(/(?:Ctrl\+S:|\^S) Save/);
           expect(hints).toMatch(new RegExp(`Esc:? ${back}`));
           if (width >= 80) expect(footerRows).toHaveLength(1);
@@ -334,7 +336,7 @@ describe("shared refine workspace", () => {
       expect(footer(workspace.render(24)).map(stripVTControlCharacters).join("\n")).toMatch(/Esc:? Discard/);
     }
     terminal.rows = 5;
-    expect(stripVTControlCharacters(footer(workspace.render(40)).at(-1)!).trim()).toBe("Esc Discard · ^S Save · ↑↓");
+    expect(stripVTControlCharacters(footer(workspace.render(40)).at(-1)!).trim()).toBe("Esc Discard · ^S Save · ↑↓ · ←→ Tabs");
     workspace.openSettings();
     expect(stripVTControlCharacters(footer(workspace.render(40)).at(-1)!).trim()).toBe("Esc Close · ^S Save · ↑↓ · ↵ Choose");
     expect(stripVTControlCharacters(footer(workspace.render(12)).at(-1)!).trim()).toBe("Esc ^S Save");

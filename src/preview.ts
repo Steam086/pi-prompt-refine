@@ -214,7 +214,6 @@ export class PreviewPanel implements Component {
         if (!options.contextUnavailable) helpLine(["f", "Revise current result with new instructions (model call)"]);
         if (!options.contextUnavailable) paragraph("Inside Revise: Alt+P Preferences · Tab controls and full requirements", "muted");
         helpLine(["s", "Send (follow-up if busy; draft kept)"]);
-        paragraph("Accept puts the result in the editor; s sends directly.", "muted");
       }
       helpLine(["x/d", "Stop request / discard result (not just close)"]);
       helpLine(["z", "Restore draft before acceptance"]);
@@ -227,9 +226,8 @@ export class PreviewPanel implements Component {
       paragraph("Requests can run in parallel. Switching is paused only while a Pi send is pending. Usage Enter applies a result here; it never writes to Pi.", "muted");
       helpLine(["o", "Original"], ["v", "Formatted/source"]);
       helpLine(["↑↓", "Scroll"], ["PgUp/PgDn", "Page"]);
-      helpLine(["i", "Input"], ["↑↓", "Settings rows (Context / Optimizer)"]);
-      helpLine(["←/→", "In Settings: adjacent group, then page at group boundary"]);
-      helpLine(["q", "Back"], ["?", "Hide help"]);
+      helpLine(["i", "Input"], ["↑↓", "Settings rows"], ["Tab", "Settings groups"]);
+      helpLine(["Esc", "Back"], ["?", "Hide help"]);
       paragraph("Enter won't send", "muted");
       if (!options.canRestore) paragraph("Nothing to restore.", "muted");
       const model = options.state.model;
@@ -250,7 +248,6 @@ export class PreviewPanel implements Component {
         paragraph(options.accepted.editorChanged
           ? "Editor changed; this snapshot excludes later edits."
           : "In editor. Viewing makes no model call or draft changes.", options.accepted.editorChanged ? "warning" : "muted");
-        paragraph("q Back to editor · r Refine current draft", "muted");
         lines.push("");
       } else if (options.draftChanged) {
         paragraph("Editor changed; candidate uses the original draft.", "warning");
@@ -362,23 +359,24 @@ export class PreviewPanel implements Component {
       : options.state.phase === "generating"
         ? [["x", "Stop"]]
         : options.accepted
-          ? [["r", "Refine draft"], ...(options.canRestore ? [["z", "Restore"] as KeyHint] : [])]
+          ? [["r", innerWidth < 30 ? "Refine" : "Refine draft"], ...(options.canRestore ? [["z", "Restore"] as KeyHint] : [])]
           : this.hasActionableCandidate()
-            ? [["a", "Accept"], ["e", "Edit"], ...(!options.contextUnavailable ? [["f", "Revise"] as KeyHint] : []), ["s", "Send"]]
+            ? [["a", innerWidth < 26 ? "Editor" : "Editor only"], ["s", "Send"], ["e", "Edit"],
+              ...(!options.contextUnavailable ? [["f", "Revise"] as KeyHint] : [])]
             : [["r", options.state.phase === "error" ? "Retry" : "Refine"], ["m", "Model"], ["i", "Input"]];
-    const secondary: KeyHint[] = [["q", "Back"], ["?", this.helpVisible ? "Hide help" : "Help"]];
+    const back: KeyHint = ["Esc", innerWidth < 20 && !!primary.length ? "" : "Back"];
+    const help: KeyHint = ["?", innerWidth < 25 && primary.length ? "" : this.helpVisible
+      ? innerWidth < 44 ? "Hide" : "Hide help" : "Help"];
+    const secondary: KeyHint[] = [];
     const expansion = this.canExpand() && this.expansionHint?.();
     if (expansion) secondary.push(expansion);
-    // Back/Help survive narrow widths; other hints are omitted rather than wrapped.
-    // Empty/error primary actions already expose Input/Model. Tabs own page hints.
     if (!primary.some(([key]) => key === "i")) secondary.push(["i", "Input"]);
     if (options.state.phase !== "generating" && !options.state.pendingSend) {
       if (!primary.some(([key]) => key === "m")) secondary.push(["m", "Model"]);
       if (options.navigation && !options.contextUnavailable) secondary.push(["g", "Same input"]);
     }
-    const keys = options.state.phase === "generating" ? [secondary[0]!, ...primary, ...secondary.slice(1)]
-      : [...secondary.slice(0, 2), ...primary, ...secondary.slice(2)];
-    const hints = this.referenceOnly ? "" : fittingKeyHints(keys, innerWidth, theme);
+    const keys = [back, ...primary.slice(0, 1), help, ...primary.slice(1), ...secondary];
+    const hints = this.referenceOnly ? "" : fittingKeyHints(keys, innerWidth, theme, innerWidth < 30 ? " " : " · ");
     // ScrollView owns offsets/clamping. Explicit viewport composition also works in regular
     // mode, where ScrollView.render() alone returns the entire document without clipping.
     const body = this.scroll.render(innerWidth);

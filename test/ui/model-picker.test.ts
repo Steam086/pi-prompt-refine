@@ -82,7 +82,10 @@ describe("model picker layout", () => {
     const empty = renderModelPicker(options, 40, 40, theme);
     expect(empty.join("\n")).not.toContain("\x1b[31m");
     expect(stripVTControlCharacters(empty.join("\n"))).toContain("No matching models");
-    expect(empty.join("\n")).toContain(formatKeyHint(["Esc", "Cancel"], theme));
+    expect(empty.at(-1)).toContain(formatKeyHint(["Esc", "Cancel"], theme));
+    for (const hint of [["Enter", "Confirm"], ["↑↓", "Select"], ["Shift+Tab", "Thinking"]] as const) {
+      expect(empty.join("\n")).not.toContain(formatKeyHint(hint, theme));
+    }
     for (const height of [0, 1, 2, 3, 4, 10, 20]) {
       const choices = renderModelChoices(items, items[12]!.value, 30, height, theme);
       expect(choices.length).toBeLessThanOrEqual(height);
@@ -192,7 +195,7 @@ describe("model picker layout", () => {
         const output = lines.join("\n");
         const label = stripVTControlCharacters(truncateToWidth(selected.description, width - 2));
         expect(bold.mock.calls).toEqual([[label]]);
-        expect(output).toContain(theme.fg("accent", "› "));
+        expect(output).toContain(theme.fg("text", "› "));
         expect(output).toContain(theme.fg("text", theme.bold(label)));
         expect(output).toContain(theme.fg("muted", `  ${selected.value}`));
         for (const badge of ["Thinking capable", "Current"]) expect(output).not.toContain(theme.bold(badge));

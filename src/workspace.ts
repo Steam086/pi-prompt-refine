@@ -436,10 +436,10 @@ export class RefineWorkspace implements Component, Focusable {
     const action = this.inputKind === "original" ? "Save" : this.actions.inputCaptureOnly?.() ? "Add unsent" : "Refine";
     const title = theme.fg("text", theme.bold(this.inputKind === "original" ? "Edit original prompt" : "Input"));
     const status = theme.fg(this.inputError ? "warning" : "muted", sanitizeTerminalText(this.inputError || (this.inputKind === "original"
-      ? `Line ${cursor.line + 1} · Save only · Enter on the list to run` : `Line ${cursor.line + 1} · Not sent to main agent`)));
+      ? `Line ${cursor.line + 1} · Saves without running` : `Line ${cursor.line + 1} · Not sent to main agent`)));
     const header = [layout.headerHeight === 1 && this.inputError ? status : title, status];
     const hints = innerWidth < 30
-      ? fittingKeyHints([["Esc", "Back"], ["↵", action], ["⇧↵", "NL"]], innerWidth, theme)
+      ? fittingKeyHints([["Esc", innerWidth >= 20 ? "Back" : ""], ["↵", action], ["⇧↵", "NL"]], innerWidth, theme, " ")
       : fittingKeyHints([["Esc", "Back"], ["Enter", action], ["Shift+Enter", "Newline"]], innerWidth, theme);
     const chrome = panelHeader(layout, header, [], hints);
     const body = this.activeInput.render(innerWidth, chrome.layout.bodyHeight);

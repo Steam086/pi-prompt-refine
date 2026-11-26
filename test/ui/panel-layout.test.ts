@@ -73,6 +73,22 @@ describe("workspace tabs", () => {
 });
 
 describe("frame action placement", () => {
+  it("keeps child page shortcuts at the bottom when status wraps onto its own row", () => {
+    const layout = panelGeometry(36, 12, 36, false, false, 0);
+    const title = "Edit original prompt";
+    const actions = "Esc Back · Enter Save";
+    const render = (status: string) =>
+      panelHeader(layout, [title, status], [], actions).render(["Draft"], (line) => line);
+    for (const status of ["", "Line 1", "The prompt exceeds the character limit."]) {
+      const lines = render(status);
+      const divider = lines.findIndex((line) => /^─+$/.test(line));
+      expect(lines.slice(0, divider).join(" ")).not.toContain("Esc");
+      expect(lines[divider + 1]).toBe("Draft");
+      expect(lines.at(-1)).toBe(actions);
+      expect(lines).toHaveLength(layout.height);
+    }
+  });
+
   it("keeps tabbed headlines to two rows and fixes action columns below the content", () => {
     const layout = panelGeometry(40, 12, 40, false, false, 0);
     const body = ["Original 中文😀", "Result", "Last line"];

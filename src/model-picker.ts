@@ -29,7 +29,7 @@ export function renderModelChoices(
     const compact = visibleWidth(prefix + name + badges) > width;
     // Clip before styling so truncation resets cannot interrupt emphasis or the selected surface.
     const label = stripVTControlCharacters(truncateToWidth(name, Math.max(1, width - 2)));
-    const primary = theme.fg("accent", prefix) + theme.fg("text", active ? theme.bold(label) : label);
+    const primary = theme.fg("text", prefix) + theme.fg("text", active ? theme.bold(label) : label);
     const entry = [compact ? primary : primary + theme.fg("muted", badges),
       theme.fg("muted", sanitizeTerminalText(`  ${item.value}`))];
     if (compact && badges) entry.push(theme.fg("muted", `  ${badges.slice(3)}`));
@@ -87,8 +87,11 @@ function formatThinkingStatus(status: string, width: number, theme: Theme, compa
 function renderSettingsModelPicker(options: ModelPickerOptions, layout: PanelLayout, theme: Theme): string[] {
   const { innerWidth: width } = layout;
   const primary: KeyHint[] = [["Esc", width >= 10 ? "Cancel" : ""]];
-  if (options.items.length) primary.push([width >= 24 ? "Enter" : "↵", "Save"]);
-  if (options.thinkingKeys) primary.push([options.thinkingKeys, "Thinking"]);
+  if (options.items.length) {
+    primary.push([width >= 24 ? "Enter" : "↵", "Save"]);
+    if (options.thinkingKeys) primary.push([options.thinkingKeys, "Thinking"]);
+    primary.push(["↑↓", "Select"]);
+  }
   const tabs = workspaceTabs(layout, "Settings", theme);
   const hints = fittingKeyHints(primary, layout.innerWidth, theme, width < 27 ? " " : " · ");
   const fullTitle = sanitizeTerminalText(options.title);
@@ -117,15 +120,18 @@ export function renderModelPicker(options: ModelPickerOptions, width: number, ro
   if (width < 1) return [];
   if (options.fromSettings) return renderSettingsModelPicker(options, layout, theme);
   const w = layout.innerWidth;
-  const primary: KeyHint[] = [[w < 30 ? "↵" : "Enter", options.run ? "Run" : w < 30 ? "Use" : "Confirm"], ["↑↓", "Select"]];
-  const secondary: KeyHint[] = [["Esc", w < 16 ? "" : "Cancel"], ...(options.thinkingKeys ? [[options.thinkingKeys, "Thinking"] as KeyHint] : [])];
-  const hints = fittingKeyHints([secondary[0]!, ...primary, ...secondary.slice(1)], w, theme, w < 30 ? " " : " · ");
+  const keys: KeyHint[] = [["Esc", w < 16 ? "" : "Cancel"]];
+  if (options.items.length) {
+    keys.push([w < 30 ? "↵" : "Enter", options.run ? "Run" : w < 30 ? "Use" : "Confirm"], ["↑↓", "Select"]);
+    if (options.thinkingKeys) keys.push([options.thinkingKeys, "Thinking"]);
+  }
+  const hints = fittingKeyHints(keys, w, theme, w < 30 ? " " : " · ");
   const chrome = panelHeader(layout, [theme.fg("text", theme.bold(sanitizeTerminalText(options.title))),
     theme.fg("muted", sanitizeTerminalText(options.subtitle))], [], hints);
   const h = chrome.layout.bodyHeight;
-  const search = h >= 4 ? [theme.fg("muted", "Search: ") + theme.fg(options.query ? "text" : "muted",
+  const search = (h >= 4 || h >= 2 && options.query) ? [theme.fg("muted", "Search: ") + theme.fg(options.query ? "text" : "muted",
     truncateToWidth(sanitizeTerminalText(options.query || "provider/model, name, or thinking"), Math.max(1, w - 8), "…"))] : [];
-  const detailHeight = h >= 6 ? Math.min(3, Math.floor(h / 4)) : 0;
+  const detailHeight = options.items.length && h >= 6 ? Math.min(3, Math.floor(h / 4)) : 0;
   const details = detailHeight ? wrapTextWithAnsi(formatThinkingStatus(options.thinkingStatus, w, theme), w) : [];
   const detail = details.slice(0, detailHeight);
   const lastDetail = detail.at(-1);

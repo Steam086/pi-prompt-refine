@@ -57,7 +57,6 @@ export function panelTabs(layout: PanelLayout, labels: string[], active: number,
 
 const HEADER_GAP = "   ";
 
-/** Keep the headline to two rows. Give tabbed pages a stationary action strip below their content. */
 export function panelHeader(base: PanelLayout, headings: string[], tabs: string[] = [], actions = "") {
   const width = base.innerWidth;
   const [title = "", status = ""] = headings;
@@ -67,8 +66,7 @@ export function panelHeader(base: PanelLayout, headings: string[], tabs: string[
   const statusWidth = base.headerHeight > 1 ? visibleWidth(status) : 0;
   const statusRoom = width - titleWidth - HEADER_GAP.length;
   const separateStatus = statusWidth > 0 && (!!tab || statusWidth > statusRoom);
-  const showActions = base.footerHeight > 0 && visibleWidth(actions) > 0;
-  const footer = showActions && (tab || separateStatus) ? [actions] : [];
+  const footer = base.footerHeight > 0 && visibleWidth(actions) > 0 ? [actions] : [];
   if (tab) {
     const room = width - visibleWidth(tab) - 2;
     const clipped = truncateToWidth(title, Math.max(0, room), "…");
@@ -77,7 +75,6 @@ export function panelHeader(base: PanelLayout, headings: string[], tabs: string[
   } else {
     if (base.headerHeight > 0) header.push(!separateStatus && statusWidth ? title + HEADER_GAP + status : title);
     if (separateStatus) header.push(status);
-    else if (showActions) header.push(actions);
   }
   const layout = { ...base, headerHeight: header.length, footerHeight: footer.length,
     bodyHeight: base.height - base.topSeparatorHeight - base.separatorHeight - header.length - footer.length };

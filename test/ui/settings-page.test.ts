@@ -19,7 +19,7 @@ describe("SettingsPage navigation seam", () => {
         const hints = footer(frame);
         const output = hints.join("\n");
         expect(hints).toHaveLength(count);
-        expect(strip(output)).not.toMatch(/(?:←|→):/);
+        if (width >= 100) expect(strip(output)).toContain("←→: Tabs  Tab: Group");
         const compact = width === 40;
         const style = compact ? "secondary-compact" : "secondary";
         const combined = [[compact ? "^S" : "Ctrl+S", "Save"], ["Esc", "Close"], ["↑↓", compact ? "" : "Move"]] as const;

@@ -5,7 +5,7 @@ import type { ApplicationApi, Mutation, MutationMeta, Query, Reply } from "../ap
 import { identity, parseMutation, parseQuery } from "../app/operation-contract.js";
 import { REFINE_OVERLAY_OPTIONS, workspaceLayout, workspaceFrame } from "../workspace-overlay.js";
 import { panelHeader } from "../panel-layout.js";
-import { formatKeyHint } from "../key-hints.js";
+import { fittingKeyHints } from "../key-hints.js";
 
 type Parsed = { kind: "query"; value: Query } | { kind: "mutation"; value: Mutation; operationId?: string };
 /** Deliberately not a shell: no interpolation, escapes, evaluation, or global trim. */
@@ -136,7 +136,7 @@ export function createSlashAdapter(api: ApplicationApi) {
           const title = theme.fg("text", theme.bold("Refine API"));
           const warning = result.kind === "ok" ? "" : theme.fg("warning", result.code);
           const chrome = panelHeader(layout, [layout.headerHeight === 1 && warning ? warning : title, warning],
-            [], formatKeyHint(["Esc", "Back"], theme));
+            [], fittingKeyHints([["Esc", "Back"], ["↑↓", "Scroll"]], layout.innerWidth, theme));
           page = chrome.layout.bodyHeight;
           count = lines.length;
           offset = Math.max(0, Math.min(offset, count - page));

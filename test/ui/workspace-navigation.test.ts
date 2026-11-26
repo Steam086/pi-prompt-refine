@@ -172,7 +172,7 @@ describe("shared refine workspace", () => {
       if (rows === 40 && width === 100) {
         for (const frame of [context, optimizer]) {
           expect(textOf(frame)).toContain(formatKeyHint(["↑↓", "Move"], theme, 1, "secondary"));
-          expect(stripVTControlCharacters(textOf(frame))).not.toMatch(/[←→]:/);
+          expect(stripVTControlCharacters(textOf(frame))).toContain("←→: Tabs");
         }
         expect(textOf(context)).toContain(theme.fg("text", theme.bold("Context")));
         expect(textOf(optimizer)).toContain(theme.fg("text", theme.bold("Optimizer")));

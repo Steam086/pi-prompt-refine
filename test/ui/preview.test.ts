@@ -55,7 +55,7 @@ describe("result reading panel", () => {
     expect(text).toContain("↑5.6k ↓335 · Cost —");
     expect(text).not.toContain("read 0");
     expect(text).not.toContain("think(out)");
-    for (const hint of ["a Accept", "e Edit", "f Revise", "s Send", "i Input", "m Model", "g Same input", "q Back", "? Help"]) {
+    for (const hint of ["a Editor only", "e Edit", "f Revise", "s Send", "i Input", "m Model", "Esc Back", "? Help"]) {
       expect(text.split(hint)).toHaveLength(2);
       expect(frameHints(lines).join("\n")).toContain(hint);
     }
@@ -66,7 +66,7 @@ describe("result reading panel", () => {
     let fullHelp = help + "\n" + panel.render(100).join("\n");
     panel.scrollBy(10);
     fullHelp += "\n" + panel.render(100).join("\n");
-    for (const hint of ["Accept puts", "Previous / next candidate", "c Cycle", "g Generate from the same frozen input", "6 msgs", "read 0", "think(out) 315"]) {
+    for (const hint of ["Accept into editor (no send)", "Previous / next candidate", "c Cycle", "g Generate from the same frozen input", "6 msgs", "read 0", "think(out) 315"]) {
       expect(fullHelp).toContain(hint);
     }
   });
@@ -79,7 +79,7 @@ describe("result reading panel", () => {
     const text = lines.join("\n");
     for (const hint of ["m Model", "g Same input", "i Input"]) expect(text.split(hint).length).toBeLessThanOrEqual(2);
     expect(text).not.toContain("←/→ Page");
-    expect(frameHints(lines).join("\n")).toContain("q Back");
+    expect(frameHints(lines).join("\n")).toContain(width >= 40 ? "Esc Back" : "Esc a Editor");
     if (width >= 40) expect(frameHints(lines).join("\n")).toContain("? Help");
   });
 
@@ -276,7 +276,7 @@ describe("result reading panel", () => {
     expect(text).not.toContain("Enter won't send");
     expect(text).not.toContain("Accept puts the result in the editor; s sends directly.");
     expect(frameHints(panel.render(100))).toEqual([
-      "  q Back · ? Help · a Accept · e Edit · f Revise · s Send · i Input · m Model",
+      "  Esc Back · a Editor only · ? Help · s Send · e Edit · f Revise · i Input · m Model",
     ]);
     expect(text.match(/Prompt refine/g)).toHaveLength(1);
     panel.toggleOriginal();
@@ -291,7 +291,7 @@ describe("result reading panel", () => {
     expect(text).toContain("✓ Accepted · 0s");
     expect(text).toContain("read-only");
     expect(text).toContain("r Refine draft");
-    expect(text).not.toContain("a Accept");
+    expect(text).not.toContain("a Editor only");
     expect(text).not.toContain("e Edit");
     expect(text).not.toContain("f Revise");
     expect(text).not.toContain("s Send");
@@ -314,7 +314,7 @@ describe("result reading panel", () => {
     expect(lines.slice(divider + 1, -1).filter((line) => line.trim())).toEqual([lines[emptyRow]]);
     expect(lines[emptyRow]).toBe(" ".repeat(layout.inset + Math.floor((layout.innerWidth - "No result yet.".length) / 2)) + "No result yet.");
     expect(frameHints(lines)).toEqual([
-      "  q Back · ? Help · r Refine · m Model · i Input",
+      "  Esc Back · r Refine · ? Help · m Model · i Input",
     ]);
     const text = lines.join("\n");
     expect(text.match(/r Refine/g)).toHaveLength(1);
@@ -414,8 +414,8 @@ describe("result reading panel", () => {
     panel.page(1);
     const next = panel.render(80).join("\n");
     expect(next).not.toContain("内容 0\n");
-    expect(next).toContain("a Accept");
-    expect(next).toContain("q Back");
+    expect(next).toContain("a Editor only");
+    expect(next).toContain("Esc Back");
     expect(next).not.toContain("q/Esc");
     expect(next).toContain("e Edit");
     expect(next).toContain("f Revise");
@@ -488,7 +488,7 @@ describe("result reading panel", () => {
     const panel = create({ state: { ...options.state, pendingSend: true } });
     const text = panel.render(width).join("\n");
     expect(text).toContain("Send");
-    for (const action of ["a Accept", "e Edit", "f Revise", "s Send", "s sends directly"]) {
+    for (const action of ["a Editor only", "e Edit", "f Revise", "s Send", "s sends directly"]) {
       expect(text).not.toContain(action);
     }
   });
@@ -497,8 +497,8 @@ describe("result reading panel", () => {
     const panel = create({ state: { ...options.state, phase: "generating" } });
     const text = panel.render(100).join("\n");
     expect(text).toContain("x Stop");
-    expect(text).toContain("q Back");
-    for (const action of ["a Accept", "e Edit", "f Revise", "s sends directly"]) {
+    expect(text).toContain("Esc Back");
+    for (const action of ["a Editor only", "e Edit", "f Revise", "s sends directly"]) {
       expect(text).not.toContain(action);
     }
   });
@@ -507,14 +507,14 @@ describe("result reading panel", () => {
     const panel = create({ state: { ...options.state, phase: "error" } });
     const text = panel.render(100).join("\n");
     expect(text).toContain("previous result kept");
-    expect(frameHints(panel.render(100)).join("\n")).toContain("a Accept · e Edit · f Revise");
+    expect(frameHints(panel.render(100)).join("\n")).toContain("s Send · e Edit · f Revise");
     expect(text).not.toContain("r Retry");
   });
 
   it("aligns result actions with navigation using the same column stops as Tasks", () => {
     const panel = create({ navigation: { index: 1, count: 1, label: "#1 refine" } });
     expect(frameHints(panel.render(100)).map((line) => line.trim())).toEqual([
-      "q Back · ? Help · a Accept · e Edit · f Revise · s Send · i Input · m Model · g Same input",
+      "Esc Back · a Editor only · ? Help · s Send · e Edit · f Revise · i Input · m Model",
     ]);
   });
 
@@ -537,10 +537,10 @@ describe("result reading panel", () => {
           const footer = frameHints(panel.render(width));
           const bottom = stripVTControlCharacters(footer.at(-1)!);
           expect(footer).toHaveLength(1);
-          expect(bottom.trimStart()).toMatch(/^q Back/);
-          expect(bottom).toContain("q Back");
-          expect(bottom).toContain(helpVisible ? "? Hide help" : "? Help");
-          expect(footer.at(-1)).toContain(theme.fg("text", theme.bold("q")));
+          expect(bottom.trimStart()).toMatch(/^Esc Back/);
+          expect(bottom).toContain("Esc Back");
+          expect(bottom).toContain(helpVisible ? width === 40 ? "? Hide" : "? Hide help" : "? Help");
+          expect(footer.at(-1)).toContain(theme.fg("text", theme.bold("Esc")));
           expect(footer.at(-1)).toContain(theme.fg("muted", "Back"));
           expect(footer.join("\n")).not.toContain("\t");
           for (const line of footer) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
@@ -549,7 +549,7 @@ describe("result reading panel", () => {
     }
   });
 
-  it("keeps Back/Help on narrow screens even with long primary labels", () => {
+  it("keeps Back and Help available on narrow screens", () => {
     for (const state of [
       { accepted: { editorChanged: false }, canRestore: true },
       { state: { ...options.state, pendingSend: true } },
@@ -557,18 +557,18 @@ describe("result reading panel", () => {
       const panel = create(state);
       for (const width of [12, 20, 24, 30]) {
         const footer = frameHints(panel.render(width));
-        expect(footer.at(-1)).toContain("q Back");
-        if (width >= 20) expect(footer.at(-1)).toContain("? Help");
+        expect(footer.at(-1)).toContain("Esc");
+        if (width >= 20) expect(footer.at(-1)).toContain("?");
         for (const line of footer) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       }
     }
   });
 
-  it("prioritizes return and help in the single-line footer, then fits primary actions", () => {
+  it("prioritizes return and the primary action in the single-line footer", () => {
     const panel = create({}, 8);
-    expect(frameHints(panel.render(100)).at(-1)?.trim()).toBe("q Back · ? Help · a Accept · e Edit · f Revise · s Send · i Input · m Model");
-    expect(frameHints(panel.render(20)).at(-1)?.trim()).toBe("q Back · ? Help");
-    expect(frameHints(panel.render(12)).at(-1)?.trim()).toBe("q Back");
+    expect(frameHints(panel.render(100)).at(-1)?.trim()).toBe("Esc Back · a Editor only · ? Help · s Send · e Edit · f Revise · i Input · m Model");
+    expect(frameHints(panel.render(20)).at(-1)?.trim()).toBe("Esc a Editor ?");
+    expect(frameHints(panel.render(12)).at(-1)?.trim()).toBe("Esc a Editor");
   });
 
   it("bounds state-specific footers and preserves return/help across resize", () => {
@@ -586,7 +586,7 @@ describe("result reading panel", () => {
           expect(lines).toHaveLength(layout.height);
           for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
           const footer = frameHints(lines).join("\n");
-          expect(footer).toContain("q Back");
+          expect(footer).toContain(width >= 40 ? "Esc Back" : "Esc");
           if (width >= 40) expect(footer).toContain("? Help");
         }
       }
