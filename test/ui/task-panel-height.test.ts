@@ -54,11 +54,12 @@ describe("original and checklist geometry", () => {
           expect(next).toHaveLength(frame.length);
           expect(next.every((line) => visibleWidth(line) <= width)).toBe(true);
           if (selecting) {
-            const back = plain(next).findIndex((line) => line.includes("Esc Back to tasks"));
+            const back = plain(next).findIndex((line) => line.includes("Esc Back"));
             const choices = plain(next).findIndex((line) => line.split(" │ ")[0]?.includes("Preferences ·"));
             expect(back).toBeGreaterThanOrEqual(0);
-            expect(choices).toBeGreaterThan(back);
-            expect(next[back]).toContain(formatKeyHint(["Esc", "Back to tasks"], theme));
+            expect(choices).toBeGreaterThanOrEqual(0);
+            expect(choices).toBeLessThan(back);
+            expect(next[back]).toContain(formatKeyHint(["Esc", "Back"], theme));
             expect(plain(next).some((line) => line.split(" │ ")[1]?.includes("Original 中文😀"))).toBe(true);
             expect(plain(next).some((line) => line.split(" │ ")[1]?.includes("Selected · 0"))).toBe(true);
           } else expect(checklistRow(next)).toBe(preferences);
@@ -83,8 +84,8 @@ describe("original and checklist geometry", () => {
         expect(frame.length).toBeLessThanOrEqual(rows!);
         expect(frame.every((line) => visibleWidth(line) <= width!)).toBe(true);
         const inner = panelLayout(width!, rows!).innerWidth;
-        expect(frame.join("\n")).toContain(formatKeyHint(["Esc", inner < 40 ? "Back" : "Back to tasks"], theme));
-        expect(frame.join("\n")).toContain(formatKeyHint([inner < 16 ? "↵" : "Enter", inner < 10 ? "Start" : "Optimize"], theme));
+        expect(frame.join("\n")).toContain(formatKeyHint(["Esc", inner < 13 ? "" : "Back"], theme));
+        expect(frame.join("\n")).toContain(formatKeyHint([inner < 29 ? "↵" : "Enter", inner < 14 ? "Start" : "Optimize"], theme));
       }
       expect(run).not.toHaveBeenCalled();
     } finally { picker.dispose(); }

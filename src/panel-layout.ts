@@ -37,7 +37,8 @@ export function focusLabel(theme: Theme, width: number, label: string, active: b
 
 /** Persistent page identity, unchanged when a child focus suspends page navigation. */
 export function workspaceTabs(layout: PanelLayout, active: WorkspacePage, theme: Pick<Theme, "fg" | "bg" | "bold">): string[] {
-  return panelTabs(layout, [...WORKSPACE_PAGES], WORKSPACE_PAGES.indexOf(active), theme);
+  const labels = layout.innerWidth >= 48 ? [...WORKSPACE_PAGES] : [active];
+  return panelTabs(layout, labels, labels.indexOf(active), theme);
 }
 
 /** One row of tabs with a flat selection surface and quiet inactive labels. */
@@ -54,83 +55,62 @@ export function panelTabs(layout: PanelLayout, labels: string[], active: number,
   return [selectedTab(stripVTControlCharacters(truncateToWidth(label, layout.innerWidth - 2, "…")))];
 }
 
-/** Place title, status, tabs and actions above the content, sharing rows where they fit. */
-export function panelHeader(base: PanelLayout, headings: string[], tabs: string[] = [], hints: string[] = []) {
+const HEADER_GAP = "   ";
+
+/** Keep the headline to two rows. Give tabbed pages a stationary action strip below their content. */
+export function panelHeader(base: PanelLayout, headings: string[], tabs: string[] = [], actions = "") {
   const width = base.innerWidth;
-  const gap = 3;
   const [title = "", status = ""] = headings;
-  const titleWidth = visibleWidth(title);
-  const statusWidth = visibleWidth(status);
+  const [tab = ""] = tabs;
   const header: string[] = [];
-  if (base.headerHeight > 0 && titleWidth) header.push(title);
-  let separateStatus = "";
-  if (base.headerHeight > 1 && statusWidth) {
-    if (titleWidth && titleWidth + gap + statusWidth <= width) header[0] += " ".repeat(gap) + status;
-    else separateStatus = status;
+  const titleWidth = visibleWidth(title);
+  const statusWidth = base.headerHeight > 1 ? visibleWidth(status) : 0;
+  const statusRoom = width - titleWidth - HEADER_GAP.length;
+  const separateStatus = statusWidth > 0 && (!!tab || statusWidth > statusRoom);
+  const showActions = base.footerHeight > 0 && visibleWidth(actions) > 0;
+  const footer = showActions && (tab || separateStatus) ? [actions] : [];
+  if (tab) {
+    const room = width - visibleWidth(tab) - 2;
+    const clipped = truncateToWidth(title, Math.max(0, room), "…");
+    header.push(clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped) - visibleWidth(tab))) + tab);
+    if (base.headerHeight > 1) header.push(status);
+  } else {
+    if (base.headerHeight > 0) header.push(!separateStatus && statusWidth ? title + HEADER_GAP + status : title);
+    if (separateStatus) header.push(status);
+    else if (showActions) header.push(actions);
   }
-  const actions = hints.slice(0, base.footerHeight).filter((line) => visibleWidth(line) > 0);
-  if (!tabs.length && separateStatus) header.push(separateStatus);
-  header.push(...tabs);
-  if (actions.length === 1) {
-    const row = header.at(-1);
-    const action = actions[0];
-    if (row && action) {
-      const padding = width - visibleWidth(row) - visibleWidth(action);
-      if (padding >= gap) {
-        header[header.length - 1] = row + " ".repeat(padding) + action;
-        actions.shift();
-      }
-    }
-  }
-  if (tabs.length && separateStatus) header.push(separateStatus);
-  header.push(...actions);
-  const layout = { ...base, headerHeight: header.length, footerHeight: 0,
-    bodyHeight: base.height - base.topSeparatorHeight - base.separatorHeight - header.length };
+  const layout = { ...base, headerHeight: header.length, footerHeight: footer.length,
+    bodyHeight: base.height - base.topSeparatorHeight - base.separatorHeight - header.length - footer.length };
   return {
     layout,
-    render: (body: readonly string[], border: (text: string) => string) =>
-      panelFrame(layout, header, body, [], border, { footerAfterBodyRows: 0 }),
+    render: (body: readonly string[], border: (text: string) => string) => panelFrame(layout, header, body, footer, border),
   };
 }
 
-/** Optionally lift action hints above content, after the body's leading tab rows. */
-export function panelFrame(layout: PanelLayout, header: string[], body: readonly string[], footer: string[], border: (text: string) => string,
-  options: { footerAfterBodyRows?: number } = {}): string[] {
+/** Place a confirmation question and its keys together in the center of the existing frame. */
+export function panelConfirmation(layout: PanelLayout, title: string, actions: string, details: readonly string[],
+  border: (text: string) => string): string[] {
+  const frame = { ...layout, headerHeight: 0, footerHeight: 0, separatorHeight: 0,
+    bodyHeight: layout.height - layout.topSeparatorHeight };
+  const height = frame.bodyHeight;
+  const notes = height > 2 ? details.slice(0, height - 2) : [];
+  const lines = (height === 1 ? [actions || title] : [title, ...notes, actions])
+    .map((line) => truncateToWidth(line, layout.innerWidth, "…"));
+  const top = Math.floor((height - lines.length) / 2);
+  const blockWidth = Math.max(...lines.map((line) => visibleWidth(line)));
+  const left = " ".repeat(Math.floor((layout.innerWidth - blockWidth) / 2));
+  return panelFrame(frame, [], [...Array<string>(top).fill(""), ...lines.map((line) => left + line)], [], border);
+}
+
+function panelFrame(layout: PanelLayout, header: string[], body: readonly string[], footer: string[], border: (text: string) => string): string[] {
   const reserve = (lines: readonly string[], count: number) => Array.from({ length: count }, (_, i) => lines[i] ?? "");
-  const content = reserve(body, layout.bodyHeight);
-  const hints = reserve(footer, layout.footerHeight);
-  const separator = layout.separatorHeight ? [border("─".repeat(layout.innerWidth))] : [];
-  const split = Math.max(0, Math.min(content.length, options.footerAfterBodyRows ?? content.length));
-  const middle = options.footerAfterBodyRows === undefined
-    ? [...content, ...separator, ...hints]
-    : [...content.slice(0, split), ...hints, ...separator, ...content.slice(split)];
   return [
     ...(layout.topSeparatorHeight ? [border("─".repeat(layout.innerWidth))] : []),
     ...reserve(header, layout.headerHeight),
-    ...middle,
+    ...(layout.separatorHeight ? [border("─".repeat(layout.innerWidth))] : []),
+    ...reserve(body, layout.bodyHeight),
+    ...reserve(footer, layout.footerHeight),
   ].map((line) => " ".repeat(layout.inset) + truncateToWidth(line, layout.innerWidth, ""));
-}
-
-/** Shared terminal-column widths keep corresponding hints aligned across rows. */
-export function alignedHints(rows: string[][], width: number, separator = " · "): string[] {
-  const columns = Math.max(0, ...rows.map((row) => row.length));
-  const selected: { index: number; width: number }[] = [];
-  let used = 0;
-  for (let index = 0; index < columns; index++) {
-    const columnWidth = Math.max(...rows.map((row) => visibleWidth(row[index] ?? "")));
-    const required = columnWidth + (selected.length ? visibleWidth(separator) : 0);
-    if (used + required > width) continue;
-    selected.push({ index, width: columnWidth });
-    used += required;
-  }
-  return rows.map((row) => {
-    let last = selected.length - 1;
-    while (last >= 0 && !row[selected[last].index]) last--;
-    return selected.slice(0, last + 1).map((column, i) => {
-      const cell = row[column.index] ?? "";
-      return cell + (i < last ? " ".repeat(column.width - visibleWidth(cell)) : "");
-    }).join(separator);
-  });
 }
 
 /** Omit secondary hints instead of wrapping chrome into the content viewport. */

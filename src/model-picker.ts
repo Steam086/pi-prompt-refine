@@ -4,7 +4,7 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { sanitizeTerminalText } from "./presentation.js";
 import { panelHeader, panelLayout, workspaceTabs, type PanelLayout } from "./panel-layout.js";
 import { workspaceFrame, workspaceLayout, workspaceViewport } from "./workspace-overlay.js";
-import { fittingKeyHints, operationHintRows, type KeyHint } from "./key-hints.js";
+import { fittingKeyHints, type KeyHint } from "./key-hints.js";
 
 export type ModelChoice = SelectItem & { usedInTask?: boolean };
 
@@ -88,13 +88,14 @@ function renderSettingsModelPicker(options: ModelPickerOptions, layout: PanelLay
   const { innerWidth: width } = layout;
   const primary: KeyHint[] = [["Esc", width >= 10 ? "Cancel" : ""]];
   if (options.items.length) primary.push([width >= 24 ? "Enter" : "↵", "Save"]);
-  const thinking: KeyHint | undefined = options.thinkingKeys ? [options.thinkingKeys, "Thinking"] : undefined;
-  const hints = operationHintRows(primary, thinking, layout, theme);
+  if (options.thinkingKeys) primary.push([options.thinkingKeys, "Thinking"]);
+  const tabs = workspaceTabs(layout, "Settings", theme);
+  const hints = fittingKeyHints(primary, layout.innerWidth, theme, width < 27 ? " " : " · ");
   const fullTitle = sanitizeTerminalText(options.title);
   const title = visibleWidth(fullTitle) <= width ? fullTitle : "Optimizer model";
   const scope = "Saves only optimizer settings";
   const chrome = panelHeader(layout, [theme.fg("text", theme.bold(title)),
-    visibleWidth(scope) <= width ? theme.fg("muted", scope) : ""], workspaceTabs(layout, "Settings", theme), hints);
+    visibleWidth(scope) <= width ? theme.fg("muted", scope) : ""], tabs, hints);
   const height = chrome.layout.bodyHeight;
   const body: string[] = [];
   if (height >= 2 && width > 8) {
@@ -118,9 +119,7 @@ export function renderModelPicker(options: ModelPickerOptions, width: number, ro
   const w = layout.innerWidth;
   const primary: KeyHint[] = [[w < 30 ? "↵" : "Enter", options.run ? "Run" : w < 30 ? "Use" : "Confirm"], ["↑↓", "Select"]];
   const secondary: KeyHint[] = [["Esc", w < 16 ? "" : "Cancel"], ...(options.thinkingKeys ? [[options.thinkingKeys, "Thinking"] as KeyHint] : [])];
-  const hints = layout.footerHeight === 1
-    ? [fittingKeyHints([secondary[0]!, ...primary, ...secondary.slice(1)], w, theme, w < 30 ? " " : " · ")]
-    : [fittingKeyHints(primary, w, theme), fittingKeyHints(secondary, w, theme)];
+  const hints = fittingKeyHints([secondary[0]!, ...primary, ...secondary.slice(1)], w, theme, w < 30 ? " " : " · ");
   const chrome = panelHeader(layout, [theme.fg("text", theme.bold(sanitizeTerminalText(options.title))),
     theme.fg("muted", sanitizeTerminalText(options.subtitle))], [], hints);
   const h = chrome.layout.bodyHeight;

@@ -180,8 +180,7 @@ describe("prompt tree and inspection", () => {
     size.rows = 40;
     panel.handleInput("d");
     const confirmation = panel.render(100).join("\n");
-    expect(confirmation).toContain(heading("Delete request"));
-    expect(confirmation).toContain(theme.fg("warning", "Delete run #2?"));
+    expect(confirmation).toContain(theme.fg("warning", theme.bold("Delete run #2?")));
     expect(confirmation).toContain(heading("Esc / n") + " " + muted("Cancel"));
     panel.handleInput("\x1b");
     expect(panel.render(100).join("\n")).toContain(heading("Prompt details"));

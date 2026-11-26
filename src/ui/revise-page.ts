@@ -147,7 +147,7 @@ export class RevisePage {
     }
     const hints = fittingKeyHints([["Esc", "Back"], ["↑↓ / PgUp/PgDn", "Scroll"]], layout.innerWidth, this.theme);
     const chrome = panelHeader(layout, [this.theme.fg("text", this.theme.bold("Full revision requirements")),
-      this.theme.fg("muted", `${text.length} chars`)], [], [hints]);
+      this.theme.fg("muted", `${text.length} chars`)], [], hints);
     this.requirementsViewport = chrome.layout.bodyHeight;
     this.requirementsScroll = Math.min(this.requirementsScroll, Math.max(0, this.requirementsCache.lines.length - this.requirementsViewport));
     const body = this.requirementsCache.lines.slice(this.requirementsScroll, this.requirementsScroll + this.requirementsViewport)
@@ -182,18 +182,12 @@ export class RevisePage {
     const controls = [...(visibleWidth(strip) <= layout.innerWidth ? [strip] : tools), inputs];
     const header = [theme.fg("text", theme.bold(title)) + identity, feedback];
     if (layout.headerHeight === 1 && warning) header[0] = feedback;
-    const hintWidth = layout.innerWidth;
-    const compact = hintWidth < 30;
-    const primary: KeyHint[] = [["Esc", hintWidth >= 11 ? "Back" : ""],
-      [compact ? "^S" : "Ctrl+S", hintWidth >= 18 ? "Revise" : hintWidth >= 15 ? "Run" : ""]];
-    const secondary: KeyHint[] = [["Enter", this.revisionFocus === "input" ? "Newline" : this.revisionFocus === "preferences" ? "Preferences" : "Review"],
-      ["Tab", "Focus"],
-      ...(this.options.preferencesKey ? [[this.options.preferencesKey.toUpperCase(), "Preferences"] as const] : []),
-      ...(canInline ? [["Ctrl+E", inline ? "Editor only" : "Show source"] as const] : [])];
-    const footer = layout.footerHeight === 1
-      ? [fittingKeyHints([...primary, ...secondary], hintWidth, theme, compact ? " " : " · ")]
-      : [fittingKeyHints(primary, hintWidth, theme, compact ? " " : " · "), fittingKeyHints(secondary, hintWidth, theme)];
-    const chrome = panelHeader(inline ? { ...layout, topSeparatorHeight: 0 } : layout, header, [], footer);
+    const narrow = layout.innerWidth < 30;
+    const hints: KeyHint[] = [["Esc", layout.innerWidth < 11 ? "" : "Back"], [narrow ? "^S" : "Ctrl+S", layout.innerWidth >= 18 ? "Revise" : layout.innerWidth >= 15 ? "Run" : ""], ["Tab", "Focus"]];
+    if (canInline) hints.push(["Ctrl+E", inline ? "Editor only" : "Show source"]);
+    hints.push(["Enter", this.revisionFocus === "input" ? "Newline" : this.revisionFocus === "preferences" ? "Preferences" : "Review"]);
+    if (this.options.preferencesKey) hints.push([this.options.preferencesKey.toUpperCase(), "Preferences"]);
+    const chrome = panelHeader(inline ? { ...layout, topSeparatorHeight: 0 } : layout, header, [], fittingKeyHints(hints, layout.innerWidth, theme, narrow ? " " : " · "));
     const { bodyHeight } = chrome.layout;
     const editorHeight = inline ? Math.min(10, Math.max(5, Math.floor(bodyHeight * 0.3))) : bodyHeight;
     const activeControl = this.revisionFocus === "preferences" ? preferences! : this.revisionFocus === "requirements" ? review : inputs;
@@ -207,7 +201,8 @@ export class RevisePage {
     if (!inline) return lines;
     // Keep the source panel's viewport/scroll unchanged; its snapshot has no live action hints.
     const source = this.revisionSource?.render(width);
-    const bottom = ["", ...lines.slice(0, chrome.layout.headerHeight + chrome.layout.separatorHeight + visibleControls.length + inputHeight)];
+    const bottom = ["", ...lines.slice(0, chrome.layout.headerHeight + chrome.layout.separatorHeight + visibleControls.length + inputHeight),
+      ...(chrome.layout.footerHeight ? lines.slice(-chrome.layout.footerHeight) : [])];
     return [...(source ?? []).slice(0, layout.height - bottom.length), ...bottom];
   }
 

@@ -377,7 +377,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\r");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Choose optimizer model"));
     const picker = () => stripVTControlCharacters(harness.panelLines(120).join("\n"));
-    expect(picker()).toMatch(/Preview +Usage +Settings.*Esc Cancel.*Enter Save/);
+    expect(picker()).toMatch(/Preview +Usage +Settings[\s\S]*Esc Cancel.*Enter Save/);
     expect(picker()).toContain("Thinking: medium");
     harness.panelInput("\x1b[Z");
     expect(picker()).toContain("Thinking: high");
@@ -486,7 +486,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.panelLines().join("\n")).toContain("Choose optimizer model");
     expect(harness.panelLines().join("\n")).toContain("Optimizer only · Main session unchanged");
     expect(harness.panelLines().join("\n")).toContain("Enter Confirm · ↑↓ Select");
-    expect(harness.panelLines().join("\n")).toContain("Esc Cancel · Shift+Tab Thinking");
+    expect(harness.panelLines().join("\n")).toContain("Shift+Tab Thinking");
     for (const { width, lines } of harness.renderedWidths) {
       for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }

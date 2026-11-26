@@ -1,5 +1,5 @@
 import { frameHeader } from "../support/panel-chrome.js";
-import { CURSOR_MARKER, KeybindingsManager, TUI_KEYBINDINGS, truncateToWidth, visibleWidth, type TUI } from "@earendil-works/pi-tui";
+import { CURSOR_MARKER, KeybindingsManager, renderFakeCursor, TUI_KEYBINDINGS, truncateToWidth, visibleWidth, type TUI } from "@earendil-works/pi-tui";
 import { performance } from "node:perf_hooks";
 import { stripVTControlCharacters } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -10,7 +10,7 @@ import * as presentation from "../../src/presentation.js";
 import * as preferences from "../../src/revision-preferences.js";
 import { composeRevision, selectPreference } from "../../src/revision-preferences.js";
 import { getThemeByName } from "../support/pi-theme.js";
-import { a, b, down, enter, esc, highlightedRow, listRows, loaded, repository, save, search, setup, tab, text } from "../support/preference-panel.js";
+import { a, b, backTab, down, enter, esc, highlightedRow, listRows, loaded, repository, save, search, setup, tab, text } from "../support/preference-panel.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -142,27 +142,64 @@ describe("preference rendering and responsiveness", () => {
     const f = setup([], "Extra", themeName); await loaded(f.panel);
     vi.spyOn(f.theme, "bold").mockImplementation((value) => `\x1b[1m${value}\x1b[22m`);
     const check = (...hints: KeyHint[]) => {
-      const footer = frameHeader(f.panel.render(100)).join("\n");
+      const footer = f.panel.render(100).join("\n");
       for (const hint of hints) {
         expect(footer).toContain(formatKeyHint(hint, f.theme));
         expect(footer).not.toContain(f.theme.bold(hint[1]));
       }
       expect(footer).toContain("\x1b[1m");
     };
-    check(["l", "Manage library"], ["Enter", "Read"], ["Esc", "Back"], ["Space", "Toggle"]);
+    check(["l", "Manage library"], ["Enter", "Read"], ["Esc", "Back"], ["Space", "Toggle"], ["?", "Keys"]);
     f.panel.handleInput("l");
     for (const hint of [["n", "Add"], ["e", "Edit"], ["d", "Delete"]] as KeyHint[]) expect(f.panel.render(100).join("\n")).toContain(formatKeyHint(hint, f.theme));
     f.panel.handleInput(enter); check(["↑↓ / PgUp / PgDn", "Scroll"], ["Esc", "Back"]); f.panel.handleInput(esc);
-    f.panel.handleInput("n"); check(["Enter", "Next field"], ["Tab / Shift+Tab", "Fields"], ["Esc", "Back"], ["Ctrl+S", "Save to library"]);
+    f.panel.handleInput("n"); check(["Enter", "Next"], ["Tab", "Fields"], ["Esc", "Back"], ["Ctrl+S", "Save to library"]);
     f.panel.handleInput("Name"); f.panel.handleInput(tab); check(["Enter", "Newline"]);
     f.panel.handleInput(tab); check(["Enter", "Show options"]);
     f.panel.handleInput(enter); check(["Enter", "Hide options"]);
-    f.panel.handleInput(tab); check(["Enter", "Change scope"]);
-    f.panel.handleInput(tab); check(["Enter", "Change type"]);
-    f.panel.handleInput(tab); check(["Enter", "Next field"]);
-    f.panel.handleInput(tab); check(["Enter", "Save to library"]);
-    f.panel.handleInput(esc); check(["y", "Discard"], ["n / Esc", "Keep editing"]);
-    f.panel.handleInput("y"); f.panel.handleInput("d"); check(["y", "Delete"], ["n / Esc", "Cancel"]);
+    f.panel.handleInput(tab); check(["←→", "Choose"]);
+    f.panel.handleInput(tab); check(["←→", "Choose"]);
+    f.panel.handleInput(tab); check(["Enter", "Next"]);
+    f.panel.handleInput(tab); check(["Enter", "Save"]);
+    expect(text(f.panel, 20)).toContain("Esc ^S Save Tab");
+    f.panel.handleInput(esc); check(["y", "Discard"], ["Esc", "Keep editing"]);
+    f.panel.handleInput("y"); f.panel.handleInput("d"); check(["y", "Delete"], ["Esc", "Cancel"]);
+  });
+
+  it.each(["dark", "light"])("anchors list and form shortcuts through Tab and centers discard with the safe shortcut first (%s)", async (theme) => {
+    const f = setup([], "", theme, [a], "manage"); await loaded(f.panel);
+    for (const width of [40, 58, 100]) {
+      const header = () => frameHeader(f.panel.render(width)).map(stripVTControlCharacters);
+      const origin = () => ["Esc", "Tab"].map((key) => visibleWidth(header()[0]!.split(key)[0]!));
+      const initial = origin();
+      for (const key of [tab, tab, tab, backTab, tab]) {
+        f.panel.handleInput(key);
+        expect(header()).toHaveLength(1);
+        expect(origin()).toEqual(initial);
+      }
+    }
+    f.panel.handleInput("?"); expect(text(f.panel)).toContain("Preferences keys");
+    expect(text(f.panel)).toContain("n / e / d"); f.panel.handleInput(esc);
+    f.panel.handleInput("n"); f.panel.handleInput("Draft name"); f.panel.handleInput(tab);
+    f.panel.handleInput("Draft instruction");
+    const shortcuts = () => frameHeader(f.panel.render(100)).map(stripVTControlCharacters)[1]!;
+    const shared = shortcuts().split(" · ").slice(0, 3);
+    expect(f.panel.render(100).join("\n")).toContain(CURSOR_MARKER);
+    for (const key of [tab, enter, tab, tab]) f.panel.handleInput(key);
+    expect(shortcuts().split(" · ").slice(0, 3)).toEqual(shared);
+    expect(f.panel.render(100).join("\n")).not.toContain(renderFakeCursor(" ").split(" ")[0]);
+    f.panel.handleInput(esc);
+    const lines = f.panel.render(100).map(stripVTControlCharacters);
+    const question = lines.findIndex((line) => line.includes("Discard unsaved form?"));
+    const actions = lines[question + 1]!;
+    expect(question).toBeGreaterThan(0);
+    expect(Math.abs((question + 0.5) - (lines.length - 1) / 2)).toBeLessThanOrEqual(1);
+    expect(actions.trim()).toBe("Esc Keep editing · y Discard");
+    expect(Math.abs(actions.indexOf("Esc") - (100 - visibleWidth(actions.trim())) / 2)).toBeLessThanOrEqual(1);
+    f.panel.handleInput(esc);
+    expect(text(f.panel)).toContain("Draft instruction");
+    expect(shortcuts()).toContain("←→ Choose");
+    expect(f.repo.save).not.toHaveBeenCalled();
   });
 
   it.each(["dark", "light"])("bounds all pages, highlights focus, and retains styled cancel at small sizes (%s)", async (themeName) => {
@@ -184,7 +221,7 @@ describe("preference rendering and responsiveness", () => {
     expect(f.panel.render(100).join("\n")).toContain(CURSOR_MARKER);
     f.panel.handleInput("Edited"); f.panel.handleInput(esc); check();
     f.terminal.rows = 8;
-    expect(frameHeader(f.panel.render(20)).join("\n")).toContain(formatKeyHint(["Esc", "Keep"], f.theme));
+    expect(f.panel.render(20).join("\n")).toContain(formatKeyHint(["Esc", ""], f.theme));
   });
 
   it.each(["dark", "light"])("separates reference headings, metadata and literal bodies (%s)", async (name) => {
@@ -250,7 +287,7 @@ describe("preference rendering and responsiveness", () => {
       expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
       expect(stripVTControlCharacters(lines.join("\n"))).toContain("Write conflict");
       expect(lines.join("\n")).toContain(f.theme.fg("error", "⚠ Write conflict 中文😀").split("⚠")[0]);
-      if (rows >= 8) expect(frameHeader(lines).join("\n")).toContain(formatKeyHint(["Esc", "Back"], f.theme));
+      if (rows >= 8) expect(lines.join("\n")).toContain(formatKeyHint(["Esc", width < 24 ? "" : "Back"], f.theme));
     }
     const failure = setup([], "Extra", name); await loaded(failure.panel);
     failure.library.errors.project = "Permission denied";

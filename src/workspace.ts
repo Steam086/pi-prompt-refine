@@ -443,7 +443,7 @@ export class RefineWorkspace implements Component, Focusable {
     const hints = innerWidth < 30
       ? fittingKeyHints([["Esc", "Back"], ["↵", action], ["⇧↵", "NL"]], innerWidth, theme)
       : fittingKeyHints([["Esc", "Back"], ["Enter", action], ["Shift+Enter", "Newline"]], innerWidth, theme);
-    const chrome = panelHeader(layout, header, [], [hints]);
+    const chrome = panelHeader(layout, header, [], hints);
     const body = this.activeInput.render(innerWidth, chrome.layout.bodyHeight);
     if (this.inputError && !layout.headerHeight) body.unshift(status);
     return chrome.render(body, (text) => theme.fg("borderMuted", text));

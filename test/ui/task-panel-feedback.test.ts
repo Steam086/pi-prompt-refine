@@ -72,10 +72,14 @@ describe("short and narrow feedback", () => {
       const destination = width === 20 ? "→editor" : "Editor only";
       expect(output).toContain(`a ${destination}`);
       expect(output).toMatch(/s Send(?: to Pi)?/);
-      expect(output).toMatch(/\? (Help|Actions)/);
-      expect(output).toContain("Esc Back");
+      if (width > 20) {
+        expect(output).toMatch(/\? (Help|Actions)/);
+        expect(output).toContain("Esc Back");
+      }
       const styled = panel.render(width).join("\n");
-      for (const [key, label] of [["a", destination], ["s", width < 60 ? "Send" : "Send to Pi"], ["Esc", "Back"]]) {
+      const hints = [["a", destination], ["s", width < 48 ? "Send" : "Send to Pi"]];
+      if (width > 20) hints.push(["Esc", "Back"]);
+      for (const [key, label] of hints) {
         expect(styled).toContain(theme.fg("text", theme.bold(key!)) + " " + theme.fg("muted", label!));
         expect(styled).not.toContain(theme.bold(label!));
       }
@@ -209,15 +213,15 @@ describe("top action hints", () => {
         const back = lines.findIndex((line) => /Esc:? Close/.test(line));
         const content = lines.findIndex((line) => line.includes(usage ? "No records" : "No current"));
         expect(back).toBeGreaterThanOrEqual(0);
-        expect(content).toBeGreaterThan(back);
+        expect(content).toBeGreaterThan(0);
         if (workspaceTabs(layout, usage ? "Usage" : "Preview", theme).length) {
-          expect(back).toBeGreaterThanOrEqual(tabs);
+          expect(back).toBeGreaterThan(content);
           expect(tabs).toBeGreaterThanOrEqual(0);
         }
         expect(frame[back]).toContain(formatKeyHint(["Esc", "Close"], theme, 1, lines[back]!.includes("Esc:") ? "secondary" : "secondary-compact"));
         expect(frame).toHaveLength(layout.height);
         expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
-        expect(lines.slice(content).join("\n")).not.toMatch(/Esc:? Close/);
+        expect(lines.filter((line) => /Esc:? Close/.test(line))).toHaveLength(1);
       }
     }
   });

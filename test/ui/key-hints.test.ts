@@ -1,7 +1,7 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
-import { alignedKeyHints, fittingKeyHints, formatKeyHint, keyHintGrid, wrappedKeyHints, type KeyHint } from "../../src/key-hints.js";
+import { confirmationKeyHints, fittingKeyHints, formatKeyHint, keyHintGrid, passiveHeaderHints, type KeyHint } from "../../src/key-hints.js";
 
 const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
 const hints: KeyHint[] = [["r", "Refine"], ["m", "Model"], ["x", "Cancel"]];
@@ -14,43 +14,37 @@ describe("fixed-column key hints", () => {
     };
     const save = "\x1b[37m\x1b[1mEnter\x1b[22m\x1b[39m \x1b[90mSave\x1b[39m";
     expect(formatKeyHint(["Enter", "Save"], styled)).toBe(save);
-    expect(alignedKeyHints([[["Enter", "Save"]]], 40, styled)).toEqual([save]);
     expect(fittingKeyHints([["Enter", "Save"], ["Space", "Toggle"]], 10, styled)).toBe(save);
     expect(formatKeyHint(["", "Send pending"], styled)).toBe(styled.fg("muted", "Send pending"));
     expect(formatKeyHint(["↑↓", ""], styled)).toBe(styled.fg("text", styled.bold("↑↓")));
     const pair: KeyHint[] = [["a", "Accept"], ["s", "Send to Pi"]];
     const joined = pair.map((hint) => formatKeyHint(hint, styled)).join(styled.fg("muted", " · "));
-    expect(alignedKeyHints([pair], 23, styled)).toEqual([joined]);
     expect(fittingKeyHints(pair, 23, styled)).toBe(joined);
     expect(fittingKeyHints(pair, 22, styled)).toBe(formatKeyHint(pair[0]!, styled));
   });
 
-  it("packs secondary hints into one muted, regular-weight line or wraps whole pairs", () => {
+  it("keeps passive shortcuts on one line and omits whole secondary pairs", () => {
     const styled = {
       fg: (_color: string, text: string) => `\x1b[90m${text}\x1b[39m`,
       bold: (text: string) => `\x1b[1m${text}\x1b[22m`,
     };
-    const pairs: KeyHint[] = [["Enter", "Optimize"], ["Tab", "Preferences"], ["Esc", "Back"]];
-    const wide = wrappedKeyHints(pairs, 60, styled);
-    expect(wide.map(stripVTControlCharacters)).toEqual(["Enter: Optimize · Tab: Preferences · Esc: Back"]);
-    expect(wide.join("")).not.toContain("\x1b[1m");
-    expect(wide[0]).toContain(styled.fg("muted", "Enter:") + " " + styled.fg("muted", "Optimize"));
-    expect(wrappedKeyHints(pairs, 20, styled).map(stripVTControlCharacters)).toEqual(["Enter: Optimize", "Tab: Preferences", "Esc: Back"]);
-    expect(fittingKeyHints(pairs, 20, styled, " · ", "secondary")).toBe(formatKeyHint(pairs[0]!, styled, 1, "secondary"));
-    expect(wrappedKeyHints(pairs, 0, styled)).toEqual([]);
-    // Tight fallbacks keep the low emphasis without spending a column on punctuation.
-    expect(fittingKeyHints([["Esc", "Cancel"]], 10, styled, " · ", "secondary-compact"))
-      .toBe(styled.fg("muted", "Esc") + " " + styled.fg("muted", "Cancel"));
+    const pairs: KeyHint[] = [["Esc", "Back"], ["Enter", "Optimize"], ["Tab", "Preferences"]];
+    const compact: KeyHint[] = [["Esc", "Back"], ["↵", "Optimize"], ["Tab", "Preferences"]];
+    const wide = passiveHeaderHints(pairs, compact, 60, styled);
+    expect(stripVTControlCharacters(wide)).toBe("Esc: Back  Enter: Optimize  Tab: Preferences");
+    expect(wide).not.toContain("\x1b[1m");
+    expect(stripVTControlCharacters(passiveHeaderHints(pairs, compact, 20, styled))).toBe("Esc Back ↵ Optimize");
+    expect(passiveHeaderHints(pairs, compact, 0, styled)).toBe("");
   });
 
-  it("wraps oversized ANSI/Unicode pairs without truncating their text", () => {
+  it("measures Unicode and keeps both confirmation keys at narrow widths", () => {
     const styled = { fg: (_color: string, text: string) => `\x1b[90m${text}\x1b[39m`, bold: theme.bold };
-    const pairs: KeyHint[] = [["→", "中文😀 literal requirements"], ["Esc", "Back"]];
-    for (const width of [4, 8, 12, 20]) {
-      const lines = wrappedKeyHints(pairs, width, styled);
-      expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
-      expect(lines.map(stripVTControlCharacters).join("").replace(/[\s·]/g, "")).toBe("→:中文😀literalrequirementsEsc:Back");
-      expect(lines.join("")).not.toContain("…");
+    const cancel = ["Esc", "继续编辑"] as const;
+    const confirm = ["y", "丢弃😀"] as const;
+    for (const width of [5, 8, 12, 20, 30]) {
+      const line = confirmationKeyHints(cancel, confirm, width, styled);
+      expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      expect(stripVTControlCharacters(line)).toMatch(/^Esc.*y/);
     }
   });
 

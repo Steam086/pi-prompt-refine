@@ -276,8 +276,7 @@ describe("result reading panel", () => {
     expect(text).not.toContain("Enter won't send");
     expect(text).not.toContain("Accept puts the result in the editor; s sends directly.");
     expect(frameHints(panel.render(100))).toEqual([
-      "  a Accept · e Edit · f Revise · s Send",
-      "  q Back   · ? Help · i Input  · m Model",
+      "  q Back · ? Help · a Accept · e Edit · f Revise · s Send · i Input · m Model",
     ]);
     expect(text.match(/Prompt refine/g)).toHaveLength(1);
     panel.toggleOriginal();
@@ -306,16 +305,16 @@ describe("result reading panel", () => {
     const panel = create({ candidateText: undefined, state: { ...options.state, phase: "idle" }, thinkingLevel: "high", contextLabel: "Context: not captured" });
     const lines = panel.render(100);
     expect(lines[0]).toBe("  " + "─".repeat(96));
-    expect(lines[1]).toBe("  Prompt refine   openai-codex/example-model · high");
+    expect(lines[1]).toContain("Prompt refine");
+    expect(lines[2]).toBe("  openai-codex/example-model · high");
     const layout = panelLayout(100, 40);
     const divider = lines.findIndex((line, index) => index > 0 && /^─+$/.test(line.trim()));
-    const emptyRow = divider + 1 + Math.floor((lines.length - divider - 2) / 2);
+    const emptyRow = divider + 1 + Math.floor((lines.length - divider - 3) / 2);
     expect(lines[emptyRow]?.trim()).toBe("No result yet.");
-    expect(lines.slice(divider + 1).filter((line) => line.trim())).toEqual([lines[emptyRow]]);
+    expect(lines.slice(divider + 1, -1).filter((line) => line.trim())).toEqual([lines[emptyRow]]);
     expect(lines[emptyRow]).toBe(" ".repeat(layout.inset + Math.floor((layout.innerWidth - "No result yet.".length) / 2)) + "No result yet.");
     expect(frameHints(lines)).toEqual([
-      "  r Refine · m Model · i Input",
-      "  q Back   · ? Help",
+      "  q Back · ? Help · r Refine · m Model · i Input",
     ]);
     const text = lines.join("\n");
     expect(text.match(/r Refine/g)).toHaveLength(1);
@@ -363,7 +362,7 @@ describe("result reading panel", () => {
     panel.setNotice("Context saved");
     expect(frameHeader(panel.render(100)).join("\n")).toContain("Context saved");
     panel.toggleHelp();
-    expect(stripVTControlCharacters(frameHeader(panel.render(100)).join("\n"))).toContain("? Hide help");
+    expect(stripVTControlCharacters(frameHints(panel.render(100)).join("\n"))).toContain("? Hide help");
   });
 
   it("keeps model guidance in the empty block when no model is selected", () => {
@@ -515,8 +514,7 @@ describe("result reading panel", () => {
   it("aligns result actions with navigation using the same column stops as Tasks", () => {
     const panel = create({ navigation: { index: 1, count: 1, label: "#1 refine" } });
     expect(frameHints(panel.render(100)).map((line) => line.trim())).toEqual([
-      "a Accept · e Edit · f Revise · s Send",
-      "q Back   · ? Help · i Input  · m Model · g Same input",
+      "q Back · ? Help · a Accept · e Edit · f Revise · s Send · i Input · m Model · g Same input",
     ]);
   });
 
@@ -530,14 +528,6 @@ describe("result reading panel", () => {
       { state: { ...options.state, pendingSend: true } },
       { accepted: { editorChanged: false }, canRestore: true },
     ];
-    const starts = (line: string) => {
-      let column = 0;
-      return line.split(" · ").map((cell) => {
-        const start = column;
-        column += visibleWidth(cell) + 3;
-        return start;
-      });
-    };
     for (const state of states) {
       const panel = new PreviewPanel({ ...options, navigation: { index: 1, count: 1, label: "#1 refine" }, ...state },
         theme, () => 40, vi.fn());
@@ -546,11 +536,8 @@ describe("result reading panel", () => {
         for (const width of [40, 60, 80, 100, 200]) {
           const footer = frameHints(panel.render(width));
           const bottom = stripVTControlCharacters(footer.at(-1)!);
-          if (footer.length === 2) {
-            const top = stripVTControlCharacters(footer[0]!);
-            const count = Math.min(starts(top).length, starts(bottom).length);
-            expect(starts(top).slice(0, count)).toEqual(starts(bottom).slice(0, count));
-          }
+          expect(footer).toHaveLength(1);
+          expect(bottom.trimStart()).toMatch(/^q Back/);
           expect(bottom).toContain("q Back");
           expect(bottom).toContain(helpVisible ? "? Hide help" : "? Help");
           expect(footer.at(-1)).toContain(theme.fg("text", theme.bold("q")));

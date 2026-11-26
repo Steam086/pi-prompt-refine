@@ -102,7 +102,7 @@ describe("Unsent preference selection", () => {
     w.handleInput(backTab); w.handleInput("/"); w.handleInput("Literal");
     // Search owns all text and arrows; it cannot open another view or invoke task actions.
     for (const key of [left, right, ctrlS]) w.handleInput(key);
-    expect(text(w)).toMatch(/Choose preferences +Search/);
+    expect(text(w)).toMatch(/Choose preferences[^\n]*\n[^\n]*Search/);
     expect(f.run).not.toHaveBeenCalled();
     w.handleInput(enter); w.handleInput(" ");
     expect(f.controller.getRecord(f.originals[0]!.id)!.input.preferences).toEqual([selectPreference(b)]);
@@ -194,12 +194,12 @@ describe("Unsent preference selection", () => {
     w.handleInput("o"); expect(text(w)).toContain("Original prompt");
     w.handleInput(tab); w.handleInput("/"); w.handleInput(a.name);
     for (const key of [tab, backTab, ctrlS]) w.handleInput(key);
-    expect(text(w)).toMatch(/Choose preferences +Search/);
+    expect(text(w)).toMatch(/Choose preferences[^\n]*\n[^\n]*Search/);
     w.handleInput(enter);
     expect(f.run).not.toHaveBeenCalled();
     w.handleInput("o");
     for (const key of [tab, backTab, enter, enter, ctrlS, bringBack]) w.handleInput(key);
-    expect(text(w)).toMatch(/Choose preferences +Read-only/);
+    expect(text(w)).toMatch(/Choose preferences[^\n]*\n[^\n]*Read-only/);
     expect(f.run).not.toHaveBeenCalled();
     w.handleInput(esc); w.handleInput("p"); await loaded(w);
     w.handleInput(" "); w.handleInput(enter); w.handleInput(enter);

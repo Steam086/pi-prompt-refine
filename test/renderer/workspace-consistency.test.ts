@@ -1,4 +1,4 @@
-import { frameHints } from "../support/panel-chrome.js";
+import { frameHeader, frameHints } from "../support/panel-chrome.js";
 import { getKeybindings, Input, sliceByColumn, TuiAltScreen, TuiMainScreen, visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters as strip } from "node:util";
 import { describe, expect, it, vi } from "vitest";
@@ -14,8 +14,6 @@ const sizes = [[60, 20], [100, 30], [160, 45]] as const;
 const themes = ["dark", "light"] as const;
 const tabs = ["Preview", "Usage", "Settings"] as const;
 type Page = typeof tabs[number];
-
-const widthOfContent = (line: string) => visibleWidth(strip(line).replace(/│$/, "").trimEnd());
 
 function screenLines(tui: TuiMainScreen | TuiAltScreen) {
   if (tui.mode === "fullscreen") return tui.getScreenLines();
@@ -101,30 +99,21 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
             : theme.fg("muted", ` ${tab} `));
         }
         const bodyText = (line: string) => strip(line).slice(1, -1).trim();
-        expect(bodyText(lines[row - 1]!), name).toMatch(/^(?:Prompt refine|Usage|Settings|[A-Za-z]+ characters)/);
+        expect(bodyText(line), name).toMatch(/^(?:Prompt refine|Usage|Settings|[A-Za-z]+ characters)/);
         const divider = lines.findIndex((line, i) => i > row && /^─+$/u.test(bodyText(line)));
         expect(divider, name).toBeGreaterThan(row);
         const hints = frameHints(lines);
         const hintStrip = hints.join("\n");
-        expect(hints.length, name).toBeGreaterThanOrEqual(1);
-        expect(hints.length, name).toBeLessThanOrEqual(2);
+        expect(hints, name).toHaveLength(1);
+        expect(frameHeader(lines).length, name).toBeLessThanOrEqual(2);
         expect(hintStrip, name).not.toContain("\x1b[1m");
         expect(hintStrip, name).toContain(`${theme.fg("muted", `${action[0]}:`)} ${theme.fg("muted", action[1])}`);
         expect(bodyText(lines[divider + 1]!), name).not.toBe("");
         expect(strip(hintStrip), name).not.toMatch(/\s(?:Space|←|→|↑↓|b|d|p|m|f): /);
         if (active === "Preview") expect(hintStrip).toContain(`${theme.fg("muted", "a:")} ${theme.fg("muted", "Editor only")}`);
         if (active !== "Settings") expect(strip(hintStrip)).toContain("?: Help");
-        if (columns >= 100) {
-          expect(hints, name).toHaveLength(1);
-          if (columns === 100 && active === "Preview") {
-            // The explicit editor destination makes the hint strip one row of its own.
-            expect(strip(lines[row + 1]!), name).toContain(`${action[0]}: ${action[1]}`);
-            expect(divider).toBe(row + 2);
-          } else {
-            expect(strip(line), name).toContain(`${action[0]}: ${action[1]}`);
-            expect(visibleWidth(strip(line).replace(/│$/, "").trimEnd()), name).toBe(widthOfContent(lines[divider]!));
-          }
-        }
+        expect(divider, name).toBe(row + 2);
+        expect(lines.at(-2)!, name).toContain(hints[0]!);
         return lines;
       }
       function operationHint(output: string, key: string, description: string) {
@@ -219,7 +208,7 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         input("\x13");
         const confirmPrompt = frame("Optimization prompt / confirmation", false).join("\n");
         expect(strip(confirmPrompt)).toContain("Save optimization prompt?");
-        expect(strip(confirmPrompt).replace(/\s*│\n│\s*/g, " ")).toContain("output protocol stay in place");
+        expect(strip(confirmPrompt).replace(/\s*│\n│\s*/g, " ")).toContain("Writes to prompt-refine.json for the next round.");
         input("y");
         await vi.waitFor(() => expect(strip(frame("Back to Optimizer", false).join("\n"))).toContain("› Optimization prompt"));
         expect(savePrompt).toHaveBeenCalledExactlyOnceWith(`${policy}�[2J\nq 中文😀`);
@@ -300,7 +289,6 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
           expect(strip(screenLines(tui).join("\n"))).toContain("Preserve 中文😀");
         });
         const preferences = frame("Preferences / choose").join("\n");
-        expect(strip(preferences)).toContain("Focus: Library");
         operationHint(preferences, "Space", "Toggle");
         operationHint(preferences, "l", "Manage library");
         input("l");

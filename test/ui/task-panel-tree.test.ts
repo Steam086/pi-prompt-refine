@@ -453,9 +453,9 @@ describe("prompt tree and inspection", () => {
     }
     const full = f.panel.render(100);
     const history = f.theme.fg("muted", "History → Usage · 1 earlier prompt");
-    const title = full.find((line) => line.includes(history))!;
+    const title = full.find((line) => line.includes("Prompt refine · Tasks"))!;
     expect(title).toContain(f.theme.fg("text", f.theme.bold("Prompt refine · Tasks")));
-    expect(title).toContain(history);
+    expect(full.join("\n")).toContain(history);
     expect(visibleWidth(title)).toBe(panelLayout(100, f.size.rows).inset + panelLayout(100, f.size.rows).innerWidth);
     expect(stripVTControlCharacters(title)).not.toContain("Current round");
     expect(full.join("\n")).not.toContain("0 prompts");

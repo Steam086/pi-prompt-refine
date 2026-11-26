@@ -1,8 +1,8 @@
 import { stripVTControlCharacters } from "node:util";
 import { parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { focusLabel, panelHeader, panelTabs, workspaceTabs, type PanelLayout, type PanelLayoutProvider } from "../panel-layout.js";
-import { discardHintRows, passiveHintLayout, type KeyHint } from "../key-hints.js";
+import { focusLabel, panelConfirmation, panelHeader, panelTabs, workspaceTabs, type PanelLayout, type PanelLayoutProvider } from "../panel-layout.js";
+import { discardKeyHints, passiveHeaderHints, type KeyHint } from "../key-hints.js";
 import type { PromptInput } from "../prompt-input.js";
 import { sanitizeTerminalText } from "../presentation.js";
 import { DEFAULT_CONFIG } from "../config.js";
@@ -213,22 +213,22 @@ export class SettingsPage {
     this.tui.requestRender();
   }
 
-  /** Settings and its numeric editor share the same passive top shortcut strip. */
   private hintLayout(layout: PanelLayout, hints: KeyHint[], compact: KeyHint[]) {
     const tabs = workspaceTabs(layout, "Settings", this.theme);
-    return { tabs, ...passiveHintLayout(layout, tabs.length, hints, compact, this.theme) };
+    return { tabs, footer: passiveHeaderHints(hints, compact, layout.innerWidth, this.theme) };
   }
 
   private renderNumberInput(width: number): string[] {
     const { spec, input, error, preset } = this.numberInput!;
     const active = preset !== undefined;
-    const base = this.layout(width);
+    const layout = this.layout(width);
     const action = active ? "Use preset" : "Stage";
-    const hints: KeyHint[] = [["Esc", "Cancel"], ["Ctrl+S", base.innerWidth >= 100 ? "Save settings" : "Save"],
-      ["Enter", action], ["Tab", "Focus"]];
-    const compact: KeyHint[] = [["Esc", base.innerWidth >= 16 ? "Cancel" : ""], ["^S", "Save"], ["↵", action], ["Tab", "Focus"]];
+    const hints: KeyHint[] = [["Esc", "Cancel"], ["Ctrl+S", layout.innerWidth >= 100 ? "Save settings" : "Save"],
+      ["Tab", "Focus"], ["Enter", action]];
+    const compact: KeyHint[] = [["Esc", layout.innerWidth >= 18 ? "Cancel" : ""], ["^S", layout.innerWidth >= 11 ? "Save" : ""],
+      ["Tab", ""], ["↵", active ? "Use" : "Stage"]];
     if (active) { hints.push(["↑↓", "Choose"]); compact.push(["↑↓", "Choose"]); }
-    const { layout, tabs, footer } = this.hintLayout(base, this.saving ? [] : hints, this.saving ? [] : compact);
+    const { tabs, footer } = this.hintLayout(layout, this.saving ? [] : hints, this.saving ? [] : compact);
     const { innerWidth } = layout;
     const theme = this.theme;
     const warning = error || (this.settingsFailed ? this.settingsNotice : "");
@@ -236,7 +236,7 @@ export class SettingsPage {
     const feedback = theme.fg(warning ? "warning" : "muted", sanitizeTerminalText(status));
     const header = layout.headerHeight === 1 && warning ? [feedback]
       : [theme.fg("text", theme.bold(spec.label)), feedback];
-    const chrome = panelHeader(layout, header, tabs, footer);
+    const chrome = panelHeader(layout, header, layout.headerHeight === 1 ? [] : tabs, footer);
     const height = chrome.layout.bodyHeight;
     const body: string[] = warning && !layout.headerHeight && height > 1 ? [feedback] : [];
     const room = height - body.length;
@@ -259,12 +259,9 @@ export class SettingsPage {
     const layout = this.layout(width);
     const theme = this.theme;
     const title = theme.fg("text", theme.bold(layout.innerWidth >= 26 ? "Discard unsaved settings?" : "Discard changes?"));
-    const hints = discardHintRows(layout, theme);
-    const chrome = panelHeader(layout, [title], workspaceTabs(layout, "Settings", theme), hints);
-    const body = [...(!layout.headerHeight ? [title] : []),
-      ...wrapTextWithAnsi("Unsaved settings will be discarded and the workspace will close.", layout.innerWidth)
-        .map((line) => theme.fg("warning", line))];
-    return chrome.render(body, (text) => theme.fg("borderMuted", text));
+    const hints = discardKeyHints(layout.innerWidth, theme);
+    const details = wrapTextWithAnsi("Discarding closes the workspace.", Math.min(layout.innerWidth, 56));
+    return panelConfirmation(layout, title, hints, details.map((line) => theme.fg("muted", line)), (text) => theme.fg("borderMuted", text));
   }
 
   private openOptimizationPrompt(): void {
@@ -370,10 +367,10 @@ export class SettingsPage {
     if (this.optimizationPrompt) return this.optimizationPrompt.render(this.layout(width));
     if (this.numberInput) return this.renderNumberInput(width);
     if (this.confirmingDiscard) return this.renderDiscard(width);
-    const baseLayout = this.layout(width);
-    const { innerWidth } = baseLayout;
+    const layout = this.layout(width);
+    const { innerWidth } = layout;
     const { theme } = this;
-    const cacheKey = JSON.stringify([width, baseLayout.height, this.selected, this.original, this.settingsOptimizer,
+    const cacheKey = JSON.stringify([width, layout.height, this.selected, this.original, this.settingsOptimizer,
       this.settingsContextEnabled, this.saving, this.settingsNotice, this.settingsFailed]);
     if (cacheKey !== this.settingsCacheKey) {
       this.settingsFrames.clear();
@@ -398,15 +395,15 @@ export class SettingsPage {
     const enterHint = (key: string): KeyHint[] => action ? [[key, action]] : [];
     // Saving has a fixed key and an explicit scope, independent of row focus.
     const close: KeyHint = ["Esc", dirty ? "Discard…" : "Close"];
-    const compactClose: KeyHint = ["Esc", innerWidth < (dirty ? 11 : 9) ? "" : dirty ? "Discard" : "Close"];
+    const compactClose: KeyHint = ["Esc", innerWidth < (dirty ? 19 : 17) ? "" : dirty ? "Discard" : "Close"];
     const groupHints: KeyHint[] = groups.length > 1 ? [["Tab", innerWidth >= 72 ? "Next group" : "Group"]] : [];
-    const { layout, tabs, footer } = this.hintLayout(baseLayout,
-      this.saving ? [] : [["Ctrl+S", "Save"], ...enterHint("Enter"), ...groupHints, close],
-      this.saving ? [] : [compactClose, ["^S", "Save"], ...enterHint("↵"), ...groupHints]);
+    const { tabs, footer } = this.hintLayout(layout,
+      this.saving ? [] : [close, ["Ctrl+S", "Save"], ...groupHints, ...enterHint("Enter")],
+      this.saving ? [] : [compactClose, ["^S", innerWidth >= 11 ? "Save" : ""], ...groupHints, ...enterHint("↵")]);
     const timing = group === "Context" && this.cursor !== 12 ? "Context changes take effect next round" : "";
     const status = notice || theme.fg("muted", timing);
     const header = [layout.headerHeight === 1 && notice ? status : theme.fg("text", theme.bold("Settings")), status];
-    const chrome = panelHeader(layout, header, tabs, footer);
+    const chrome = panelHeader(layout, header, layout.headerHeight === 1 && notice ? [] : tabs, footer);
     const contentHeight = chrome.layout.bodyHeight;
     // Keep top-level navigation fixed; the subordinate group strip is compact.
     const rows = panelTabs({ ...layout, bodyHeight: Math.min(7, contentHeight) }, groups.map((group) => group.label), this.settingsGroup, theme);

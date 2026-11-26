@@ -66,7 +66,7 @@ describe("shared refine workspace", () => {
         if (width >= 40 && rows >= 16) {
           expect(stripVTControlCharacters(textOf(input))).toContain("Esc Back");
           expect(stripVTControlCharacters(textOf(input))).toContain("Enter Refine");
-          expect(stripVTControlCharacters(textOf(context))).toContain("Ctrl+S: Save");
+          expect(stripVTControlCharacters(textOf(context))).toMatch(/(?:Ctrl\+S:|\^S) Save/);
         }
       }
     }

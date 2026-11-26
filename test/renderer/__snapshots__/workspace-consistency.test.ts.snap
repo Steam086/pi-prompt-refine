@@ -3,10 +3,8 @@
 exports[`workspace consistency (regular) > dark theme > keeps shared chrome and action hierarchy at 60×20 > compact workspace flow 1`] = `
 "=== Preview ===
 ╭───────────────────────────────────────────────────────╮
-│  Prompt refine · Tasks   1 prompt · 2 runs            │
-│   Preview    Usage    Settings                        │
-│  a: Editor only  Enter: Inspect  Tab: Read            │
-│  Esc: Close  ?: Help                                  │
+│  Prompt refine · Ta…   Preview    Usage    Settings   │
+│  1 prompt · 2 runs                                    │
 │  ───────────────────────────────────────────────────  │
 │    ▾ 本项目的原始要求                                 │
 │    ├─ model-2                                 ✓ Done  │
@@ -16,13 +14,14 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │                                                       │
 │                                                       │
 │                                                       │
+│                                                       │
+│  Esc: Close  Enter: Inspect  a: Editor only  ?: Help  │
 ╰───────────────────────────────────────────────────────╯
 
 === Usage ===
 ╭───────────────────────────────────────────────────────╮
-│  Usage · All rounds   1 prompt · 2 runs               │
-│   Preview    Usage    Settings                        │
-│  Enter: Inspect  Tab: Read    Esc: Close  ?: Help     │
+│  Usage · All rounds    Preview    Usage    Settings   │
+│  1 prompt · 2 runs                                    │
 │  ───────────────────────────────────────────────────  │
 │    ▾ 本项目的原始要求                                 │
 │    ├─ model-2                                 ✓ Done  │
@@ -33,13 +32,13 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │                                                       │
 │                                                       │
 │                                                       │
+│  Esc: Close  Enter: Inspect  ?: Help  Tab: Read       │
 ╰───────────────────────────────────────────────────────╯
 
 === Settings ===
 ╭───────────────────────────────────────────────────────╮
-│  Settings   Context changes take effect next round    │
-│   Preview    Usage    Settings                        │
-│  Ctrl+S: Save  Enter: Change  Tab: Group  Esc: Close  │
+│  Settings              Preview    Usage    Settings   │
+│  Context changes take effect next round               │
 │  ───────────────────────────────────────────────────  │
 │   Context    Optimizer                                │
 │    Project context: [x] On                            │
@@ -50,13 +49,13 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │    History messages: 12 messages ›                    │
 │    History characters: 16000 characters ›             │
 │  Pi-loaded rules (e.g. AGENTS.md) may go to the…      │
+│  Esc: Close  Ctrl+S: Save  Tab: Group  Enter: Change  │
 ╰───────────────────────────────────────────────────────╯
 
 === Settings / Optimizer ===
 ╭───────────────────────────────────────────────────────╮
-│  Settings                                             │
-│   Preview    Usage    Settings                        │
-│  Ctrl+S: Save  Enter: Edit  Tab: Group  Esc: Close    │
+│  Settings              Preview    Usage    Settings   │
+│                                                       │
 │  ───────────────────────────────────────────────────  │
 │   Context    Optimizer                                │
 │    Default model: provider/rewrite-model ›            │
@@ -67,13 +66,13 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │  › Draft character limit: 16000 characters ›          │
 │  Oversized drafts and revision instructions are       │
 │  rejected, not truncated. Existing work is kept.      │
+│  Esc: Close  Ctrl+S: Save  Tab: Group  Enter: Edit    │
 ╰───────────────────────────────────────────────────────╯
 
 === Settings / number ===
 ╭───────────────────────────────────────────────────────╮
-│  History characters   0–100000 characters             │
-│   Preview    Usage    Settings                        │
-│  Esc: Cancel  Ctrl+S: Save  Enter: Stage  Tab: Focus  │
+│  History characters    Preview    Usage    Settings   │
+│  0–100000 characters                                  │
 │  ───────────────────────────────────────────────────  │
 │  › Value: 16000                                       │
 │  Presets: 0 / 8000 / 16000 / 32000 / 64000 / 100000   │
@@ -84,14 +83,13 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │                                                       │
 │                                                       │
 │                                                       │
+│  Esc: Cancel  Ctrl+S: Save  Tab: Focus  Enter: Stage  │
 ╰───────────────────────────────────────────────────────╯
 
 === Settings / validation ===
 ╭───────────────────────────────────────────────────────╮
-│  History characters                                   │
-│   Preview    Usage    Settings                        │
+│  History characters    Preview    Usage    Settings   │
 │  Enter 0–100000 characters (whole numbers).           │
-│  Esc: Cancel  Ctrl+S: Save  Enter: Stage  Tab: Focus  │
 │  ───────────────────────────────────────────────────  │
 │  › Value: -1                                          │
 │  Presets: 0 / 8000 / 16000 / 32000 / 64000 / 100000   │
@@ -101,14 +99,14 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │                                                       │
 │                                                       │
 │                                                       │
+│                                                       │
+│  Esc: Cancel  Ctrl+S: Save  Tab: Focus  Enter: Stage  │
 ╰───────────────────────────────────────────────────────╯
 
 === Result details ===
 ╭───────────────────────────────────────────────────────╮
-│  Prompt details   Selected: #1 model-1 · o Reference  │
-│   Preview    Usage    Settings                        │
-│  a Editor only · s Send · p Preferences               │
-│  Esc Back · ? Help · c Compare · e Edit result        │
+│  Prompt details        Preview    Usage    Settings   │
+│  Selected: #1 model-1 · o Reference                   │
 │  ───────────────────────────────────────────────────  │
 │  model-1 · ✓ Done                                     │
 │  openai-codex · Thinking xhigh · 23s · ↑2.3k ↓670 ·   │
@@ -118,14 +116,14 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │                                                       │
 │  Result 1                                             │
 │  Literal **正文** 中文😀                              │
+│  Another line�[31m                                    │
+│  Esc Back · a Editor only · s Send to Pi · ? Help     │
 ╰───────────────────────────────────────────────────────╯
 
 === Result notes ===
 ╭───────────────────────────────────────────────────────╮
-│  Prompt details   Selected: #1 model-1 · o Reference  │
-│   Preview    Usage    Settings                        │
-│  a Editor only · s Send · p Preferences               │
-│  Esc Back · ? Help · c Compare · e Edit result        │
+│  Prompt details        Preview    Usage    Settings   │
+│  Selected: #1 model-1 · o Reference                   │
 │  ───────────────────────────────────────────────────  │
 │  model-1 · ✓ Done                                     │
 │  openai-codex · Thinking xhigh · 23s · ↑2.3k ↓670 ·   │
@@ -135,14 +133,14 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │  只讨论 **范围** 😀                                   │
 │                                                       │
 │  Limits                                               │
+│  Note unavailable for this run.                       │
+│  Esc Back · a Editor only · s Send to Pi · ? Help     │
 ╰───────────────────────────────────────────────────────╯
 
 === Compare ===
 ╭───────────────────────────────────────────────────────╮
-│  Compare results   Selected: #1 model-1 · ↑↓ scroll   │
-│   Preview    Usage    Settings                        │
-│  a Editor only · s Send · p Preferences               │
-│  Esc Back · ? Help · c Next comparison · f Revise     │
+│  Compare results       Preview    Usage    Settings   │
+│  Selected: #1 model-1 · ↑↓ scroll                     │
 │  ───────────────────────────────────────────────────  │
 │  A · #1 · Tab B · #2                                  │
 │  model-1                                      ✓ Done  │
@@ -152,13 +150,14 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │  Result                                               │
 │                                                       │
 │  Result 1                                             │
+│  Literal **正文** 中文😀                              │
+│  Esc Back · a Editor only · s Send to Pi · ? Help     │
 ╰───────────────────────────────────────────────────────╯
 
 === Revise ===
 ╭───────────────────────────────────────────────────────╮
 │  Revise · #1 · model-1   Revision not submitted       │
-│  Esc Back · Ctrl+S Revise                             │
-│  Enter Newline · Tab Focus                            │
+│  Esc Back · Ctrl+S Revise · Tab Focus                 │
 │  ───────────────────────────────────────────────────  │
 │  Preferences: None · Review full requirements         │
 │  › Additional requirements:                           │
@@ -169,45 +168,46 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │                                                       │
 │                                                       │
 │                                                       │
+│                                                       │
 ╰───────────────────────────────────────────────────────╯
 
 === Preferences / choose ===
 ╭───────────────────────────────────────────────────────╮
-│  Preferences · This revision                          │
-│  Focus: Library · 0 selected · Kept on return         │
-│  Space Toggle · Enter Read · s Selected               │
-│  Esc Back · l Manage library · Tab Focus · / Search   │
+│  Preferences · This revision   Esc Back Tab ? Keys    │
 │  ───────────────────────────────────────────────────  │
 │  Search:                                              │
-│  Library 1/1                                          │
+│  Library 1/1 · 0 selected · Kept on return            │
 │  Unclassified                                         │
 │  › [ ] Preserve 中文😀                        Global  │
 │                                                       │
 │                                                       │
 │                                                       │
 │                                                       │
+│                                                       │
+│                                                       │
+│  Space Toggle · Enter Read · l Manage library         │
 ╰───────────────────────────────────────────────────────╯
 
 === Preferences / library ===
 ╭───────────────────────────────────────────────────────╮
-│  Preferences library                                  │
-│  Focus: Library · 0 selected (read-only)              │
-│  Enter Read · s Selected                              │
-│  Esc To selection · Tab Focus · / Search              │
+│  Preferences library   Esc Back · Tab Focus · ? Keys  │
 │  ───────────────────────────────────────────────────  │
 │  Search:                                              │
-│  Library 1/1                                          │
+│  Library 1/1 · 0 selected (read-only)                 │
 │  n Add · e Edit · d Delete                            │
 │  Unclassified                                         │
 │  ›     Preserve 中文😀                        Global  │
 │                                                       │
 │                                                       │
 │                                                       │
+│                                                       │
+│                                                       │
+│  Enter Read · s Selected only                         │
 ╰───────────────────────────────────────────────────────╯
 
 === Preferences / read ===
 ╭───────────────────────────────────────────────────────╮
-│  Full revision instruction   Read-only                │
+│  Full revision instruction                            │
 │  Esc Back · ↑↓ / PgUp / PgDn Scroll                   │
 │  ───────────────────────────────────────────────────  │
 │  Preserve 中文😀                                      │

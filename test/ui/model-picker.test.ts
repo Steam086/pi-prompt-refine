@@ -1,4 +1,3 @@
-import { frameHeader } from "../support/panel-chrome.js";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it, vi } from "vitest";
@@ -73,8 +72,8 @@ describe("model picker layout", () => {
       const lines = renderModelPicker(options, width, rows, theme);
       expect(lines).toHaveLength(panelLayout(width, rows).height);
       expect(lines.every((line) => visibleWidth(line) <= Math.min(width, 100))).toBe(true);
-      if (width >= 20 && rows >= 8) expect(frameHeader(lines).join("\n")).toContain(formatKeyHint(["Esc", "Cancel"], theme));
-      if (width >= 20 && rows === 8) expect(frameHeader(lines).join("\n")).toContain(formatKeyHint(width < 34 ? ["↵", "Use"] : ["Enter", "Confirm"], theme));
+      if (width >= 20 && rows >= 8) expect(lines.join("\n")).toContain(formatKeyHint(["Esc", "Cancel"], theme));
+      if (width >= 20 && rows === 8) expect(lines.join("\n")).toContain(formatKeyHint(width < 34 ? ["↵", "Use"] : ["Enter", "Confirm"], theme));
       if (width >= 40 && rows >= 12) expect(lines.join("\n")).toContain("模型 Model 12");
       if (width >= 100 && rows >= 24) expect(lines.join("\n")).toContain(theme.fg("muted", "Thinking level: ")
         + theme.fg("text", theme.bold("high")) + theme.fg("muted", " · Last used for this model"));

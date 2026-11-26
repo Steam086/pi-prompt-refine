@@ -1,7 +1,7 @@
 import { Input, parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { focusLabel, panelHeader, panelLayout, type PanelLayoutProvider } from "./panel-layout.js";
-import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
+import { focusLabel, panelConfirmation, panelHeader, panelLayout, type PanelLayoutProvider } from "./panel-layout.js";
+import { confirmationKeyHints, discardKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
 import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
@@ -41,13 +41,20 @@ function formFields(form: Form): FormField[] {
 type DocumentPart = { text: string; color: "text" | "muted" | "warning" | "error"; heading?: boolean };
 type PreferenceDocument = DocumentPart[];
 type Page = { kind: "list" } | { kind: "read"; title: string; document: PreferenceDocument; scroll: number }
-  | { kind: "form"; form: Form } | { kind: "discard"; form: Form } | { kind: "delete"; entry: RevisionPreference };
+  | { kind: "form"; form: Form } | { kind: "discard"; form: Form }
+  | { kind: "delete"; entry: RevisionPreference; document: PreferenceDocument };
 type Action = "new" | "edit" | "delete";
 const ACTIONS = [
   { id: "new", key: "n", label: "Add" },
   { id: "edit", key: "e", label: "Edit" },
   { id: "delete", key: "d", label: "Delete" },
 ] as const;
+const KINDS = ["rewrite", "task", "result"] as const;
+const SCOPES = ["project", "global"] as const;
+function nextChoice<T>(choices: readonly T[], value: T | undefined, step: number): T {
+  const index = value === undefined ? (step > 0 ? -1 : 0) : choices.indexOf(value);
+  return choices[(index + step + choices.length) % choices.length]!;
+}
 
 type PreferencePanelActions = { back(): void; updateSelection?(selected: SelectedPreference[]): string | undefined; session?: SessionPreferenceTarget };
 
@@ -284,12 +291,11 @@ export class PreferencePanel {
       ];
     };
     let document: PreferenceDocument;
-    // Delete confirmation still describes its current-source operation target.
     if (this.actions.session) {
       const override = this.actions.session.override(preferenceKey(entry));
       document = details(entry, [{ text: `This session: ${override === undefined ? "Inherits project default" : override ? "On" : "Off"}`, color: "muted" },
         ...(!source || unavailable ? [{ text: unavailable ? "Library unavailable" : "Deleted source", color: "warning" as const }] : [])]);
-    } else if (this.selectedOnly && local && this.page.kind !== "delete") {
+    } else if (this.selectedOnly && local) {
       document = [{ text: "Selected snapshot", color: "text", heading: true }, ...details(local, [
         { text: status, color: unavailable || !source || changed ? "warning" : "muted" },
         ...(!compact ? [{ text: preferenceSelectionLabel(local), color: "muted" as const }] : []),
@@ -298,7 +304,7 @@ export class PreferencePanel {
         { text: "", color: "text" }, { text: "Current library entry", color: "text", heading: true }, ...details(source, []));
     } else {
       const differentSnapshot = local && (changed || local.body !== entry.body);
-      document = details(entry, differentSnapshot && this.page.kind !== "delete" ? [{ text: "Current library version · not the selected snapshot", color: "warning" }]
+      document = details(entry, differentSnapshot ? [{ text: "Current library version · not the selected snapshot", color: "warning" }]
         : compact && source && !unavailable ? [] : [{ text: unavailable ? "Library unavailable" : source ? "Library entry" : "Deleted source",
           color: unavailable || !source ? "warning" : "muted" }]);
       if (local) document.push({ text: "", color: "text" }, { text: "Selected snapshot", color: "text", heading: true },
@@ -314,6 +320,20 @@ export class PreferencePanel {
     return document;
   }
   private read(title: string, document: PreferenceDocument): void { this.page = { kind: "read", title, document, scroll: 0 }; }
+  private listHelp(): PreferenceDocument {
+    return [
+      "Tab / Shift+Tab   Move between controls",
+      "Esc   Back (leave Search first)",
+      "/   Search by name or instruction",
+      "↑↓ / PgUp / PgDn   Browse entries",
+      "Enter   Read the highlighted entry or activate a control",
+      ...(this.purpose !== "audit" ? ["s   Switch between All and Selected only"] : []),
+      ...(this.selectable ? ["Space   Save the highlighted selection", "c   Clear selections", "l   Manage library"] : []),
+      ...(this.projectDefaultsEditable ? ["g   Toggle the highlighted project default"] : []),
+      ...(this.selectable && this.actions.session ? ["r   Follow the project default for this item"] : []),
+      ...(this.managing ? ["n / e / d   Add, edit, or delete a library entry", "←→   Move between library actions"] : []),
+    ].map((text) => ({ text, color: "text" }));
+  }
   private bodyText(form: Form): string {
     const text = form.body.editor.getExpandedText();
     // Native Editor normalizes tabs on setText; preserve untouched saved literals.
@@ -366,7 +386,11 @@ export class PreferencePanel {
         return;
       }
       if (action === "edit") this.openForm("library", source);
-      else this.page = { kind: "delete", entry: structuredClone(source) };
+      else this.page = { kind: "delete", entry: structuredClone(source), document: [
+        { text: `${source.name.replace(/\n/g, " ")} · ${source.scope === "global" ? "Global" : "Project"}`, color: "muted" },
+        { text: source.body.trim(), color: "text" },
+        ...(this.local(source) ? [{ text: "Selected snapshot kept", color: "muted" } as const] : []),
+      ] };
     }
   }
   private async save(form: Form): Promise<void> {
@@ -457,16 +481,17 @@ export class PreferencePanel {
       else if (cancel || key === "n") this.page = { kind: "list" };
     } else if (this.page.kind === "form") {
       const form = this.page.form;
+      const step = key === "left" || key === "up" ? -1 : key === "right" || key === "down" ? 1 : 0;
       if (cancel) this.page = this.stamp(form) === form.initial ? { kind: "list" } : { kind: "discard", form };
-      else if (key === "tab" || key === "shift+tab") {
-        const fields = formFields(form);
-        const next = fields.indexOf(form.focus) + (key === "tab" ? 1 : fields.length - 1);
-        form.focus = fields[next % fields.length]!;
-      } else if (form.focus === "save" && enter) void this.save(form);
+      else if (key === "tab" || key === "shift+tab") form.focus = nextChoice(formFields(form), form.focus, key === "tab" ? 1 : -1);
+      else if (form.focus === "save" && enter) void this.save(form);
       else if (form.focus === "options" && (enter || key === "space")) form.optionsOpen = !form.optionsOpen;
-      else if (form.focus === "scope" && (enter || key === "space")) form.scope = form.scope === "project" ? "global" : "project";
-      else if (form.focus === "type" && (enter || key === "space")) {
-        form.metadata = { description: form.description.getValue(), kind: form.metadata?.kind === "rewrite" ? "result" : form.metadata?.kind === "result" ? "task" : "rewrite", activation: "manual" };
+      else if (form.focus === "scope" || form.focus === "type") {
+        if (enter) form.focus = nextChoice(formFields(form), form.focus, 1);
+        else if (step && form.focus === "scope" && form.kind === "new") form.scope = nextChoice(SCOPES, form.scope, step);
+        else if (step && form.focus === "type") {
+          form.metadata = { description: form.description.getValue(), kind: nextChoice(KINDS, form.metadata?.kind, step), activation: "manual" };
+        }
       } else if (form.focus === "description") {
         if (enter) form.focus = "save";
         else {
@@ -491,6 +516,7 @@ export class PreferencePanel {
       if (enter || key === "down") this.focus = 1;
       else { this.search.handleInput(data); this.index = 0; this.top = 0; this.navigationDirection = 1; }
     } else if (key === "s" && this.purpose !== "audit") this.toggleView();
+    else if (key === "?") this.read("Preferences keys", this.listHelp());
     else if (key === "c" && this.selectable) {
       const cleared = this.actions.session ? this.changeSessionSelection({ kind: "clear" }) : this.selected.length && this.updateSelection([]);
       if (cleared) this.setNotice("Selection cleared; project defaults unchanged.");
@@ -543,29 +569,69 @@ export class PreferencePanel {
     const type = form.metadata ? preferenceGroup({ metadata: form.metadata }) : "Unclassified (legacy)";
     const controls = {
       options: `Options ${form.optionsOpen ? "▾" : "▸"} · ${form.scope} · ${type}`,
-      scope: `Scope: ${form.scope}`,
-      type: `Type: ${type}`,
       save: "Save to library",
     };
     const fields = formFields(form);
     const count = Math.min(fields.length, Math.max(1, height - 1));
     const start = Math.max(0, Math.min(fields.indexOf(form.focus) - 1, fields.length - count));
     const visible = fields.slice(start, start + count);
+    let extraRows = Math.max(0, height - visible.length);
+    const choices: Partial<Record<"scope" | "type", string[]>> = {};
+    for (const field of ["type", "scope"] as const) {
+      if (!visible.includes(field)) continue;
+      const rows = this.formChoiceRows(form, field, width, extraRows + 1);
+      choices[field] = rows;
+      extraRows -= rows.length - 1;
+    }
     return visible.flatMap((field) => {
       const active = form.focus === field;
       if (field === "name" || field === "description") {
         return [this.textField(form[field], field === "name" ? "Name:" : "Description:", width, active)];
       }
       if (field === "instruction") {
-        const rows = height - visible.length;
+        const rows = extraRows;
         if (rows < 1) {
           const prefix = width > 1 ? focusLabel(this.theme, 1, "", active) : "";
           return [prefix + form.body.render(width - visibleWidth(prefix), 1)[0]!];
         }
         return [focusLabel(this.theme, width, "Instruction:", active), ...form.body.render(width, rows)];
       }
+      if (field === "scope" || field === "type") return choices[field]!;
       return [focusLabel(this.theme, width, controls[field], active)];
     });
+  }
+
+  private formChoiceRows(form: Form, field: "scope" | "type", width: number, rows: number): string[] {
+    if (field === "scope") return this.formChoices("Scope", SCOPES, form.scope, form.focus === "scope", width,
+      (value) => value, (value) => value, rows);
+    return this.formChoices("Type", KINDS, form.metadata?.kind, form.focus === "type", width,
+      (kind) => preferenceGroup({ metadata: { kind, activation: "manual", description: "" } }),
+      (kind) => ({ rewrite: "Rewrite", task: "Task", result: "Result" })[kind], rows);
+  }
+
+  private formChoices<T>(label: string, choices: readonly T[], selected: T | undefined, focused: boolean, width: number,
+    full: (value: T) => string, short: (value: T) => string, height = Infinity): string[] {
+    const theme = this.theme;
+    const cell = (choice: T, name: (value: T) => string) => {
+      const text = `${choice === selected ? "●" : "○"} ${name(choice)}`;
+      return choice !== selected ? theme.fg("muted", text)
+        : focused ? theme.bg("selectedBg", theme.fg("text", theme.bold(text))) : theme.fg("text", text);
+    };
+    const prefix = focusLabel(theme, width, `${label}:`, focused) + " ";
+    const legacyLabel = focused ? theme.bg("selectedBg", theme.fg("text", "Unclassified (legacy)"))
+      : theme.fg("muted", "Unclassified (legacy)");
+    const legacy = selected === undefined ? legacyLabel + theme.fg("muted", " · ") : "";
+    for (const name of [full, short]) {
+      const row = prefix + legacy + choices.map((choice) => cell(choice, name)).join("  ");
+      if (visibleWidth(row) <= width) return [row];
+    }
+    if (choices.length + Number(!!legacy) > height) {
+      return [prefix + (selected === undefined ? theme.fg("muted", "Unclassified") : cell(selected, short))];
+    }
+    const indent = " ".repeat(visibleWidth(prefix));
+    const rows = choices.map((choice, i) => (i || legacy ? indent : prefix) + cell(choice,
+      visibleWidth(prefix) + 2 + visibleWidth(full(choice)) <= width ? full : short));
+    return legacy ? [prefix + legacyLabel, ...rows] : rows;
   }
 
   render(width: number): string[] {
@@ -579,64 +645,49 @@ export class PreferencePanel {
     const session = this.purpose === "session";
     const target = this.purpose === "refine" ? "Unsent original" : session ? "This session" : "This revision";
     const selectionLabel = `${this.selected.length} selected`;
-    const selectionScope = !selectable ? " (read-only)" : session ? " · Future prompts · Saved on Space" : " · Kept on return";
+    const selectionScope = !selectable ? " (read-only)" : session ? " · Future prompts" : " · Kept on return";
     let title = managing ? "Preferences library" : audit ? "Adopted preferences" : `Preferences · ${target}`;
-    if (selectable && layout.headerHeight === 1) {
-      const shortTarget = this.purpose === "refine" ? "Unsent" : session ? "Session" : "Revision";
-      title = [`${title} · ${selectionLabel}`, `${shortTarget} · ${selectionLabel}`, `${shortTarget} ${selectionLabel}`,
-        `${shortTarget} · ${this.selected.length}`, shortTarget].find((line) => visibleWidth(line) <= w) ?? shortTarget;
-    }
-    let subtitle = `${w >= 36 ? `Focus: ${["Search", "Library", "Actions"][this.focus]} · ` : ""}${selectionLabel}${selectionScope}`;
+    let subtitle = "";
     let subtitleColor: DocumentPart["color"] = "muted";
     let renderBody: (height: number) => string[];
-    const viewHint: KeyHint = ["s", this.selectedOnly ? "All" : w < 60 ? "Selected" : "Selected only"];
+    const viewHint: KeyHint = ["s", this.selectedOnly ? "All" : "Selected only"];
     const toggle: KeyHint | undefined = this.focus === 1 && selectable && (!this.selectedOnly || this.selected.length)
       ? ["Space", this.selectedOnly ? "Deselect" : "Toggle"] : undefined;
     const project: KeyHint | undefined = this.focus === 1 && this.projectDefaultsEditable ? ["g", "Project default"] : undefined;
     const selectionActions = [toggle, project].filter((hint): hint is KeyHint => !!hint);
-    let hints: KeyHint[][] = [[
-      ...(this.focus !== 0 && this.selectedOnly && !audit ? [viewHint] : []),
-      ...selectionActions,
-      ["Enter", this.focus === 0 ? "Browse" : this.focus === 1 ? "Read" : "Choose"],
-      ...(this.focus === 2 ? [["←→", "Choose action"] as KeyHint] : []),
-      ...(this.focus !== 0 && !this.selectedOnly ? [viewHint] : []),
-    ], [["Esc", this.focus === 0 ? "End search" : this.libraryMode && w >= 30 ? "To selection" : "Back"],
-      ...(this.focus !== 0 && selectable ? [["l", w < 30 ? "Library" : "Manage library"] as KeyHint] : []),
-      ...(this.focus === 1 && selectable && session ? [["r", "Inherit default"] as KeyHint] : []),
-      [w < 54 ? "Tab" : "Tab / Shift+Tab", "Focus"],
-      ...(this.focus !== 0 ? [["/", "Search"] as KeyHint] : []),
-      ...(this.focus !== 0 && selectable ? [["c", "Clear all"] as KeyHint] : [])]];
+    const border = (line: string) => this.theme.fg("borderMuted", line);
+    const back: KeyHint = ["Esc", "Back"];
+    let hints: KeyHint[] = [back, ["Tab", "Focus"], ["?", "Keys"]];
     const page = this.page;
     if (page.kind === "read") {
       title = page.title;
-      subtitle = "Read-only";
       renderBody = (h) => {
         const lines = this.document(page.document, w);
         this.viewport = h;
         page.scroll = Math.min(page.scroll, Math.max(0, lines.length - h));
         return lines.slice(page.scroll, page.scroll + h);
       };
-      hints = [[["↑↓ / PgUp / PgDn", "Scroll"]], [["Esc", "Back"]]];
+      hints = [back, [w >= 37 ? "↑↓ / PgUp / PgDn" : "↑↓", "Scroll"]];
     } else if (page.kind === "discard" || page.kind === "delete") {
-      title = page.kind === "discard" ? "Discard unsaved form?" : "Delete library entry?";
-      subtitle = "";
-      renderBody = () => page.kind === "discard"
-        ? wrap("Unsaved form changes will be discarded. Current selection and saved library entries stay unchanged.").map((line) => this.theme.fg("warning", line))
-        : [...wrap(this.actions.session ? "Existing prompt snapshots stay unchanged." : "Selections for this request stay unchanged.").map((line) => this.theme.fg("muted", line)),
-          "", ...this.document(this.description(page.entry), w)];
-      hints = [[["y", page.kind === "discard" ? "Discard" : "Delete"]],
-        [["n / Esc", page.kind === "discard" ? "Keep editing" : "Cancel"]]];
+      const discard = page.kind === "discard";
+      title = discard ? "Discard unsaved form?" : "Delete library entry?";
+      const actions = discard ? discardKeyHints(w, this.theme) : confirmationKeyHints(["Esc", "Cancel"], ["y", "Delete"], w, this.theme);
+      const detail = discard ? [] : this.document(page.document, Math.min(w, 56)).slice(0, 5);
+      return panelConfirmation(layout, this.theme.fg("warning", this.theme.bold(title)), actions, detail, border);
     } else if (page.kind === "form") {
       const form = page.form;
       title = form.kind === "library" ? "Edit library entry" : "Save new preference";
-      subtitle = form.metadata?.kind === "result" ? RESULT_NOTE_HINT : "Check paths and sensitive text";
+      subtitle = form.metadata?.kind === "result" ? RESULT_NOTE_HINT : "";
       renderBody = (h) => this.renderForm(form, w, h);
-      const enterLabel = {
-        name: "Next field", instruction: "Newline", options: form.optionsOpen ? "Hide options" : "Show options",
-        scope: "Change scope", type: "Change type", description: "Next field", save: "Save to library",
-      }[form.focus];
-      hints = [[["Esc", w >= 12 ? "Back" : ""], [w < 30 ? "^S" : "Ctrl+S", w >= 16 || w === 11 ? "Save to library" : ""]],
-        [["Enter", enterLabel], ["Tab / Shift+Tab", "Fields"]]];
+      const compact = w < 30;
+      const action: KeyHint = form.focus === "scope" || form.focus === "type"
+        ? [this.formChoiceRows(form, form.focus, w, Infinity).length > 1 ? "↑↓" : "←→", compact ? "" : "Choose"]
+        : [compact ? "↵" : "Enter", {
+          name: "Next", instruction: compact ? "NL" : "Newline",
+          options: form.optionsOpen ? "Hide options" : "Show options", description: "Next", save: "Save",
+        }[form.focus]];
+      hints = [w < 20 ? ["Esc", ""] : back, [compact ? "^S" : "Ctrl+S", w >= 60 ? "Save to library" : w >= 11 ? "Save" : ""],
+        ["Tab", compact ? "" : "Fields"], action];
     } else {
       const entries = this.entries();
       this.index = Math.min(this.index, Math.max(0, entries.length - 1));
@@ -661,10 +712,21 @@ export class PreferencePanel {
             if (active) actionRow = toolbar.length - 1;
           }
         }
-        const room = h >= toolbar.length + 3;
-        const available = Math.max(1, room ? h - toolbar.length - 2 : h);
-        const split = room && splitCandidate;
+        const context: KeyHint[] = this.focus === 0 ? [["Enter", "Browse"], ["Esc", "End search"]]
+          : this.focus === 2 ? [["←→", "Choose action"], ["Enter", "Open"]]
+          : [...selectionActions, ...(this.selectedOnly && !audit ? [viewHint] : []), ["Enter", "Read"],
+            ...(selectable ? [["l", "Manage library"] as const, ["c", "Clear all"] as const] : []),
+            ...(!this.selectedOnly && !audit ? [viewHint] : [])];
+        const shortSelection = this.focus === 1 && selectionActions.length === 2 && h < 6;
+        const room = h >= toolbar.length + 3 && (!shortSelection || h >= 4);
+        const split = room && h >= toolbar.length + 6 && splitCandidate;
         const leftWidth = split ? toolbarWidth : w;
+        const contextHints = shortSelection ? fittingKeyHints([["Space", ""], ["g", "Default"]], w, this.theme)
+          : fittingKeyHints(context, w, this.theme);
+        const statusRows = subtitle ? [feedback] : [];
+        const controls = !!contextHints && (h >= toolbar.length + statusRows.length + 5 || shortSelection);
+        const available = Math.max(1, h - (room ? toolbar.length + 2 : 0)
+          - statusRows.length - Number(controls));
         const search = [this.textField(this.search, "Search:", leftWidth, this.focus === 0)];
         const window = selectionWindow(entries.length, this.index, available, this.top,
           this.selectedOnly ? undefined : (index) => preferenceGroup(entries[index]!), available >= 10 ? 1 : 0, this.navigationDirection);
@@ -689,22 +751,26 @@ export class PreferencePanel {
         });
         if (!entries.length) list.push(...wrap(status, leftWidth).map((line) => this.theme.fg(errors.length ? "error" : "muted", line)));
         if (!room) {
-          return this.focus === 0 ? search : this.focus === 2
+          const active = this.focus === 0 ? search : this.focus === 2
             ? toolbar.slice(Math.min(actionRow, Math.max(0, toolbar.length - h))) : list;
+          return [...statusRows, ...active.slice(0, Math.max(1, h - statusRows.length - Number(controls))), ...(controls ? [contextHints] : [])];
         }
         const rightWidth = split ? w - leftWidth - 3 : w;
         const detail = split && entries[this.index] ? this.document(this.description(entries[this.index]!, true), rightWidth) : [];
         const headingText = this.theme.fg("text", this.theme.bold(`${audit ? "Adopted" : this.selectedOnly ? "Selected only" : "Library"} ${entries.length ? this.index + 1 : 0}/${entries.length}`));
-        const count = subtitleColor !== "muted" || this.notice || this.busy || layout.headerHeight < 2
-          ? this.theme.fg("muted", ` · ${selectionLabel}${!selectable && !this.busy ? selectionScope : ""}`) : "";
-        const heading = truncateToWidth(headingText + (visibleWidth(headingText + count) <= leftWidth ? count : ""), leftWidth, "");
+        const count = this.theme.fg("muted", ` · ${selectionLabel}${selectionScope}`);
+        const compactCount = this.theme.fg("muted", ` · ${selectionLabel}`);
+        const suffix = [count, compactCount].find((label) => visibleWidth(headingText + label) <= leftWidth);
+        const heading = truncateToWidth(suffix ? headingText + suffix
+          : selectable ? this.theme.fg("muted", selectionLabel) : headingText, leftWidth, "");
         const left = [...search, heading, ...toolbar, ...list];
-        if (!split) return left;
+        const footer = controls ? [contextHints] : [];
+        if (!split) return [...statusRows, ...Array.from({ length: h - statusRows.length - footer.length }, (_, i) => left[i] ?? ""), ...footer];
         const divider = this.theme.fg("borderMuted", " │ ");
-        return Array.from({ length: h }, (_, i) => {
+        return [...statusRows, ...Array.from({ length: h - statusRows.length - footer.length }, (_, i) => {
           const line = left[i] ?? "";
           return line + " ".repeat(Math.max(0, leftWidth - visibleWidth(line))) + divider + (detail[i] ?? "");
-        });
+        }), ...footer];
       };
       if (errors.length) { subtitle = `Load failed · ${errors.join(" · ")}`; subtitleColor = "error"; }
       else if (selectable && this.selected.length > PREFERENCE_SELECTION_LIMIT) {
@@ -716,38 +782,30 @@ export class PreferencePanel {
     if (this.busy) { subtitle = "Working…"; subtitleColor = "muted"; }
     else if (this.notice && (this.noticeColor !== "muted" || subtitleColor === "muted")) {
       subtitleColor = this.noticeColor;
-      subtitle = page.kind === "list" && subtitleColor === "muted" ? `Focus: ${["Search", "Library", "Actions"][this.focus]} · ${this.notice}` : this.notice;
-    }
-    if (w < 30) {
-      const labels: Record<string, string> = { "Keep editing": "Keep", "Next field": "Next",
-        "Save to library": "Save", "Change scope": "Scope", "Scope fixed": "Fixed" };
-      hints = hints.map((row) => row.map(([key, label]) => [key === "n / Esc" ? "Esc" : key.split(" / ")[0]!, labels[label] ?? label]));
-    }
-    const footer = page.kind === "read"
-      ? [fittingKeyHints([hints[1]![0]!, ...hints[0]!], w, this.theme)]
-      : w < 30 || page.kind === "list"
-      ? hints.map((row) => fittingKeyHints(row, w, this.theme, w < 30 && page.kind === "form" ? " " : " · "))
-      : alignedKeyHints(hints, w, this.theme);
-    if (page.kind === "list" && selectionActions.length) {
-      const [back, ...secondary] = hints[1]!;
-      const short = ([key, label]: KeyHint): KeyHint => [key, key === "g" ? "Default" : key === "Esc" && label === "To selection" ? "Back" : label];
-      const required = layout.footerHeight === 1 ? [back!, ...selectionActions] : selectionActions;
-      const variants = [required, required.map(short), required.map((hint): KeyHint => hint[0] === "Space" ? ["Space", ""] : short(hint)),
-        required.map(([key]): KeyHint => [key, ""])];
-      const separator = w < 30 ? " " : " · ";
-      const primary = variants.find((variant) => visibleWidth(fittingKeyHints(variant, Infinity, this.theme, separator)) <= w) ?? variants.at(-1)!;
-      const extra = hints[0]!.filter(([key]) => !selectionActions.some(([action]) => key === action));
-      footer[0] = fittingKeyHints([...primary, ...extra, ...(layout.footerHeight === 1 ? secondary : [])], w, this.theme, separator);
-    } else if (layout.footerHeight === 1 && page.kind !== "form") {
-      footer[0] = fittingKeyHints([hints[1]![0]!, ...hints[0]!], w, this.theme);
+      subtitle = this.notice;
     }
     const severe = subtitleColor !== "muted";
     const feedback = this.theme.fg(subtitleColor, clean(`${severe ? "⚠ " : ""}${subtitle}`));
-    const heading = this.theme.fg("text", this.theme.bold(clean(title)));
-    const foregroundFeedback = severe || this.busy;
-    const chrome = panelHeader(layout, [foregroundFeedback && layout.headerHeight === 1 ? feedback : heading, feedback], [], footer);
+    const heading = (text: string) => this.theme.fg("text", this.theme.bold(text));
+    let headline = heading(clean(title));
+    let actions = fittingKeyHints(hints, w, this.theme, w < 30 && page.kind === "form" ? " " : " · ");
+    if (page.kind === "list" && layout.headerHeight > 0) {
+      const shortTitle = managing ? "Library" : audit ? "Adopted" : this.purpose === "refine" ? "Unsent" : session ? "Session" : "Revision";
+      const shownTitle = visibleWidth(title) + 3 + visibleWidth("Esc Tab ?") <= w ? title : shortTitle;
+      const hintWidth = w - visibleWidth(shownTitle) - 3;
+      const compact: KeyHint[] = [back, ["Tab", ""], ["?", "Keys"]];
+      const bare: KeyHint[] = [["Esc", ""], ["Tab", ""], ["?", ""]];
+      const [controls, separator] = visibleWidth(fittingKeyHints(hints, Infinity, this.theme)) <= hintWidth ? [hints, " · "]
+        : visibleWidth(fittingKeyHints(compact, Infinity, this.theme, " ")) <= hintWidth ? [compact, " "] : [bare, " "];
+      const shownHints = fittingKeyHints(this.focus === 0 ? controls.slice(0, 2) : controls, hintWidth, this.theme, separator);
+      headline = heading(shownTitle) + (shownHints ? "   " + shownHints : "");
+      actions = "";
+    }
+    const formFeedback = page.kind === "form" && !!subtitle;
+    const chrome = panelHeader(layout, [formFeedback && layout.headerHeight === 1 ? feedback : headline,
+      formFeedback ? feedback : ""], [], actions);
     const body = renderBody(chrome.layout.bodyHeight);
-    if (foregroundFeedback && layout.headerHeight === 0) body.unshift(feedback);
-    return chrome.render(body, (text) => this.theme.fg("borderMuted", text));
+    if (formFeedback && layout.headerHeight === 0) body.unshift(feedback);
+    return chrome.render(body, border);
   }
 }

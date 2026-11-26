@@ -3,7 +3,7 @@ import { getKeybindings, visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters as strip } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import { InlinePreferences } from "../../src/inline-preferences.js";
-import { formatKeyHint, wrappedKeyHints, type KeyHint } from "../../src/key-hints.js";
+import { formatKeyHint } from "../../src/key-hints.js";
 import { workspaceTabs } from "../../src/panel-layout.js";
 import { TaskPanel } from "../../src/task-panel.js";
 import { workspaceLayout } from "../../src/workspace-overlay.js";
@@ -23,7 +23,7 @@ describe("Tasks shortcut hierarchy", () => {
       () => f.size.rows, keys, false, f.position, (width) => workspaceLayout(width, f.size.rows));
     const expected = [["Enter", "Optimize"], ["Tab", "Preferences"], ["o", "Read original"], ["Esc", "Close"], ["?", "Help"]] as const;
     try {
-      for (const [width, rows, hintRows] of [[160, 40, 1], [120, 40, 1], [100, 40, 1], [80, 40, 2], [40, 24, 2], [160, 40, 1]] as const) {
+      for (const [width, rows, hintRows] of [[160, 40, 1], [120, 40, 1], [100, 40, 1], [80, 40, 1], [40, 24, 1], [160, 40, 1]] as const) {
         f.size.rows = rows;
         const layout = workspaceLayout(width, rows);
         const frame = panel.render(width);
@@ -35,12 +35,12 @@ describe("Tasks shortcut hierarchy", () => {
         expect(strip(hints)).not.toMatch(/(?:p|i|n|m|d):/);
         expect(hints).not.toContain("\x1b[1m");
         const style = width === 40 ? "secondary-compact" : "secondary";
-        for (const [key, label] of expected) {
+        for (const [key, label] of expected.filter(([key]) => width > 40 || key === "Esc" || key === "Enter" || key === "?")) {
           expect(frame.join("\n")).toContain(formatKeyHint([style === "secondary-compact" && key === "Enter" ? "↵" : key, label], f.theme, 1, style));
         }
         const tabs = lines.findIndex((line) => line.includes(" Preview "));
         const divider = lines.findIndex((line, i) => i > tabs && line.trim().startsWith("─"));
-        if (width >= 120) expect(divider).toBe(tabs + 1);
+        if (width >= 120) expect(divider).toBe(tabs + 2);
         expect(frame).toHaveLength(layout.height);
         expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
         expect(frame.join("\n")).toContain(f.theme.fg("text", f.theme.bold("Prompt refine · Tasks")));
@@ -77,17 +77,14 @@ describe("Tasks shortcut hierarchy", () => {
         for (const reading of [false, true]) {
           const frame = panel.render(width);
           const plain = frame.map(strip);
-          const tab = plain.findIndex((line) => line.includes(" Preview "));
+          const tab = plain.findIndex((line) => line.includes(" Usage "));
           const end = plain.findIndex((line, index) => index > tab && line.trim().startsWith("─"));
           const hints = frameHints(frame);
-          const expected: KeyHint[] = [["Enter", "Inspect"], ["Tab", reading ? "Select" : "Read  "],
-            ["Esc", "Close"], ["?", "Help"]];
-          expect(hints.map(strip).join(" ").trim().replace(/ +/g, " ")).toBe(
-            wrappedKeyHints(expected, workspaceLayout(width, rows).innerWidth, f.theme, false, "  ")
-              .map(strip).join(" ").trim().replace(/ +/g, " "));
-          expect(hints).toHaveLength(width === 40 ? 2 : 1);
+          expect(hints).toHaveLength(1);
+          expect(hints.map(strip).join(" ")).toMatch(/Esc:? Close.*(?:Enter:|↵) Inspect.*\??:? Help/);
+          if (width >= 80) expect(hints.map(strip).join(" ")).toContain(`Tab: ${reading ? "Select" : "Read"}`);
           expect(hints.join("\n")).not.toContain("\x1b[1m");
-          expect(plain[tab - 1]!.trim()).toMatch(/^Usage/);
+          expect(plain[tab]!.trim()).toMatch(/^Usage/);
           expect(plain[end + 1]!.trim()).not.toBe("");
           expect(frame).toHaveLength(workspaceLayout(width, rows).height);
           expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
@@ -146,7 +143,7 @@ describe("Tasks shortcut hierarchy", () => {
       expect(f.text()).not.toContain("Refine model:");
       f.size.rows = 8;
       const short = f.text(32);
-      for (const hint of ["Esc Close", "x Stop", "? Help"]) expect(short).toContain(hint);
+      for (const hint of ["Esc", "x Stop", "? Help"]) expect(short).toContain(hint);
       f.panel.handleInput("x");
       expect(f.actions.stop).toHaveBeenCalledExactlyOnceWith(1);
     }

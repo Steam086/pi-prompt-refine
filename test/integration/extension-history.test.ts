@@ -260,7 +260,7 @@ describe("main request deletion shortcut", () => {
     expect(harness.panelLines(100).join("\n")).toContain("x: Stop");
     expect(harness.panelLines(100).join("\n")).not.toContain("d: Delete");
     harness.panelInput("d");
-    expect(harness.panelLines().join("\n")).toContain("Confirmation required");
+    expect(harness.panelLines().join("\n")).toMatch(/Delete run #\d+\?/);
     harness.panelInput("n");
     expect(harness.panelLines().join("\n")).toContain("Running");
     harness.panelInput("d");

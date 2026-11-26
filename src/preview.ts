@@ -1,6 +1,6 @@
 import { Markdown, ScrollView, Text, truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
+import { fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
 import { panelHeader, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
 import { formatRunUsage, formatTokenUsage } from "./usage.js";
 import type { ResultNote } from "./revision-preferences.js";
@@ -376,13 +376,9 @@ export class PreviewPanel implements Component {
       if (!primary.some(([key]) => key === "m")) secondary.push(["m", "Model"]);
       if (options.navigation && !options.contextUnavailable) secondary.push(["g", "Same input"]);
     }
-    // Match Tasks/Usage's shared column stops. Very narrow terminals keep rows
-    // independent so long status/action labels cannot crowd out Back/Help.
-    const footer = innerWidth < 30
-      ? [fittingKeyHints(primary, innerWidth, theme), fittingKeyHints(secondary, innerWidth, theme)]
-      : alignedKeyHints([primary, secondary], innerWidth, theme);
-    if (layout.footerHeight === 1) footer[0] = fittingKeyHints([...secondary.slice(0, 2), ...primary, ...secondary.slice(2)], innerWidth, theme);
-    const hints = this.referenceOnly ? [] : footer;
+    const keys = options.state.phase === "generating" ? [secondary[0]!, ...primary, ...secondary.slice(1)]
+      : [...secondary.slice(0, 2), ...primary, ...secondary.slice(2)];
+    const hints = this.referenceOnly ? "" : fittingKeyHints(keys, innerWidth, theme);
     // ScrollView owns offsets/clamping. Explicit viewport composition also works in regular
     // mode, where ScrollView.render() alone returns the entire document without clipping.
     const body = this.scroll.render(innerWidth);

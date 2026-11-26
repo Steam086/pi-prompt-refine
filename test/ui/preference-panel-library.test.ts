@@ -3,7 +3,7 @@ import { stripVTControlCharacters } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { panelLayout } from "../../src/panel-layout.js";
 import { composeRevision, selectPreference, type RevisionPreference } from "../../src/revision-preferences.js";
-import { a, b, backTab, bringBack, ctrlS, down, enter, esc, loaded, right, save, search, setup, tab, text } from "../support/preference-panel.js";
+import { a, b, backTab, bringBack, ctrlS, down, enter, esc, highlightedRow, left, loaded, right, save, search, setup, tab, text } from "../support/preference-panel.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -57,8 +57,8 @@ describe("Library purpose groups", () => {
   it("creates a custom result note and shows its destination while choosing the type", async () => {
     const f = setup([], "Name the unresolved question."); await loaded(f.panel);
     f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput("Open question");
-    for (const key of [tab, tab, enter, tab, tab, enter, enter]) f.panel.handleInput(key);
-    expect(text(f.panel)).toContain("Type: Result notes");
+    for (const key of [tab, tab, enter, tab, tab, right]) f.panel.handleInput(key);
+    expect(text(f.panel)).toContain("● Result notes");
     expect(text(f.panel)).toContain("Shown in Result only.");
     f.panel.handleInput(ctrlS);
     await loaded(f.panel);
@@ -246,9 +246,10 @@ describe("three-action preference library", () => {
     const f = setup([], "Preserve existing structure.", themeName); await loaded(f.panel);
     f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput("Structure");
     for (const key of [tab, tab, enter, tab, tab]) f.panel.handleInput(key);
-    f.panel.handleInput(enter); // Task -> Rewrite.
-    expect(text(f.panel)).toContain("Type: Prompt rewriting");
-    f.panel.handleInput(tab); f.panel.handleInput("并列问题 😀");
+    expect(text(f.panel)).toContain("Type: ○ Prompt rewriting  ● Task requirements  ○ Result notes");
+    f.panel.handleInput(left);
+    expect(text(f.panel)).toContain("Type: ● Prompt rewriting  ○ Task requirements  ○ Result notes");
+    f.panel.handleInput(enter); f.panel.handleInput("并列问题 😀");
     f.panel.handleInput(tab); // Description -> Save, with no adoption control.
     expect(text(f.panel)).toContain("› Save to library");
     expect(text(f.panel)).not.toContain("Adoption:");
@@ -276,29 +277,29 @@ describe("three-action preference library", () => {
     expect(text(f.panel)).toContain("Preferences · This revision");
     f.panel.handleInput("l");
     expect(text(f.panel)).toContain("Preferences library");
-    expect(text(f.panel)).toContain("Focus: Library");
+    expect(highlightedRow(f.panel)).toContain(a.name);
     const lines = text(f.panel).split("\n");
     const heading = lines.findIndex((line) => /Library 1\/2.*│ /.test(line));
     expect(heading).toBeGreaterThan(0);
     expect(lines[heading - 1]).toMatch(/Search:.*│ Concise 中文/);
     expect(lines[heading + 1]!.split("│")[0]!.trim()).toBe("n Add · e Edit · d Delete");
-    expect(lines.join("\n")).toContain("Esc To selection");
+    expect(lines.join("\n")).toContain("Esc Back");
     expect(lines.join("\n").match(/s Selected(?: only)?/g)).toHaveLength(1);
     expect(lines.join("\n").match(/Enter Read/g)).toHaveLength(1);
     for (const removed of ["Show all selected", "Refresh library", "Save highlighted", "Current actual", "Preview after", "Edit selected for", "Clear search"]) {
       expect(text(f.panel)).not.toContain(removed);
     }
-    f.panel.handleInput(tab); expect(text(f.panel)).toContain("Focus: Actions");
+    f.panel.handleInput(tab);
     expect(text(f.panel)).toContain("› n Add");
     f.panel.handleInput(right); expect(text(f.panel)).toContain("› e Edit");
     f.panel.handleInput(right); expect(text(f.panel)).toContain("› d Delete");
-    f.panel.handleInput(tab); expect(text(f.panel)).toContain("Focus: Search");
+    f.panel.handleInput(tab);
     expect(text(f.panel)).not.toMatch(/n Add|e Edit|d Delete/);
     expect(text(f.panel)).toContain("Add · Edit · Delete");
     expect(f.panel.render(100).join("\n")).toContain(CURSOR_MARKER);
-    f.panel.handleInput(tab); expect(text(f.panel)).toContain("Focus: Library");
-    f.panel.handleInput(backTab); expect(text(f.panel)).toContain("Focus: Search");
-    f.panel.handleInput(backTab); expect(text(f.panel)).toContain("Focus: Actions");
+    f.panel.handleInput(tab); expect(highlightedRow(f.panel)).toContain(a.name);
+    f.panel.handleInput(backTab); expect(f.panel.render(100).join("\n")).toContain(CURSOR_MARKER);
+    f.panel.handleInput(backTab); expect(text(f.panel)).toContain("› d Delete");
     expect(f.repo.load).toHaveBeenCalledTimes(1);
     expect(f.repo.save).not.toHaveBeenCalled(); expect(f.repo.remove).not.toHaveBeenCalled(); expect(f.close).not.toHaveBeenCalled();
   });

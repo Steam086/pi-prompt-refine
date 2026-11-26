@@ -58,7 +58,11 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       expect(plain[selectedAt]).toContain("Original prompt");
       expect(plain[selectedAt + 1]).toContain("Current 中文😀");
       expect(initial.join("\n")).toContain(theme.fg("muted", sanitizeTerminalText(entries[0]!.metadata!.description!)));
-      const tabStrip = (lines: string[]) => sliceByColumn(lines.find((line) => line.includes(" Preview "))!, 0, tabWidth("   Preview    Usage    Settings "));
+      const tabStrip = (lines: string[]) => {
+        const line = lines.find((row) => row.includes(" Preview "))!;
+        const column = tabWidth(stripVTControlCharacters(line).split(" Preview ")[0]!);
+        return stripVTControlCharacters(sliceByColumn(line, column, tabWidth(" Preview    Usage    Settings ")));
+      };
       const tabs = tabStrip(initial);
       expect(stripVTControlCharacters(tabs)).not.toMatch(/[←→]/);
       const redraws = tui.fullRedraws;
@@ -145,8 +149,8 @@ describe.each(["regular", "fullscreen"] as const)("inline preference rendering (
       expect(render()).toContain("› [x] Item 00");
       expect(panel.render(100).join("\n")).toContain(formatKeyHint(["Enter", "Optimize"], theme));
       expect(panel.render(100).join("\n")).toContain(formatKeyHint(["o", "Read"], theme));
-      expect(panel.render(100).join("\n")).toContain(formatKeyHint(["Esc", "Back to tasks"], theme));
-      expect(panel.render(100).join("\n")).toContain(formatKeyHint(["Tab", "Back"], theme));
+      expect(panel.render(100).join("\n")).toContain(formatKeyHint(["Esc", "Back"], theme));
+      expect(panel.render(100).join("\n")).toContain(formatKeyHint(["Tab", "Tasks"], theme));
       const columns = () => panel.render(100).map(stripVTControlCharacters).filter((line) => line.includes(" │ "));
       expect(columns().filter((line) => /Item \d+/.test(line.split(" │ ")[0]!)).length).toBeGreaterThanOrEqual(8);
       expect(columns().map((line) => line.split(" │ ")[0]).join("\n")).not.toContain("Unsent");

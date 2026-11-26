@@ -28,22 +28,18 @@ export function renderTaskPreferences(
   const mode = inline.hints;
   const warning = inline.warning;
   const showInlineWarning = layout.headerHeight === 0;
-  const back: KeyHint = ["Esc", width < 8 ? "" : mode === "select" ? width < 40 ? "Back" : "Back to tasks"
-    : mode === "search" ? width < 40 ? "Back" : "End search" : width < 40 ? "Back" : "Back to preferences"];
-  const submit: KeyHint = [width < 16 ? "↵" : "Enter", width < 10 ? "Start" : "Optimize"];
+  const back: KeyHint = ["Esc", width < 13 ? "" : "Back"];
+  const submit: KeyHint = [width < 29 ? "↵" : "Enter", width < 14 ? "Start" : "Optimize"];
   const primary: KeyHint[] = mode === "select" ? [back, submit]
     : mode === "search" ? [back, ["Enter", "Results"]] : [back, ["↑↓", "Scroll"]];
   const secondary: KeyHint[] = mode === "select"
-    ? [["Space", "Toggle"], ["c", "Clear all"], ["Tab", "Back"], ["o", "Read"], ["↑↓", "Choose"], ["/", "Search"], ["p", "More"]] : [];
+    ? [["Space", "Toggle"], ["p", "More"], ["Tab", "Tasks"], ["/", "Search"], ["o", "Read"], ["c", "Clear all"]] : [];
   if (expansion) secondary.push(expansion);
-  const pairFits = visibleWidth(formatKeyHint(primary[0]!, theme) + " · " + formatKeyHint(primary[1]!, theme)) <= width;
+  const separator = width < 26 ? " " : " · ";
+  const pairFits = visibleWidth(formatKeyHint(primary[0]!, theme) + separator + formatKeyHint(primary[1]!, theme)) <= width;
   const header = [content.heading("Choose preferences"), mode === "search" ? content.muted("Search") : mode === "read" ? content.muted("Read-only") : ""];
-  const footer = layout.footerHeight > 1 && !pairFits
-    ? [fittingKeyHints([back], width, theme), fittingKeyHints([...primary.slice(1), ...secondary], width, theme)]
-    : [fittingKeyHints(primary, width, theme), fittingKeyHints(secondary, width, theme)];
-  if (layout.footerHeight === 1) footer[0] = fittingKeyHints([...primary, ...secondary], width, theme);
-  if (layout.footerHeight === 1 && mode === "select" && !pairFits && layout.headerHeight > 0) {
-    // Keep both action meanings, rather than dropping Optimize in short/narrow frames.
+  const footer = fittingKeyHints([...primary, ...secondary], width, theme, separator);
+  if (mode === "select" && !pairFits && layout.headerHeight > 0) {
     header[layout.headerHeight - 1] = formatKeyHint(submit, theme);
   }
   if (warning && layout.headerHeight > 0) header[layout.headerHeight - 1] = theme.fg("warning", sanitizeTerminalText(`⚠ ${warning}`));

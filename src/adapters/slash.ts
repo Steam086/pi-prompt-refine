@@ -136,7 +136,7 @@ export function createSlashAdapter(api: ApplicationApi) {
           const title = theme.fg("text", theme.bold("Refine API"));
           const warning = result.kind === "ok" ? "" : theme.fg("warning", result.code);
           const chrome = panelHeader(layout, [layout.headerHeight === 1 && warning ? warning : title, warning],
-            [], [formatKeyHint(["Esc", "Back"], theme)]);
+            [], formatKeyHint(["Esc", "Back"], theme));
           page = chrome.layout.bodyHeight;
           count = lines.length;
           offset = Math.max(0, Math.min(offset, count - page));

@@ -29,6 +29,8 @@ In **Preview**, press `p` on an editable **Unsent** original to choose preferenc
 
 Press `l` to manage the library (`n` Add, `e` Edit, `d` Delete). Add starts at **Name**. Editing a saved entry starts at **Instruction**. Use `Tab` or `Shift+Tab` to move between fields and `Enter` on **Options** to show scope, type and description. Press `Ctrl+S` from any field to save to the library. Existing drafts retain their captured versions. To use a new version in an existing draft, deselect the old entry and select it again. In **Usage**, `p` on a run opens a read-only audit of its adopted preferences.
 
+Under **Options**, use the arrow keys to select a **Type** or change the **Scope** of a new entry. When the form asks about unsaved edits, `Esc` returns to editing and `y` discards the form. In the list, press `?` for shortcuts.
+
 For an existing result, press `f` to open **Revise**, then `Alt+P` (or `Tab`, then `Enter`) to choose preferences for the revision draft. `Ctrl+S` in Revise or `Enter` on an Unsent original starts a rewrite; `Space` in a chooser never does.
 
 Select **In Your Own Words** in Preferences to see how the rewrite model understood your draft. The note appears below the rewritten prompt and is not included when you accept or send it. You can also add your own **Result notes** in Preferences.

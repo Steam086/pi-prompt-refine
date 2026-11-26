@@ -103,7 +103,7 @@ describe("shared refine workspace", () => {
     expect(main).toHaveLength(settings.length);
   });
 
-  it.each(["dark", "light"])("places Settings hints below workspace tabs and above settings content in %s", (name) => {
+  it.each(["dark", "light"])("keeps Settings content between the header and available shortcuts in %s", (name) => {
     const { workspace, terminal, actions, theme } = create(40, name, true);
     actions.optimizer = () => ({ model: "provider/中文😀\x1b[31m".repeat(8), thinking: "high", thinkingEnabled: true });
     for (const rows of [40, 12, 8, 5, 40]) for (const width of [20, 40, 100]) {
@@ -117,8 +117,8 @@ describe("shared refine workspace", () => {
         const output = hints.join("\n");
         const style = stripVTControlCharacters(output).includes(":") ? "secondary" : "secondary-compact";
         const save = [style === "secondary" ? "Ctrl+S" : "^S", "Save"] as const;
-        if (layout.footerHeight > 1 || layout.innerWidth >= 20) expect(output).toContain(formatKeyHint(save, theme, 1, style));
-        expect(output).toContain(formatKeyHint(["Esc", "Close"], theme, 1, style));
+        if (layout.innerWidth >= 12) expect(output).toContain(formatKeyHint(save, theme, 1, style));
+        expect(output).toContain(formatKeyHint(["Esc", layout.innerWidth < 17 ? "" : "Close"], theme, 1, style));
         if (layout.separatorHeight) {
           const divider = plain.findIndex((line) => /^[│ ]*─+[│ ]*$/u.test(line));
           expect(divider).toBeGreaterThan(0);
@@ -243,7 +243,7 @@ describe("shared refine workspace", () => {
     workspace.handleInput("\x1b[A");
     expect(stripVTControlCharacters(textOf(workspace.render(40)))).toContain("› Draft: 16000 characters");
     workspace.handleInput("\r");
-    expect(stripVTControlCharacters(textOf(workspace.render(40)))).toContain("Enter: Stage");
+    expect(stripVTControlCharacters(textOf(workspace.render(40)))).toMatch(/(?:Enter:|↵) Stage/);
     workspace.handleInput("\x15"); workspace.handleInput("42000"); workspace.handleInput("\r");
     expect(actions.saveContext).not.toHaveBeenCalled();
     workspace.handleInput("\x13");
@@ -281,7 +281,7 @@ describe("shared refine workspace", () => {
     const { workspace } = create(40, "dark", true);
     workspace.openSettings(undefined, cursor);
     const hints = footer(workspace.render(100)).map((line) => stripVTControlCharacters(line).replace(/^│|│$/g, "").trim());
-    expect(hints).toEqual([`Ctrl+S: Save  Enter: ${cursor === 3 ? "Choose" : "Change"}  Tab: Next group  Esc: Close`]);
+    expect(hints).toEqual([`Esc: Close  Ctrl+S: Save  Tab: Next group  Enter: ${cursor === 3 ? "Choose" : "Change"}`]);
   });
 
   it.each(["dark", "light"])("aligns Settings hints across groups, dirty/disabled states and resize in %s", (name) => {
@@ -304,7 +304,9 @@ describe("shared refine workspace", () => {
           expect(lines).toHaveLength(panelLayout(width, 40).height);
           for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
           if (width >= 80) {
-            expect(hints).toContain(`${action ? `Enter: ${action}  ` : ""}${optimizer ? "Tab: Next group  " : ""}Esc: ${back}`);
+            expect(hints).toContain(`Esc: ${back}`);
+            if (optimizer) expect(hints).toContain("Tab: Next group");
+            if (action) expect(hints).toContain(`Enter: ${action}`);
             if (!action) expect(hints).not.toContain("Enter:");
             expect(footerRows[0]).toContain(formatKeyHint(["Ctrl+S", "Save"], theme, 1, "secondary"));
             expect(footerRows[0]).toContain(formatKeyHint(["Esc", dirty ? "Discard…" : "Close"], theme, 1, "secondary"));
@@ -324,18 +326,18 @@ describe("shared refine workspace", () => {
       workspace.openSettings(undefined, cursor);
       for (const width of [12, 20, 24, 30]) {
         const footerRows = footer(workspace.render(width)).map(stripVTControlCharacters);
-        expect(footerRows[0]).toMatch(/Esc Close/);
-        expect(footerRows.join("\n")).toMatch(/\^S Save/);
+        expect(footerRows[0]).toMatch(width < 24 ? /Esc/ : /Esc Close/);
+        expect(footerRows.join("\n")).toMatch(width === 12 ? /\^S/ : /\^S Save/);
         for (const line of footerRows) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       }
       workspace.openSettings({ instructions: "always", tree: false, skills: false }, cursor);
       expect(footer(workspace.render(24)).map(stripVTControlCharacters).join("\n")).toMatch(/Esc:? Discard/);
     }
     terminal.rows = 5;
-    expect(stripVTControlCharacters(footer(workspace.render(40)).at(-1)!).trim()).toBe("Esc Discard · ^S Save · ↵ Choose");
+    expect(stripVTControlCharacters(footer(workspace.render(40)).at(-1)!).trim()).toBe("Esc Discard · ^S Save · Tab Group");
     workspace.openSettings();
-    expect(stripVTControlCharacters(footer(workspace.render(40)).at(-1)!).trim()).toBe("Esc Close · ^S Save · ↵ Choose");
-    expect(stripVTControlCharacters(footer(workspace.render(12)).at(-1)!).trim()).toBe("Esc Close");
+    expect(stripVTControlCharacters(footer(workspace.render(40)).at(-1)!).trim()).toBe("Esc Close · ^S Save · Tab Group");
+    expect(stripVTControlCharacters(footer(workspace.render(12)).at(-1)!).trim()).toBe("Esc ^S Save");
   });
 
   it("keeps disabled context warnings visible and omits unavailable groups", () => {
@@ -428,11 +430,11 @@ describe("shared refine workspace", () => {
     }
     resolve({ message: "Thinking level saved", persisted: true });
     await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain("Thinking level saved"));
-    const status = workspace.render(100)[1];
+    const status = workspace.render(100)[2];
     expect(status).toContain("Thinking level saved");
     expect(status).not.toContain("Context changes take effect next round");
     workspace.handleInput("\x1b[D");
-    expect(workspace.render(100)[1]).toBe(status);
+    expect(workspace.render(100)[2]).toBe(status);
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Project instructions");
     expect(actions.saveContext).not.toHaveBeenCalled();
     expect(actions.chooseModel).not.toHaveBeenCalled();

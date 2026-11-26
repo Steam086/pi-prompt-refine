@@ -255,8 +255,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const tabs = settings.findIndex((line) => line.includes(" Settings "));
     expect(tabs).toBeGreaterThan(0);
     expect(settingsHints).toBeGreaterThan(tabs);
-    expect(settings[settingsHints + 1]).toContain("────────");
-    expect(settings.findIndex((line) => line.includes("Directory tree"))).toBeGreaterThan(settingsHints + 1);
+    expect(settings[tabs + 2]).toContain("────────");
+    expect(settings.findIndex((line) => line.includes("Directory tree"))).toBeLessThan(settingsHints);
     expect(settings[1]?.startsWith("│  ")).toBe(true);
     harness.panelInput(" ");
     const edited = harness.panelLines();

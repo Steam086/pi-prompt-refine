@@ -118,8 +118,8 @@ describe.each(["regular", "fullscreen"] as const)("task tree rendering (%s)", (m
       const tabs = initial.findIndex((line) => / Preview +Usage +Settings /.test(strip(line)));
       const divider = initial.findIndex((line, index) => index > tabs && /^─+$/u.test(strip(line).trim()));
       const hints = frameHints(initial);
-      expect(strip(initial[tabs - 1]!).trim()).toMatch(/^Usage/);
-      expect(divider).toBe(tabs + 1);
+      expect(strip(initial[tabs]!).trim()).toMatch(/^Usage/);
+      expect(divider).toBe(tabs + 2);
       expect(hints).toHaveLength(1);
       expect(hints[0]).toContain(formatKeyHint(["Enter", "Inspect"], theme, 1, "secondary"));
       expect(hints[0]).not.toContain("\x1b[1m");

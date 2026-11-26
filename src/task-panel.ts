@@ -5,8 +5,8 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { selectTaskOriginal, taskGroups, type TaskDisplayRecord } from "./history.js";
 import { runId, taskId } from "./app/operation-contract.js";
 import type { HistoryStorageStatus } from "./history-store.js";
-import { fittingHints, panelHeader, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
-import { alignedKeyHints, fittingKeyHints, formatKeyHint, passiveHintLayout, type KeyHint } from "./key-hints.js";
+import { fittingHints, panelConfirmation, panelHeader, panelLayout, workspaceTabs, type PanelLayoutProvider } from "./panel-layout.js";
+import { confirmationKeyHints, fittingKeyHints, formatKeyHint, passiveHeaderHints, type KeyHint } from "./key-hints.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
 import type { InlinePreferences } from "./inline-preferences.js";
@@ -587,14 +587,14 @@ export class TaskPanel {
   }
   private renderPanel(width: number): string[] {
     if (width < 1) return [];
-    let layout = this.layout(width);
+    const layout = this.layout(width);
     if (this.document) return this.renderDocument(width);
     if (this.deletion) {
-      const body = this.content.wrapped(this.theme.fg("warning", `Delete ${this.deletion.label}?`) +
-        "\n\nRunning requests will be stopped; queued requests will be removed.\nThis removes Refine history. Pi editor and conversation stay unchanged.", layout.innerWidth);
-      const chrome = panelHeader(layout, [this.content.heading("Delete request"), this.content.muted("Confirmation required")], [],
-        [fittingKeyHints([["Esc / n", "Cancel"], ["y", "Delete"]], layout.innerWidth, this.theme)]);
-      return chrome.render(body, (text) => this.theme.fg("borderMuted", text));
+      const title = this.theme.fg("warning", this.theme.bold(`Delete ${this.deletion.label}?`));
+      const hints = confirmationKeyHints(["Esc / n", "Cancel"], ["y", "Delete"], layout.innerWidth, this.theme);
+      const details = this.content.wrapped("Running requests will be stopped. Queued requests and saved Refine history will be removed.",
+        Math.min(layout.innerWidth, 56));
+      return panelConfirmation(layout, title, hints, details, (text) => this.theme.fg("borderMuted", text));
     }
     const tabs = workspaceTabs(layout, this.usage ? "Usage" : "Preview", this.theme);
     const entries = this.entries();
@@ -620,19 +620,20 @@ export class TaskPanel {
       ? (layout.innerWidth < 40 ? "Result→editor" : "Result to editor only")
       : layout.innerWidth < 20 ? "→editor" : "Editor only";
     const compact = (hints: KeyHint[]): KeyHint[] => hints.map(([key, label]) => [key === "Enter" ? "↵" : key, label === "Send to Pi" ? "Send" : label]);
-    let footer: string[];
+    const actionWidth = layout.innerWidth;
+    let footer: string;
     if (passiveHints) {
       const primary: KeyHint[] = !selected ? [["n", "New"]] : [["Enter", action]];
       if (stop) primary.unshift(["x", "Stop"]);
-      if (run?.candidate && !this.usage) primary.unshift(["a", editorHint]);
+      if (run?.candidate && !this.usage) primary.push(["a", editorHint]);
       // Reserve both focus labels so a focus change never moves or hides other hints.
       const preferences: KeyHint[] = this.actions.sessionPreferences || (!inline && this.canChoosePreferences(selected))
         ? [["p", "Preferences"]] : [];
       const focus: KeyHint[] = inline ? [["Tab", "Preferences"], ["o", (this.reading ? "Select" : "Read original").padEnd("Read original".length)]]
         : selected ? [["Tab", (this.reading ? "Select" : "Read").padEnd("Select".length)]] : [];
-      ({ layout, footer } = passiveHintLayout(layout, tabs.length,
-        [...primary, ...preferences, ...focus, back, ["?", "Help"]],
-        [layout.innerWidth < 9 ? ["Esc", ""] : back, ...compact(primary.slice(0, 1)), ...preferences, ["?", "Help"], ...compact(primary.slice(1)), ...focus], this.theme));
+      footer = passiveHeaderHints(
+        [back, ...primary, ["?", "Help"], ...preferences, ...focus],
+        [actionWidth < 9 || stop && actionWidth < 36 ? ["Esc", ""] : back, ...compact(primary), ["?", "Help"], ...preferences, ...focus], actionWidth, this.theme);
     } else {
       const primary: KeyHint[] = !selected ? [["n", "New"]] : [
         ...(!this.inspecting ? [["Enter", action] as const] : []),
@@ -656,11 +657,11 @@ export class TaskPanel {
         if (selected.records.some((record) => record.id !== run.id && record.candidate)) secondary.push(["c", other ? "Next comparison" : "Compare"]);
         secondary.push(["e", "Edit result"], ...(!restored ? [["f", "Revise"] as const] : []));
       }
-      const separator = layout.innerWidth < 30 ? " " : " · ";
-      footer = layout.innerWidth < 56
-        ? [fittingKeyHints(compact(primary), layout.innerWidth, this.theme, separator), fittingKeyHints(secondary, layout.innerWidth, this.theme, separator)]
-        : alignedKeyHints([primary, secondary], layout.innerWidth, this.theme);
-      if (layout.footerHeight === 1) footer[0] = fittingKeyHints([back, ["?", "Help"], ...compact(primary)], layout.innerWidth, this.theme, " ");
+      const actions = actionWidth < 44 ? compact(primary) : primary;
+      const firstActions = run?.candidate && this.inspecting ? actions.slice(0, 2) : actions.slice(0, 1);
+      const essential: KeyHint[] = actionWidth < 23 && run?.candidate ? [...firstActions, ["Esc", ""]] : [back, ...firstActions];
+      footer = fittingKeyHints([...essential, ...secondary.slice(1, 2), ...actions.filter((item) => !essential.includes(item)),
+        ...secondary.slice(2)], actionWidth, this.theme, actionWidth < 44 ? " " : " · ");
     }
     const title = this.inspecting ? (other ? "Compare results" : "Prompt details") : this.usage ? "Usage · All rounds" : "Prompt refine · Tasks";
     const feedback = this.notice ? this.theme.fg(this.noticeColor, sanitizeTerminalText(this.notice)) : "";
@@ -687,10 +688,10 @@ export class TaskPanel {
     const hasPreferences = !!selected?.record.input.preferences?.length;
     const browseStatus = fittingHints([
       model,
-      this.reading && selected ? this.content.muted("↑↓ scroll") : "",
       hasPreferences ? preference : "",
       selected ? this.content.muted(`${prompts} prompt${prompts === 1 ? "" : "s"} · ${runs} run${runs === 1 ? "" : "s"}`) : "",
       hasPreferences ? "" : preference,
+      this.reading && selected ? this.content.muted("↑↓ scroll") : "",
     ].filter(Boolean), layout.innerWidth, separator);
     const subtitle = this.referenceOnly ? this.content.muted("Read-only reference") : this.notice ? feedback : this.retainedEarlier
       ? this.content.muted(layout.innerWidth < 32 ? "Earlier → Usage" : layout.innerWidth < 72
@@ -701,15 +702,16 @@ export class TaskPanel {
       : layout.innerWidth < 72 ? `History → Usage · ${earlierPending ? `${earlierPending} active` : earlierLabel}`
       : `History → Usage · ${earlierPending ? `${earlierPending} running / queued · ` : ""}${earlierLabel}`;
     const showHistoryHint = earlierCount > 0 && !this.retainedEarlier && !this.notice && !this.inspecting && !this.referenceOnly;
-    // Separate history navigation from the page title and retain the compact fallback on narrow screens.
     const identity = this.retainedEarlier && selected && !selected.original
-      ? this.content.muted(" · ") + this.content.heading(`#${selected.record.id} ${selected.record.input.model.id}`) : "";
-    const historyGap = layout.innerWidth - visibleWidth(title) - visibleWidth(historyHint);
-    const header = [showHistoryHint
-      ? (historyGap >= 3 ? this.content.heading(title) + " ".repeat(historyGap) + this.content.muted(historyHint) : this.content.muted(historyHint))
-      : this.content.heading(title) + identity, subtitle];
+      ? this.content.heading(`#${selected.record.id} ${selected.record.input.model.id}`) : "";
+    const history = showHistoryHint ? this.content.muted(historyHint) : "";
+    const earlier = layout.innerWidth < 72 ? this.content.muted("Earlier · Esc current") : subtitle;
+    const status = this.retainedEarlier ? fittingHints([earlier, identity].filter(Boolean), layout.innerWidth, separator)
+      : fittingHints([model && subtitle ? subtitle : history, model && subtitle ? history : subtitle].filter(Boolean), layout.innerWidth, separator);
+    const header = [this.content.heading(title), status || subtitle];
     const banners: string[] = [];
     const historyStatus = this.retainedEarlier || showHistoryHint;
+    if (showHistoryHint && model && status === subtitle && layout.headerHeight > 1) banners.push(history);
     if (historyStatus && layout.headerHeight < 2 && !this.notice) {
       const status = showHistoryHint ? this.content.muted(historyHint) : subtitle;
       if (layout.headerHeight === 1) header[0] = status;
@@ -725,12 +727,10 @@ export class TaskPanel {
     }
     const quota = passiveHints && !this.notice && action === "Optimize" && !restored && this.actions.showOptimizerQuota?.()
       ? this.content.optimizerQuotaHint(layout.innerWidth) : "";
-    if (quota && layout.headerHeight) {
-      const combined = header[0] + separator + quota;
-      header[0] = visibleWidth(combined) <= layout.innerWidth ? combined : quota;
-    } else if (quota) banners.push(quota);
-    const visibleTabs = layout.headerHeight === 0 && (this.notice || historyStatus || quota) ? [] : tabs;
-    const chrome = panelHeader(layout, header, visibleTabs, this.referenceOnly ? [] : footer);
+    if (quota) banners.push(quota);
+    const visibleTabs = layout.headerHeight < 2 && (this.notice || historyStatus || model) ? []
+      : layout.innerWidth < 32 && (this.inspecting || this.retainedEarlier) ? [] : tabs;
+    const chrome = panelHeader(layout, header, visibleTabs, this.referenceOnly ? "" : footer);
     const height = Math.max(1, chrome.layout.bodyHeight - banners.length);
     const split = !!selected && !this.inspecting && !this.retainedEarlier && layout.innerWidth >= 72;
     const leftWidth = split ? Math.min(layout.innerWidth >= 120 ? 48 : 36, Math.floor(layout.innerWidth / 3)) : layout.innerWidth;

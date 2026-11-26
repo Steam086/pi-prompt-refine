@@ -1,5 +1,11 @@
 import { CURSOR_MARKER, Editor, renderFakeCursor, truncateToWidth, type EditorTheme, type TUI } from "@earendil-works/pi-tui";
 
+const [cursorStart, cursorEnd] = renderFakeCursor("\0").split("\0") as [string, string];
+
+export function withoutFakeCursor(line: string): string {
+  return line.replaceAll(cursorStart, "").replaceAll(cursorEnd, "");
+}
+
 /** Adapt Pi's editor (which budgets 30% of terminal rows) to our shared viewport.
  * The scoped terminal facade never changes the real terminal's dimensions.
  * Keep this compatibility adapter covered when upgrading pi-tui.
@@ -27,8 +33,11 @@ export class PromptInput {
     // Editor owns wrapping, paste expansion, scrolling, undo and IME cursor placement.
     // Pi reserves one column for its cursor. Give its wrapper at least two more
     // for a wide grapheme; tiny viewports retain a cursor without recursive wrap.
-    const lines = this.editor.render(Math.max(3, width)).slice(1, -1).map((line) => width >= 3 ? line
-      : line.includes(CURSOR_MARKER) ? CURSOR_MARKER + renderFakeCursor(" ") : truncateToWidth(line, width, ""));
+    const lines = this.editor.render(Math.max(3, width)).slice(1, -1).map((rendered) => {
+      const line = this.editor.focused ? rendered : withoutFakeCursor(rendered);
+      if (width >= 3) return line;
+      return line.includes(CURSOR_MARKER) ? CURSOR_MARKER + renderFakeCursor(" ") : truncateToWidth(line, width, "");
+    });
     // Pi enforces a five-line minimum; tiny viewports must still show the cursor.
     const cursor = lines.findIndex((line) => line.includes(CURSOR_MARKER));
     const start = Math.max(0, cursor - this.height + 1);

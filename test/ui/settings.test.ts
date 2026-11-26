@@ -192,7 +192,7 @@ describe("Settings budgets and limits", () => {
       expect(frame.join("\n")).toContain(CURSOR_MARKER);
       if (width >= 20) {
         const style = stripVTControlCharacters(frame.join("\n")).includes("Esc: Cancel") ? "secondary" : "secondary-compact";
-        expect(frame.join("\n")).toContain(formatKeyHint(["Esc", "Cancel"], f.theme, 1, style));
+        expect(frame.join("\n")).toContain(formatKeyHint(["Esc", width < 24 ? "" : "Cancel"], f.theme, 1, style));
         expect(frame.join("\n")).toContain(f.theme.fg("warning", "").split("\x1b[39m")[0]);
         expect(stripVTControlCharacters(frame.join("\n"))).toContain("Enter 16–65536");
       }

@@ -66,7 +66,7 @@ describe.each(["regular", "fullscreen"] as const)("TUI layout regressions (%s)",
         if (columns >= 40) expect(strip(output)).toContain("Model 12 中文😀");
         if (columns >= 100) {
           const lines = strip(output).split("\n");
-          expect(lines.filter((line) => line.includes("provider/model-"))).toHaveLength(7);
+          expect(lines.filter((line) => line.includes("provider/model-"))).toHaveLength(8);
           expect(lines.findIndex((line) => line.includes("Thinking level:")) -
             lines.findIndex((line) => line.includes("More models"))).toBe(2);
         }

@@ -1,7 +1,7 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { alignedHints, panelFrame, panelGeometry, panelTabs, workspaceTabs, WORKSPACE_PAGES } from "../../src/panel-layout.js";
+import { panelGeometry, panelHeader, panelTabs, workspaceTabs, WORKSPACE_PAGES } from "../../src/panel-layout.js";
 import { getThemeByName } from "../support/pi-theme.js";
 import { workspaceHeight, workspaceLayout, workspaceViewport } from "../../src/workspace-overlay.js";
 
@@ -48,10 +48,10 @@ describe("workspace tabs", () => {
       expect(tabs.join("\n")).not.toContain(theme.bg("toolPendingBg", "probe").split("probe")[0]);
       for (const label of WORKSPACE_PAGES.filter((label) => label !== active)) {
         expect(tabs.join("\n")).not.toContain(theme.underline(label));
-        if (width >= 30) expect(tabs.join("\n")).toContain(theme.fg("muted", ` ${label} `));
+        if (width >= 48) expect(tabs.join("\n")).toContain(theme.fg("muted", ` ${label} `));
       }
       expect(tabs.every((line) => visibleWidth(line) <= width)).toBe(true);
-      if (width >= 30) for (const label of WORKSPACE_PAGES) expect(plain).toContain(label);
+      if (width >= 48) for (const label of WORKSPACE_PAGES) expect(plain).toContain(label);
       else expect(plain.trim()).toBe(active);
     }
   });
@@ -73,49 +73,19 @@ describe("workspace tabs", () => {
 });
 
 describe("frame action placement", () => {
-  it("lifts hints after tabs without changing content capacity or default footer placement", () => {
+  it("keeps tabbed headlines to two rows and fixes action columns below the content", () => {
     const layout = panelGeometry(40, 12, 40, false, false, 0);
-    const header = ["Title", "Status"];
-    const body = ["Tabs", "", "Original 中文😀", "Result", "Last line"];
-    const hints = ["Enter Inspect", "Esc Back"];
-    const bottom = panelFrame(layout, header, body, hints, (text) => text);
-    const top = panelFrame(layout, header, body, hints, (text) => text, { footerAfterBodyRows: 2 });
-    expect(bottom.slice(-2)).toEqual(hints);
-    expect(top.slice(0, 7)).toEqual([...header, ...body.slice(0, 2), ...hints, "─".repeat(40)]);
-    expect(top.slice(7)).toEqual(bottom.slice(4, -3));
-    expect(top).toHaveLength(layout.height);
-    expect(top.join("\n")).toContain("Original 中文😀");
-    expect(top.join("\n")).toContain("Last line");
-  });
-});
-
-describe("aligned footer hints", () => {
-  it("shares column starts rather than distributing each row independently", () => {
-    expect(alignedHints([
-      ["r Refine", "m Model", "x Cancel", "Enter won't send"],
-      ["q Back", "? Help", "i Input", "→ Settings"],
-    ], 96)).toEqual([
-      "r Refine · m Model · x Cancel · Enter won't send",
-      "q Back   · ? Help  · i Input  · → Settings",
-    ]);
-  });
-
-  it("measures ANSI and wide text in terminal columns", () => {
-    const lines = alignedHints([["\x1b[1m中😀\x1b[22m", "Next"], ["é", "Back"]], 30);
-    expect(visibleWidth(lines[0].split(" · ")[0])).toBe(4);
-    expect(visibleWidth(lines[1].split(" · ")[0])).toBe(4);
-  });
-
-  it.each([1, 8, 16, 20, 36, 76, 96])("omits whole columns without overflow at %i columns", (width) => {
-    const lines = alignedHints([["a Accept", "e Edit", "Enter won't send"], ["q Back", "? Help"]], width);
-    for (const line of lines) {
-      expect(visibleWidth(line)).toBeLessThanOrEqual(width);
-      expect(line).not.toMatch(/ · $/);
-    }
-    expect(lines).toHaveLength(2);
-  });
-
-  it("does not leave separators for missing trailing cells", () => {
-    expect(alignedHints([["Accept"], ["Back", "Help"]], 30)).toEqual(["Accept", "Back   · Help"]);
+    const body = ["Original 中文😀", "Result", "Last line"];
+    const first = panelHeader(layout, ["Title", "Status"], [" Tabs "], "Esc Back · Enter Inspect");
+    const next = panelHeader(layout, ["Title", ""], [" Tabs "], "Esc Back · Enter Select");
+    const before = first.render(body, (text) => text);
+    const after = next.render(body, (text) => text);
+    expect(first.layout.headerHeight).toBe(2);
+    expect(next.layout.bodyHeight).toBe(first.layout.bodyHeight);
+    expect(before.slice(2, -1)).toEqual(["─".repeat(40), ...after.slice(3, -1)]);
+    expect(before[3]).toBe(body[0]);
+    expect(before.at(-1)).toBe("Esc Back · Enter Inspect");
+    expect(after.at(-1)).toBe("Esc Back · Enter Select");
+    expect(before).toHaveLength(layout.height);
   });
 });

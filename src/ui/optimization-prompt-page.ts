@@ -1,7 +1,7 @@
 import { parseKey, visibleWidth, wrapTextWithAnsi, type KeybindingsManager } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { discardHintRows, operationHintRows, type KeyHint } from "../key-hints.js";
-import { panelHeader, workspaceTabs, type PanelLayout } from "../panel-layout.js";
+import { confirmationKeyHints, discardKeyHints, fittingKeyHints, type KeyHint } from "../key-hints.js";
+import { panelConfirmation, panelHeader, workspaceTabs, type PanelLayout } from "../panel-layout.js";
 import { sanitizeTerminalText } from "../presentation.js";
 import type { PromptInput } from "../prompt-input.js";
 import type { SettingsResult } from "../settings.js";
@@ -104,28 +104,21 @@ export class OptimizationPromptPage {
     const scope = width >= 34 ? "Refine only · Applies next round" : "Refine only · Next round";
     const status = this.error && !confirming ? theme.fg("warning", visibleWidth(this.error) <= width ? this.error : "Empty prompt")
       : !confirming && visibleWidth(scope) <= width ? theme.fg("muted", scope) : "";
-    const primary: KeyHint[] = confirming ? [["Esc", width >= 8 ? "Back" : ""], ["y", "Save"]]
-      : [["Esc", width >= 10 ? "Cancel" : ""], [width >= 34 ? "Ctrl+S" : "^S", "Save"]];
-    const hints = this.saving ? [] : discard ? discardHintRows(layout, theme)
-      : operationHintRows(primary, confirming ? undefined : ["Enter", "Newline"], layout, theme);
+    const border = (text: string) => theme.fg("borderMuted", text);
+    if (confirming) {
+      const hints = this.saving ? "" : discard ? discardKeyHints(width, theme) : confirmationKeyHints(["Esc", "Back"], ["y", "Save"], width, theme);
+      const notes = discard ? [] : wrapTextWithAnsi("Writes to prompt-refine.json for the next round.", Math.min(width, 56));
+      return panelConfirmation(layout, title, hints, notes.map((line) => theme.fg("muted", line)), border);
+    }
     const tabs = workspaceTabs(layout, "Settings", theme);
-    const header = layout.headerHeight === 1 && status && this.error ? [status] : [title, status];
+    const primary: KeyHint[] = [["Esc", width >= 10 ? "Cancel" : ""], [width >= 34 ? "Ctrl+S" : "^S", "Save"], ["Enter", "Newline"]];
+    const hints = fittingKeyHints(primary, layout.innerWidth, theme, width < 27 ? " " : " · ");
+    const header = layout.headerHeight === 1 && this.error ? [status] : [title, status];
     const chrome = panelHeader(layout, header, tabs, hints);
     const height = chrome.layout.bodyHeight;
     const body: string[] = [];
-    if (confirming) {
-      if (!layout.headerHeight) body.push(title);
-      const details = discard ? ["Unsaved edits to the optimization prompt will be discarded."]
-        : ["Writes to prompt-refine.json for the next round.", "The fixed role and JSON output protocol stay in place."];
-      for (const detail of details) {
-        const notes = wrapTextWithAnsi(detail, width);
-        if (body.length + notes.length > height) break;
-        body.push(...notes.map((line) => theme.fg("muted", line)));
-      }
-    } else {
-      if (!layout.headerHeight && this.error && height > 1) body.push(status);
-      body.push(...this.input.render(width, height - body.length).map((line) => theme.fg("text", line)));
-    }
-    return chrome.render(body, (line) => theme.fg("borderMuted", line));
+    if (!layout.headerHeight && this.error && height > 1) body.push(status);
+    body.push(...this.input.render(width, height - body.length).map((line) => theme.fg("text", line)));
+    return chrome.render(body, border);
   }
 }

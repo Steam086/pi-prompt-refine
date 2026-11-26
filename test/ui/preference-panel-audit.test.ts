@@ -208,7 +208,6 @@ describe("new preference save identity and reveal", () => {
     if (mode === "both") search(f.panel, "Missing snapshot");
     f.panel.handleInput("l"); f.panel.handleInput(tab); f.panel.handleInput("n"); f.panel.handleInput(a.name);
     save(f.panel); await loaded(f.panel);
-    expect(text(f.panel)).toContain("Focus: Library");
     expect(text(f.panel)).not.toContain("Selected only ");
     expect(text(f.panel)).not.toContain("Search: No match");
     expect(text(f.panel)).toContain("Saved; not selected.");
@@ -270,7 +269,7 @@ describe("new preference save identity and reveal", () => {
     const selected = [selectPreference(b), selectPreference(a)]; const f = setup(selected); await loaded(f.panel);
     f.panel.handleInput("s"); search(f.panel, "Concise"); f.panel.handleInput("l"); f.panel.handleInput(tab);
     f.panel.handleInput("e"); f.panel.handleInput(backTab); f.panel.handleInput(" renamed"); save(f.panel); await loaded(f.panel);
-    expect(text(f.panel)).toContain("Focus: Actions");
+    expect(text(f.panel)).toContain("› e Edit");
     expect(text(f.panel)).toContain("Selected only ");
     expect(text(f.panel)).toContain("Search: Concise");
     expect(listRows(f.panel)).toHaveLength(1);

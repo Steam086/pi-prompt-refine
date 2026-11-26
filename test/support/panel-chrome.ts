@@ -1,7 +1,7 @@
 import { sliceByColumn, visibleWidth } from "@earendil-works/pi-tui";
 import { stripVTControlCharacters as strip } from "node:util";
 
-const actionKey = "(?:Ctrl\\+S|Esc|Tab|Enter|r|m|a|x|q|o|↵|\\^S|\\?|n):? ";
+const actionKey = "(?:Ctrl\\+S|Esc|Tab|Enter|r|m|a|x|q|o|↵|\\^S|\\?|n)(?::? |(?= *(?:│|$)))";
 const leadingAction = new RegExp(`^[│ ]*${actionKey}`, "u");
 const sharedAction = new RegExp(` {3,}(?=${actionKey})`, "u");
 
@@ -11,9 +11,13 @@ export function frameHeader(lines: string[]): string[] {
   return end < 0 ? lines : lines.slice(1, end);
 }
 
-/** Keep the action columns when the active tabs share their first row. */
+/** Read action strips beside workspace tabs or at the bottom of narrower frames. */
 export function frameHints(lines: string[]): string[] {
-  return frameHeader(lines).flatMap((line) => {
+  const header = frameHeader(lines);
+  const framed = strip(lines[0] ?? "").startsWith("╭");
+  const lastContent = lines.at(framed ? -2 : -1);
+  const rows = lastContent && !header.includes(lastContent) && leadingAction.test(strip(lastContent)) ? [...header, lastContent] : header;
+  return rows.flatMap((line) => {
     const text = strip(line);
     if (leadingAction.test(text)) return [line];
     const shared = sharedAction.exec(text);

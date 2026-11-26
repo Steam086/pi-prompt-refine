@@ -14,18 +14,22 @@ describe("SettingsPage navigation seam", () => {
     const bold = vi.spyOn(theme, "bold").mockImplementation((text) => `\x1b[1m${text}\x1b[22m`);
     workspace.openSettings();
     try {
-      for (const [width, count] of [[160, 1], [120, 1], [100, 1], [80, 1], [60, 1], [40, 2], [160, 1]] as const) {
+      for (const [width, count] of [[160, 1], [120, 1], [100, 1], [80, 1], [60, 1], [40, 1], [160, 1]] as const) {
         const frame = workspace.render(width);
         const hints = footer(frame);
         const output = hints.join("\n");
         expect(hints).toHaveLength(count);
         expect(strip(output)).not.toMatch(/(?:Space|←|→|↑↓):/);
-        for (const hint of [["Ctrl+S", "Save"], ["Enter", "Change"], ["Esc", "Close"], ["Tab", width >= 80 ? "Next group" : "Group"]] as const) {
-          expect(output).toContain(formatKeyHint(hint, theme, 1, "secondary"));
+        const compact = width === 40;
+        const style = compact ? "secondary-compact" : "secondary";
+        const combined = [[compact ? "^S" : "Ctrl+S", "Save"], ["Esc", "Close"], ["Tab", width >= 80 ? "Next group" : "Group"]] as const;
+        for (const hint of combined) {
+          expect(output).toContain(formatKeyHint(hint, theme, 1, style));
           expect(output).not.toContain(theme.bold(hint[0]));
         }
+        if (!compact) expect(output).toContain(formatKeyHint(["Enter", "Change"], theme, 1, style));
         const tab = frame.findIndex((line) => line.includes(theme.bg("selectedBg", theme.fg("text", theme.bold(" Settings ")))));
-        const hintRow = frame.findIndex((line) => line.includes(formatKeyHint(["Ctrl+S", "Save"], theme, 1, "secondary")));
+        const hintRow = frame.findIndex((line) => line.includes(formatKeyHint(combined[0], theme, 1, style)));
         expect(hintRow).toBeGreaterThanOrEqual(tab);
         expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
         expect(frame.join("\n")).toContain(theme.fg("text", theme.bold("Settings")));
@@ -50,8 +54,8 @@ describe("SettingsPage navigation seam", () => {
         const hints = footer(frame);
         const shortcutText = hints.map(strip).join("\n");
         expect(shortcutText).toContain("Esc");
-        expect(shortcutText).toMatch(/(?:Ctrl\+S:|\^S) Save/);
-        if (width >= 100) expect(shortcutText).toContain("Enter: Stage  Tab: Focus");
+        expect(shortcutText).toMatch(width === 12 ? /\^S/ : /(?:Ctrl\+S:|\^S) Save/);
+        if (width >= 100) expect(shortcutText).toContain("Tab: Focus  Enter: Stage");
         expect(hints.join("\n")).not.toContain("\x1b[1m");
         if (width >= 100) expect(hints).toHaveLength(1);
         expect(frame.join("\n")).toContain(CURSOR_MARKER);
@@ -60,7 +64,7 @@ describe("SettingsPage navigation seam", () => {
       for (const rows of [8, 5]) {
         terminal.rows = rows;
         const frame = workspace.render(20);
-        expect(frame.join("\n")).toContain(formatKeyHint(["Esc", "Cancel"], theme, 1, "secondary-compact"));
+        expect(frame.join("\n")).toContain(formatKeyHint(["Esc", ""], theme, 1, "secondary-compact"));
         expect(frame.join("\n")).toContain(CURSOR_MARKER);
         expect(frame.every((line) => visibleWidth(line) <= 20)).toBe(true);
       }

@@ -135,7 +135,10 @@ describe("explicit candidate revision", () => {
     finishes[0]!(refinement("Done")); await flushPromises();
     expect(h.complete).toHaveBeenCalledTimes(5);
     h.panelInput("\x1b"); h.panelInput("\x1b"); h.panelInput("\x1b[C");
-    h.panelInput("p"); await vi.waitFor(() => expect(output()).toContain("1 selected (read-only)"));
+    h.panelInput("p"); await vi.waitFor(() => {
+      expect(output()).toContain("1 selected (read-only)");
+      expect(output()).not.toContain("Working…");
+    });
     expect(output()).toContain("Adopted preferences"); expect(output()).not.toContain("g Project default");
     h.panelInput(" "); expect(output()).toContain("Read-only snapshot");
     h.panelInput("\r"); expect(output()).toContain("Source deleted"); expect(output()).toContain(entry.body);
@@ -253,7 +256,7 @@ describe("explicit candidate revision", () => {
     h.panelInput("\x1b[B"); h.panelInput("\x1b[B"); h.panelInput("f");
     expect(output()).toContain("Revise current result");
     h.panelInput("\x1bp");
-    await vi.waitFor(() => expect(output()).toContain("0 selected ·"));
+    await vi.waitFor(() => expect(output()).toContain("0 selected"));
     await vi.waitFor(() => expect(output()).not.toContain("Working…"));
     if (selectBefore) h.panelInput(" ");
     h.panelInput("l");
@@ -311,7 +314,7 @@ describe("explicit candidate revision", () => {
     expect(h.complete).not.toHaveBeenCalled();
     h.panelInput("p");
     await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("[ ] Bullet Points"));
-    expect(h.panelLines(100).join("\n")).toContain("0 selected · Kept on return");
+    expect(h.panelLines(100).join("\n")).toContain("0 selected");
     for (const checked of [true, false, true]) {
       h.panelInput(" ");
       expect(h.panelLines().join("\n")).toContain(`[${checked ? "x" : " "}] Bullet Points`);

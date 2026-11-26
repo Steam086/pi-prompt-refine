@@ -95,7 +95,7 @@ export function renderTaskDocument(
     body.push(...hints.map((hint) => formatKeyHint(hint, theme)), "", content.muted("Read-only help. Return with Esc before using these actions."));
   }
   const lines = content.wrapped(body.join("\n"), layout.innerWidth);
-  const footer = [fittingKeyHints([["Esc", "Back"], ["↑↓", "Scroll"]], layout.innerWidth, theme)];
+  const footer = fittingKeyHints([["Esc", "Back"], ["↑↓", "Scroll"]], layout.innerWidth, theme);
   const heading = content.heading(title);
   const last = lines.length;
   const statusWidth = `${last}–${last} / ${last} lines`.length;

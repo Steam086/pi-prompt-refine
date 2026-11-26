@@ -99,7 +99,7 @@ describe("project defaults through the extension", () => {
     h.panelInput("r"); expect(output()).toContain("[x] * Inherited item");
     h.panelInput(" "); find(manual.name);
     h.resize(10);
-    expect(output(24)).toMatch(/Esc.*Space.*g/);
+    expect(output(24)).toMatch(/Esc[\s\S]*Space.*g/);
     h.panelInput(" ");
     expect(output(24)).toContain("1 selected"); expect(output(24)).toContain("[x]");
     h.resize(40);
