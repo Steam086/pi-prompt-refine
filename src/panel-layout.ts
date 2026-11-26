@@ -30,6 +30,11 @@ export type PanelLayoutProvider = (width: number) => PanelLayout;
 export const WORKSPACE_PAGES = ["Preview", "Usage", "Settings"] as const;
 export type WorkspacePage = typeof WORKSPACE_PAGES[number];
 
+export function focusLabel(theme: Theme, width: number, label: string, active: boolean): string {
+  const text = stripVTControlCharacters(truncateToWidth(active ? `› ${label}` : label, width, width > 2 ? "…" : ""));
+  return active ? theme.bg("selectedBg", theme.fg("text", theme.bold(text))) : theme.fg("muted", text);
+}
+
 /** Persistent page identity, unchanged when a child focus suspends page navigation. */
 export function workspaceTabs(layout: PanelLayout, active: WorkspacePage, theme: Pick<Theme, "fg" | "bg" | "bold">): string[] {
   return panelTabs(layout, [...WORKSPACE_PAGES], WORKSPACE_PAGES.indexOf(active), theme);

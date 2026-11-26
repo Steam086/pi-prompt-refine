@@ -1,15 +1,16 @@
 import { Input, parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager, type TUI } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { panelHeader, panelLayout, type PanelLayoutProvider } from "./panel-layout.js";
+import { focusLabel, panelHeader, panelLayout, type PanelLayoutProvider } from "./panel-layout.js";
 import { alignedKeyHints, fittingKeyHints, formatKeyHint, type KeyHint } from "./key-hints.js";
 import { PromptInput } from "./prompt-input.js";
 import { sanitizeTerminalText } from "./presentation.js";
 import { selectionWindow } from "./selection-window.js";
 import { renderPreferenceRow } from "./preference-row.js";
 import type { SessionPreferenceChange, SessionPreferenceTarget } from "./app/session-preferences.js";
-import { preferenceGroup, preferenceGroupOrder, RESULT_NOTE_HINT, composeRevision, preferenceContentKey, preferenceKey, preferenceSelectionLabel, preferenceValidation, searchPreferences, selectPreference, PREFERENCE_SELECTION_LIMIT,
+import { preferenceGroup, preferenceGroupOrder, RESULT_NOTE_HINT, composeRevision, preferenceContentKey, preferenceKey, preferenceSelectionLabel, preferenceValidationIssue, searchPreferences, selectPreference, PREFERENCE_SELECTION_LIMIT,
   type PreferenceLibrary, type PreferenceMetadata, type PreferenceRepository, type PreferenceScope, type PreferenceValue, type RevisionPreference, type SelectedPreference } from "./revision-preferences.js";
 
+type FormField = "name" | "instruction" | "options" | "scope" | "type" | "description" | "save";
 type Form = {
   kind: "new" | "library";
   expected?: RevisionPreference;
@@ -25,8 +26,18 @@ type Form = {
   rawBody: string;
   initialEditorBody: string;
   initial: string;
-  focus: number;
+  focus: FormField;
+  optionsOpen: boolean;
 };
+
+function formFields(form: Form): FormField[] {
+  const fields: FormField[] = ["name", "instruction", "options"];
+  if (form.optionsOpen) {
+    if (form.kind === "new") fields.push("scope");
+    fields.push("type", "description");
+  }
+  return [...fields, "save"];
+}
 type DocumentPart = { text: string; color: "text" | "muted" | "warning" | "error"; heading?: boolean };
 type PreferenceDocument = DocumentPart[];
 type Page = { kind: "list" } | { kind: "read"; title: string; document: PreferenceDocument; scroll: number }
@@ -44,8 +55,8 @@ type PreferencePanelActions = { back(): void; updateSelection?(selected: Selecte
 export class PreferencePanel {
   private page: Page = { kind: "list" };
   private library: PreferenceLibrary = { entries: [], errors: {} };
-  private allSearch = new Input({ prompt: "Search: " });
-  private selectedSearch = new Input({ prompt: "Search: " });
+  private allSearch = new Input({ prompt: "" });
+  private selectedSearch = new Input({ prompt: "" });
   private get search(): Input { return this.selectedOnly ? this.selectedSearch : this.allSearch; }
   private selected: SelectedPreference[];
   private libraryMode = false;
@@ -94,9 +105,9 @@ export class PreferencePanel {
     this.selectedSearch.focused = searching && this.selectedOnly;
     const form = this.page.kind === "form" || this.page.kind === "discard" ? this.page.form : undefined;
     if (form) {
-      form.name.focused = this.hasFocus && this.page.kind === "form" && form.focus === 0;
-      form.body.editor.focused = this.hasFocus && this.page.kind === "form" && form.focus === 1;
-      form.description.focused = this.hasFocus && this.page.kind === "form" && form.focus === 4;
+      form.name.focused = this.hasFocus && this.page.kind === "form" && form.focus === "name";
+      form.body.editor.focused = this.hasFocus && this.page.kind === "form" && form.focus === "instruction";
+      form.description.focused = this.hasFocus && this.page.kind === "form" && form.focus === "description";
     }
   }
   dispose(): void { this.focused = false; this.disposed = true; }
@@ -324,17 +335,19 @@ export class PreferencePanel {
       selectList: { selectedPrefix: (text) => this.theme.fg("accent", text), selectedText: (text) => this.theme.fg("accent", text),
         description: (text) => this.theme.fg("muted", text), scrollInfo: (text) => this.theme.fg("muted", text), noMatch: (text) => this.theme.fg("warning", text) },
     });
+    body.editor.disableSubmit = true;
     const rawBody = entry?.body ?? this.freeText;
     body.editor.setText(rawBody);
     const rawName = entry?.name ?? "";
-    const name = new Input({ prompt: "Name: " }); name.setValue(sanitizeTerminalText(rawName).replace(/\n/g, " "));
+    const name = new Input({ prompt: "" }); name.setValue(sanitizeTerminalText(rawName).replace(/\n/g, " "));
     const rawDescription = entry?.metadata?.description ?? "";
-    const description = new Input({ prompt: "Description: " }); description.setValue(sanitizeTerminalText(rawDescription).replace(/\n/g, " "));
+    const description = new Input({ prompt: "" }); description.setValue(sanitizeTerminalText(rawDescription).replace(/\n/g, " "));
     const form: Form = { kind, scope: entry?.scope === "global" ? "global" : "project", name, rawName, initialEditorName: name.getValue(),
       body, rawBody, initialEditorBody: body.editor.getExpandedText(),
       description, rawDescription, initialEditorDescription: description.getValue(),
       metadata: entry ? entry.metadata && structuredClone(entry.metadata) : { kind: "task", description: "", activation: "manual" },
-      expected: kind === "library" ? structuredClone(entry) : undefined, initial: "", focus: 0 };
+      expected: kind === "library" ? structuredClone(entry) : undefined, initial: "",
+      focus: kind === "library" ? "instruction" : "name", optionsOpen: false };
     form.initial = this.stamp(form);
     this.page = { kind: "form", form }; this.setNotice("");
   }
@@ -358,8 +371,14 @@ export class PreferencePanel {
   }
   private async save(form: Form): Promise<void> {
     const value = this.formValue(form);
-    const error = preferenceValidation(value);
-    if (error) { this.setNotice(error, "warning"); return; }
+    const issue = preferenceValidationIssue(value);
+    if (issue) {
+      form.focus = issue.field;
+      if (issue.field === "type" || issue.field === "description") form.optionsOpen = true;
+      this.setNotice(issue.message, "warning");
+      this.redraw();
+      return;
+    }
     this.busy = true; this.redraw();
     try {
       const saved = await this.repository.save(form.scope, value, form.expected);
@@ -368,7 +387,7 @@ export class PreferencePanel {
       if (form.kind === "new") {
         const reset = this.selectedOnly || !!this.search.getValue().trim();
         this.selectedOnly = false;
-        this.allSearch = new Input({ prompt: "Search: " });
+        this.allSearch = new Input({ prompt: "" });
         this.allView = { index: 0, top: 0, direction: 1, key: preferenceKey(saved) };
         this.top = 0;
         this.navigationDirection = 1;
@@ -409,17 +428,18 @@ export class PreferencePanel {
     if (this.disposed) return;
     const key = parseKey(data)?.toLowerCase();
     if (key && /(^|\+)f\d+$/.test(key)) return;
+    const cancel = this.keys.matches(data, "tui.select.cancel") || key === "ctrl+\\";
+    if (this.busy) {
+      if (cancel && this.page.kind === "list") { this.back(); this.redraw(); }
+      return;
+    }
     if (key === "ctrl+s") {
+      if (this.page.kind === "form") { void this.save(this.page.form); return; }
       this.setNotice(this.managing ? "Library management only; no request sent."
         : this.purpose === "audit" ? "Read-only snapshot; no request sent."
         : this.purpose === "session" ? "Session choices are saved on Space; no request sent."
         : this.purpose === "refine" ? "Return to the Unsent original and press Enter to refine." : "Return to Revise to request revision with Ctrl+S.");
       this.redraw(); return;
-    }
-    const cancel = this.keys.matches(data, "tui.select.cancel") || key === "ctrl+\\";
-    if (this.busy) {
-      if (cancel && this.page.kind === "list") { this.back(); this.redraw(); }
-      return;
     }
     const enter = this.keys.matches(data, "tui.input.submit");
     if (this.page.kind === "list" && key) this.setNotice("");
@@ -437,24 +457,28 @@ export class PreferencePanel {
       else if (cancel || key === "n") this.page = { kind: "list" };
     } else if (this.page.kind === "form") {
       const form = this.page.form;
-      const count = 6;
       if (cancel) this.page = this.stamp(form) === form.initial ? { kind: "list" } : { kind: "discard", form };
-      else if (key === "tab" || key === "shift+tab") form.focus = (form.focus + (key === "tab" ? 1 : count - 1)) % count;
-      else if (form.focus === count - 1 && enter) void this.save(form);
-      else if (form.focus === 2 && (enter || key === "space") && form.kind !== "library") form.scope = form.scope === "project" ? "global" : "project";
-      else if (form.focus === 3 && (enter || key === "space")) {
+      else if (key === "tab" || key === "shift+tab") {
+        const fields = formFields(form);
+        const next = fields.indexOf(form.focus) + (key === "tab" ? 1 : fields.length - 1);
+        form.focus = fields[next % fields.length]!;
+      } else if (form.focus === "save" && enter) void this.save(form);
+      else if (form.focus === "options" && (enter || key === "space")) form.optionsOpen = !form.optionsOpen;
+      else if (form.focus === "scope" && (enter || key === "space")) form.scope = form.scope === "project" ? "global" : "project";
+      else if (form.focus === "type" && (enter || key === "space")) {
         form.metadata = { description: form.description.getValue(), kind: form.metadata?.kind === "rewrite" ? "result" : form.metadata?.kind === "result" ? "task" : "rewrite", activation: "manual" };
-      } else if (form.focus === 4) {
-        if (enter) form.focus = 5;
+      } else if (form.focus === "description") {
+        if (enter) form.focus = "save";
         else {
+          const before = form.description.getValue();
           form.description.handleInput(data);
-          form.metadata ??= { kind: "task", description: "", activation: "manual" };
+          if (form.description.getValue() !== before) form.metadata ??= { kind: "task", description: "", activation: "manual" };
         }
-      } else if (form.focus === 1) {
+      } else if (form.focus === "instruction") {
         if (enter) form.body.editor.insertTextAtCursor("\n");
         else form.body.editor.handleInput(data);
-      } else if (form.focus === 0) {
-        if (enter) form.focus = 1; else form.name.handleInput(data);
+      } else if (form.focus === "name") {
+        if (enter) form.focus = "instruction"; else form.name.handleInput(data);
       }
     } else if (cancel) {
       if (this.focus === 0 && key !== "ctrl+\\") this.focus = 1;
@@ -506,13 +530,50 @@ export class PreferencePanel {
     this.redraw();
   }
 
+  private textField(input: Input, label: string, width: number, active: boolean): string {
+    if (width < 3) return active && input.focused ? input.render(width)[0]! : focusLabel(this.theme, width, label, active);
+    const prefix = focusLabel(this.theme, width - Math.min(4, width - 2), label, active) + " ";
+    const remaining = width - visibleWidth(prefix);
+    const value = active && input.focused ? input.render(remaining)[0]!
+      : truncateToWidth(sanitizeTerminalText(input.getValue()).replace(/\n/g, " "), remaining, "…");
+    return prefix + this.theme.fg("text", value);
+  }
+
+  private renderForm(form: Form, width: number, height: number): string[] {
+    const type = form.metadata ? preferenceGroup({ metadata: form.metadata }) : "Unclassified (legacy)";
+    const controls = {
+      options: `Options ${form.optionsOpen ? "▾" : "▸"} · ${form.scope} · ${type}`,
+      scope: `Scope: ${form.scope}`,
+      type: `Type: ${type}`,
+      save: "Save to library",
+    };
+    const fields = formFields(form);
+    const count = Math.min(fields.length, Math.max(1, height - 1));
+    const start = Math.max(0, Math.min(fields.indexOf(form.focus) - 1, fields.length - count));
+    const visible = fields.slice(start, start + count);
+    return visible.flatMap((field) => {
+      const active = form.focus === field;
+      if (field === "name" || field === "description") {
+        return [this.textField(form[field], field === "name" ? "Name:" : "Description:", width, active)];
+      }
+      if (field === "instruction") {
+        const rows = height - visible.length;
+        if (rows < 1) {
+          const prefix = width > 1 ? focusLabel(this.theme, 1, "", active) : "";
+          return [prefix + form.body.render(width - visibleWidth(prefix), 1)[0]!];
+        }
+        return [focusLabel(this.theme, width, "Instruction:", active), ...form.body.render(width, rows)];
+      }
+      return [focusLabel(this.theme, width, controls[field], active)];
+    });
+  }
+
   render(width: number): string[] {
     if (width < 1) return [];
     const layout = this.layout(width);
     const { innerWidth: w } = layout;
     const clean = (text: string) => sanitizeTerminalText(text);
     const wrap = (text: string, columns = w) => wrapTextWithAnsi(clean(text), columns);
-    const button = (text: string, active: boolean) => active ? this.theme.bg("selectedBg", this.theme.fg("text", `› ${clean(text)}`)) : this.theme.fg("muted", `  ${clean(text)}`);
     const { managing, selectable } = this;
     const audit = this.purpose === "audit";
     const session = this.purpose === "session";
@@ -568,25 +629,14 @@ export class PreferencePanel {
     } else if (page.kind === "form") {
       const form = page.form;
       title = form.kind === "library" ? "Edit library entry" : "Save new preference";
-      subtitle = `Focus: ${["Name", "Instruction", "Scope", "Type", "Description", "Save"][form.focus]} · Check paths and sensitive text`;
-      const name = form.name.render(w);
-      const scope = button(`Scope: ${form.scope}${form.kind === "library" ? " (fixed)" : " (Enter change)"}`, form.focus === 2);
-      const type = button(`Type: ${form.metadata ? preferenceGroup({ metadata: form.metadata }) : "Unclassified (legacy)"}`, form.focus === 3);
-      if (form.metadata?.kind === "result") subtitle = RESULT_NOTE_HINT;
-      const description = form.description.render(w);
-      const save = button("Save to preference library", form.focus === 5);
-      // Native Editor cannot wrap a wide glyph into a one-column line. The
-      // outer frame clips its minimal safe canvas in extremely narrow terminals.
-      const editorWidth = Math.max(4, w);
-      // Tiny viewports show the focused field; the same Tab order remains usable.
-      renderBody = (h) => {
-        if (h < 9) return form.focus === 0 ? name : form.focus === 5 ? [save] : form.focus === 4 ? description
-          : form.focus === 2 ? [scope] : form.focus === 3 ? [type] : form.body.render(editorWidth, Math.max(1, h));
-        return [...name, ...form.body.render(editorWidth, h - 5), scope, type, ...description, save];
-      };
-      const enterLabel = form.focus === 5 ? "Save to library" : form.focus === 1 ? "Newline" : form.focus === 0 || form.focus === 4 ? "Next field"
-        : form.focus === 3 ? "Change type" : form.kind === "library" ? "Scope fixed" : "Change scope";
-      hints = [[["Enter", enterLabel], ["Tab / Shift+Tab", "Fields"]], [["Esc", "Back"]]];
+      subtitle = form.metadata?.kind === "result" ? RESULT_NOTE_HINT : "Check paths and sensitive text";
+      renderBody = (h) => this.renderForm(form, w, h);
+      const enterLabel = {
+        name: "Next field", instruction: "Newline", options: form.optionsOpen ? "Hide options" : "Show options",
+        scope: "Change scope", type: "Change type", description: "Next field", save: "Save to library",
+      }[form.focus];
+      hints = [[["Esc", w >= 12 ? "Back" : ""], [w < 30 ? "^S" : "Ctrl+S", w >= 16 || w === 11 ? "Save to library" : ""]],
+        [["Enter", enterLabel], ["Tab / Shift+Tab", "Fields"]]];
     } else {
       const entries = this.entries();
       this.index = Math.min(this.index, Math.max(0, entries.length - 1));
@@ -603,9 +653,8 @@ export class PreferencePanel {
           const separator = this.theme.fg("muted", " · ");
           for (const [i, action] of ACTIONS.entries()) {
             const active = this.focus === 2 && i === this.actionIndex;
-            const hint = (active ? "› " : "") + formatKeyHint([this.focus === 0 ? "" : action.key, action.label], this.theme);
-            const cell = truncateToWidth(hint, toolbarWidth, "…");
-            const styled = active ? this.theme.bg("selectedBg", cell) : cell;
+            const styled = active ? focusLabel(this.theme, toolbarWidth, `${action.key} ${action.label}`, true)
+              : truncateToWidth(formatKeyHint([this.focus === 0 ? "" : action.key, action.label], this.theme), toolbarWidth, "…");
             const last = toolbar.at(-1);
             if (last && visibleWidth(last + separator + styled) <= toolbarWidth) toolbar[toolbar.length - 1] = last + separator + styled;
             else toolbar.push(styled);
@@ -616,8 +665,7 @@ export class PreferencePanel {
         const available = Math.max(1, room ? h - toolbar.length - 2 : h);
         const split = room && splitCandidate;
         const leftWidth = split ? toolbarWidth : w;
-        const search = this.focus === 0 && this.hasFocus ? this.search.render(leftWidth) : [truncateToWidth(this.theme.fg("muted", "Search: ")
-          + this.theme.fg("text", clean(this.search.getValue()).replace(/\n/g, " ")), leftWidth, "…")];
+        const search = [this.textField(this.search, "Search:", leftWidth, this.focus === 0)];
         const window = selectionWindow(entries.length, this.index, available, this.top,
           this.selectedOnly ? undefined : (index) => preferenceGroup(entries[index]!), available >= 10 ? 1 : 0, this.navigationDirection);
         this.top = window.start;
@@ -678,7 +726,7 @@ export class PreferencePanel {
     const footer = page.kind === "read"
       ? [fittingKeyHints([hints[1]![0]!, ...hints[0]!], w, this.theme)]
       : w < 30 || page.kind === "list"
-      ? hints.map((row) => fittingKeyHints(row, w, this.theme))
+      ? hints.map((row) => fittingKeyHints(row, w, this.theme, w < 30 && page.kind === "form" ? " " : " · "))
       : alignedKeyHints(hints, w, this.theme);
     if (page.kind === "list" && selectionActions.length) {
       const [back, ...secondary] = hints[1]!;
@@ -690,7 +738,7 @@ export class PreferencePanel {
       const primary = variants.find((variant) => visibleWidth(fittingKeyHints(variant, Infinity, this.theme, separator)) <= w) ?? variants.at(-1)!;
       const extra = hints[0]!.filter(([key]) => !selectionActions.some(([action]) => key === action));
       footer[0] = fittingKeyHints([...primary, ...extra, ...(layout.footerHeight === 1 ? secondary : [])], w, this.theme, separator);
-    } else if (layout.footerHeight === 1) {
+    } else if (layout.footerHeight === 1 && page.kind !== "form") {
       footer[0] = fittingKeyHints([hints[1]![0]!, ...hints[0]!], w, this.theme);
     }
     const severe = subtitleColor !== "muted";

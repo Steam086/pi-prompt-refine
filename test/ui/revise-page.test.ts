@@ -41,6 +41,9 @@ describe("RevisePage focus seam", () => {
     expect(submit).not.toHaveBeenCalled();
     expect(back).not.toHaveBeenCalled();
     page.handleInput("\x1b");
+    expect(editor.editor.focused).toBe(false);
+    expect(page.render(100).join("\n")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold("› Review full requirements"))));
+    page.handleInput("\t");
     expect(editor.editor.focused).toBe(true);
     expect(page.render(100).join("\n")).toContain(CURSOR_MARKER);
     page.handleInput("\x13");

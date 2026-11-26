@@ -4,14 +4,14 @@
 
 ## Settings 面板
 
-Tab 切换 **Context**、**Optimizer**，方向键选择设置，必要时用 PgUp／PgDn 阅读详情。Enter／Space 切换开关。数值项按 Enter 打开编辑页，可直接输入或用 Tab 切换档位。再次按 Enter 暂存，返回 Settings 后按 Ctrl+S 保存。在数值编辑页按 Esc 取消本次编辑；在 Settings 顶层按 Esc 关闭工作台，未保存的暂存修改会被放弃。
+Tab 切换 **Context**、**Optimizer**，方向键选择设置，必要时用 PgUp／PgDn 阅读详情。Enter／Space 切换开关。数值项按 Enter 打开编辑页，可直接输入，也可按 Tab 聚焦预设，用方向键选择，再按 Enter 采用。聚焦数值时，Enter 暂存。编辑页和设置列表均可按 Ctrl+S 保存。数值编辑页的 Esc 取消本次编辑。设置列表有暂存修改时，Esc 会先询问是否放弃并关闭工作台。
 
 上下文和编辑策略从下一 round 生效。输出和超时设置用于之后实际启动的请求，包括届时启动的排队项。原稿长度限制用于新的输入及编辑校验，已有记录仍可阅读。保存失败时检查 `Not persisted`，已应用的设置可能只在当前进程有效。
 
 ## 模型、策略与快捷键
 
 - 用 `/refine model` 选择默认优化模型。Pi 管理 Provider 认证，主模型保持独立。模型、thinking 和策略各有保存确认。
-- **Optimizer → Optimization prompt** 按 Enter 编辑，Ctrl+S 后按 `y` 确认。删除文件中的 `systemPrompt` 字段可恢复内置策略。自定义策略保留，固定角色、字面保护和输出协议由程序提供。
+- **Optimizer → Optimization prompt** 按 Enter 编辑，Ctrl+S 后按 `y` 确认保存。草稿有改动时，Esc 会先询问是否放弃。删除文件中的 `systemPrompt` 字段可恢复内置策略。自定义策略保留，固定角色、字面保护和输出协议由程序提供。
 - 默认优化快捷键是 `Ctrl+\`，Preferences 的 `preferencesKey` 默认是 Alt+P。可在配置中用 `null` 关闭对应绑定。即使禁用 Alt+P，仍可在 Preview／Usage 按 `p`，或在 Revise 用 Tab 聚焦 Preferences 后按 Enter。完整流程见[使用说明](usage.md)及[偏好指南](preference-selection.md)。原生快捷键避免功能键，旧绑定的兼容行为见[配置测试](../test/unit/config.test.ts)。
 
 ## 历史保存与隐私

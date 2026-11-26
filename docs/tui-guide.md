@@ -4,7 +4,7 @@ For installation and your first rewrite, start with the [README](../README.md). 
 
 ## Work with drafts and results
 
-The workspace has three tabs: **Preview** for the current round, **Usage** for current and earlier records, and **Settings** for configuration. Use the Left and Right arrow keys to switch tabs and `?` to see the actions available for your current selection. From any top-level tab, press `Esc` once to close the workspace. In a subpage, such as Usage record details, `Esc` returns to the parent page.
+The workspace has three tabs: **Preview** for the current round, **Usage** for current and earlier records, and **Settings** for configuration. Use the Left and Right arrow keys to switch tabs and `?` to see the actions available for your current selection. Press `Esc` from a top-level tab to close the workspace. Settings asks before discarding staged changes. In a subpage, such as Usage record details, `Esc` returns to the parent page.
 
 Scroll within the workspace to read long results. The frame stays stable as you switch pages and may cover part of the Pi footer in a short terminal.
 
@@ -27,7 +27,7 @@ In **Preview**, press `p` on an editable **Unsent** original to choose preferenc
 
 `g` changes the **project default** (`*`) from either chooser. A session choice inherits that default until you override it with `Space`. For example, `[ ] *` means the project default is on but this session has opted out. In **This session**, `r` restores inheritance for the highlighted item. Session choices survive closing the workspace and starting a new round, but not `/reload`. They don't change existing drafts or runs, same-input retries, or Revise drafts.
 
-Press `l` to manage the library (`n` Add, `e` Edit, `d` Delete). New prompts take a snapshot of the current library text when captured. Edits and deletions don't change existing snapshots. To use a new version in an existing draft, deselect the old entry and select it again. In **Usage**, `p` on a run opens a read-only audit of its adopted preferences.
+Press `l` to manage the library (`n` Add, `e` Edit, `d` Delete). Add starts at **Name**. Editing a saved entry starts at **Instruction**. Use `Tab` or `Shift+Tab` to move between fields and `Enter` on **Options** to show scope, type and description. Press `Ctrl+S` from any field to save to the library. Existing drafts retain their captured versions. To use a new version in an existing draft, deselect the old entry and select it again. In **Usage**, `p` on a run opens a read-only audit of its adopted preferences.
 
 For an existing result, press `f` to open **Revise**, then `Alt+P` (or `Tab`, then `Enter`) to choose preferences for the revision draft. `Ctrl+S` in Revise or `Enter` on an Unsent original starts a rewrite; `Space` in a chooser never does.
 
@@ -37,8 +37,8 @@ Select **In Your Own Words** in Preferences to see how the rewrite model underst
 
 - Use `/refine model` to choose the default rewrite model. Your main agent's model does not change, and Pi still manages provider authentication.
 - In **Settings**, use `Tab` to switch between **Context** and **Optimizer**. Select a row for details and use `PgUp` / `PgDn` to read more.
-- `Enter` stages a numeric edit; `Ctrl+S` back in Settings saves it without leaving the current group or selection. `Esc` in the numeric editor cancels the current edit. In Settings itself, `Esc` closes the workspace and discards any unsaved settings changes. Context changes apply to the next round, not the current round. The model, thinking level, and optimization prompt save separately.
-- In **Optimizer → Optimization prompt**, press `Enter` to edit Refine’s rewrite policy without leaving Settings. Press `Ctrl+S`, then `y` to confirm. `Esc` from confirmation returns to your draft; `Esc` from the editor discards your edits. The policy applies only to Refine, starting with the next round.
+- Open a numeric setting with `Enter`. Type a value or press `Tab` to focus the presets, choose with the arrow keys and press `Enter` to use one. Press `Enter` on the value to stage it or `Ctrl+S` in either view to save it along with other staged settings. In the numeric editor, `Esc` cancels that edit. On the Settings list, `Esc` asks before discarding staged changes and closing. Context changes apply from the next round. The model, thinking level, and optimization prompt save separately.
+- In **Optimizer → Optimization prompt**, press `Enter` to edit Refine’s rewrite policy. Press `Ctrl+S`, then `y` to confirm the save. Press `Esc` on a changed draft to review whether to discard it. From either confirmation, `Esc` returns to the draft. The policy applies only to Refine, starting with the next round.
 - The config file is `prompt-refine.json` in your Pi agent directory. See the [example config](../examples/prompt-refine.json); its model entry is illustrative. After editing the file, run `/reload` in Pi.
 
 ## What the rewrite provider receives

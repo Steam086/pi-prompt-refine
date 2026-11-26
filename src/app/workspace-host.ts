@@ -207,7 +207,9 @@ export function createWorkspaceHost({ controller, readConfig, openHint, taskPosi
               if (finishModelPicker) modelPicker?.handleInput?.(data);
               return;
             }
-            if (workspace.handleInput(data)) return;
+            const handled = workspace.handleInput(data);
+            if (handled === "close") { finish(); return; }
+            if (handled) return;
             const navigationKey = parseKey(data);
             if (keybindings.matches(data, "tui.select.cancel") || navigationKey === "ctrl+\\") { finish(); return; }
             if (keybindings.matches(data, "tui.input.submit")) return;

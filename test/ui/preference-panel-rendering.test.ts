@@ -153,8 +153,10 @@ describe("preference rendering and responsiveness", () => {
     f.panel.handleInput("l");
     for (const hint of [["n", "Add"], ["e", "Edit"], ["d", "Delete"]] as KeyHint[]) expect(f.panel.render(100).join("\n")).toContain(formatKeyHint(hint, f.theme));
     f.panel.handleInput(enter); check(["↑↓ / PgUp / PgDn", "Scroll"], ["Esc", "Back"]); f.panel.handleInput(esc);
-    f.panel.handleInput("n"); check(["Enter", "Next field"], ["Tab / Shift+Tab", "Fields"], ["Esc", "Back"]);
+    f.panel.handleInput("n"); check(["Enter", "Next field"], ["Tab / Shift+Tab", "Fields"], ["Esc", "Back"], ["Ctrl+S", "Save to library"]);
     f.panel.handleInput("Name"); f.panel.handleInput(tab); check(["Enter", "Newline"]);
+    f.panel.handleInput(tab); check(["Enter", "Show options"]);
+    f.panel.handleInput(enter); check(["Enter", "Hide options"]);
     f.panel.handleInput(tab); check(["Enter", "Change scope"]);
     f.panel.handleInput(tab); check(["Enter", "Change type"]);
     f.panel.handleInput(tab); check(["Enter", "Next field"]);
@@ -238,7 +240,8 @@ describe("preference rendering and responsiveness", () => {
     const f = setup([], "Extra", name); await loaded(f.panel);
     f.panel.handleInput("l"); f.panel.handleInput("n"); save(f.panel);
     expect(f.panel.render(100).join("\n")).toContain(f.theme.fg("warning", "⚠ Name must contain 1–120 characters."));
-    f.panel.handleInput(tab); f.panel.handleInput("Name");
+    expect(text(f.panel)).toContain("› Name:");
+    f.panel.handleInput("Name");
     f.repo.save.mockRejectedValueOnce(new Error("Write conflict 中文😀")); save(f.panel); await loaded(f.panel);
     for (const rows of [40, 12, 8, 5]) for (const width of [20, 40, 100]) {
       f.terminal.rows = rows; f.terminal.columns = width;

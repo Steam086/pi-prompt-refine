@@ -253,6 +253,12 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
         input("\x1b");
       }
     }
+    if (choice === undefined || choice === "empty" || choice === false) {
+      expect(frame()).toContain("Discard unsaved prompt?");
+      input("\x1b");
+      expect(frame()).not.toContain("Discard unsaved prompt?");
+      input("\x1b"); input("y");
+    }
     expect(frame()).toContain("› Optimization prompt");
     expect(frame()).toContain("Unsaved settings changes");
     input("\x1b[D");
@@ -271,7 +277,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(JSON.parse(after).systemPrompt).toBe(expected);
     expect(JSON.parse(after).projectContext).toEqual(JSON.parse(before).projectContext);
     if (choice !== true) expect(after).toBe(before);
-    input("\x1b"); input("q"); await view;
+    input("\x1b"); input("y"); await view;
     await harness.reload();
     await harness.command("optimize", harness.context);
     await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledOnce());
@@ -354,8 +360,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.complete).not.toHaveBeenCalled();
     expect(harness.editorWrites).toEqual([]);
     expect(harness.sent).toEqual([]);
-    if (origin === "settings") harness.panelInput("\x1b");
-    harness.panelInput("q");
+    if (origin === "settings") { harness.panelInput("\x1b"); harness.panelInput("y"); }
+    else harness.panelInput("q");
     await view;
   });
 
@@ -399,7 +405,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.customCalls()).toBe(1);
     expect(harness.complete).not.toHaveBeenCalled();
     harness.panelInput("\x1b");
-    harness.panelInput("q");
+    harness.panelInput("y");
     await view;
     expect(harness.editorWrites).toEqual([]);
   });

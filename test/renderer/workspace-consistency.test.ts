@@ -234,6 +234,8 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         operationHint(narrowError, "Esc", "Cancel");
         input("\x1b");
         Object.assign(terminal, { columns, rows }); workspace.invalidate();
+        expect(strip(frame("Optimization prompt / discard confirmation", false).join("\n"))).toContain("Discard unsaved prompt?");
+        input("y");
         expect(strip(frame("Optimization prompt / cancel edit", false).join("\n"))).toContain("› Optimization prompt");
         expect(savePrompt).toHaveBeenCalledTimes(1);
         expect(saveContext).not.toHaveBeenCalled();
@@ -241,14 +243,14 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         input("\x1b[A"); input("\x1b[A"); input("\r"); // Reach History characters from Project instructions.
         const number = passivePage("Settings / number", "Settings", ["Esc", "Cancel"]);
         const rule = number.findIndex((line, index) => index > 0 && /^─+$/u.test(strip(line).slice(1, -1).trim()));
-        expect(number[rule + 1]).toContain(theme.fg("muted", "› ") + theme.getFgAnsi("text") + "16000");
+        expect(strip(number[rule + 1])).toContain("› Value: 16000");
         input("\x15"); input("-1"); input("\r");
         expect(frame("Settings / validation").join("\n")).toContain(theme.fg("warning", "Enter 0–100000 characters (whole numbers)."));
         Object.assign(terminal, { columns: 32, rows: 9 }); workspace.invalidate();
         const short = frame("Settings / validation after resize", false).join("\n");
         expect(short).toContain(`${theme.fg("muted", "Esc")} ${theme.fg("muted", "Cancel")}`);
         expect(short).toContain(theme.getFgAnsi("warning") + "Enter 0–100000");
-        expect(short).toContain(theme.fg("muted", "› ") + theme.getFgAnsi("text") + "-1");
+        expect(strip(short)).toContain("› Value: -1");
         Object.assign(terminal, { columns, rows }); workspace.invalidate();
         input("\x1b"); input("\x1b[D"); input("\x1b[D");
         expect(frame("Back to Preview", false)).toEqual(previewFrame);
@@ -314,6 +316,8 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         input("\r"); input("\t"); // Reading consumes both keys without leaving the child page.
         expect(frame("Preferences / read after input", false).join("\n")).toBe(reading);
         input("\x1b"); input("\x1b");
+        expect(frame("Back to Preferences control", false).join("\n")).toContain(theme.fg("text", theme.bold("› Preferences: None")));
+        input("\x1b[Z");
         expect(frame("Back to Revise", false).join("\n")).toBe(revision);
         expect(position.selectedId).toBe(1);
         expect(revise).not.toHaveBeenCalled();

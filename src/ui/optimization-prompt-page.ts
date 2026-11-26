@@ -1,6 +1,6 @@
 import { parseKey, visibleWidth, wrapTextWithAnsi, type KeybindingsManager } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { operationHintRows, type KeyHint } from "../key-hints.js";
+import { discardHintRows, operationHintRows, type KeyHint } from "../key-hints.js";
 import { panelHeader, workspaceTabs, type PanelLayout } from "../panel-layout.js";
 import { sanitizeTerminalText } from "../presentation.js";
 import type { PromptInput } from "../prompt-input.js";
@@ -14,7 +14,7 @@ export interface OptimizationPromptTarget {
 /** Settings owns the list draft; this child owns only the policy draft and its confirmation. */
 export class OptimizationPromptPage {
   private readonly initial: string;
-  private confirmation?: string;
+  private confirmation?: { kind: "save"; text: string } | { kind: "discard" };
   private saving = false;
   private error = "";
   private hasFocus = false;
@@ -47,20 +47,26 @@ export class OptimizationPromptPage {
     if (this.disposed || this.saving) return;
     const key = parseKey(data);
     const cancel = key === "escape" || key === "ctrl+\\" || this.keys.matches(data, "tui.select.cancel");
-    if (this.confirmation !== undefined) {
-      if (key === "y") void this.save(this.confirmation);
-      else if (cancel || key === "n") {
+    if (this.confirmation) {
+      if (key === "y") {
+        if (this.confirmation.kind === "save") void this.save(this.confirmation.text);
+        else this.close();
+      } else if (cancel || key === "n") {
         this.confirmation = undefined;
         this.focused = this.hasFocus;
       }
     } else if (cancel) {
-      this.close();
+      if (this.input.editor.getExpandedText() === this.initial) this.close();
+      else {
+        this.confirmation = { kind: "discard" };
+        this.focused = this.hasFocus;
+      }
     } else if (key === "ctrl+s") {
       const text = this.input.editor.getExpandedText();
       if (!text.trim()) this.error = "Prompt cannot be empty.";
       else if (text === this.initial) this.close();
       else {
-        this.confirmation = text;
+        this.confirmation = { kind: "save", text };
         this.focused = this.hasFocus;
       }
     } else {
@@ -90,25 +96,28 @@ export class OptimizationPromptPage {
     const { theme } = this;
     const { innerWidth: width } = layout;
     const confirming = this.confirmation !== undefined;
-    const confirmTitle = "Save optimization prompt?";
+    const discard = this.confirmation?.kind === "discard";
+    const confirmTitle = discard ? "Discard unsaved prompt?" : "Save optimization prompt?";
     const heading = this.saving ? "Saving prompt…" : confirming
-      ? (visibleWidth(confirmTitle) <= width ? confirmTitle : "Save prompt?") : "Optimization prompt";
+      ? (visibleWidth(confirmTitle) <= width ? confirmTitle : discard ? "Discard prompt?" : "Save prompt?") : "Optimization prompt";
     const title = theme.fg("text", theme.bold(heading));
     const scope = width >= 34 ? "Refine only · Applies next round" : "Refine only · Next round";
-    const status = this.error ? theme.fg("warning", visibleWidth(this.error) <= width ? this.error : "Empty prompt")
+    const status = this.error && !confirming ? theme.fg("warning", visibleWidth(this.error) <= width ? this.error : "Empty prompt")
       : !confirming && visibleWidth(scope) <= width ? theme.fg("muted", scope) : "";
-    const primary: KeyHint[] = confirming
-      ? [["Esc", width >= 8 ? "Back" : ""], ["y", "Save"]]
+    const primary: KeyHint[] = confirming ? [["Esc", width >= 8 ? "Back" : ""], ["y", "Save"]]
       : [["Esc", width >= 10 ? "Cancel" : ""], [width >= 34 ? "Ctrl+S" : "^S", "Save"]];
-    const hints = this.saving ? [] : operationHintRows(primary, confirming ? undefined : ["Enter", "Newline"], layout, theme);
+    const hints = this.saving ? [] : discard ? discardHintRows(layout, theme)
+      : operationHintRows(primary, confirming ? undefined : ["Enter", "Newline"], layout, theme);
     const tabs = workspaceTabs(layout, "Settings", theme);
-    const header = layout.headerHeight === 1 && this.error ? [status] : [title, status];
+    const header = layout.headerHeight === 1 && status && this.error ? [status] : [title, status];
     const chrome = panelHeader(layout, header, tabs, hints);
     const height = chrome.layout.bodyHeight;
     const body: string[] = [];
     if (confirming) {
       if (!layout.headerHeight) body.push(title);
-      for (const detail of ["Writes to prompt-refine.json for the next round.", "The fixed role and JSON output protocol stay in place."]) {
+      const details = discard ? ["Unsaved edits to the optimization prompt will be discarded."]
+        : ["Writes to prompt-refine.json for the next round.", "The fixed role and JSON output protocol stay in place."];
+      for (const detail of details) {
         const notes = wrapTextWithAnsi(detail, width);
         if (body.length + notes.length > height) break;
         body.push(...notes.map((line) => theme.fg("muted", line)));

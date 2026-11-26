@@ -87,7 +87,7 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
       expect(writes.join("")).toContain("�]52;c;edit-name�");
       input("\x1b"); expect(render()).not.toContain("Discard unsaved form?");
       expect(save).not.toHaveBeenCalled();
-      input("e"); input("\x1b[Z"); input("\r"); await settled();
+      input("e"); input("\x13"); await settled();
       expect(render()).toContain("Write conflict");
       expect(save).toHaveBeenLastCalledWith(original.scope, { name: original.name, body: original.body }, original);
       for (let field = 0; field < 6; field++) {
@@ -97,15 +97,15 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
         }
         input("\t");
       }
-      input("\r"); await settled(); render(); // Retry from Save, without changing the name.
+      input("\x13"); await settled(); render();
       expect(save).toHaveBeenCalledTimes(2);
       expect(current).toEqual({ ...original, version: 2 });
       const expected = structuredClone(current);
-      input("e"); input("\x05"); input("\x15"); input("Renamed 中文😀"); render();
+      input("e"); input("\x1b[Z"); input("\x05"); input("\x15"); input("Renamed 中文😀"); render();
       input("\x1b"); expect(render()).toContain("Discard unsaved form?");
       input("n"); expect(render()).toContain("Renamed 中文😀");
       expect(save).toHaveBeenCalledTimes(2);
-      input("\x1b[Z"); input("\r"); await settled(); render();
+      input("\x13"); await settled(); render();
       expect(save).toHaveBeenLastCalledWith(original.scope, { name: "Renamed 中文😀", body: original.body }, expected);
       expect(close).not.toHaveBeenCalled();
     } finally {
@@ -173,14 +173,17 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
         expect(focused).toContain(theme.bg("selectedBg", "").split("\x1b[49m")[0]);
       }
       input("l"); input("n"); input("Saved 中文😀");
-      for (const field of ["Name", "Instruction", "Scope", "Type", "Description", "Save"]) {
+      for (const field of ["Name", "Instruction", "Options", "Scope", "Type", "Description", "Save"]) {
         Object.assign(terminal, { columns: 100, rows: 40 }); panel.invalidate();
-        expect(render()).toContain(`Focus: ${field}`);
-        expect(render()).not.toContain("Adoption:");
-        if (field === "Save") expect(panel.render(100).join("\n")).toContain(theme.fg("muted", "Save to library"));
+        const frame = render();
+        expect(frame).toContain(`› ${field}`);
+        expect(frame).not.toContain("Adoption:");
+        const line = panel.render(100).find((line) => stripVTControlCharacters(line).includes(`› ${field}`));
+        expect(line).toContain(theme.bg("selectedBg", "").split("\x1b[49m")[0]);
         for (const [columns, rows] of [[40, 16], [20, 8], [100, 40]]) {
           Object.assign(terminal, { columns, rows }); panel.invalidate(); render();
         }
+        if (field === "Options") input("\r");
         if (field !== "Save") input("\t");
       }
       expect(close).not.toHaveBeenCalled();
@@ -222,12 +225,12 @@ describe.each(["regular", "fullscreen"] as const)("preference selection terminal
         Object.assign(terminal, { columns, rows }); panel.invalidate();
         input("\x1b[6~"); render(); input("\x1b[5~"); render();
       }
-      input("\x1b"); input("e"); input("Edited "); input("\x1b[Z"); input("\r");
+      input("\x1b"); input("e"); input("\x1b[Z"); input("Edited "); input("\x13");
       for (let i = 0; i < 4; i++) await Promise.resolve();
       expect(render()).toContain("Saved to library");
       // Storage recovery names the real Add action, including in a short warning row.
       versionLimit = true;
-      input("e"); input("\x05"); input("\x15"); input("Unsaved 中文😀"); input("\x1b[Z"); input("\r");
+      input("e"); input("\x1b[Z"); input("\x05"); input("\x15"); input("Unsaved 中文😀"); input("\x13");
       for (let i = 0; i < 4; i++) await Promise.resolve();
       for (const [columns, rows] of [[100, 40], [20, 8], [100, 40]]) {
         Object.assign(terminal, { columns, rows }); panel.invalidate();

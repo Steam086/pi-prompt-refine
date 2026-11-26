@@ -307,7 +307,7 @@ describe("shared refine workspace", () => {
             expect(hints).toContain(`${action ? `Enter: ${action}  ` : ""}${optimizer ? "Tab: Next group  " : ""}Esc: ${back}`);
             if (!action) expect(hints).not.toContain("Enter:");
             expect(footerRows[0]).toContain(formatKeyHint(["Ctrl+S", "Save"], theme, 1, "secondary"));
-            expect(footerRows[0]).toContain(formatKeyHint(["Esc", dirty ? "Discard and close" : "Close"], theme, 1, "secondary"));
+            expect(footerRows[0]).toContain(formatKeyHint(["Esc", dirty ? "Discard…" : "Close"], theme, 1, "secondary"));
           }
           // Cache hits must retain the packed frame unchanged.
           expect(workspace.render(width)).toEqual(lines);
@@ -380,11 +380,13 @@ describe("shared refine workspace", () => {
     await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain("Context saved"));
   });
 
-  it.each(["\x1b", "q", "\x1c"])("delegates Settings dismissal without saving with %j", (key) => {
+  it.each(["\x1b", "q", "\x1c"])("asks before dismissing dirty Settings with %j", (key) => {
     const { workspace, actions } = create(40, "dark", true);
     workspace.openSettings();
     workspace.handleInput("\r");
-    expect(workspace.handleInput(key)).toBe(false);
+    expect(workspace.handleInput(key)).toBe(true);
+    expect(textOf(workspace.render(100))).toContain("Discard unsaved settings?");
+    expect(workspace.handleInput("y")).toBe("close");
     expect(actions.saveContext).not.toHaveBeenCalled();
   });
 

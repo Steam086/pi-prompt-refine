@@ -35,6 +35,12 @@ export function operationHintRows(primary: KeyHint[], secondary: KeyHint | undef
   return footerHeight > 1 && visibleWidth(extra) <= width ? [first, extra] : [first];
 }
 
+export function discardHintRows(layout: PanelLayout, theme: HintTheme): string[] {
+  const { innerWidth: width } = layout;
+  return operationHintRows([["Esc", width >= 28 ? "Keep editing" : width >= 20 ? "Keep" : ""],
+    ["y", width >= 15 ? "Discard" : ""]], undefined, layout, theme);
+}
+
 /** Low-emphasis chrome: keep key/action pairs together, wrap rather than omit hints. */
 export function wrappedKeyHints(hints: KeyHint[], width: number, theme: HintTheme, compact = false, gap = " · "): string[] {
   if (width < 1) return [];

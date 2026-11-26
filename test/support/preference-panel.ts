@@ -52,8 +52,7 @@ export function search(panel: PreferencePanel, query: string) {
 }
 
 export function save(panel: { handleInput(data: string): unknown }) {
-  panel.handleInput(backTab);
-  panel.handleInput(enter);
+  panel.handleInput(ctrlS);
 }
 
 export const listRows = (panel: PreferencePanel, width = 70) => text(panel, width).split("\n").filter((line) => /\[[x ]\]/.test(line));

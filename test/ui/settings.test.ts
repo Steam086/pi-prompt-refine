@@ -65,10 +65,9 @@ describe("Settings budgets and limits", () => {
         const field = frame.findIndex((line) => line.includes(CURSOR_MARKER));
         const divider = frame.findIndex((line) => /^[│ ]*─+[│ ]*$/u.test(stripVTControlCharacters(line)));
         expect(field).toBeGreaterThan(0);
-        expect(frame[field]).toContain(f.theme.fg("muted", "› ") + f.theme.getFgAnsi("text") + value);
+        expect(frame[field]).toContain(f.theme.bg("selectedBg", f.theme.fg("text", f.theme.bold("› Value:"))) + " " + f.theme.getFgAnsi("text") + value);
         if (divider >= 0) expect(field).toBe(divider + 1);
         expect(frame.slice(0, field).join("\n")).not.toContain("Presets:");
-        if (width >= 60) expect(frame.slice(field + 1).join("\n")).toContain(f.theme.fg("muted", "Ctrl+S in Settings saves staged changes."));
         if (width === 160) expect(frame.slice(field + 1).join("\n")).toContain(f.theme.fg("muted", `Presets: ${spec.presets.join(" / ")}`));
       }
       f.workspace.handleInput("\x1b");
@@ -87,8 +86,6 @@ describe("Settings budgets and limits", () => {
     expect(f.actions.saveContext).not.toHaveBeenCalled();
     f.workspace.handleInput("\x1b[Z");
     f.value(String(spec.min));
-    f.workspace.handleInput("\r");
-    expect(f.text()).toContain("Unsaved settings changes");
     expect(f.saved[spec.field]).not.toBe(spec.min * spec.scale);
     f.workspace.handleInput("\x13");
     expect(f.actions.saveContext).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ [spec.field]: spec.min * spec.scale }));
@@ -100,8 +97,10 @@ describe("Settings budgets and limits", () => {
     f.workspace.handleInput("\r");
     f.value(String(spec.max));
     f.workspace.handleInput("\r");
-    expect(f.text()).toContain("Esc: Discard and close");
-    expect(f.workspace.handleInput("\x1b")).toBe(false);
+    expect(f.text()).toContain("Unsaved settings changes");
+    expect(f.workspace.handleInput("\x1b")).toBe(true);
+    expect(f.text()).toContain("Discard unsaved settings?");
+    expect(f.workspace.handleInput("y")).toBe("close");
     expect(f.saved[spec.field]).toBe(spec.min * spec.scale);
     f.workspace.openSettings(undefined, Number(cursor));
     expect(f.text()).not.toContain("Unsaved settings changes");
@@ -115,8 +114,12 @@ describe("Settings budgets and limits", () => {
     for (const preset of spec.presets) {
       f.workspace.handleInput("\r");
       f.value("invalid");
-      // Unknown custom values start at the first preset; continue to this preset.
-      for (let i = 0; i <= spec.presets.indexOf(preset); i++) f.workspace.handleInput("\t");
+      f.workspace.handleInput("\t");
+      expect(f.text()).toContain("Value: invalid");
+      for (let i = 0; i < spec.presets.indexOf(preset); i++) f.workspace.handleInput("\x1b[B");
+      expect(f.text()).toContain(`› Preset: ${preset}`);
+      f.workspace.handleInput("\r");
+      expect(f.text()).toContain(`› Value: ${preset}`);
       f.workspace.handleInput("\r");
       const row = f.workspace.render(100).map(stripVTControlCharacters).find((line) => line.includes(`› ${spec.label}`));
       expect(row).toContain(preset === 0 ? "Off" : `${preset} ${spec.unit}`);
@@ -125,6 +128,31 @@ describe("Settings budgets and limits", () => {
     expect(f.actions.submit).not.toHaveBeenCalled();
     f.workspace.handleInput("\x13");
     expect(f.actions.saveContext).toHaveBeenCalledWith(expect.objectContaining({ [spec.field]: spec.presets.at(-1)! * spec.scale }));
+  });
+
+  it.each(["dark", "light"])("highlights the preset at short heights and retains the numeric edit after a failed save (%s)", async (name) => {
+    const f = fixture(name);
+    const { workspace, theme, terminal, actions } = f;
+    workspace.openSettings(undefined, 8);
+    workspace.handleInput("\r");
+    f.value("23");
+    workspace.handleInput("\t");
+    for (const [columns, rows] of [[100, 40], [24, 8], [100, 40]]) {
+      Object.assign(terminal, { columns, rows });
+      expect(workspace.render(columns!).join("\n")).toContain(theme.bg("selectedBg", theme.fg("text", theme.bold("› Preset: 0 (1/5)"))));
+    }
+    actions.saveContext.mockRejectedValueOnce(new Error("Unavailable"));
+    workspace.handleInput("\x13");
+    await vi.waitFor(() => expect(f.text()).toContain("Could not save settings"));
+    expect(f.text()).toContain("› Value: 23");
+    expect(actions.saveContext).toHaveBeenLastCalledWith(expect.objectContaining({ maxMessages: 23 }));
+    workspace.handleInput("\x1b");
+    expect(f.text()).toContain("Could not save settings");
+    expect(f.text()).toContain("Unsaved settings changes");
+    workspace.handleInput("\x13");
+    await vi.waitFor(() => expect(f.text()).toContain("Settings saved"));
+    expect(actions.saveContext).toHaveBeenCalledTimes(2);
+    expect(f.saved.maxMessages).toBe(23);
   });
 
   it.each(Object.entries(NUMBER_SETTINGS))("validates both boundaries and retains invalid input for %s", (_cursor, spec) => {

@@ -124,24 +124,38 @@ export function composeRevision(selected: readonly SelectedPreference[], freeTex
   if (freeText.trim()) blocks.push(entries.length ? `Current user instructions:\n${freeText}` : freeText);
   return blocks.join("\n\n");
 }
-/** Only the storage reader accepts legacy adoption fields, before normalizing to manual. */
-export function metadataValidation(value: unknown, legacy = false): string | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return "Metadata must be a JSON object.";
+type PreferenceValidationIssue = { field: "name" | "instruction" | "type" | "description"; message: string };
+
+function metadataIssue(value: unknown, legacy: boolean): PreferenceValidationIssue | undefined {
+  const typeIssue = (message: string): PreferenceValidationIssue => ({ field: "type", message });
+  if (!value || typeof value !== "object" || Array.isArray(value)) return typeIssue("Metadata must be a JSON object.");
   const data = value as Record<string, unknown>;
-  if (typeof data.description !== "string" || !data.description.trim() || data.description.length > 2000) return "Description must contain 1–2000 characters.";
-  if (data.kind !== "rewrite" && data.kind !== "task" && data.kind !== "result") return "Preference type must be rewrite, task or result.";
-  if (data.activation !== "manual" && !(legacy && data.activation === "auto")) return "Preferences must be selected manually.";
-  if (legacy) {
-    if (data.match !== undefined && !["always", "parallel", "sequence"].includes(data.match as string)) return "Unknown legacy adoption condition.";
-    if (data.activation === "auto" && (data.kind !== "rewrite" || data.match === undefined)) return "Invalid legacy automatic preference.";
+  if (typeof data.description !== "string" || !data.description.trim() || data.description.length > 2000) {
+    return { field: "description", message: "Description must contain 1–2000 characters." };
   }
-  if (Object.keys(data).some((key) => !["description", "kind", "activation", ...(legacy ? ["match"] : [])].includes(key))) return "Unknown preference metadata field.";
+  if (data.kind !== "rewrite" && data.kind !== "task" && data.kind !== "result") return typeIssue("Preference type must be rewrite, task or result.");
+  if (data.activation !== "manual" && !(legacy && data.activation === "auto")) return typeIssue("Preferences must be selected manually.");
+  if (legacy) {
+    if (data.match !== undefined && !["always", "parallel", "sequence"].includes(data.match as string)) return typeIssue("Unknown legacy adoption condition.");
+    if (data.activation === "auto" && (data.kind !== "rewrite" || data.match === undefined)) return typeIssue("Invalid legacy automatic preference.");
+  }
+  if (Object.keys(data).some((key) => !["description", "kind", "activation", ...(legacy ? ["match"] : [])].includes(key))) return typeIssue("Unknown preference metadata field.");
   return undefined;
 }
+
+/** Only the storage reader accepts legacy adoption fields, before normalizing to manual. */
+export function metadataValidation(value: unknown, legacy = false): string | undefined {
+  return metadataIssue(value, legacy)?.message;
+}
+
+export function preferenceValidationIssue(value: PreferenceValue): PreferenceValidationIssue | undefined {
+  if (!value.name.trim() || value.name.length > PREFERENCE_NAME_LIMIT) return { field: "name", message: `Name must contain 1–${PREFERENCE_NAME_LIMIT} characters.` };
+  if (!value.body.trim() || value.body.length > PREFERENCE_BODY_LIMIT) return { field: "instruction", message: `Instruction must contain 1–${PREFERENCE_BODY_LIMIT} characters.` };
+  return value.metadata === undefined ? undefined : metadataIssue(value.metadata, false);
+}
+
 export function preferenceValidation(value: PreferenceValue): string | undefined {
-  if (!value.name.trim() || value.name.length > PREFERENCE_NAME_LIMIT) return `Name must contain 1–${PREFERENCE_NAME_LIMIT} characters.`;
-  if (!value.body.trim() || value.body.length > PREFERENCE_BODY_LIMIT) return `Instruction must contain 1–${PREFERENCE_BODY_LIMIT} characters.`;
-  return value.metadata === undefined ? undefined : metadataValidation(value.metadata);
+  return preferenceValidationIssue(value)?.message;
 }
 export function searchPreferences(entries: readonly RevisionPreference[], query: string): RevisionPreference[] {
   const needle = query.trim().toLowerCase();

@@ -73,14 +73,14 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 ╭───────────────────────────────────────────────────────╮
 │  History characters   0–100000 characters             │
 │   Preview    Usage    Settings                        │
-│  Esc: Cancel  Enter: Stage  Tab: Preset               │
+│  Esc: Cancel  Ctrl+S: Save  Enter: Stage  Tab: Focus  │
 │  ───────────────────────────────────────────────────  │
-│  › 16000                                              │
-│                                                       │
-│  Ctrl+S in Settings saves staged changes.             │
+│  › Value: 16000                                       │
+│  Presets: 0 / 8000 / 16000 / 32000 / 64000 / 100000   │
 │  Either limit set to 0 turns off history. Counts      │
 │  role labels as well as message text.                 │
-│  Presets: 0 / 8000 / 16000 / 32000 / 64000 / 100000   │
+│                                                       │
+│                                                       │
 │                                                       │
 │                                                       │
 │                                                       │
@@ -91,14 +91,14 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 │  History characters                                   │
 │   Preview    Usage    Settings                        │
 │  Enter 0–100000 characters (whole numbers).           │
-│  Esc: Cancel  Enter: Stage  Tab: Preset               │
+│  Esc: Cancel  Ctrl+S: Save  Enter: Stage  Tab: Focus  │
 │  ───────────────────────────────────────────────────  │
-│  › -1                                                 │
-│                                                       │
-│  Ctrl+S in Settings saves staged changes.             │
+│  › Value: -1                                          │
+│  Presets: 0 / 8000 / 16000 / 32000 / 64000 / 100000   │
 │  Either limit set to 0 turns off history. Counts      │
 │  role labels as well as message text.                 │
-│  Presets: 0 / 8000 / 16000 / 32000 / 64000 / 100000   │
+│                                                       │
+│                                                       │
 │                                                       │
 │                                                       │
 ╰───────────────────────────────────────────────────────╯
@@ -157,8 +157,8 @@ exports[`workspace consistency (regular) > dark theme > keeps shared chrome and 
 === Revise ===
 ╭───────────────────────────────────────────────────────╮
 │  Revise · #1 · model-1   Revision not submitted       │
-│  Ctrl+S Revise · Enter Newline                        │
-│  Esc Back      · Tab Focus                            │
+│  Esc Back · Ctrl+S Revise                             │
+│  Enter Newline · Tab Focus                            │
 │  ───────────────────────────────────────────────────  │
 │  Preferences: None · Review full requirements         │
 │  › Additional requirements:                           │

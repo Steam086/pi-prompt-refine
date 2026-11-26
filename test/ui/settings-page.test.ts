@@ -34,7 +34,7 @@ describe("SettingsPage navigation seam", () => {
       }
       workspace.handleInput(" ");
       expect(workspace.render(160).join("\n")).toContain(theme.fg("warning", "Unsaved settings changes"));
-      expect(footer(workspace.render(160)).join("\n")).toContain(formatKeyHint(["Esc", "Discard and close"], theme, 1, "secondary"));
+      expect(footer(workspace.render(160)).join("\n")).toContain(formatKeyHint(["Esc", "Discard…"], theme, 1, "secondary"));
       expect(actions.saveContext).not.toHaveBeenCalled();
       expect(actions.submit).not.toHaveBeenCalled();
     } finally { bold.mockRestore(); workspace.dispose(); }
@@ -48,8 +48,10 @@ describe("SettingsPage navigation seam", () => {
       for (const width of [160, 100, 40, 20, 12, 160]) {
         const frame = workspace.render(width);
         const hints = footer(frame);
-        const shortcutText = hints.map(strip).join("").replace(/[│\s·]/g, "");
-        expect(shortcutText).toBe(width <= 20 ? "EscCancel↵Stage" : "Esc:CancelEnter:StageTab:Preset");
+        const shortcutText = hints.map(strip).join("\n");
+        expect(shortcutText).toContain("Esc");
+        expect(shortcutText).toMatch(/(?:Ctrl\+S:|\^S) Save/);
+        if (width >= 100) expect(shortcutText).toContain("Enter: Stage  Tab: Focus");
         expect(hints.join("\n")).not.toContain("\x1b[1m");
         if (width >= 100) expect(hints).toHaveLength(1);
         expect(frame.join("\n")).toContain(CURSOR_MARKER);
@@ -67,7 +69,7 @@ describe("SettingsPage navigation seam", () => {
     } finally { bold.mockRestore(); workspace.dispose(); }
   });
 
-  it("delegates only outer group arrows while numeric editing consumes navigation and save", () => {
+  it("delegates only outer group arrows while numeric editing owns focus and save", async () => {
     const tui = { terminal: { rows: 40, columns: 100 }, requestRender: vi.fn() } as unknown as TUI;
     const inputs: PromptInput[] = [];
     const optimizer = vi.fn(() => ({ model: "model", thinking: "high", thinkingEnabled: true }));
@@ -96,14 +98,14 @@ describe("SettingsPage navigation seam", () => {
     expect(editor.focused).toBe(true);
     const text = editor.getExpandedText();
     expect(page.handleInput("\x1b[D")).toBe(true);
-    expect(page.handleInput("\x13")).toBe(true);
     expect(editor.getExpandedText()).toBe(text);
-    expect(saveContext).not.toHaveBeenCalled();
     page.focused = false;
     expect(editor.focused).toBe(false);
     page.focused = true;
     expect(editor.focused).toBe(true);
-    page.handleInput("\x1b");
+    expect(page.handleInput("\x13")).toBe(true);
+    expect(saveContext).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ maxDraftChars: Number(text) }));
+    await vi.waitFor(() => expect(page.editingNumber).toBe(false));
     expect(page.editingNumber).toBe(false);
     expect(editor.focused).toBe(false);
     expect(page.handleInput("\x1b[C")).toBe(false);

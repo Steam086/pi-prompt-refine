@@ -77,12 +77,11 @@ describe("explicit candidate revision", () => {
     h.panelInput(" "); expect(h.panelLines(100).join("\n")).toContain("[x] In Your Own Words");
     h.panelInput(" "); expect(h.panelLines(100).join("\n")).toContain("[ ] In Your Own Words");
     h.panelInput("l"); h.panelInput("n"); h.panelInput("First 中文😀"); h.panelInput("\t"); h.panelInput("Keep literal commands.");
-    for (let i = 0; i < 4; i++) h.panelInput("\t");
-    h.panelInput("\r");
+    h.panelInput("\x13");
     await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Saved; not selected"));
     h.panelInput(" "); h.panelInput("\x1b[13;3u"); h.panelInput("\x13");
     expect(h.panelLines().join("\n")).toContain("Library management only");
-    h.panelInput("e"); h.panelInput("Renamed "); h.panelInput("\x1b[Z"); h.panelInput("\r");
+    h.panelInput("e"); h.panelInput("\x1b[Z"); h.panelInput("Renamed "); h.panelInput("\x13");
     await vi.waitFor(() => expect(h.panelLines().join("\n")).toContain("Saved to library"));
     expect((await store.load()).entries).toEqual([expect.objectContaining({ name: "Renamed First 中文😀", body: "Keep literal commands." })]);
     h.panelInput("d"); h.panelInput("n"); expect((await store.load()).entries).toHaveLength(1);
@@ -127,7 +126,7 @@ describe("explicit candidate revision", () => {
       }
     }
     h.panelInput("p"); await vi.waitFor(() => expect(output()).toContain("[ ] Frozen 中文😀"));
-    h.panelInput("l"); h.panelInput("e"); h.panelInput("Changed "); h.panelInput("\x1b[Z"); h.panelInput("\r");
+    h.panelInput("l"); h.panelInput("e"); h.panelInput("\x1b[Z"); h.panelInput("Changed "); h.panelInput("\x13");
     await vi.waitFor(() => expect(output()).toContain("Saved to library"));
     expect(output()).toContain("Changed Frozen 中文😀");
     h.panelInput("d"); h.panelInput("y");
@@ -263,10 +262,8 @@ describe("explicit candidate revision", () => {
       await vi.waitFor(() => expect(output()).toContain("Deleted from library"));
     } else {
       h.panelInput(change === "add" ? "n" : "e");
-      if (change === "add") h.panelInput("Added 中文😀");
-      h.panelInput("\t"); h.panelInput("Updated body. ");
-      for (let i = 0; i < 4; i++) h.panelInput("\t");
-      h.panelInput("\r");
+      if (change === "add") { h.panelInput("Added 中文😀"); h.panelInput("\t"); }
+      h.panelInput("Updated body. "); h.panelInput("\x13");
       await vi.waitFor(() => expect(output()).toContain(change === "add" ? "Saved; not selected" : "Saved to library"));
     }
     h.panelInput("\x1b");
@@ -532,8 +529,7 @@ describe("explicit candidate revision", () => {
     find(other.name); h.panelInput(" ");
     expect(output()).toContain("2 selected");
     find(entry.name); h.panelInput("l"); h.panelInput("e");
-    h.panelInput("\t"); h.panelInput("\x01"); h.panelInput("Updated: ");
-    h.panelInput("\x1b[Z"); h.panelInput("\x1b[Z"); h.panelInput("\r");
+    h.panelInput("\x01"); h.panelInput("Updated: "); h.panelInput("\x13");
     await vi.waitFor(() => expect(output()).toContain("Saved to library"));
     h.panelInput(" ");
     expect(output()).toContain("Esc: return to the chooser.");

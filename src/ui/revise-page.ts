@@ -1,7 +1,7 @@
 import { matchesKey, parseKey, visibleWidth, wrapTextWithAnsi, type KeybindingsManager, type KeyId } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { panelHeader, type PanelLayoutProvider } from "../panel-layout.js";
-import { alignedKeyHints, fittingKeyHints } from "../key-hints.js";
+import { focusLabel, panelHeader, type PanelLayoutProvider } from "../panel-layout.js";
+import { fittingKeyHints, type KeyHint } from "../key-hints.js";
 import type { PromptInput } from "../prompt-input.js";
 import { sanitizeTerminalText } from "../presentation.js";
 import type { RevisionInput } from "../context.js";
@@ -81,7 +81,6 @@ export class RevisePage {
       },
     };
   }
-  focusRequirementsInput(): void { this.revisionFocus = "input"; }
   private rememberRevision(): void {
     if (!this.revisionTarget) return;
     this.revisionDrafts.set(this.revisionTarget.key, { freeText: this.revisionInput.editor.getExpandedText(), selected: structuredClone(this.revisionSelected) });
@@ -92,7 +91,7 @@ export class RevisePage {
     const key = parseKey(data);
     if (this.reviewingRequirements) {
       if (this.keys.matches(data, "tui.select.cancel") || key === "ctrl+\\") {
-        this.reviewingRequirements = false; this.revisionFocus = "input"; this.focused = this.hasFocus;
+        this.reviewingRequirements = false; this.focused = this.hasFocus;
       } else if (key === "up" || key === "down" || key === "pageUp" || key === "pageDown") {
         const delta = key === "up" ? -1 : key === "down" ? 1 : (key === "pageUp" ? -1 : 1) * this.requirementsViewport;
         this.requirementsScroll = Math.max(0, this.requirementsScroll + delta);
@@ -173,7 +172,7 @@ export class RevisePage {
       || `Revision not submitted${this.revisionSelected.some((item) => item.body !== item.sourceBody) ? " · * Edited for this revision only" : ""}`;
     const warning = !!(this.inputError || this.options.preferencesKeyNotice);
     const feedback = theme.fg(warning ? "warning" : "muted", sanitizeTerminalText(`${warning ? "⚠ " : ""}${status}`));
-    const control = (label: string, active: boolean) => active ? theme.bg("selectedBg", theme.fg("text", theme.bold(`› ${label}`))) : theme.fg("muted", label);
+    const control = (label: string, active: boolean) => focusLabel(theme, layout.innerWidth, label, active);
     const preferences = this.options.preferences ? control(sanitizeTerminalText(`Preferences: ${selected}`), this.revisionFocus === "preferences") : undefined;
     const review = control("Review full requirements", this.revisionFocus === "requirements");
     const inputs = control("Additional requirements:", this.revisionFocus === "input");
@@ -183,22 +182,27 @@ export class RevisePage {
     const controls = [...(visibleWidth(strip) <= layout.innerWidth ? [strip] : tools), inputs];
     const header = [theme.fg("text", theme.bold(title)) + identity, feedback];
     if (layout.headerHeight === 1 && warning) header[0] = feedback;
-    const footer = alignedKeyHints([
-      [["Ctrl+S", "Revise"], ["Enter", "Newline"], ...(this.options.preferencesKey ? [[this.options.preferencesKey.toUpperCase(), "Preferences"] as const] : [])],
-      [["Esc", "Back"], ["Tab", "Focus"], ...(canInline ? [["Ctrl+E", inline ? "Editor only" : "Show source"] as const] : [])],
-    ], layout.innerWidth, theme);
-    if (layout.footerHeight === 1) footer[0] = fittingKeyHints([["Esc", "Back"], ["^S", "Revise"], ["Tab", "Focus"]], layout.innerWidth, theme);
-    if (this.revisionFocus !== "input") footer[0] = fittingKeyHints([
-      ...(layout.footerHeight === 1 ? [["Esc", "Back"] as const] : []),
-      ["Enter", this.revisionFocus === "preferences" ? "Preferences" : "Review"], ["Tab", "Focus"], ["Ctrl+S", "Revise"]], layout.innerWidth, theme);
+    const hintWidth = layout.innerWidth;
+    const compact = hintWidth < 30;
+    const primary: KeyHint[] = [["Esc", hintWidth >= 11 ? "Back" : ""],
+      [compact ? "^S" : "Ctrl+S", hintWidth >= 18 ? "Revise" : hintWidth >= 15 ? "Run" : ""]];
+    const secondary: KeyHint[] = [["Enter", this.revisionFocus === "input" ? "Newline" : this.revisionFocus === "preferences" ? "Preferences" : "Review"],
+      ["Tab", "Focus"],
+      ...(this.options.preferencesKey ? [[this.options.preferencesKey.toUpperCase(), "Preferences"] as const] : []),
+      ...(canInline ? [["Ctrl+E", inline ? "Editor only" : "Show source"] as const] : [])];
+    const footer = layout.footerHeight === 1
+      ? [fittingKeyHints([...primary, ...secondary], hintWidth, theme, compact ? " " : " · ")]
+      : [fittingKeyHints(primary, hintWidth, theme, compact ? " " : " · "), fittingKeyHints(secondary, hintWidth, theme)];
     const chrome = panelHeader(inline ? { ...layout, topSeparatorHeight: 0 } : layout, header, [], footer);
     const { bodyHeight } = chrome.layout;
     const editorHeight = inline ? Math.min(10, Math.max(5, Math.floor(bodyHeight * 0.3))) : bodyHeight;
-    const visibleControls = bodyHeight <= 1 && this.revisionFocus === "input" ? [] : bodyHeight >= controls.length + 1 ? controls
-      : [this.revisionFocus === "preferences" ? preferences! : this.revisionFocus === "requirements" ? review : inputs];
+    const activeControl = this.revisionFocus === "preferences" ? preferences! : this.revisionFocus === "requirements" ? review : inputs;
+    const visibleControls = bodyHeight <= 1 && this.revisionFocus === "input" ? [] : bodyHeight >= controls.length + 1 ? controls : [activeControl];
     const inputHeight = Math.max(1, inline ? editorHeight : bodyHeight - visibleControls.length);
     const editor = this.revisionInput.render(layout.innerWidth, inputHeight);
-    const body = layout.headerHeight === 0 && warning ? [feedback, ...editor] : [...visibleControls, ...editor];
+    const body = layout.headerHeight === 0 && warning
+      ? this.revisionFocus === "input" ? [feedback, ...editor] : [...visibleControls, feedback, ...editor]
+      : [...visibleControls, ...editor];
     const lines = chrome.render(body, (text) => theme.fg("borderMuted", text));
     if (!inline) return lines;
     // Keep the source panel's viewport/scroll unchanged; its snapshot has no live action hints.

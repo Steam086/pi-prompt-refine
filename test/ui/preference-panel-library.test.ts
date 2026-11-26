@@ -57,10 +57,10 @@ describe("Library purpose groups", () => {
   it("creates a custom result note and shows its destination while choosing the type", async () => {
     const f = setup([], "Name the unresolved question."); await loaded(f.panel);
     f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput("Open question");
-    for (const key of [tab, tab, tab, enter, enter]) f.panel.handleInput(key);
+    for (const key of [tab, tab, enter, tab, tab, enter, enter]) f.panel.handleInput(key);
     expect(text(f.panel)).toContain("Type: Result notes");
     expect(text(f.panel)).toContain("Shown in Result only.");
-    for (const key of [tab, tab, enter]) f.panel.handleInput(key);
+    f.panel.handleInput(ctrlS);
     await loaded(f.panel);
     expect(f.repo.save).toHaveBeenCalledWith("project", { name: "Open question", body: "Name the unresolved question.",
       metadata: { kind: "result", description: "Open question", activation: "manual" } }, undefined);
@@ -157,6 +157,7 @@ describe("Preferences management without selection", () => {
     }
     f.panel.handleInput(esc); f.panel.handleInput("e");
     expect(text(f.panel)).toContain("Current library body");
+    f.panel.handleInput(backTab);
     f.panel.handleInput("\x05"); f.panel.handleInput("\x15"); f.panel.handleInput("Changed name"); save(f.panel); await loaded(f.panel);
     expect(f.repo.save.mock.calls[0]![2]).toMatchObject({ version: 2, body: "Current library body 中文😀" });
     f.panel.handleInput("d"); f.panel.handleInput("y"); await loaded(f.panel);
@@ -171,8 +172,7 @@ describe("Preferences management without selection", () => {
     const f = setup([], "", "dark", [], "manage"); await loaded(f.panel);
     expect(text(f.panel)).toContain("Library is empty");
     f.panel.handleInput("n"); f.panel.handleInput("First 中文😀"); f.panel.handleInput(tab); f.panel.handleInput("Keep literal commands.");
-    for (let i = 0; i < 4; i++) f.panel.handleInput(tab);
-    f.panel.handleInput(enter); await loaded(f.panel);
+    f.panel.handleInput(ctrlS); await loaded(f.panel);
     expect(f.repo.save).toHaveBeenCalledOnce();
     f.panel.handleInput(" ");
     expect(text(f.panel)).toContain("0 selected (read-only)");
@@ -208,7 +208,7 @@ describe("three-action preference library", () => {
     save(f.panel); await loaded(f.panel); assertSafe();
     expect(f.panel.render(100).join("\n")).toContain(f.theme.fg("error", "⚠ Write conflict 中文😀"));
     expect(f.repo.save).toHaveBeenLastCalledWith(entry.scope, { name: entry.name, body: entry.body }, entry);
-    f.panel.handleInput(enter); await loaded(f.panel); // Explicit retry with the original name and conflict snapshot.
+    f.panel.handleInput(ctrlS); await loaded(f.panel); // Explicit retry with the original name and conflict snapshot.
     expect(f.repo.save).toHaveBeenCalledTimes(2);
     expect(f.repo.save).toHaveBeenLastCalledWith(entry.scope, { name: entry.name, body: entry.body }, entry);
     expect(f.library.entries[0]!.name).toBe(entry.name);
@@ -218,6 +218,7 @@ describe("three-action preference library", () => {
     const entry = { ...a, name: "Original \x1b]52;c;name-payload\x07" };
     const f = setup([selectPreference(entry)], "", themeName, [entry]); await loaded(f.panel);
     f.panel.handleInput("l"); f.panel.handleInput("e");
+    f.panel.handleInput(backTab);
     f.panel.handleInput("\x05"); f.panel.handleInput("\x15"); f.panel.handleInput("Renamed 中文😀");
     f.panel.handleInput(esc); expect(text(f.panel)).toContain("Discard unsaved form?");
     f.panel.handleInput("n"); expect(text(f.panel)).toContain("Name: Renamed 中文😀");
@@ -233,6 +234,7 @@ describe("three-action preference library", () => {
     const entry: RevisionPreference = { ...a, metadata: { kind: "rewrite", activation: "manual", description: "Literal \u001b[31m红色\n第二行\t😀" } };
     const f = setup([], "", themeName, [entry]); await loaded(f.panel);
     f.panel.handleInput("l"); f.panel.handleInput("e");
+    for (const key of [tab, enter]) f.panel.handleInput(key);
     const output = f.panel.render(100).join("\n");
     expect(output).not.toContain("\u001b[31m");
     expect(output).toContain("�[31m红色 第二行    😀");
@@ -243,14 +245,14 @@ describe("three-action preference library", () => {
   it.each(["dark", "light"])("edits classification/description with manual-only selection and bounds each field (%s)", async (themeName) => {
     const f = setup([], "Preserve existing structure.", themeName); await loaded(f.panel);
     f.panel.handleInput("l"); f.panel.handleInput("n"); f.panel.handleInput("Structure");
-    f.panel.handleInput(tab); f.panel.handleInput(tab); f.panel.handleInput(tab);
+    for (const key of [tab, tab, enter, tab, tab]) f.panel.handleInput(key);
     f.panel.handleInput(enter); // Task -> Rewrite.
     expect(text(f.panel)).toContain("Type: Prompt rewriting");
     f.panel.handleInput(tab); f.panel.handleInput("并列问题 😀");
     f.panel.handleInput(tab); // Description -> Save, with no adoption control.
-    expect(text(f.panel)).toContain("Focus: Save");
+    expect(text(f.panel)).toContain("› Save to library");
     expect(text(f.panel)).not.toContain("Adoption:");
-    for (let field = 0; field < 6; field++) {
+    for (let field = 0; field < 7; field++) {
       for (const rows of [5, 8, 16, 40]) for (const width of [1, 12, 40, 100]) {
         f.terminal.rows = rows;
         const lines = f.panel.render(width);
@@ -304,9 +306,8 @@ describe("three-action preference library", () => {
   it("opens Add directly, saves explicitly, and does not auto-select or submit", async () => {
     const f = setup([], "Reusable full text"); await loaded(f.panel); f.panel.handleInput("l");
     f.panel.handleInput("n"); expect(text(f.panel)).toContain("Save new preference");
-    f.panel.handleInput("Saved"); f.panel.handleInput(ctrlS);
-    expect(f.repo.save).not.toHaveBeenCalled();
-    save(f.panel); await loaded(f.panel);
+    f.panel.handleInput("Saved"); f.panel.handleInput(ctrlS); f.panel.handleInput(ctrlS);
+    await loaded(f.panel);
     expect(f.repo.save).toHaveBeenCalledWith("project", { name: "Saved", body: "Reusable full text",
       metadata: { kind: "task", description: "Saved", activation: "manual" } }, undefined);
     expect(text(f.panel)).toContain("0 selected");
@@ -340,8 +341,8 @@ describe("three-action preference library", () => {
 
   it("edits a library entry without silently changing its selected snapshot", async () => {
     const f = setup([selectPreference(a)]); await loaded(f.panel);
-    f.panel.handleInput("l"); f.panel.handleInput("e"); f.panel.handleInput(tab); f.panel.handleInput(" Changed");
-    f.panel.handleInput(backTab); save(f.panel); await loaded(f.panel);
+    f.panel.handleInput("l"); f.panel.handleInput("e"); f.panel.handleInput(" Changed");
+    save(f.panel); await loaded(f.panel);
     expect(f.repo.save).toHaveBeenCalledWith("global", { name: a.name, body: `${a.body} Changed` }, a);
     f.panel.handleInput(enter);
     let all = text(f.panel); f.panel.handleInput("\x1b[6~"); all += text(f.panel);

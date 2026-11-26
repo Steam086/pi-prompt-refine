@@ -255,7 +255,7 @@ describe("Unsent preference selection", () => {
     w.handleInput("p"); await loaded(w);
     w.handleInput("l"); w.handleInput("n"); w.handleInput("New entry"); w.handleInput(tab);
     expect(text(w)).not.toContain(f.originals[0]!.input.draft);
-    for (const key of ["p", "i", "f", enter, ctrlS]) w.handleInput(key);
+    for (const key of ["p", "i", "f", enter]) w.handleInput(key);
     expect(f.run).not.toHaveBeenCalled(); expect(f.complete).not.toHaveBeenCalled();
     w.handleInput(esc); w.handleInput("y"); w.handleInput(esc);
     expect(text(w)).toContain("Preferences · Unsent original");
@@ -347,7 +347,7 @@ describe("Unsent preference selection", () => {
 });
 
 describe("workspace preference integration", () => {
-  it.each(["dark", "light"])("reviews exact snapshots without submitting, restores input, and fits resized %s views", async (theme) => {
+  it.each(["dark", "light"])("reviews exact snapshots without submitting, restores focus, and fits resized %s views", async (theme) => {
     const f = workspaceSetup("alt+p", false, theme); const w = f.workspace;
     w.handleInput("f"); w.handleInput("补充 中文😀\x1b[2J");
     w.handleInput(altP); await loaded(w); w.handleInput(" "); w.handleInput(esc);
@@ -367,7 +367,9 @@ describe("workspace preference integration", () => {
     }
     f.terminal.rows = 40;
     expect(w.render(100).join("\n")).toContain(f.theme.fg("text", f.theme.bold("Full revision requirements")));
-    w.handleInput(esc); w.handleInput("!"); w.handleInput(ctrlS);
+    w.handleInput(esc);
+    expect(text(w)).toContain("› Review full requirements");
+    w.handleInput(tab); w.handleInput("!"); w.handleInput(ctrlS);
     expect(f.submit.mock.calls.at(-1)![0]).toContain(`${a.body}\n\nCurrent user instructions:\n补充 中文😀`);
     expect(f.submit.mock.calls.at(-1)![0]).toContain("!");
     w.handleInput(esc); w.handleInput("f");

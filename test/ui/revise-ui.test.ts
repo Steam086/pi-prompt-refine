@@ -61,6 +61,11 @@ describe("Revise visual hierarchy and feedback", () => {
     expect(output(w)).toContain(f.theme.bg("selectedBg", f.theme.fg("text", f.theme.bold("› Preferences: None"))));
     expect(output(w)).toContain(formatKeyHint(["Enter", "Preferences"], f.theme));
     expect(output(w)).not.toContain(CURSOR_MARKER);
+    w.handleInput("\r"); w.handleInput(esc);
+    expect(output(w)).toContain(f.theme.bg("selectedBg", f.theme.fg("text", f.theme.bold("› Preferences: None"))));
+    for (const width of [20, 40]) {
+      expect(strip(output(w, width))).toMatch(/Esc Back.*(?:\^S|Ctrl\+S)/);
+    }
     w.handleInput(tab);
     expect(output(w)).toContain(formatKeyHint(["Enter", "Review"], f.theme));
     w.handleInput(tab); expect(output(w)).toContain(CURSOR_MARKER);

@@ -232,7 +232,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await view;
   });
 
-  it.each(["\x1c", "q", "\x1b"])("closes Settings with %j without saving unsaved context edits", async (close) => {
+  it.each(["\x1c", "q", "\x1b"])("confirms before closing dirty Settings with %j", async (close) => {
     const harness = await makeHarness({ config: { projectContext: structuredClone(DEFAULT_CONFIG.projectContext) } });
     const file = join(harness.agentDir, "prompt-refine.json");
     const before = await readFile(file, "utf8");
@@ -265,6 +265,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.panelInput("\t");
     expect(harness.panelLines()).toEqual(edited);
     harness.panelInput(close);
+    expect(harness.panelLines().join("\n")).toContain("Discard unsaved settings?");
+    harness.panelInput("y");
     await view;
     expect(harness.complete).not.toHaveBeenCalled();
     expect(harness.customCalls()).toBe(1);
@@ -293,7 +295,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     down(1); number("9000");
     harness.panelInput("\t"); down(3); number("4096");
     down(1); number("120");
-    down(1); number("32");
+    down(1); harness.panelInput("\r"); harness.panelInput("\x15"); harness.panelInput("32");
     expect(await readFile(file, "utf8")).toBe(before);
     expect(harness.complete).not.toHaveBeenCalled();
     expect(harness.customCalls()).toBe(1); // Numeric editors stay inside the same shell.
@@ -493,7 +495,8 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.panelLines().join("\n")).not.toContain("Settings saved");
     expect(harness.panelLines().join("\n")).toContain("Settings");
     harness.panelInput("q"); // Failed persistence stays in Settings for retry.
-    harness.panelInput("q");
+    expect(harness.panelLines().join("\n")).toContain("Discard unsaved settings?");
+    harness.panelInput("y");
     await view;
   });
 });

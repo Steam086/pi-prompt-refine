@@ -37,7 +37,7 @@ describe("shared refine workspace", () => {
     expect(actions.cycleThinking).not.toHaveBeenCalled();
   });
 
-  it("preserves unsaved Context across page arrows until Esc delegates dismissal", () => {
+  it("preserves unsaved Context across page arrows and dismissal confirmation", () => {
     const { workspace, actions } = create(40, "dark", true);
     workspace.handleInput("\x1b[D"); // Preview -> Settings, wrapping left.
     workspace.handleInput(" ");
@@ -49,7 +49,12 @@ describe("shared refine workspace", () => {
     expect(textOf(settings)).toContain("Unsaved settings changes");
     expect(stripVTControlCharacters(textOf(settings))).toContain("› Thinking");
     expect(actions.saveContext).not.toHaveBeenCalled();
-    expect(workspace.handleInput("\x1b")).toBe(false);
+    expect(workspace.handleInput("\x1b")).toBe(true);
+    expect(textOf(workspace.render(100))).toContain("Discard unsaved settings?");
+    workspace.handleInput("\x1b");
+    expect(workspace.render(100)).toEqual(settings);
+    workspace.handleInput("\x1b");
+    expect(workspace.handleInput("y")).toBe("close");
   });
 
   it("switches away from Usage with arrows and keeps Preview's reading state", () => {

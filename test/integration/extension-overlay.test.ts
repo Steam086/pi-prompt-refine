@@ -238,7 +238,7 @@ describe("native overlay workspace", () => {
     expect(h.panelLines().join("\n")).toContain("Unsaved settings changes");
     expect(h.notifications.at(-1)).toContain("No authorized text-generation models");
     expect(h.customCalls()).toBe(1);
-    h.panelInput("\x1b"); h.panelInput("q"); await view;
+    h.panelInput("\x1b"); h.panelInput("y"); await view;
     expect(h.complete).not.toHaveBeenCalled();
   });
 

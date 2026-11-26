@@ -192,7 +192,7 @@ export class RefineWorkspace implements Component, Focusable {
     this.preferencePanel = new PreferencePanel(this.tui, this.theme, this.keys, options.repository,
       draft.selected, draft.freeText, options.maxChars, {
         updateSelection: draft.updateSelection,
-        back: () => { this.revise.focusRequirementsInput(); this.closePreferences(); },
+        back: () => this.closePreferences(),
       }, "revise", this.layout);
     this.focused = this.hasFocus;
     this.tui.requestRender();
@@ -330,7 +330,7 @@ export class RefineWorkspace implements Component, Focusable {
   }
 
   /** Unhandled keys go to the host for overlay dismissal or guarded actions. */
-  handleInput(data: string): boolean {
+  handleInput(data: string): boolean | "close" {
     if (this.disposed) return true;
     this.taskPanel?.clearReadingSelection();
     this.historyPanel?.clearReadingSelection();
@@ -366,7 +366,8 @@ export class RefineWorkspace implements Component, Focusable {
     // leaving the page; arrows at the outer group boundaries still change pages.
     if (this.settings.busy) return true;
     if (this.mode === "context") {
-      if (this.settings.handleInput(data)) return true;
+      const handled = this.settings.handleInput(data);
+      if (handled) return handled;
       if (key !== "left" && key !== "right") return false;
     }
     if (key === "left" || key === "right") {

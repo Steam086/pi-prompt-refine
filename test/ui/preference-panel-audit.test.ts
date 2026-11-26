@@ -3,7 +3,7 @@ import { formatKeyHint } from "../../src/key-hints.js";
 import { PreferencePanel } from "../../src/preference-panel.js";
 import * as presentation from "../../src/presentation.js";
 import { selectPreference, type RevisionPreference } from "../../src/revision-preferences.js";
-import { a, b, ctrlS, down, enter, esc, highlightedRow, listRows, loaded, save, search, setup, tab, text } from "../support/preference-panel.js";
+import { a, b, backTab, ctrlS, down, enter, esc, highlightedRow, listRows, loaded, save, search, setup, tab, text } from "../support/preference-panel.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -233,7 +233,7 @@ describe("new preference save identity and reveal", () => {
     expect(text(f.panel)).toContain("Disk full");
     f.panel.handleInput(esc); f.panel.handleInput("n"); // Keep the failed form.
     expect(text(f.panel)).toContain("Name: Retry me");
-    f.panel.handleInput(enter); await loaded(f.panel); // Save remains focused.
+    save(f.panel); await loaded(f.panel);
     expect(text(f.panel)).toContain("Filters reset to All.");
     expect(highlightedRow(f.panel)).toContain("Retry me");
     f.panel.handleInput(esc);
@@ -269,7 +269,7 @@ describe("new preference save identity and reveal", () => {
   it("keeps edit query, selected-only mode and focus semantics while preserving the selected snapshot", async () => {
     const selected = [selectPreference(b), selectPreference(a)]; const f = setup(selected); await loaded(f.panel);
     f.panel.handleInput("s"); search(f.panel, "Concise"); f.panel.handleInput("l"); f.panel.handleInput(tab);
-    f.panel.handleInput("e"); f.panel.handleInput(" renamed"); save(f.panel); await loaded(f.panel);
+    f.panel.handleInput("e"); f.panel.handleInput(backTab); f.panel.handleInput(" renamed"); save(f.panel); await loaded(f.panel);
     expect(text(f.panel)).toContain("Focus: Actions");
     expect(text(f.panel)).toContain("Selected only ");
     expect(text(f.panel)).toContain("Search: Concise");

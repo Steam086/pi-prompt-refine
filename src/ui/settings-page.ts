@@ -1,8 +1,8 @@
 import { stripVTControlCharacters } from "node:util";
 import { parseKey, truncateToWidth, visibleWidth, wrapTextWithAnsi, type KeybindingsManager } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { panelHeader, panelTabs, workspaceTabs, type PanelLayout, type PanelLayoutProvider } from "../panel-layout.js";
-import { formatKeyHint, passiveHintLayout, type KeyHint } from "../key-hints.js";
+import { focusLabel, panelHeader, panelTabs, workspaceTabs, type PanelLayout, type PanelLayoutProvider } from "../panel-layout.js";
+import { discardHintRows, passiveHintLayout, type KeyHint } from "../key-hints.js";
 import type { PromptInput } from "../prompt-input.js";
 import { sanitizeTerminalText } from "../presentation.js";
 import { DEFAULT_CONFIG } from "../config.js";
@@ -38,8 +38,9 @@ export class SettingsPage {
   private groupCursors = [0, 3];
   private detailPage = 0;
   private detailPages = 1;
-  private numberInput?: { spec: NumberSettingSpec; input: PromptInput; error: string };
+  private numberInput?: { spec: NumberSettingSpec; input: PromptInput; error: string; preset?: number };
   private optimizationPrompt?: OptimizationPromptPage;
+  private confirmingDiscard = false;
   private settingsOptimizer?: SettingsOptimizer;
   private settingsContextEnabled = true;
   private settingsCacheKey = "";
@@ -62,7 +63,7 @@ export class SettingsPage {
   get editingOptimizationPrompt(): boolean { return !!this.optimizationPrompt; }
   set focused(value: boolean) {
     this.hasFocus = value;
-    if (this.numberInput) this.numberInput.input.editor.focused = value;
+    if (this.numberInput) this.numberInput.input.editor.focused = value && this.numberInput.preset === undefined;
     if (this.optimizationPrompt) this.optimizationPrompt.focused = value;
   }
   dispose(): void {
@@ -79,9 +80,10 @@ export class SettingsPage {
   open(selected = this.actions.context(), cursor = this.cursor): void {
     this.original = this.actions.context();
     this.selected = { ...selected };
-    this.numberInput = undefined;
+    this.closeNumber();
     this.optimizationPrompt?.dispose();
     this.optimizationPrompt = undefined;
+    this.confirmingDiscard = false;
     this.cursor = this.settingsGroups.flatMap((group) => group.rows).includes(cursor) ? cursor : 0;
     this.groupCursors[this.settingsGroups[this.settingsGroup]!.memory] = this.cursor;
     this.settingsScrollTop = 0;
@@ -122,40 +124,91 @@ export class SettingsPage {
     this.tui.requestRender();
   }
 
+  private closeNumber(): void {
+    if (!this.numberInput) return;
+    this.numberInput.input.editor.focused = false;
+    this.numberInput = undefined;
+  }
+
+  private async saveSettings(fromNumber = false): Promise<void> {
+    const saved = { ...this.selected };
+    this.saving = true;
+    this.settingsNotice = "";
+    this.settingsFailed = false;
+    this.tui.requestRender();
+    try {
+      const result = await this.actions.saveContext(saved);
+      if (this.disposed) return;
+      this.settingsNotice = result.message;
+      this.settingsFailed = !result.persisted;
+      if (result.persisted) {
+        this.original = saved;
+        if (fromNumber) this.closeNumber();
+      }
+    } catch {
+      if (!this.disposed) {
+        this.settingsNotice = "Could not save settings. Retry with Ctrl+S.";
+        this.settingsFailed = true;
+      }
+    } finally {
+      this.saving = false;
+      if (!this.disposed) this.tui.requestRender();
+    }
+  }
+
   private handleNumberInput(data: string): void {
     const editor = this.numberInput!;
     const { spec, input } = editor;
     const key = parseKey(data);
+    const enter = this.keys.matches(data, "tui.input.submit");
     if (key === "escape" || key === "ctrl+\\" || this.keys.matches(data, "tui.select.cancel")) {
-      input.editor.focused = false;
-      this.numberInput = undefined;
-      this.focused = this.hasFocus;
+      this.closeNumber();
     } else if (key === "tab" || key === "shift+tab") {
-      const value = Number(input.editor.getExpandedText());
-      const index = spec.presets.indexOf(value);
-      const next = index < 0 ? (key === "tab" ? 0 : spec.presets.length - 1)
-        : (index + (key === "tab" ? 1 : spec.presets.length - 1)) % spec.presets.length;
-      input.editor.setText(String(spec.presets[next]));
-      editor.error = "";
-    } else if (this.keys.matches(data, "tui.input.submit")) {
+      editor.preset = editor.preset === undefined ? Math.max(0, spec.presets.indexOf(Number(input.editor.getExpandedText()))) : undefined;
+      this.focused = this.hasFocus;
+    } else if (key !== "ctrl+s" && editor.preset !== undefined) {
+      if (enter) {
+        input.editor.setText(String(spec.presets[editor.preset]));
+        editor.preset = undefined;
+        editor.error = "";
+        this.settingsNotice = "";
+        this.settingsFailed = false;
+        this.focused = this.hasFocus;
+      } else if (this.keys.matches(data, "tui.select.up") || this.keys.matches(data, "tui.select.down")) {
+        const step = this.keys.matches(data, "tui.select.up") ? -1 : 1;
+        editor.preset = (editor.preset + step + spec.presets.length) % spec.presets.length;
+      }
+    } else if (enter || key === "ctrl+s") {
       const text = input.editor.getExpandedText().trim();
       const value = Number(text);
       if (!/^\d+(?:\.\d+)?$/.test(text) || !Number.isSafeInteger(value * spec.scale) || value < spec.min || value > spec.max) {
         editor.error = `Enter ${spec.min}–${spec.max} ${spec.unit}${spec.scale === 1 ? " (whole numbers)" : ""}.`;
+        editor.preset = undefined;
+        this.focused = this.hasFocus;
       } else {
         this.selected[spec.field] = value * spec.scale;
-        input.editor.focused = false;
-        this.numberInput = undefined;
+        if (key === "ctrl+s") {
+          editor.error = "";
+          editor.preset = undefined;
+          this.focused = this.hasFocus;
+          void this.saveSettings(true);
+          return;
+        }
+        this.closeNumber();
         this.settingsNotice = "";
         this.settingsFailed = false;
-        this.focused = this.hasFocus;
       }
-    } else if (key !== "ctrl+s") {
-      editor.error = "";
+    } else {
+      const before = input.editor.getExpandedText();
       input.editor.handleInput(data);
       const text = input.editor.getExpandedText();
       const safe = sanitizeTerminalText(text);
       if (safe !== text) input.editor.setText(safe);
+      if (safe !== before) {
+        editor.error = "";
+        this.settingsNotice = "";
+        this.settingsFailed = false;
+      }
     }
     this.tui.requestRender();
   }
@@ -167,38 +220,50 @@ export class SettingsPage {
   }
 
   private renderNumberInput(width: number): string[] {
-    const { spec, input, error } = this.numberInput!;
-    const hints: KeyHint[] = [["Esc", "Cancel"], ["Enter", "Stage"], ["Tab", "Preset"]];
-    const { layout, tabs, footer } = this.hintLayout(this.layout(width), hints, [["Esc", "Cancel"], ["↵", "Stage"], ["Tab", "Preset"]]);
+    const { spec, input, error, preset } = this.numberInput!;
+    const active = preset !== undefined;
+    const base = this.layout(width);
+    const action = active ? "Use preset" : "Stage";
+    const hints: KeyHint[] = [["Esc", "Cancel"], ["Ctrl+S", base.innerWidth >= 100 ? "Save settings" : "Save"],
+      ["Enter", action], ["Tab", "Focus"]];
+    const compact: KeyHint[] = [["Esc", base.innerWidth >= 16 ? "Cancel" : ""], ["^S", "Save"], ["↵", action], ["Tab", "Focus"]];
+    if (active) { hints.push(["↑↓", "Choose"]); compact.push(["↑↓", "Choose"]); }
+    const { layout, tabs, footer } = this.hintLayout(base, this.saving ? [] : hints, this.saving ? [] : compact);
     const { innerWidth } = layout;
     const theme = this.theme;
-    const status = error || `${spec.min}–${spec.max} ${spec.unit}`;
-    const feedback = theme.fg(error ? "warning" : "muted", status);
-    const header = layout.headerHeight === 1 && error ? [feedback]
+    const warning = error || (this.settingsFailed ? this.settingsNotice : "");
+    const status = this.saving ? "Saving…" : warning || `${spec.min}–${spec.max} ${spec.unit}`;
+    const feedback = theme.fg(warning ? "warning" : "muted", sanitizeTerminalText(status));
+    const header = layout.headerHeight === 1 && warning ? [feedback]
       : [theme.fg("text", theme.bold(spec.label)), feedback];
     const chrome = panelHeader(layout, header, tabs, footer);
     const height = chrome.layout.bodyHeight;
-    const body: string[] = error && !layout.headerHeight && height > 1 ? [feedback] : [];
-    const prefix = innerWidth >= 12 ? "› " : "";
-    // Show the field first, with a small viewport for wrapped or multiline paste.
-    // PromptInput still owns the cursor and scroll position.
-    const indent = " ".repeat(visibleWidth(prefix));
-    const fieldWidth = innerWidth - visibleWidth(prefix);
-    const field = input.render(fieldWidth, Math.min(3, height - body.length));
-    body.push(...field.map((line, index) => theme.fg("muted", index === 0 ? prefix : indent)
-      + theme.fg("text", line)));
-    const save = wrapTextWithAnsi("Ctrl+S in Settings saves staged changes.", innerWidth);
-    if (body.length + save.length <= height) {
-      if (body.length + save.length + 2 <= height) body.push("");
-      body.push(...save.map((line) => theme.fg("muted", line)));
-      for (const note of [spec.description, `Presets: ${spec.presets.join(" / ")}`]) {
-        const block = wrapTextWithAnsi(note, innerWidth);
-        if (body.length + block.length <= height) body.push(...block.map((line) => theme.fg("muted", line)));
-      }
-    } else if (body.length < height) {
-      const compact = theme.fg("muted", "Settings: ") + formatKeyHint(["^S", "Save"], theme, 1, "secondary-compact");
-      if (visibleWidth(compact) <= innerWidth) body.push(compact);
+    const body: string[] = warning && !layout.headerHeight && height > 1 ? [feedback] : [];
+    const room = height - body.length;
+    const presets = active ? `Preset: ${spec.presets[preset]} (${preset + 1}/${spec.presets.length})`
+      : `Presets: ${spec.presets.join(" / ")}`;
+    if (!active || room > 1) {
+      const prefix = innerWidth >= 14 ? focusLabel(theme, innerWidth, "Value:", !active) + " "
+        : innerWidth > 2 ? active ? "  " : focusLabel(theme, 1, "", true) + " " : "";
+      const indent = " ".repeat(visibleWidth(prefix));
+      const field = input.render(innerWidth - indent.length, Math.max(1, Math.min(3, room - 1)));
+      body.push(...field.map((line, index) => (index === 0 ? prefix : indent) + theme.fg("text", line)));
     }
+    if (body.length < height) body.push(focusLabel(theme, innerWidth, presets, active));
+    const help = wrapTextWithAnsi(spec.description, innerWidth);
+    if (body.length + help.length <= height) body.push(...help.map((line) => theme.fg("muted", line)));
+    return chrome.render(body, (text) => theme.fg("borderMuted", text));
+  }
+
+  private renderDiscard(width: number): string[] {
+    const layout = this.layout(width);
+    const theme = this.theme;
+    const title = theme.fg("text", theme.bold(layout.innerWidth >= 26 ? "Discard unsaved settings?" : "Discard changes?"));
+    const hints = discardHintRows(layout, theme);
+    const chrome = panelHeader(layout, [title], workspaceTabs(layout, "Settings", theme), hints);
+    const body = [...(!layout.headerHeight ? [title] : []),
+      ...wrapTextWithAnsi("Unsaved settings will be discarded and the workspace will close.", layout.innerWidth)
+        .map((line) => theme.fg("warning", line))];
     return chrome.render(body, (text) => theme.fg("borderMuted", text));
   }
 
@@ -235,11 +300,24 @@ export class SettingsPage {
   }
 
   /** Delegate tab switches and top-level dismissal; Settings subpages consume their own input. */
-  handleInput(data: string): boolean {
+  handleInput(data: string): boolean | "close" {
     if (this.optimizationPrompt) { this.optimizationPrompt.handleInput(data); return true; }
-    if (this.numberInput) { this.handleNumberInput(data); return true; }
     if (this.saving) return true;
+    if (this.numberInput) { this.handleNumberInput(data); return true; }
     const key = parseKey(data);
+    const cancel = key === "q" || key === "ctrl+\\" || this.keys.matches(data, "tui.select.cancel");
+    if (this.confirmingDiscard) {
+      if (key === "y") {
+        this.confirmingDiscard = false;
+        this.selected = { ...this.original };
+        return "close";
+      }
+      if (cancel || key === "n") {
+        this.confirmingDiscard = false;
+        this.tui.requestRender();
+      }
+      return true;
+    }
     if (key === "left" || key === "right") {
       if (key === "right" ? this.settingsGroup < this.settingsGroups.length - 1 : this.settingsGroup > 0) {
         this.switchSettingsGroup(key === "right" ? 1 : -1);
@@ -247,31 +325,17 @@ export class SettingsPage {
       }
       return false;
     }
-    if (key === "q" || key === "ctrl+\\" || this.keys.matches(data, "tui.select.cancel")) {
-      return false;
+    if (cancel) {
+      if (!settingsDirty(this.selected, this.original)) return false;
+      this.confirmingDiscard = true;
+      this.tui.requestRender();
     } else if (key === "tab") {
       if (this.settingsGroups.length > 1) this.switchSettingsGroup();
     } else if (key === "pageUp" || key === "pageDown") {
       this.detailPage = Math.max(0, Math.min(this.detailPages - 1, this.detailPage + (key === "pageUp" ? -1 : 1)));
       this.tui.requestRender();
     } else if (key === "ctrl+s") {
-      this.saving = true;
-      this.settingsFailed = false;
-      this.tui.requestRender();
-      const saved = { ...this.selected };
-      void this.actions.saveContext(saved).then((result) => {
-        if (this.disposed) return;
-        this.settingsNotice = result.message;
-        this.settingsFailed = !result.persisted;
-        if (result.persisted) this.original = saved;
-      }).catch(() => {
-        if (this.disposed) return;
-        this.settingsNotice = "Could not save settings. Retry with Ctrl+S.";
-        this.settingsFailed = true;
-      }).finally(() => {
-        this.saving = false;
-        if (!this.disposed) this.tui.requestRender();
-      });
+      void this.saveSettings();
     } else if (this.actions.optimizer && this.keys.matches(data, "app.thinking.cycle")) {
       this.cycleThinking();
     } else if (this.keys.matches(data, "tui.input.submit") || key === "space") {
@@ -305,6 +369,7 @@ export class SettingsPage {
   render(width: number): string[] {
     if (this.optimizationPrompt) return this.optimizationPrompt.render(this.layout(width));
     if (this.numberInput) return this.renderNumberInput(width);
+    if (this.confirmingDiscard) return this.renderDiscard(width);
     const baseLayout = this.layout(width);
     const { innerWidth } = baseLayout;
     const { theme } = this;
@@ -332,7 +397,7 @@ export class SettingsPage {
       : this.cursor === 3 ? "Choose" : this.cursor === 5 || NUMBER_SETTINGS[this.cursor] ? "Edit" : "Change";
     const enterHint = (key: string): KeyHint[] => action ? [[key, action]] : [];
     // Saving has a fixed key and an explicit scope, independent of row focus.
-    const close: KeyHint = ["Esc", dirty ? "Discard and close" : "Close"];
+    const close: KeyHint = ["Esc", dirty ? "Discard…" : "Close"];
     const compactClose: KeyHint = ["Esc", innerWidth < (dirty ? 11 : 9) ? "" : dirty ? "Discard" : "Close"];
     const groupHints: KeyHint[] = groups.length > 1 ? [["Tab", innerWidth >= 72 ? "Next group" : "Group"]] : [];
     const { layout, tabs, footer } = this.hintLayout(baseLayout,
