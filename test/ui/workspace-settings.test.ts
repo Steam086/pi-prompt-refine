@@ -257,8 +257,8 @@ describe("shared refine workspace", () => {
     workspace.openSettings();
     const timing = theme.fg("muted", "Context changes take effect next round");
     for (const width of [20, 40, 100]) {
-      for (const [key, context] of [["\x1b[C", false], ["\x1b[D", true], ["\t", false], ["\t", true]] as const) {
-        workspace.handleInput(key);
+      for (const context of [false, true]) {
+        workspace.handleInput("\t");
         const lines = workspace.render(width);
         expect(textOf(lines)).not.toMatch(/Ctrl\+S to save|Changes save on confirmation/);
         if (width === 100) {
@@ -268,8 +268,8 @@ describe("shared refine workspace", () => {
       }
     }
     workspace.handleInput(" ");
-    for (const key of ["\x1b[C", "\x1b[D", "\t", "\t", "\t"]) {
-      workspace.handleInput(key);
+    for (let i = 0; i < 3; i++) {
+      workspace.handleInput("\t");
       const lines = workspace.render(100);
       expect(frameHeader(lines).join("\n")).toContain(theme.fg("warning", "Unsaved settings changes"));
       expect(textOf(lines)).not.toContain(timing);
@@ -399,8 +399,8 @@ describe("shared refine workspace", () => {
     workspace.handleInput("\r");
     workspace.handleInput("\x13");
     await vi.waitFor(() => expect(textOf(workspace.render(100))).toContain("Could not save settings"));
-    for (const key of ["\x1b[C", "\x1b[D"]) {
-      workspace.handleInput(key);
+    for (let i = 0; i < 2; i++) {
+      workspace.handleInput("\t");
       const text = textOf(workspace.render(100));
       expect(text).toContain("Could not save settings");
       expect(text).toContain("Unsaved settings changes");
@@ -417,7 +417,7 @@ describe("shared refine workspace", () => {
     let resolve!: (notice: SettingsResult) => void;
     actions.cycleThinking!.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
     workspace.openSettings();
-    workspace.handleInput("\x1b[C");
+    workspace.handleInput("\t");
     workspace.handleInput("\x1b[Z");
     expect(actions.cycleThinking).toHaveBeenCalledOnce();
     const saving = workspace.render(100);
@@ -433,7 +433,7 @@ describe("shared refine workspace", () => {
     const status = workspace.render(100)[2];
     expect(status).toContain("Thinking level saved");
     expect(status).not.toContain("Context changes take effect next round");
-    workspace.handleInput("\x1b[D");
+    workspace.handleInput("\t");
     expect(workspace.render(100)[2]).toBe(status);
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Project instructions");
     expect(actions.saveContext).not.toHaveBeenCalled();

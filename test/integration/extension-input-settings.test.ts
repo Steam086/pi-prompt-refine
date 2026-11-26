@@ -366,7 +366,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     const result = "x".repeat(20000); // Above the new character guard, within the old one.
     resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: result }) }], stopReason: "stop" });
     await flushPromises();
-    harness.panelInput("\x1b[D"); // Context group -> Usage.
+    harness.panelInput("\x1b[D"); // Settings -> Usage.
     harness.panelInput("\x1b[D"); // Usage -> Preview.
     harness.panelInput("\x1b[B"); // Original root -> completed run.
     harness.panelInput("a");

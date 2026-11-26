@@ -105,11 +105,11 @@ export class SettingsPage {
     return this.settingsGroups.findIndex((group) => group.rows.includes(this.cursor));
   }
 
-  private switchSettingsGroup(direction = 1): void {
+  private switchSettingsGroup(): void {
     const groups = this.settingsGroups;
     const current = this.settingsGroup;
     this.groupCursors[groups[current]!.memory] = this.cursor;
-    const next = groups[(current + direction + groups.length) % groups.length]!;
+    const next = groups[(current + 1) % groups.length]!;
     this.cursor = this.groupCursors[next.memory]!;
     this.settingsScrollTop = 0;
     this.detailPage = 0;
@@ -325,13 +325,7 @@ export class SettingsPage {
       }
       return true;
     }
-    if (key === "left" || key === "right") {
-      if (key === "right" ? this.settingsGroup < this.settingsGroups.length - 1 : this.settingsGroup > 0) {
-        this.switchSettingsGroup(key === "right" ? 1 : -1);
-        return true;
-      }
-      return false;
-    }
+    if (key === "left" || key === "right") return false;
     if (cancel) {
       if (!settingsDirty(this.selected, this.original)) return false;
       this.confirmingDiscard = true;

@@ -362,8 +362,6 @@ export class RefineWorkspace implements Component, Focusable {
       this.tui.requestRender();
       return true;
     }
-    // Input/Revise owns cursor keys. Settings visits its adjacent group before
-    // leaving the page; arrows at the outer group boundaries still change pages.
     if (this.settings.busy) return true;
     if (this.mode === "context") {
       const handled = this.settings.handleInput(data);

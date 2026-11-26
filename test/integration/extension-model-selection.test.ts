@@ -229,7 +229,10 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     if (choice !== "unchanged") {
       input("\x15"); // Clear the prefilled line.
       if (choice === "empty") { input(" "); input("\r"); input(" "); }
-      else { input("Custom optimization instructions"); input("\r"); input("Keep 中文😀"); }
+      else {
+        input("Custom optimization instructions"); input("\r"); input("Keep 文");
+        input("\x1b[D"); input("中"); input("\x1b[C"); input("😀");
+      }
     }
     if (choice === undefined) input("\x1b");
     else input("\x13");
@@ -262,6 +265,10 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(frame()).toContain("› Optimization prompt");
     expect(frame()).toContain("Unsaved settings changes");
     input("\x1b[D");
+    expect(frame()).toContain("Usage · All rounds");
+    input("\x1b[C");
+    expect(frame()).toContain("› Optimization prompt");
+    input("\t");
     expect(frame()).toMatch(/› Project instructions +First only · inactive/);
     input("\t");
     expect(frame()).toContain("› Optimization prompt");
@@ -387,7 +394,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(picker()).not.toContain("Enter Save");
     harness.panelInput("\x1b");
     await vi.waitFor(() => expect(harness.panelLines().join("\n")).toContain("Unsaved settings changes"));
-    harness.panelInput("\x1b[D");
+    harness.panelInput("\t");
     expect(harness.panelLines().join("\n")).toMatch(/Project instructions +Always/);
     harness.panelInput("\t");
     harness.panelInput("\x1b[B");

@@ -73,7 +73,7 @@ describe("SettingsPage navigation seam", () => {
     } finally { bold.mockRestore(); workspace.dispose(); }
   });
 
-  it("delegates only outer group arrows while numeric editing owns focus and save", async () => {
+  it("delegates horizontal arrows while numeric editing owns cursor movement and save", async () => {
     const tui = { terminal: { rows: 40, columns: 100 }, requestRender: vi.fn() } as unknown as TUI;
     const inputs: PromptInput[] = [];
     const optimizer = vi.fn(() => ({ model: "model", thinking: "high", thinkingEnabled: true }));
@@ -92,7 +92,8 @@ describe("SettingsPage navigation seam", () => {
     page.open();
     page.focused = true;
     expect(page.handleInput("\x1b[D")).toBe(false);
-    expect(page.handleInput("\x1b[C")).toBe(true);
+    expect(page.handleInput("\t")).toBe(true);
+    expect(page.handleInput("\x1b[D")).toBe(false);
     expect(page.handleInput("\x1b[C")).toBe(false);
     expect(optimizer).toHaveBeenCalledTimes(1);
     page.open(undefined, 12);
@@ -101,8 +102,12 @@ describe("SettingsPage navigation seam", () => {
     expect(page.editingNumber).toBe(true);
     expect(editor.focused).toBe(true);
     const text = editor.getExpandedText();
+    const cursor = editor.getCursor();
     expect(page.handleInput("\x1b[D")).toBe(true);
+    expect(editor.getCursor().col).toBe(cursor.col - 1);
     expect(editor.getExpandedText()).toBe(text);
+    expect(page.handleInput("\x1b[C")).toBe(true);
+    expect(editor.getCursor()).toEqual(cursor);
     page.focused = false;
     expect(editor.focused).toBe(false);
     page.focused = true;

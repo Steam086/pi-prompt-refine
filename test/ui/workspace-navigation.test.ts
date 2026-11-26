@@ -9,12 +9,12 @@ import { create, textOf } from "../support/workspace.js";
 
 describe("shared refine workspace", () => {
 
-  it.each(["dark", "light"])("cycles pages and Settings groups in both directions with shared chrome in %s", (name) => {
+  it.each(["dark", "light"])("cycles workspace tabs in both directions with shared chrome in %s", (name) => {
     const { workspace, actions, theme } = create(40, name, true);
     const height = workspace.render(100).length;
     for (const [key, pages] of [
-      ["\x1b[C", ["Usage", "Settings", "Settings", "Preview"]],
-      ["\x1b[D", ["Settings", "Settings", "Usage", "Preview"]],
+      ["\x1b[C", ["Usage", "Settings", "Preview"]],
+      ["\x1b[D", ["Settings", "Usage", "Preview"]],
     ] as const) {
       for (const page of pages) {
         expect(workspace.handleInput(key)).toBe(true);
@@ -44,7 +44,7 @@ describe("shared refine workspace", () => {
     workspace.handleInput("\t");
     workspace.handleInput("\x1b[B");
     const settings = workspace.render(100);
-    for (const key of ["\x1b[C", "\x1b[D", "\x1b[D", "\x1b[D", "\x1b[C", "\x1b[C"]) workspace.handleInput(key);
+    for (const key of ["\x1b[C", "\x1b[D", "\x1b[D", "\x1b[C"]) workspace.handleInput(key);
     expect(workspace.render(100)).toEqual(settings);
     expect(textOf(settings)).toContain("Unsaved settings changes");
     expect(stripVTControlCharacters(textOf(settings))).toContain("› Thinking");
@@ -73,7 +73,7 @@ describe("shared refine workspace", () => {
     expect(textOf(workspace.render(100))).toContain("Historical candidate");
     workspace.handleInput("\x1b[C");
     expect(stripVTControlCharacters(workspace.render(100)[1]!)).toContain("Settings");
-    workspace.handleInput("\x1b[C");
+    workspace.handleInput("\t");
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Default model");
     workspace.handleInput("\x1b[A");
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› History characters");
@@ -110,7 +110,7 @@ describe("shared refine workspace", () => {
       for (const width of [1, 8, 12, 20, 40, 100]) {
         const { workspace } = create(rows, name, true);
         const openingHeight = workspace.render(width).length;
-        for (const page of ["Usage", "Settings", "Settings", "Preview"]) {
+        for (const page of ["Usage", "Settings", "Preview"]) {
           workspace.handleInput("\x1b[C");
           const lines = workspace.render(width);
           expect(lines).toHaveLength(openingHeight);
@@ -139,22 +139,18 @@ describe("shared refine workspace", () => {
     expect(actions.saveContext).toHaveBeenCalledWith({ instructions: "first", tree: true, skills: false });
   });
 
-  it.each([
-    ["Tab", "\t", "\t"],
-    ["arrows", "\x1b[C", "\x1b[D"],
-    ["Kitty arrows", "\x1b[1;1C", "\x1b[1;1D"],
-  ])("switches groups with %s without applying pending context and remembers each selection", (_name, next, previous) => {
+  it("switches groups with Tab without applying pending context and remembers each selection", () => {
     const { workspace, actions } = create(40, "dark", true);
     workspace.openSettings();
     workspace.handleInput("\r");
     workspace.handleInput("\x1b[B");
-    workspace.handleInput(next);
+    workspace.handleInput("\t");
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Default model");
     workspace.handleInput("\x1b[B");
-    workspace.handleInput(previous);
+    workspace.handleInput("\t");
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Directory tree");
     expect(textOf(workspace.render(100))).toContain("Unsaved settings changes");
-    workspace.handleInput(next);
+    workspace.handleInput("\t");
     expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Thinking");
     expect(actions.saveContext).not.toHaveBeenCalled();
     expect(actions.cycleThinking).not.toHaveBeenCalled();
@@ -184,35 +180,39 @@ describe("shared refine workspace", () => {
     }
   });
 
-  it("keeps page navigation at Settings group boundaries and when Optimizer is unavailable", () => {
-    for (const optimizer of [false, true]) {
+  it.each([
+    ["arrows", "\x1b[D", "\x1b[C"],
+    ["Kitty arrows", "\x1b[1;1D", "\x1b[1;1C"],
+  ])("uses %s to switch workspace tabs from any Settings section and restores the row", (_name, left, right) => {
+    for (const [optimizer, cursor, label] of [[false, 0, "Project instructions"], [true, 0, "Project instructions"],
+      [true, 4, "Thinking"]] as const) {
       const { workspace } = create(40, "dark", optimizer);
-      workspace.openSettings();
-      workspace.handleInput("\x1b[D");
+      workspace.openSettings(undefined, cursor);
+      const settings = workspace.render(100);
+      expect(stripVTControlCharacters(textOf(settings))).toContain(`› ${label}`);
+      workspace.handleInput(left);
       expect(stripVTControlCharacters(workspace.render(100)[1]!)).toContain("Usage · All rounds");
-      workspace.handleInput("\x1b[C");
-      expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Project instructions");
-      if (optimizer) {
-        workspace.handleInput("\x1b[C");
-        expect(stripVTControlCharacters(textOf(workspace.render(100)))).toContain("› Default model");
-      }
-      workspace.handleInput("\x1b[C");
+      workspace.handleInput(right);
+      expect(workspace.render(100)).toEqual(settings);
+      workspace.handleInput(right);
       expect(stripVTControlCharacters(workspace.render(100)[1]!)).toContain("Prompt refine");
+      workspace.handleInput(left);
+      expect(workspace.render(100)).toEqual(settings);
     }
   });
 
-  it("switches groups with arrows using cached frames without refreshing optimizer state", () => {
+  it("switches groups with Tab using cached frames without refreshing optimizer state", () => {
     const { workspace, actions, theme } = create(40, "dark", true);
     const optimizer = vi.spyOn(actions, "optimizer");
     workspace.openSettings();
     const context = workspace.render(100);
-    workspace.handleInput("\x1b[C");
+    workspace.handleInput("\t");
     const settings = workspace.render(100);
     const paint = vi.spyOn(theme, "fg");
     for (let i = 0; i < 3; i++) {
-      workspace.handleInput("\x1b[D");
+      workspace.handleInput("\t");
       expect(workspace.render(100)).toEqual(context);
-      workspace.handleInput("\x1b[C");
+      workspace.handleInput("\t");
       expect(workspace.render(100)).toEqual(settings);
     }
     expect(paint.mock.calls.filter(([color]) => color !== "borderMuted")).toEqual([]);
