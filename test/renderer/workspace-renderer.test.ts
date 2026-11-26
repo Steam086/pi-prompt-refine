@@ -11,13 +11,12 @@ import { RefineWorkspace } from "../../src/workspace.js";
 import { getThemeByName } from "../support/pi-theme.js";
 import { createRecordingTerminal } from "../support/recording-terminal.js";
 
-// Exercise the real Pi diff renderers, not just component snapshots. Terminal I/O
-// is captured, so these tests make no claims about a physical terminal's latency/IME.
+// Each case drives hundreds of frames through the real Pi diff renderer with captured terminal I/O.
 describe("workspace terminal rendering", () => {
   it.each([
     ["regular", 20, 12, "dark"], ["regular", 40, 24, "dark"], ["regular", 80, 40, "dark"], ["regular", 100, 40, "light"],
     ["fullscreen", 20, 12, "dark"], ["fullscreen", 40, 24, "dark"], ["fullscreen", 80, 40, "dark"], ["fullscreen", 100, 40, "light"],
-  ] as const)("switches without full redraw or screen clearing in %s at %ix%i (%s)", async (mode, columns, rows, themeName) => {
+  ] as const)("switches without full redraw or screen clearing in %s at %ix%i (%s)", { timeout: 15_000 }, async (mode, columns, rows, themeName) => {
     vi.useFakeTimers();
     const { terminal, writes, input } = createRecordingTerminal({ rows, columns }, vi.fn());
     const tui = mode === "regular" ? new TuiMainScreen(terminal) : new TuiAltScreen(terminal);
@@ -63,10 +62,18 @@ describe("workspace terminal rendering", () => {
     });
     tui.addChild(workspace);
     tui.setFocus(workspace);
+    const render = vi.spyOn(workspace, "render");
+    const renderFrame = () => {
+      // Reuse the workspace frame that Pi received for this diff.
+      render.mockClear();
+      tui.renderNow();
+      const frame = render.mock.results.at(-1);
+      if (frame?.type !== "return") throw new Error("Pi did not render the workspace");
+      return frame.value;
+    };
     try {
       tui.start();
-      tui.renderNow();
-      const initialFrame = workspace.render(columns);
+      const initialFrame = renderFrame();
       const initialHeight = initialFrame.length;
       const plain = initialFrame.map(stripVTControlCharacters);
       const back = plain.findIndex((line) => /Esc:? Close/.test(line));
@@ -79,8 +86,8 @@ describe("workspace terminal rendering", () => {
       workspace.openSettings();
       for (const key of ["", "\x1b[B", "\t", "\x1b[B", "\t"]) {
         if (key) input(key);
-        tui.requestRender(); tui.renderNow();
-        const frame = workspace.render(columns);
+        tui.requestRender();
+        const frame = renderFrame();
         const settings = frame.map(stripVTControlCharacters);
         const save = settings.findIndex((line) => /(?:Ctrl\+S: Save|\^S Save)/.test(line));
         const back = settings.findIndex((line) => /Esc:? Close/.test(line));
@@ -94,8 +101,8 @@ describe("workspace terminal rendering", () => {
       for (const cursor of [8, 9, 10, 11, 12]) {
         workspace.openSettings(undefined, cursor);
         for (const key of ["\r", "\x15", "中文😀", "\r", "\t", "\r"]) {
-          input(key); tui.renderNow();
-          const frame = workspace.render(columns);
+          input(key);
+          const frame = renderFrame();
           expect(frame).toHaveLength(initialHeight);
           expect(frame.every((line) => visibleWidth(line) <= columns)).toBe(true);
           expect(frame.join("\n")).toContain(theme.fg("muted", stripVTControlCharacters(frame.join("\n")).includes("Esc:") ? "Esc:" : "Esc"));
@@ -112,8 +119,7 @@ describe("workspace terminal rendering", () => {
         tui.renderNow();
         panel.scrollBy(10000);
         tui.requestRender();
-        tui.renderNow();
-        expect(workspace.render(columns)).toHaveLength(initialHeight);
+        expect(renderFrame()).toHaveLength(initialHeight);
         // Automatic navigation stays at the opening height. Explicit reading
         // expansion is covered separately in workspace-height-renderer.test.ts.
         for (const key of [
@@ -122,8 +128,7 @@ describe("workspace terminal rendering", () => {
           "\x1b[C", ...Array<string>(6).fill("\x1b[B"), ...Array<string>(6).fill("\x1b[A"), "\t", ...Array<string>(3).fill("\x1b[B"), "\t", "\x1b[C", "i", "\x1b",
         ]) {
           input(key);
-          tui.renderNow();
-          expect(workspace.render(columns)).toHaveLength(initialHeight);
+          expect(renderFrame()).toHaveLength(initialHeight);
         }
         panel.update({
           state: { phase: "ready", requestId: repeat + 2, pendingSend: false },
@@ -131,18 +136,17 @@ describe("workspace terminal rendering", () => {
           contextLabel: "Draft only", elapsedSeconds: 1, openHint: "ctrl+\\", canRestore: false,
         });
         tui.requestRender();
-        tui.renderNow();
-        expect(workspace.render(columns)).toHaveLength(initialHeight);
+        expect(renderFrame()).toHaveLength(initialHeight);
       }
       workspace.openTasks();
       for (const key of ["?", "\x1b[6~", "\x1b[5~", "a", "s", "\x1b[C", "\x1b", "\x1b[C", "b", "\x1b[6~", "\x1b[5~", "i", "\x1b[D", "\x1b"]) {
-        input(key); tui.renderNow();
-        expect(workspace.render(columns)).toHaveLength(initialHeight);
+        input(key);
+        expect(renderFrame()).toHaveLength(initialHeight);
       }
       workspace.openTasks(); taskPosition.selectedTaskId = unsent.taskId;
       input("\t"); await Promise.resolve();
-      tui.requestRender(); tui.renderNow();
-      const inlineFrame = workspace.render(columns);
+      tui.requestRender();
+      const inlineFrame = renderFrame();
       const inlineLayout = workspaceLayout(columns, rows);
       const choicesWidth = inlineLayout.innerWidth >= 72 ? Math.min(36, Math.floor(inlineLayout.innerWidth / 3)) : inlineLayout.innerWidth;
       const sourceLabel = choicesWidth >= 28 ? " Global" : "G";
@@ -156,8 +160,8 @@ describe("workspace terminal rendering", () => {
       input("\x1b"); input("p"); await Promise.resolve();
       const callsBefore = run.mock.calls.length;
       for (const key of [" ", "s", "\r", "\x1b[6~", "\x1b[5~", "\x1b", "s", "\x13", "\x1b"]) {
-        input(key); tui.renderNow();
-        const lines = workspace.render(columns);
+        input(key);
+        const lines = renderFrame();
         expect(lines).toHaveLength(initialHeight);
         for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(columns);
       }
@@ -165,23 +169,24 @@ describe("workspace terminal rendering", () => {
       expect(unsent.input.draft).toBe(requestInput.draft);
       expect(run).toHaveBeenCalledTimes(callsBefore);
       run.mockImplementationOnce(() => { unsent.status = "generating"; });
-      input("\r"); tui.renderNow();
+      input("\r");
+      const submittedFrame = renderFrame();
       expect(run).toHaveBeenLastCalledWith(unsent.id);
       expect(taskPosition.selectedTaskId).toBeUndefined();
       expect(taskPosition.selectedId).toBe(unsent.id);
-      expect(workspace.render(columns)).toHaveLength(initialHeight);
+      expect(submittedFrame).toHaveLength(initialHeight);
       taskPosition.selectedTaskId = undefined; taskPosition.selectedId = 2;
       workspace.openResult(); input("f"); input("\x1bp");
       await Promise.resolve();
       for (const key of [" ", "\r", "\x1b[6~", "\x1b", "l", "\t", "\x1b[C", "\x1b[D", "\t", "\t", "n", "Saved name", "\t", "\r", "中文",
         "\t", "\t", "\r", "\t", "中文😀 description", "\t", "\r", "\t", "\x13", "\x1b", "n", "\x1b", "y", "\x1b", "\x1b"]) {
-        input(key); tui.renderNow();
-        expect(workspace.render(columns)).toHaveLength(initialHeight);
+        input(key);
+        expect(renderFrame()).toHaveLength(initialHeight);
       }
       workspace.openResult(); input("f");
       for (const key of ["\t", "\t", "\r", "\x1b[6~", "\x1b[5~", "\x13", "\x1b", "More 中文😀", "\x1b"]) {
-        input(key); tui.renderNow();
-        expect(workspace.render(columns)).toHaveLength(initialHeight);
+        input(key);
+        expect(renderFrame()).toHaveLength(initialHeight);
       }
       expect(writes.length).toBeGreaterThan(0);
       expect(tui.fullRedraws).toBe(initialRedraws);
@@ -190,6 +195,7 @@ describe("workspace terminal rendering", () => {
     } finally {
       workspace.dispose();
       tui.stop();
+      render.mockRestore();
       vi.useRealTimers();
     }
   });

@@ -41,7 +41,9 @@ describe("Tasks preview hierarchy", () => {
     expect(pane.lines.join("\n")).toContain(theme.fg("text", "# Literal heading 中文😀").replace(/\x1b\[39m$/u, ""));
     expect(pane.lines.slice(4).join("\n")).not.toContain("\x1b[1m");
     const renderedRun = content.pane({ ...row, original: false }, 105, 30, previewOptions).lines.join("\n");
-    expect(stripVTControlCharacters(renderedRun).split("\n").map(line => line.trimEnd())).toEqual([run.input.model.id, "", ...run.candidate!.text.split("\n")]);
+    expect(stripVTControlCharacters(renderedRun).split("\n").map(line => line.trimEnd())).toEqual([
+      `Result · ${run.input.model.id}`, "", ...run.candidate!.text.split("\n"),
+    ]);
     expect(renderedRun).not.toContain(theme.bold("23s"));
     expect(renderedRun).not.toContain(theme.fg("success", "✓ Done"));
   });
@@ -60,10 +62,10 @@ describe("Tasks preview hierarchy", () => {
         const row = { record: current, original: false, records: [current] };
         const { lines } = content.pane(row, width, 24, previewOptions);
         expect(lines[0]).toContain(theme.fg("text", run.input.model.id));
-        expect(lines[0]).not.toContain("\x1b[1m");
+        expect(lines[0]).not.toContain(theme.bold(run.input.model.id));
         const start = lines.findIndex((line) => plain(line).startsWith("第一段"));
         expect(plain(lines[start - 1]!)).toBe("");
-        expect(plain(lines[start - 2]!)).toBe(current === running ? "Original prompt" : run.input.model.id);
+        expect(plain(lines[start - 2]!)).toBe(current === running ? "Original prompt" : `Result · ${run.input.model.id}`);
         expect(lines.slice(start).map(plain).join("\n")).toBe(sanitizeTerminalText(run.input.draft));
         expect(lines[start]).toContain(theme.getFgAnsi("text") + "第一段");
         expect(lines.at(-1)).toContain(theme.getFgAnsi("text") + "第二段");
@@ -79,6 +81,19 @@ describe("Tasks preview hierarchy", () => {
         expect(short.lines.every((line) => visibleWidth(line) <= width)).toBe(true);
       }
     }
+  });
+
+  it.each(["dark", "light"])("drops the result label and provider before shortening the selected model name in %s", (name) => {
+    const theme = getThemeByName(name)!;
+    const content = new TaskContent(theme);
+    const run = record(); const other = record(2);
+    run.input.model = { id: "模型-name", provider: "provider-a" };
+    other.input.model = { id: run.input.model.id, provider: "provider-b" };
+    const row = { record: run, original: false, records: [run, other] };
+    const header = (width: number) => content.paneHeader(row, width, previewOptions)[0]!;
+    expect(stripVTControlCharacters(header(50))).toBe("Result · 模型-name · provider-a");
+    expect(header(9)).toBe(theme.fg("text", "模型-name"));
+    expect(stripVTControlCharacters(header(8))).toBe("模型-na…");
   });
 
   it.each(["dark", "light"])("wraps without editing paragraphs, code, paths or long strings in %s", (name) => {

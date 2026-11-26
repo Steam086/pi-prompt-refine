@@ -386,7 +386,7 @@ describe("prompt tree and inspection", () => {
     text();
     panel.handleInput("\t"); panel.handleInput("\x1b[6~");
     const scrolled = text();
-    expect(scrolled.split("\n").some(line => line.split(" │ ").at(-1)?.trim() === "model-1")).toBe(true);
+    expect(scrolled.split("\n").some(line => line.split(" │ ").at(-1)?.trim() === "Result · model-1")).toBe(true);
     expect(scrolled).not.toContain("Result 1");
     panel.handleInput("\t"); panel.handleInput("\x1b[A");
     expect(text()).toContain("Result 2");

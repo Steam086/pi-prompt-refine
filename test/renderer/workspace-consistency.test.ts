@@ -151,9 +151,23 @@ describe.each(["regular", "fullscreen"] as const)("workspace consistency (%s)", 
         const completedSummary = summaryText(completedFrame);
         const resultAt = completedSummary.indexOf("Result 1");
         expect(resultAt).toBeGreaterThan(1);
-        expect(completedSummary.slice(resultAt - 2, resultAt)).toEqual(["model-1", ""]);
-        expect(completedFrame[resultAt - 2]).toContain(theme.fg("text", "model-1"));
+        expect(completedSummary.slice(resultAt - 2, resultAt)).toEqual(["Result · model-1", ""]);
+        expect(completedFrame[resultAt - 2]).toContain(theme.fg("text", theme.bold("Result")) + theme.fg("muted", " · ") + theme.fg("text", "model-1"));
         expect(completedFrame[resultAt]).toContain(theme.getFgAnsi("text") + "Result 1");
+        if (columns >= 100) {
+          result.additional = [{ name: "In Your Own Words", text: "只讨论 **范围** 😀" }];
+          const summaryWithNotes = frame("Preview / result notes", false);
+          const summary = summaryText(summaryWithNotes);
+          const notesAt = summary.indexOf("Result notes · preview only");
+          expect(notesAt).toBeGreaterThan(resultAt);
+          expect(summary.slice(notesAt - 3, notesAt + 4)).toEqual([
+            "", "─".repeat(24), "", "Result notes · preview only", "", "In Your Own Words", "只讨论 **范围** 😀",
+          ]);
+          expect(summaryWithNotes[notesAt - 2]).toContain(theme.fg("muted", "─".repeat(24)));
+          expect(summaryWithNotes[notesAt]).toContain(theme.fg("text", theme.bold("Result notes")) + theme.fg("muted", " · preview only"));
+          expect(summaryWithNotes[notesAt + 3]).toContain(theme.getFgAnsi("text") + "只讨论 **范围** 😀");
+          delete result.additional;
+        }
         expect(completedFrame.join("\n")).toContain("↑↓ scroll");
         expect(position.selectedId).toBe(1);
         input("\t");

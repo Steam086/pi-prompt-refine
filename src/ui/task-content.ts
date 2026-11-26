@@ -85,6 +85,13 @@ export class TaskContent {
     return this.paneHeader(row, width, options).length + (options.taskPreview ? 2 : 1)
       + this.wrapped(sanitizeTerminalText(body), bodyWidth).length;
   }
+  private resultPreviewHeading({ record, records }: TaskRow, width: number, model: string): string {
+    const heading = this.heading(record.kind === "revise" ? "Revised result" : "Result") + this.muted(" · ") + model;
+    const sameModelName = records.some(({ input }) => input.model.id === record.input.model.id && input.model.provider !== record.input.model.provider);
+    const provider = sameModelName ? this.muted(` · ${record.input.model.provider}`) : "";
+    const line = [heading + provider, model + provider, heading].find((label) => visibleWidth(label) <= width) ?? model;
+    return truncateToWidth(line, width, "…");
+  }
   paneHeader(row: TaskRow, width: number, options: HeaderOptions, previewDetails = false): string[] {
     const { record, records } = row;
     const title = row.original ? "Original prompt" : record.input.model.id;
@@ -94,11 +101,7 @@ export class TaskContent {
     const runPreview = options.taskPreview && !row.original;
     const titleText = previewDetails || runPreview ? this.theme.fg("text", sanitizeTerminalText(title)) : this.heading(title);
     const resultPreview = runPreview && record.status === "generated" && !!record.candidate;
-    // A compact tree can truncate same-name runs before the provider. Keep
-    // that distinction in the preview without repeating the whole run header.
-    const previewIdentity = resultPreview && records.some(({ input }) => input.model.id === record.input.model.id && input.model.provider !== record.input.model.provider)
-      ? this.theme.fg("text", `#${record.id}`) + this.muted(` · ${record.input.model.provider}`) : titleText;
-    const header = resultPreview ? [truncateToWidth(previewIdentity, width, "…")] : visibleWidth(titleText) + visibleWidth(status) + 3 <= width
+    const header = resultPreview ? [this.resultPreviewHeading(row, width, titleText)] : visibleWidth(titleText) + visibleWidth(status) + 3 <= width
       ? [titleText + (previewDetails ? this.muted(" · ") : " ".repeat(width - visibleWidth(titleText) - visibleWidth(status))) + status]
       : [truncateToWidth(titleText, width, "…"), status];
     const identityLines = header.length;
@@ -148,7 +151,11 @@ export class TaskContent {
       original && !record.input.draft ? this.muted("Empty prompt · ") + formatKeyHint(["i", "Edit original"], this.theme)
         : this.theme.fg("text", sanitizeTerminalText(original ? record.input.draft : record.candidate!.text)),
     ];
-    if (!original) body.push(...resultNoteLines(record.candidate?.additional, this.theme));
+    if (!original) {
+      const notes = record.candidate?.additional;
+      if (notes?.length && runPreview && height >= 12) body.push("", this.muted("─".repeat(Math.min(24, bodyWidth))));
+      body.push(...resultNoteLines(notes, this.theme));
+    }
     if (options.inspecting || options.usage) {
       if (record.input.editingInstruction) body.push("", this.heading("Initial editing instruction"), "", this.theme.fg("text", sanitizeTerminalText(record.input.editingInstruction)));
       if (!row.original && record.candidate && !original) body.push("", this.heading("Original prompt"), "", this.theme.fg("text", sanitizeTerminalText(record.input.draft)));
