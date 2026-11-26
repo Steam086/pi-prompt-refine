@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { RefineController } from "../controller.js";
-import type { RefineRecord } from "../history.js";
+import { taskGroups, type RefineRecord } from "../history.js";
+import { immutable } from "../immutable.js";
 import type { TriggerResult } from "../request-types.js";
 import type { ApplicationApi, Binding, Failure, FailureCode, Hello, Mutation, MutationMeta, Query, QueryValue, Receipt, Reply, Snapshot } from "./api.js";
 import type { InputPort, ModelPort, StoragePort } from "./ports.js";
 import { createOperationLedger } from "./idempotency.js";
 import { createApplicationEvents } from "./events.js";
-import { immutable, localId, runDetail, runId, runSummary, taskDetail, taskGroups, taskId, taskSummary } from "./queries.js";
-import { binding as validBinding, identity, mutationMeta, parseMutation, parseQuery } from "../adapters/wire.js";
+import { runDetail, runSummary, taskDetail, taskSummary } from "./queries.js";
+import { binding as validBinding, identity, localId, mutationMeta, parseMutation, parseQuery, runId, taskId } from "./operation-contract.js";
 
 type Controller = Pick<RefineController, "getSessionId" | "getRoundId" | "getHistory" | "getState" | "getRecord" |
   "getTaskVersion" | "getRunVersion" | "getRunElapsed" | "createDraft" | "capture" | "updateDraft" | "removeDraft" | "runOriginal" |

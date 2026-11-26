@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Text, matchesKey } from "@earendil-works/pi-tui";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ApplicationApi, Mutation, MutationMeta, Query, Reply } from "../app/api.js";
-import { identity, parseMutation, parseQuery } from "./wire.js";
+import { identity, parseMutation, parseQuery } from "../app/operation-contract.js";
 import { REFINE_OVERLAY_OPTIONS, workspaceLayout, workspaceFrame } from "../workspace-overlay.js";
 import { panelHeader } from "../panel-layout.js";
 import { formatKeyHint } from "../key-hints.js";

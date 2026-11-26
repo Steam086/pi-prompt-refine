@@ -1,55 +1,64 @@
-import type { Binding, ModelIdentity, Mutation, MutationMeta, Query, Thinking } from "../app/api.js";
+import type { Binding, Mutation, MutationMeta, Query } from "../app/api.js";
+import { binding, identity, isRecord, keysOnly, mutationMeta, parseMutation, parseQuery } from "../app/operation-contract.js";
 
 export const REQUEST_EVENT = "prompt-refine:v1:request";
 export const RESPONSE_EVENT = "prompt-refine:v1:response";
 export const INVALIDATION_EVENT = "prompt-refine:v1:invalidation";
-export const thinkingLevels: readonly Thinking[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-export const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
-export const keysOnly = (value: Record<string, unknown>, allowed: readonly string[]): boolean => Object.keys(value).every((key) => allowed.includes(key));
-export const identity = (value: unknown): value is string => typeof value === "string" && /^[a-zA-Z0-9_.:-]{1,128}$/.test(value);
-const version = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) > 0;
-const target = (value: unknown, kind: string): boolean => typeof value === "string" && new RegExp(`^${kind}-[1-9][0-9]{0,14}$`).test(value);
-const text = (value: unknown): value is string => typeof value === "string" && value.length <= 100_000;
-const thinking = (value: unknown): value is Thinking => thinkingLevels.includes(value as Thinking);
-export function modelIdentity(value: unknown): value is ModelIdentity {
-  return isRecord(value) && keysOnly(value, ["provider", "id"]) &&
-    [value.provider, value.id].every((part) => typeof part === "string" && part.length > 0 && part.length <= 512);
-}
-export function binding(value: unknown): value is Binding {
-  return isRecord(value) && keysOnly(value, ["runtimeId", "sessionId", "lifecycleEpoch"]) && identity(value.runtimeId) &&
-    typeof value.sessionId === "string" && value.sessionId.length > 0 && value.sessionId.length <= 512 && version(value.lifecycleEpoch);
-}
-export function mutationMeta(value: unknown): value is MutationMeta {
-  return isRecord(value) && keysOnly(value, ["binding", "clientLeaseId", "operationId"]) &&
-    binding(value.binding) && identity(value.clientLeaseId) && identity(value.operationId);
-}
-export function parseMutation(value: unknown): Mutation | undefined {
-  if (!isRecord(value)) return undefined;
-  const choice = () => (value.model === undefined || modelIdentity(value.model)) && (value.thinking === undefined || thinking(value.thinking));
-  const draftTarget = () => target(value.taskId, "task") && version(value.expectedVersion);
-  let valid = false;
-  switch (value.method) {
-    case "createDraft": case "captureDraft": valid = keysOnly(value, ["method", "text"]) && text(value.text); break;
-    case "updateDraft": valid = keysOnly(value, ["method", "taskId", "expectedVersion", "text"]) && draftTarget() && text(value.text); break;
-    case "copyToCurrent": case "discardDraft": valid = keysOnly(value, ["method", "taskId", "expectedVersion"]) && draftTarget(); break;
-    case "startRun": valid = keysOnly(value, ["method", "taskId", "expectedVersion", "model", "thinking"]) && draftTarget() && choice(); break;
-    case "optimizeText": valid = keysOnly(value, ["method", "text", "model", "thinking"]) && text(value.text) && choice(); break;
-    case "stopRun": valid = keysOnly(value, ["method", "runId"]) && target(value.runId, "run"); break;
-    case "setDefaultOptimizer": valid = keysOnly(value, ["method", "expectedVersion", "model", "thinking"]) &&
-      version(value.expectedVersion) && modelIdentity(value.model) && (value.thinking === "inherit" || thinking(value.thinking)); break;
+
+export type WireCall =
+  | { action: "hello"; clientId: string; resumeLease?: string }
+  | { action: "query"; binding: Binding; query: Query }
+  | { action: "mutate"; meta: MutationMeta; mutation: Mutation }
+  | { action: "subscribe"; binding: Binding }
+  | { action: "close" }
+  | { action: "readOutput"; outputId: string; index: number }
+  | { action: "releaseOutput"; outputId: string }
+  | { action: "stage"; transferId: string; index: number; total: number; text: string }
+  | { action: "commit"; transferId: string };
+
+export function parseWireCall(call: unknown): WireCall | undefined {
+  if (!isRecord(call)) return undefined;
+  const { action } = call;
+  switch (action) {
+    case "hello":
+      if (keysOnly(call, ["action", "clientId", "resumeLease"]) && identity(call.clientId) &&
+        (call.resumeLease === undefined || identity(call.resumeLease))) return { action, clientId: call.clientId, resumeLease: call.resumeLease };
+      break;
+    case "query": {
+      if (!keysOnly(call, ["action", "binding", "query"]) || !binding(call.binding)) break;
+      const query = parseQuery(call.query);
+      if (query) return { action, binding: call.binding, query };
+      break;
+    }
+    case "mutate": {
+      if (!keysOnly(call, ["action", "meta", "mutation"]) || !mutationMeta(call.meta)) break;
+      const mutation = parseMutation(call.mutation);
+      if (mutation) return { action, meta: call.meta, mutation };
+      break;
+    }
+    case "subscribe":
+      if (keysOnly(call, ["action", "binding"]) && binding(call.binding)) return { action, binding: call.binding };
+      break;
+    case "close":
+      if (keysOnly(call, ["action"])) return { action };
+      break;
+    case "readOutput":
+      if (keysOnly(call, ["action", "outputId", "index"]) && identity(call.outputId) &&
+        typeof call.index === "number" && Number.isSafeInteger(call.index)) return { action, outputId: call.outputId, index: call.index };
+      break;
+    case "releaseOutput":
+      if (keysOnly(call, ["action", "outputId"]) && identity(call.outputId)) return { action, outputId: call.outputId };
+      break;
+    case "stage":
+      if (keysOnly(call, ["action", "transferId", "index", "total", "text"]) && identity(call.transferId) &&
+        typeof call.index === "number" && Number.isSafeInteger(call.index) &&
+        typeof call.total === "number" && Number.isSafeInteger(call.total) && typeof call.text === "string") {
+        return { action, transferId: call.transferId, index: call.index, total: call.total, text: call.text };
+      }
+      break;
+    case "commit":
+      if (keysOnly(call, ["action", "transferId"]) && identity(call.transferId)) return { action, transferId: call.transferId };
+      break;
   }
-  return valid ? structuredClone(value) as unknown as Mutation : undefined;
-}
-export function parseQuery(value: unknown): Query | undefined {
-  if (!isRecord(value)) return undefined;
-  let valid = false;
-  switch (value.method) {
-    case "snapshot": valid = keysOnly(value, ["method", "scope"]) && ["current", "all"].includes(value.scope as string); break;
-    case "task": valid = keysOnly(value, ["method", "taskId"]) && target(value.taskId, "task"); break;
-    case "run": valid = keysOnly(value, ["method", "runId"]) && target(value.runId, "run"); break;
-    case "models": valid = keysOnly(value, ["method"]); break;
-    case "operation": valid = keysOnly(value, ["method", "clientLeaseId", "operationId"]) && identity(value.clientLeaseId) && identity(value.operationId); break;
-  }
-  return valid ? structuredClone(value) as unknown as Query : undefined;
+  return undefined;
 }

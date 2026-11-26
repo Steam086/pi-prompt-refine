@@ -1,6 +1,6 @@
 import type { JsonValue, PluginPeer, PluginPeerChannel } from "@jmfederico/pi-web/plugin-api";
 import type { Binding, Hello, ModelOption, Mutation, MutationMeta, OperationStatus, Query, QueryValue, Receipt, Snapshot } from "../../../../src/app/api.js";
-import { isRecord } from "../../../../src/adapters/wire.js";
+import { isRecord } from "../../../../src/app/operation-contract.js";
 import { randomId } from "./random-id.js";
 
 const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue;

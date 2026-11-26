@@ -2,7 +2,7 @@ import type { Candidate, RefineRequestInput } from "./request-types.js";
 import type { TokenUsage } from "./usage.js";
 import type { BudgetReport } from "./budget.js";
 import type { SelectedPreference } from "./revision-preferences.js";
-import { immutable } from "./app/queries.js";
+import { immutable } from "./immutable.js";
 
 export interface RefineRecord {
   id: number;
@@ -252,4 +252,21 @@ export class RefineHistory {
   list(sessionId: string, taskId?: number): RefineRecord[] {
     return structuredClone(this.records.filter((record) => record.input.sessionId === sessionId && (taskId === undefined || record.taskId === taskId)));
   }
+}
+
+/** Shared ordering, independent of focus, completion order and the presentation clock. */
+export function taskGroups<T extends { id: number; taskId: number; archivedAt?: number; input: { roundId?: number } }>(
+  records: readonly T[], all = false,
+): T[][] {
+  const groups = new Map<number, T[]>();
+  for (const record of records) {
+    if (!all && record.archivedAt !== undefined) continue;
+    const group = groups.get(record.taskId) ?? [];
+    group.push(record);
+    groups.set(record.taskId, group);
+  }
+  return [...groups.values()].sort((a, b) =>
+    Number(a[0]!.archivedAt !== undefined) - Number(b[0]!.archivedAt !== undefined) ||
+    (b[0]!.input.roundId ?? 0) - (a[0]!.input.roundId ?? 0) ||
+    Math.max(...b.map((record) => record.id)) - Math.max(...a.map((record) => record.id)));
 }

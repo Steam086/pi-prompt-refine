@@ -1,10 +1,13 @@
+import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
+import { createSessionEventsBridge } from "../../src/adapters/session-events.js";
 import { createApplication } from "../../src/app/application.js";
 import { createApplicationEvents } from "../../src/app/events.js";
 import { RefineController } from "../../src/controller.js";
 import { selectPreference } from "../../src/revision-preferences.js";
 import type { Hello, Mutation, Receipt, Reply, RunDetail, Snapshot, TaskDetail } from "../../src/app/api.js";
 import type { InputPort } from "../../src/app/ports.js";
+import { wireRequest } from "../support/application-wire.js";
 import { input, model } from "../support/controller.js";
 import { flushPromises, success } from "../support/helpers.js";
 
@@ -203,10 +206,43 @@ describe("shared application contract", () => {
       off();
       const revision = f.snapshot().revision;
       expect(f.snapshot().revision).toBe(revision);
-      expect(await f.execute({ method: "createDraft", text: "x".repeat(100_001) })).toEqual({ kind: "rejected", code: "invalid-input" });
-      expect(await f.execute({ method: "createDraft", text: "draft", history: "injected" } as unknown as Mutation)).toEqual({ kind: "rejected", code: "invalid-input" });
+      const invalid = { kind: "rejected", code: "invalid-input" };
+      for (const operation of [
+        { method: "createDraft", text: "x".repeat(100_001) },
+        { method: "createDraft", text: "draft", history: "injected" },
+        { method: "unknown", text: "draft" },
+      ]) {
+        const mutation = operation as unknown as Mutation;
+        expect(f.app.local(mutation)).toEqual(invalid);
+        expect(await f.execute(mutation)).toEqual(invalid);
+      }
       expect(f.capture).not.toHaveBeenCalled();
+      expect(f.complete).not.toHaveBeenCalled();
       expect(f.controller.getHistory()).toEqual([]);
     } finally { f.controller.invalidateLifecycle(); }
+  });
+
+  it("keeps the wire frame limit outside native and direct application operations", async () => {
+    const f = fixture();
+    const emitter = new EventEmitter();
+    const bus = {
+      on: (event: string, listener: (value: unknown) => void) => {
+        emitter.on(event, listener);
+        return () => emitter.off(event, listener);
+      },
+      emit: (event: string, value: unknown) => emitter.emit(event, value),
+    };
+    const bridge = createSessionEventsBridge(f.app.api, bus);
+    try {
+      const text = "中".repeat(32_000);
+      const mutation: Mutation = { method: "createDraft", text };
+      const meta = { binding: f.hello.binding, clientLeaseId: f.hello.lease.id, operationId: "over-frame" };
+      expect(await wireRequest(bus, { action: "mutate", meta, mutation })).toEqual({ kind: "rejected", code: "invalid-input" });
+      expect(f.capture).not.toHaveBeenCalled();
+      expect(f.app.local(mutation)).toMatchObject({ kind: "ok", value: { outcome: "captured", taskId: "task-1", version: 1 } });
+      expect(await f.app.api.execute(meta, mutation)).toMatchObject({ kind: "ok", value: { outcome: "captured", taskId: "task-2", version: 1 } });
+      expect(f.controller.getHistory().map((record) => record.input.draft)).toEqual([text, text]);
+      expect(f.complete).not.toHaveBeenCalled();
+    } finally { bridge.dispose(); f.controller.invalidateLifecycle(); }
   });
 });

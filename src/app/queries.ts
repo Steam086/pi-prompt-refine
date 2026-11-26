@@ -2,37 +2,9 @@ import type { RefineRecord } from "../history.js";
 import type { TokenUsage } from "../usage.js";
 import type { Availability, FailureCode, RunDetail, RunSummary, TaskDetail, TaskSummary, UsageDto } from "./api.js";
 
-export const taskId = (id: number): string => `task-${id}`;
-export const runId = (id: number): string => `run-${id}`;
-export function localId(value: string, kind: "task" | "run"): number | undefined {
-  const match = new RegExp(`^${kind}-([1-9][0-9]*)$`).exec(value);
-  const id = match ? Number(match[1]) : NaN;
-  return Number.isSafeInteger(id) ? id : undefined;
-}
-export function immutable<T>(value: T): T {
-  if (value && typeof value === "object") {
-    for (const child of Object.values(value)) immutable(child);
-    Object.freeze(value);
-  }
-  return value;
-}
+import { taskId, runId } from "./operation-contract.js";
+
 const action = (reason?: FailureCode): Availability => reason ? { enabled: false, reason } : { enabled: true };
-/** Shared ordering, independent of focus, completion order and the presentation clock. */
-export function taskGroups<T extends { id: number; taskId: number; archivedAt?: number; input: { roundId?: number } }>(
-  records: readonly T[], all = false,
-): T[][] {
-  const groups = new Map<number, T[]>();
-  for (const record of records) {
-    if (!all && record.archivedAt !== undefined) continue;
-    const group = groups.get(record.taskId) ?? [];
-    group.push(record);
-    groups.set(record.taskId, group);
-  }
-  return [...groups.values()].sort((a, b) =>
-    Number(a[0]!.archivedAt !== undefined) - Number(b[0]!.archivedAt !== undefined) ||
-    (b[0]!.input.roundId ?? 0) - (a[0]!.input.roundId ?? 0) ||
-    Math.max(...b.map((record) => record.id)) - Math.max(...a.map((record) => record.id)));
-}
 export function taskSummary(records: readonly RefineRecord[], version: number, pendingSend: boolean, modelUnavailable?: FailureCode): TaskSummary {
   const source = records.find((record) => !record.input.revision) ?? records[0]!;
   const editable = source.status === "unsent" && source.archivedAt === undefined && !source.input.contextUnavailable;

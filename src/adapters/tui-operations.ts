@@ -1,7 +1,7 @@
 import type { RefineController } from "../controller.js";
 import type { ModelIdentity, Mutation, Receipt, Reply, Thinking } from "../app/api.js";
 import type { LocalReply } from "../app/application.js";
-import { runId, taskId } from "../app/queries.js";
+import { runId, taskId } from "../app/operation-contract.js";
 
 /** Synchronous native view boundary; scheduling, versions and validation remain in the application. */
 export function createTuiOperations(

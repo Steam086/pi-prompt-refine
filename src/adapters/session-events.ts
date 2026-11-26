@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { outputChunks, retainedBytes } from "./json-output.js";
 import type { ApplicationApi, Binding, Reply } from "../app/api.js";
-import { binding, identity, isRecord, keysOnly, mutationMeta, parseMutation, parseQuery,
-  REQUEST_EVENT, RESPONSE_EVENT, INVALIDATION_EVENT } from "./wire.js";
+import { identity, isRecord, keysOnly } from "../app/operation-contract.js";
+import { parseWireCall, REQUEST_EVENT, RESPONSE_EVENT, INVALIDATION_EVENT } from "./wire.js";
 
 export interface SessionBus {
   on(event: string, listener: (data: unknown) => void): () => void;
@@ -70,26 +70,18 @@ export function createSessionEventsBridge(api: ApplicationApi, bus: SessionBus, 
     outputBytes += bytes;
     send({ output: { id } });
   }
-  async function invoke(connectionId: string, connection: Connection, call: Record<string, unknown>, scope: { binding?: Binding }): Promise<unknown> {
-    switch (call.action) {
+  async function invoke(connectionId: string, connection: Connection, rawCall: unknown, scope: { binding?: Binding }): Promise<unknown> {
+    const call = parseWireCall(rawCall);
+    switch (call?.action) {
       case "hello":
-        if (!keysOnly(call, ["action", "clientId", "resumeLease"]) || !identity(call.clientId) ||
-          (call.resumeLease !== undefined && !identity(call.resumeLease))) break;
-        return api.hello(call.clientId, call.resumeLease as string | undefined);
-      case "query": {
-        const query = parseQuery(call.query);
-        if (!keysOnly(call, ["action", "binding", "query"]) || !binding(call.binding) || !query) break;
+        return api.hello(call.clientId, call.resumeLease);
+      case "query":
         scope.binding = { ...call.binding };
-        return api.query(call.binding, query);
-      }
-      case "mutate": {
-        const mutation = parseMutation(call.mutation);
-        if (!keysOnly(call, ["action", "meta", "mutation"]) || !mutationMeta(call.meta) || !mutation) break;
+        return api.query(call.binding, call.query);
+      case "mutate":
         scope.binding = { ...call.meta.binding };
-        return api.execute(call.meta, mutation);
-      }
+        return api.execute(call.meta, call.mutation);
       case "subscribe": {
-        if (!keysOnly(call, ["action", "binding"]) || !binding(call.binding)) break;
         const snapshot = api.query(call.binding, { method: "snapshot", scope: "current" });
         if (snapshot.kind !== "ok") return snapshot;
         connection.unsubscribe?.();
@@ -101,11 +93,9 @@ export function createSessionEventsBridge(api: ApplicationApi, bus: SessionBus, 
         return { kind: "ok", revision: snapshot.revision };
       }
       case "close":
-        if (!keysOnly(call, ["action"])) break;
         release(connectionId);
         return { kind: "ok" };
       case "readOutput": {
-        if (!keysOnly(call, ["action", "outputId", "index"]) || !identity(call.outputId) || !Number.isSafeInteger(call.index)) break;
         const output = connection.outputs.get(call.outputId);
         if (!output || output.expiresAt <= now()) return { kind: "rejected", code: "transfer-expired" };
         if (!api.isCurrentBinding(output.binding)) {
@@ -126,12 +116,9 @@ export function createSessionEventsBridge(api: ApplicationApi, bus: SessionBus, 
         return { part: output.last };
       }
       case "releaseOutput":
-        if (!keysOnly(call, ["action", "outputId"]) || !identity(call.outputId)) break;
         releaseOutput(connection, call.outputId); return { kind: "ok" };
       case "stage": {
-        if (!keysOnly(call, ["action", "transferId", "index", "total", "text"]) || !identity(call.transferId) ||
-          !Number.isSafeInteger(call.index) || !Number.isSafeInteger(call.total) || typeof call.text !== "string") break;
-        const index = call.index as number, total = call.total as number;
+        const { index, total } = call;
         if (index < 0 || index >= total || total < 1 || total > 128) break;
         let stage = connection.stages.get(call.transferId);
         if (!stage) {
@@ -151,7 +138,6 @@ export function createSessionEventsBridge(api: ApplicationApi, bus: SessionBus, 
         return { kind: "ok" };
       }
       case "commit": {
-        if (!keysOnly(call, ["action", "transferId"]) || !identity(call.transferId)) break;
         const stage = connection.stages.get(call.transferId);
         if (!stage || stage.parts.length !== stage.total) break;
         connection.stages.delete(call.transferId);
