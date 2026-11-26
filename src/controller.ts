@@ -6,7 +6,7 @@ import { composeRevision, resultNoteRequests, preferenceKey, preferenceValidatio
 
 import type {
   RefineRequestInput, RefineRequest, Candidate, CandidateToken, RestoreSnapshot, RestoreToken,
-  RequestSource, ControllerState, Scheduler, RefineControllerOptions, RefineStopReason, TriggerResult,
+  RequestSource, ControllerState, Scheduler, RefineControllerOptions, RefineStopReason, RecordIdentity, TriggerResult,
 } from "./request-types.js";
 export type {
   RefinePhase, RefineStopReason, RefineRequestInput, RefineRequest, RefineCompletion,
@@ -15,6 +15,7 @@ export type {
 } from "./request-types.js";
 
 interface ActiveRequest {
+  taskId: number;
   previousCandidate?: Candidate;
   startedAt?: number;
   maxOutputChars?: number;
@@ -32,7 +33,12 @@ const stopErrors: Partial<Record<RefineStopReason, ControllerState["error"]>> = 
 };
 function sameModel(a: ModelRef | undefined, b: ModelRef | undefined): boolean { return a?.provider === b?.provider && a?.id === b?.id; }
 function fingerprint(input: RefineRequestInput): string {
-  return JSON.stringify([input.draft, input.model, input.thinkingLevel, input.sessionId, input.roundId, input.revision, input.editingInstruction, resultNoteRequests(input.preferences)]);
+  return JSON.stringify([input.draft, input.model.provider, input.model.id, input.thinkingLevel, input.sessionId, input.roundId,
+    input.revision, input.editingInstruction, resultNoteRequests(input.preferences)]);
+}
+type Duplicate = Extract<TriggerResult, { kind: "duplicate" }>;
+function recordMatch(record: Pick<RefineRecord, "id" | "taskId" | "status">): NonNullable<Duplicate["match"]> {
+  return { kind: record.status === "unsent" ? "draft" : "run", recordId: record.id, taskId: record.taskId };
 }
 function elapsed(active: ActiveRequest): number { return active.startedAt === undefined ? 0 : Math.max(0, Math.floor((Date.now() - active.startedAt) / 1000)); }
 
@@ -41,13 +47,12 @@ export class RefineController {
   private readonly scheduler: Scheduler;
   private readonly journal = new RefineHistory();
   private readonly active = new Map<number, ActiveRequest>();
-  private readonly submissions = new WeakMap<TriggerResult, { recordId: number; queued: boolean }>();
   private round?: { id: number; input: RefineRequestInput; hasSubmittedRun: boolean };
   private roundSequence = 0;
   private taskSequence = 0;
   private taskId?: number;
   // Captures follow the journal record through edits. Accept and Restore remember the literal editor write.
-  private lastCapture?: { recordId?: number; editorText?: string };
+  private lastCapture?: { kind: "draft"; recordId: number } | { kind: "editor"; text: string; acceptedRecordId?: number };
   private foregroundId?: number;
   private sessionId?: string;
   private currentModel?: ModelRef;
@@ -87,14 +92,6 @@ export class RefineController {
     const active = [...this.active.values()].find((run) => run.request.recordId === recordId);
     return active ? elapsed(active) : this.getRecord(recordId)?.elapsedSeconds;
   }
-  getSubmission(result: TriggerResult): { recordId: number; queued: boolean } | undefined {
-    const receipt = this.submissions.get(result);
-    return receipt ? { ...receipt } : undefined;
-  }
-  findOriginalRun(taskId: number, model: ModelRef, thinkingLevel?: ModelThinkingLevel): number | undefined {
-    return [...this.active.values()].find((run) => this.getRecord(run.request.recordId)?.taskId === taskId &&
-      !run.request.revision && sameModel(run.request.model, model) && run.request.thinkingLevel === thinkingLevel)?.request.recordId;
-  }
   getCandidate(): Candidate | undefined { return this.candidate ? structuredClone(this.candidate) : undefined; }
   getAppliedRecordId(): number | undefined { return (this.candidate ?? this.viewedAccepted)?.recordId; }
   getAccepted(): Candidate | undefined { return this.accepted ? structuredClone(this.accepted) : undefined; }
@@ -117,8 +114,15 @@ export class RefineController {
   getRecord(id: number): RefineRecord | undefined { return this.journal.get(id, this.sessionId ?? ""); }
   hasWorkspaceContent(): boolean { return !!(this.journal.has(this.sessionId ?? "") || this.candidate || this.accepted || this.requestSource); }
   hasCapturedDraft(draft: string): boolean {
-    return draft === this.lastCapture?.editorText ||
-      this.journal.hasDraft(this.sessionId ?? "", draft, this.lastCapture?.recordId);
+    return this.captureMatch(draft) !== undefined;
+  }
+  private captureMatch(draft: string): Duplicate["match"] | undefined {
+    const last = this.lastCapture;
+    const record = this.journal.findDraft(this.sessionId ?? "", draft, last?.kind === "draft" ? last.recordId : undefined);
+    if (record) return recordMatch(record);
+    if (last?.kind !== "editor" || last.text !== draft) return undefined;
+    const accepted = last.acceptedRecordId === undefined ? undefined : this.getRecord(last.acceptedRecordId);
+    return accepted ? recordMatch(accepted) : null;
   }
   shouldOpenPanel(draft: string): boolean { return !draft.trim() || this.hasWorkspaceContent(); }
   getTaskInput(): RefineRequestInput | undefined {
@@ -282,22 +286,28 @@ export class RefineController {
     const invalid = this.validate(input, true);
     if (invalid) return invalid;
     this.ensureSession(input.sessionId);
-    if (this.hasCapturedDraft(input.draft)) return { kind: "duplicate" };
+    const match = this.captureMatch(input.draft);
+    if (match !== undefined) return { kind: "duplicate", match };
     if (!this.journal.canStart()) return { kind: "busy" };
     const frozen = this.freezeRound(input);
-    const recordId = this.journal.start(++this.taskSequence, frozen, undefined, "refine", "unsent");
-    this.lastCapture = { recordId };
+    const receipt = this.addDraft(frozen);
+    this.lastCapture = { kind: "draft", recordId: receipt.recordId };
     this.emitState();
-    return { kind: "captured", recordId };
+    return receipt;
   }
   /** Explicit creation is independent of shortcut deduplication, model selection and submission. */
   createDraft(input: RefineRequestInput): TriggerResult {
     if ((input.preferences?.length ?? 0) > PREFERENCE_SELECTION_LIMIT || input.draft.length > this.options.maxDraftChars) return { kind: "too-long" };
     this.ensureSession(input.sessionId);
     if (!this.journal.canStart()) return { kind: "busy" };
-    const recordId = this.journal.start(++this.taskSequence, this.freezeRound(input), undefined, "refine", "unsent");
+    const receipt = this.addDraft(this.freezeRound(input));
     this.emitState();
-    return { kind: "captured", recordId };
+    return receipt;
+  }
+  private addDraft(input: RefineRequestInput): Extract<TriggerResult, { kind: "captured" }> {
+    const taskId = ++this.taskSequence;
+    const recordId = this.journal.start(taskId, input, undefined, "refine", "unsent");
+    return { kind: "captured", recordId, taskId, version: this.journal.taskVersion(taskId) };
   }
   updateDraft(id: number, expected: string, text: string): boolean {
     const record = this.getRecord(id);
@@ -349,7 +359,8 @@ export class RefineController {
     const invalid = this.validate(input);
     if (invalid) return invalid;
     if (this.pendingSend || !this.journal.canStart()) return { kind: "busy" };
-    if ([...this.active.values()].some((run) => this.getRecord(run.request.recordId)?.taskId === source.taskId && fingerprint(run.request) === fingerprint(input))) return { kind: "duplicate" };
+    const duplicate = this.findDuplicateRun(input, source.taskId);
+    if (duplicate) return duplicate;
     const recordId = this.journal.start(source.taskId, input, undefined, "refine");
     if (source.archivedAt !== undefined) this.journal.update(recordId, { archivedAt: source.archivedAt });
     return this.launch(recordId, false);
@@ -366,13 +377,14 @@ export class RefineController {
     this.ensureSession(input.sessionId);
     const frozen = input.revision ? structuredClone({ ...input, roundId: this.candidate!.roundId })
       : options.sameTask ? structuredClone({ ...source!, model: input.model, thinkingLevel: input.thinkingLevel }) : this.freezeRound(input);
-    if ([...this.active.values()].some((run) => fingerprint(run.request) === fingerprint(frozen))) return { kind: "duplicate" };
+    const duplicate = this.findDuplicateRun(frozen);
+    if (duplicate) return duplicate;
     if (!options.force && this.candidate && fingerprint(this.candidate) === fingerprint(frozen)) return { kind: "ready" };
     if (!this.journal.canStart()) return { kind: "busy" };
     const taskId = (input.revision || options.sameTask) ? this.taskId! : ++this.taskSequence;
     const previous = (input.revision || options.sameTask) ? this.getCandidate() : undefined;
     const recordId = this.journal.start(taskId, frozen, input.revision ? this.candidate?.recordId : undefined);
-    this.lastCapture = { recordId };
+    this.lastCapture = { kind: "draft", recordId };
     if (frozen.roundId !== this.round?.id) this.journal.update(recordId, { archivedAt: Date.now() });
     return this.launch(recordId, !options.sameTask, previous);
   }
@@ -380,7 +392,7 @@ export class RefineController {
     const record = this.getRecord(id);
     if (!record || !model) return { kind: "stale-source" };
     if (this.pendingSend) return { kind: "busy" };
-    if (record.status !== "unsent") return { kind: "duplicate" };
+    if (record.status !== "unsent") return { kind: "duplicate", match: recordMatch(record) };
     const invalid = this.validate({ ...record.input, model, thinkingLevel });
     if (invalid) return invalid;
     this.journal.setModel(id, model, thinkingLevel);
@@ -393,10 +405,20 @@ export class RefineController {
     if (!record || !model || record.input.contextUnavailable) return { kind: "stale-source" };
     if (this.pendingSend || !this.journal.canStart()) return { kind: "busy" };
     const input = { ...record.input, model, thinkingLevel };
-    if ([...this.active.values()].some((run) => fingerprint(run.request) === fingerprint(input))) return { kind: "duplicate" };
+    const duplicate = this.findDuplicateRun(input);
+    if (duplicate) return duplicate;
     const recordId = this.journal.start(record.taskId, input, record.parentId, record.kind === "edit" ? "refine" : record.kind);
     if (record.archivedAt !== undefined) this.journal.update(recordId, { archivedAt: record.archivedAt });
     return this.launch(recordId, false);
+  }
+  private findDuplicateRun(input: RefineRequestInput, taskId?: number): Duplicate | undefined {
+    const key = fingerprint(input);
+    for (const active of this.active.values()) {
+      if ((taskId === undefined || active.taskId === taskId) && fingerprint(active.request) === key) {
+        return { kind: "duplicate", match: { kind: "run", recordId: active.request.recordId, taskId: active.taskId } };
+      }
+    }
+    return undefined;
   }
   private launch(recordId: number, foreground: boolean, previousCandidate?: Candidate): TriggerResult {
     const record = this.getRecord(recordId)!;
@@ -411,16 +433,17 @@ export class RefineController {
       this.state = { phase: "generating", requestId, recordId, model: record.input.model, thinkingLevel: record.input.thinkingLevel, pendingSend: false };
     }
     const request: RefineRequest = { ...record.input, requestId, recordId, generation: this.generation };
-    this.active.set(requestId, { request, controller: new AbortController(), previousCandidate });
+    const active: ActiveRequest = { taskId: record.taskId, request, controller: new AbortController(), previousCandidate };
+    this.active.set(requestId, active);
     this.journal.update(recordId, { status: "queued" });
     // Count admission, regardless of outcome or journal retention. Runs of archived work do not count.
     if (this.round && record.input.roundId === this.round.id) this.round.hasSubmittedRun = true;
     this.pump();
-    const result: TriggerResult = { kind: "started", requestId };
-    const active = this.active.get(requestId);
-    this.submissions.set(result, { recordId, queued: !!active && active.startedAt === undefined });
+    const receipt: Extract<TriggerResult, { kind: "started" }> = {
+      kind: "started", requestId, recordId, taskId: record.taskId, queued: active.startedAt === undefined,
+    };
     this.emitState();
-    return result;
+    return receipt;
   }
   private pump(): void {
     let running = [...this.active.values()].filter((item) => item.startedAt !== undefined).length;
@@ -508,7 +531,7 @@ export class RefineController {
     try { writeEditor(candidate.text); } catch { return false; }
     this.clearPendingSend();
     this.restoreAccepted = this.accepted;
-    this.lastCapture = { editorText: candidate.text };
+    this.lastCapture = { kind: "editor", text: candidate.text, acceptedRecordId: candidate.recordId };
     this.accepted = structuredClone(candidate);
     this.viewedAccepted = structuredClone(candidate);
     if (candidate.recordId) this.journal.update(candidate.recordId, { acceptedAt: Date.now() });
@@ -524,7 +547,7 @@ export class RefineController {
     const restore = this.restore!;
     if (currentDraft !== restore.applied && !confirmedOverwrite) return false;
     try { writeEditor(restore.before); } catch { return false; }
-    this.lastCapture = { editorText: restore.before };
+    this.lastCapture = { kind: "editor", text: restore.before };
     this.accepted = this.restoreAccepted;
     this.viewedAccepted = this.accepted;
     this.restore = undefined;

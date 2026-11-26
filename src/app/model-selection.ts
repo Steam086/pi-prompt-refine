@@ -36,7 +36,7 @@ interface ModelSelectionDependencies {
   saveOptimizer(model: ModelRef, thinking: ModelThinkingLevel | "inherit", expectedVersion?: number): Promise<boolean>;
   optimizerVersion(): number;
   taskVersion(id: number): number;
-  startOriginal(id: number, model: ModelRef, thinking: ModelThinkingLevel, expectedVersion: number): { kind: string };
+  startOriginal(id: number, model: ModelRef, thinking: ModelThinkingLevel, expectedVersion: number): { kind: string; recordId?: number };
   controller: Pick<RefineController,
     "getGeneration" | "getHistory" | "getModel" | "getOriginalRecord" | "getRecord" | "getSessionId" |
     "getState" | "getTaskModels">;
@@ -234,12 +234,10 @@ export function createModelSelection({ controller, config, useContext, setComple
       if (result.kind === "started" || result.kind === "duplicate") {
         recentRunModels.set(startSessionId, [selection.modelKey, ...recent.filter((key) => key !== selection.modelKey)].slice(0, 12));
         if (result.kind === "duplicate") {
-          const existing = controller.getHistory().find((record) => record.taskId === source.taskId && sameModel(model, record.input.model) &&
-            record.input.thinkingLevel === thinking && !record.input.revision && ["queued", "generating"].includes(record.status));
-          if (existing) {
+          if (result.recordId !== undefined) {
             const positions = runUsage ? usagePositions : taskPositions;
             const position = positions.get(startSessionId) ?? {};
-            Object.assign(position, { selectedId: existing.id, selectedTaskId: undefined, scroll: 0 });
+            Object.assign(position, { selectedId: result.recordId, selectedTaskId: undefined, scroll: 0 });
             positions.set(startSessionId, position);
           }
           notify(ctx, "This model is already running for the original prompt.", "info");

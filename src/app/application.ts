@@ -1,4 +1,3 @@
-import { resultNoteRequests } from "../revision-preferences.js";
 import { randomUUID } from "node:crypto";
 import type { RefineController } from "../controller.js";
 import type { RefineRecord } from "../history.js";
@@ -12,7 +11,8 @@ import { binding as validBinding, identity, mutationMeta, parseMutation, parseQu
 
 type Controller = Pick<RefineController, "getSessionId" | "getRoundId" | "getHistory" | "getState" | "getRecord" |
   "getTaskVersion" | "getRunVersion" | "getRunElapsed" | "createDraft" | "capture" | "updateDraft" | "removeDraft" | "runOriginal" |
-  "trigger" | "stopRequest" | "getSubmission" | "findOriginalRun">;
+  "trigger" | "stopRequest">;
+export type LocalReply = Failure | (Extract<Reply<Receipt>, { kind: "ok" }> & { recordId?: number });
 const reject = (code: FailureCode): Failure => ({ kind: "rejected", code });
 const conflict = (code: FailureCode): Failure => ({ kind: "conflict", code });
 
@@ -25,7 +25,10 @@ export function createApplication(deps: {
   const ledger = createOperationLedger();
   let lifecycleEpoch = 0;
   let current: Binding | undefined;
-  function ok<T>(value: T): Reply<T> { return immutable({ kind: "ok", value, revision: events.revision }); }
+  function ok<T>(value: T): Extract<Reply<T>, { kind: "ok" }> { return immutable({ kind: "ok", value, revision: events.revision }); }
+  function located(value: Receipt, recordId: number): LocalReply {
+    return Object.freeze({ ...ok(value), recordId });
+  }
   function guard(value: Binding): Failure | undefined {
     if (!validBinding(value)) return reject("invalid-input");
     if (!current || value.runtimeId !== current.runtimeId || value.sessionId !== current.sessionId ||
@@ -47,10 +50,10 @@ export function createApplication(deps: {
     if (controller.getTaskVersion(record.taskId) !== expected) return conflict("task-version");
     return record;
   }
-  function created(result: TriggerResult, outcome: "captured" | "copied" = "captured"): Reply<Receipt> {
+  function created(result: TriggerResult, outcome: "captured" | "copied" = "captured"): LocalReply {
+    if (result.kind === "duplicate") return duplicate(result.match);
     if (result.kind !== "captured") return rejectedTrigger(result);
-    const record = controller.getRecord(result.recordId)!;
-    return ok({ outcome, taskId: taskId(record.taskId), version: controller.getTaskVersion(record.taskId) });
+    return located({ outcome, taskId: taskId(result.taskId), version: result.version }, result.recordId);
   }
   function rejectedTrigger(result: TriggerResult): Failure {
     const code: Partial<Record<TriggerResult["kind"], FailureCode>> = {
@@ -59,18 +62,16 @@ export function createApplication(deps: {
     };
     return reject(code[result.kind] ?? "not-editable");
   }
-  function started(result: TriggerResult, duplicateId?: number): Reply<Receipt> {
-    if (result.kind === "duplicate") {
-      const record = duplicateId === undefined ? undefined : controller.getRecord(duplicateId);
-      return ok({ outcome: "duplicate", taskId: record ? taskId(record.taskId) : null, runId: record ? runId(record.id) : null });
-    }
-    if (result.kind !== "started") return rejectedTrigger(result);
-    const submission = controller.getSubmission(result);
-    if (!submission) return { kind: "error", code: "internal" };
-    const record = controller.getRecord(submission.recordId)!;
-    return ok({ outcome: submission.queued ? "queued" : "started", taskId: taskId(record.taskId), runId: runId(record.id) });
+  function duplicate(match: Extract<TriggerResult, { kind: "duplicate" }>["match"]): LocalReply {
+    if (!match) return ok({ outcome: "duplicate", taskId: null, runId: null });
+    return located({ outcome: "duplicate", taskId: taskId(match.taskId), runId: match.kind === "run" ? runId(match.recordId) : null }, match.recordId);
   }
-  function commit(mutation: Mutation): Reply<Receipt> {
+  function started(result: TriggerResult): LocalReply {
+    if (result.kind === "duplicate") return duplicate(result.match);
+    if (result.kind !== "started") return rejectedTrigger(result);
+    return located({ outcome: result.queued ? "queued" : "started", taskId: taskId(result.taskId), runId: runId(result.recordId) }, result.recordId);
+  }
+  function commit(mutation: Mutation): LocalReply {
     if ("text" in mutation && mutation.text.length > deps.maxDraftChars()) return reject("too-long");
     switch (mutation.method) {
       case "setDefaultOptimizer": {
@@ -82,12 +83,7 @@ export function createApplication(deps: {
         if (!mutation.text.trim()) return reject("empty");
         const selection = deps.models.resolve();
         if ("kind" in selection) return selection;
-        const result = controller.capture({ ...deps.input.capture(mutation.text), model: selection.model, thinkingLevel: selection.thinking });
-        if (result.kind !== "duplicate") return created(result);
-        const match = controller.getHistory().find((record) => record.archivedAt === undefined && (record.input.draft === mutation.text ||
-          (record.candidate?.text === mutation.text && (record.acceptedAt !== undefined || record.sentAt !== undefined))));
-        return ok({ outcome: "duplicate", taskId: match ? taskId(match.taskId) : null,
-          runId: match && match.status !== "unsent" ? runId(match.id) : null });
+        return created(controller.capture({ ...deps.input.capture(mutation.text), model: selection.model, thinkingLevel: selection.thinking }));
       }
       case "updateDraft": case "copyToCurrent": case "discardDraft": case "startRun": {
         const record = target(mutation.taskId, mutation.expectedVersion);
@@ -98,8 +94,7 @@ export function createApplication(deps: {
           if (!record.input.draft.trim()) return reject("empty");
           const selection = deps.models.resolve(mutation.model, mutation.thinking);
           if ("kind" in selection) return selection;
-          const result = controller.runOriginal(record.id, selection.model, selection.thinking);
-          return started(result, controller.findOriginalRun(record.taskId, selection.model, selection.thinking));
+          return started(controller.runOriginal(record.id, selection.model, selection.thinking));
         }
         if (record.status !== "unsent" || record.archivedAt !== undefined || record.input.contextUnavailable) return reject("not-editable");
         if (mutation.method === "discardDraft") {
@@ -114,14 +109,7 @@ export function createApplication(deps: {
         const selection = deps.models.resolve(mutation.model, mutation.thinking);
         if ("kind" in selection) return selection;
         const input = { ...deps.input.capture(mutation.text), model: selection.model, thinkingLevel: selection.thinking };
-        const result = controller.trigger(input, { force: true });
-        const duplicate = result.kind === "duplicate" ? controller.getHistory().find((record) =>
-          ["queued", "generating"].includes(record.status) && record.input.roundId === controller.getRoundId() &&
-          !record.input.revision && record.input.draft === input.draft && record.input.editingInstruction === input.editingInstruction &&
-          JSON.stringify(resultNoteRequests(record.input.preferences)) === JSON.stringify(resultNoteRequests(input.preferences)) &&
-          record.input.model.provider === selection.model.provider && record.input.model.id === selection.model.id &&
-          record.input.thinkingLevel === selection.thinking)?.id : undefined;
-        return started(result, duplicate);
+        return started(controller.trigger(input, { force: true }));
       }
       case "stopRun": {
         const record = controller.getRecord(localId(mutation.runId, "run")!);
@@ -179,7 +167,11 @@ export function createApplication(deps: {
       if (failure) return Promise.resolve(failure);
       const mutation = parseMutation(requested);
       if (!mutation) return Promise.resolve(reject("invalid-input"));
-      return ledger.execute(meta.clientLeaseId, meta.operationId, mutation, () => commit(mutation));
+      return ledger.execute(meta.clientLeaseId, meta.operationId, mutation, () => {
+        const result = commit(mutation);
+        if (result.kind !== "ok") return result;
+        return { kind: result.kind, value: result.value, revision: result.revision };
+      });
     },
     subscribe(value, listener) {
       if (guard(value)) throw new Error("Binding is stale");
@@ -194,8 +186,8 @@ export function createApplication(deps: {
   return {
     api,
     currentBinding: (): Binding | undefined => current && !guard(current) ? { ...current } : undefined,
-    /** Local UI events use the same guards/use cases, not a remote retry ledger. */
-    local(requested: Mutation, binding = current): Reply<Receipt> {
+    /** Native navigation can use the journal record ID from the admission receipt. */
+    local(requested: Mutation, binding = current): LocalReply {
       if (!binding) return reject("not-ready");
       const failure = guard(binding);
       if (failure) return failure;

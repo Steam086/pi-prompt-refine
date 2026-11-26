@@ -87,7 +87,9 @@ export interface RefineControllerOptions {
   onState(state: ControllerState): void;
   onAccepted?(candidate: Candidate): void;
 }
+export interface RecordIdentity { recordId: number; taskId: number }
 export type TriggerResult =
-  | { kind: "started"; requestId: number }
-  | { kind: "captured"; recordId: number }
-  | { kind: "duplicate" | "ready" | "empty" | "too-long" | "no-model" | "stale-source" | "busy" };
+  | ({ kind: "started"; requestId: number; queued: boolean } & RecordIdentity)
+  | ({ kind: "captured"; version: number } & RecordIdentity)
+  | { kind: "duplicate"; match: (RecordIdentity & { kind: "draft" | "run" }) | null }
+  | { kind: "ready" | "empty" | "too-long" | "no-model" | "stale-source" | "busy" };

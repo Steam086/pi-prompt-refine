@@ -97,9 +97,10 @@ export class RefineHistory {
 
   has(sessionId: string): boolean { return this.records.some((record) => record.input.sessionId === sessionId); }
 
-  hasDraft(sessionId: string, draft: string, lastCapturedId?: number): boolean {
-    return this.records.some((record) => record.input.sessionId === sessionId && record.input.draft === draft &&
+  findDraft(sessionId: string, draft: string, lastCapturedId?: number): Pick<RefineRecord, "id" | "taskId" | "status"> | undefined {
+    const record = this.records.find((record) => record.input.sessionId === sessionId && record.input.draft === draft &&
       (record.archivedAt === undefined || record.id === lastCapturedId));
+    return record && { id: record.id, taskId: record.taskId, status: record.status };
   }
 
   get(id: number, sessionId: string): RefineRecord | undefined {
