@@ -1,0 +1,55 @@
+ Pi can explain its own features and look up its docs. Ask it how to use or
+ extend Pi.
+
+[Extensions]
+  focus-probe.mjs
+
+
+ Warning: fd not found. Offline mode enabled, skipping download.
+
+ Warning: No models available. Use /login to log into a provider via OAuth or
+ API key. See:
+
+ <checkout>
+ ules/@earendil-works/pi-coding-agent/docs/providers.md
+
+ <checkout>
+ ules/@earendil-works/pi-coding-agent/docs/models.md
+
+aboveEditor witness
+────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────
+/tmp/isolated/project
+0.0%/0 (auto)                                                            unknown
+ Pi can explain its own features and look up its docs. Ask it how to use or
+ extend Pi.
+
+[Extensions]
+  focus-probe.mjs
+
+
+ Warning: fd not found. Offline mode enabled, skipping download.
+
+ Warning: No models available. Use /login to log into a provider via OAuth or
+ API key. See:
+
+ <checkout>
+ ules/@earendil-works/pi-coding-agent/docs/providers.md
+
+ <checkout>
+ ules/@earendil-works/pi-coding-agent/docs/models.md
+
+aboveEditor witness
+────────────────────────────────────────────────────────────────────────────────
+FOCUS PROBE
+────────────────────────────────────────────────────────────────────────────────
+/tmp/isolated/project
+0.0%/0 (auto)                                                            unknown
+editor shortcut "original"
+overlay "\r"
+overlay "\r"
+overlay "\u001b[A"
+overlay "\u001b[B"
+overlay "\u001b"
+editor shortcut "original restored"
