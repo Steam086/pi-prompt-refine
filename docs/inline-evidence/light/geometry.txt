@@ -1,0 +1,13 @@
+hidden 120x40 hardware-cursor=1
+background 120x40 hardware-cursor=1
+short 120x40 hardware-cursor=0
+accepted 120x40 hardware-cursor=1
+long 120x40 hardware-cursor=0
+revision 120x40 hardware-cursor=1
+scrolled 120x40 hardware-cursor=0
+expanded 120x40 hardware-cursor=0
+ready-80x24 80x24 hardware-cursor=0
+ready-160x50 160x50 hardware-cursor=0
+ready-240x60 240x60 hardware-cursor=0
+ready-48x18 48x18 hardware-cursor=0
+ready-40x12 40x12 hardware-cursor=0

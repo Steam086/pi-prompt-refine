@@ -1,3 +1,4 @@
+import { createUnsent } from "../support/application-wire.js";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -45,8 +46,9 @@ describe("first optimizer model setup", () => {
     h.panelInput("q"); await view;
 
     h.setEditorText("A different draft");
+    await createUnsent(h.events, "A different draft");
     const selectedView = h.shortcuts.get("ctrl+\\")!(h.context);
-    h.panelInput("\t");
+    h.panelInput("w"); h.panelInput("\t");
     await vi.waitFor(() => {
       const frame = h.panelLines(160).join("\n");
       expect(frame).toContain("[ ] Translate Prompt to English");
@@ -60,7 +62,7 @@ describe("first optimizer model setup", () => {
     const selected = h.complete.mock.calls[1]![1] as typeof call;
     expect(JSON.parse(selected.messages[0].content[0].text).editing_instruction).toContain("Translate the prompt's natural-language content into English");
     expect(h.sent).toEqual([]); expect(h.editorWrites).toEqual([]);
-    h.panelInput("q"); await selectedView;
+    h.panelInput("q"); h.panelInput("q"); await selectedView;
   });
 
   it("guides a fresh install without borrowing the main model or starting a request", async () => {

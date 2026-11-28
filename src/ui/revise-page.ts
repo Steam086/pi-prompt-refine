@@ -33,6 +33,7 @@ export class RevisePage {
   private requirementsScroll = 0;
   private requirementsViewport = 1;
   private requirementsCache?: { text: string; width: number; lines: string[] };
+  private excerpt?: string;
   private revisionSource?: { render(width: number): string[] };
   private inputError = "";
   private hasFocus = false;
@@ -50,7 +51,7 @@ export class RevisePage {
     this.revisionInput.editor.focused = value && !this.reviewingRequirements && this.revisionFocus === "input";
   }
   invalidate(): void { this.revisionInput.editor.invalidate(); }
-  open(target: RevisionTarget, source: { render(width: number): string[] } | undefined): void {
+  open(target: RevisionTarget, source: { render(width: number): string[] } | undefined, excerpt?: string): void {
     const draft = this.revisionDrafts.get(target.key);
     if (target.key !== this.revisionTarget?.key) {
       // Undo must not resurrect another candidate's feedback. Child pages keep this instance.
@@ -61,6 +62,7 @@ export class RevisePage {
     this.revisionTarget = target;
     this.revisionSelected = structuredClone(draft?.selected ?? []);
     this.revisionSource = source;
+    this.excerpt = excerpt === undefined ? undefined : sanitizeTerminalText(excerpt.split("\n", 1)[0] ?? "");
     this.inputError = "";
     this.revisionExpanded = false;
     this.revisionFocus = "input";
@@ -157,7 +159,7 @@ export class RevisePage {
 
   private canInlineRevision(width: number): boolean {
     const layout = this.layout(width);
-    return layout.bodyHeight >= 12 && layout.innerWidth >= 36;
+    return this.excerpt === undefined && layout.bodyHeight >= 12 && layout.innerWidth >= 36;
   }
 
   private renderRevision(width: number): string[] {
@@ -165,11 +167,11 @@ export class RevisePage {
     const { theme } = this;
     const canInline = this.canInlineRevision(width);
     const inline = !this.revisionExpanded && canInline;
-    const title = layout.innerWidth < 64 ? "Revise" : "Revise current result";
+    const title = this.excerpt !== undefined ? "Refine · Revise" : layout.innerWidth < 64 ? "Revise" : "Revise current result";
     const identity = this.revisionTarget?.label ? theme.fg("muted", sanitizeTerminalText(` · ${this.revisionTarget.label}`)) : "";
     const selected = this.revisionSelected.length ? `${this.revisionSelected.length} · ${this.revisionSelected.map((item) => item.name + (item.body !== item.sourceBody ? "*" : "")).join(", ")}` : "None";
     const status = this.inputError || this.options.preferencesKeyNotice.trim()
-      || (this.revisionSelected.some((item) => item.body !== item.sourceBody) ? "* Edited for this revision only" : "");
+      || (this.revisionSelected.some((item) => item.body !== item.sourceBody) ? "* Edited for this revision only" : this.excerpt !== undefined ? `Current result: ${this.excerpt}` : "");
     const warning = !!(this.inputError || this.options.preferencesKeyNotice);
     const feedback = theme.fg(warning ? "warning" : "muted", sanitizeTerminalText(`${warning ? "⚠ " : ""}${status}`));
     const control = (label: string, active: boolean) => focusLabel(theme, layout.innerWidth, label, active);

@@ -63,7 +63,7 @@ export function createModelSelection({ controller, readConfig, useContext, setCo
 
   async function selectModel(ctx: ExtensionContext, runId?: number, runUsage = false,
     present: ModelPickerPresenter = (factory) => ctx.ui.custom(factory, { overlay: true, overlayOptions: REFINE_OVERLAY_OPTIONS }),
-    origin?: "settings"): Promise<void> {
+    origin?: "settings", onRun?: (id: number) => void): Promise<void> {
     useContext(ctx);
     if (ctx.mode !== "tui") {
       notify(ctx, "Optimizer model selection is only available in TUI mode.", "warning");
@@ -229,6 +229,7 @@ export function createModelSelection({ controller, readConfig, useContext, setCo
       const thinking = effectiveThinkingLevel(check.model, selection.thinkingLevel, ctx.thinkingLevel);
       const result = startOriginal(runId!, modelRef(model), thinking, sourceVersion);
       if (result.kind === "started" || result.kind === "duplicate") {
+        if (result.recordId !== undefined) onRun?.(result.recordId);
         recentRunModels.set(startSessionId, [selection.modelKey, ...recent.filter((key) => key !== selection.modelKey)].slice(0, 12));
         if (result.kind === "duplicate") {
           if (result.recordId !== undefined) {

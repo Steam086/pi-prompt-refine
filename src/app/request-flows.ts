@@ -11,8 +11,8 @@ import { composeRevision, PREFERENCE_SELECTION_LIMIT, type SelectedPreference } 
 
 interface RequestFlowDependencies {
   controller: Pick<RefineController,
-    "capture" | "getCandidate" | "getGeneration" | "getModel" | "getState" | "getTaskInput" |
-    "hasSubmittedRunInRound" | "isCandidateCurrent" | "startRecord" | "trigger">;
+    "capture" | "createDraft" | "getCandidate" | "getGeneration" | "getModel" | "getState" | "getTaskInput" |
+    "isCandidateCurrent" | "startRecord" | "trigger">;
   readConfig: ConfigReader<"maxDraftChars" | "context" | "projectContext" | "systemPrompt" | "thinkingLevel">;
   useContext(ctx: ExtensionContext): void;
   setCompletionContext(ctx: ExtensionContext): void;
@@ -112,8 +112,8 @@ export function createRequestFlows({ controller, readConfig, useContext, setComp
     projectWarnings = project?.warnings ?? [];
     const defaultsTooLong = (input.editingInstruction?.length ?? 0) > maxDraftChars;
     const tooMany = (input.preferences?.length ?? 0) > PREFERENCE_SELECTION_LIMIT;
-    let result = mode === "run" ? controller.trigger(input, { force }) : controller.capture(input);
-    if (mode === "shortcut" && result.kind === "captured" && !controller.hasSubmittedRunInRound() && !defaultsTooLong) {
+    let result = mode === "run" ? controller.trigger(input, { force }) : mode === "shortcut" ? controller.createDraft(input) : controller.capture(input);
+    if (mode === "shortcut" && result.kind === "captured" && !defaultsTooLong) {
       // Start the captured source in place. If admission is rejected, keep it editable.
       const started = controller.startRecord(result.recordId, selected, input.thinkingLevel);
       if (started.kind === "started") result = started;
@@ -161,7 +161,7 @@ export function createRequestFlows({ controller, readConfig, useContext, setComp
     if (result.kind !== "started") notify(ctx, "Same-input generation was not started; current results kept.", "warning");
   }
 
-  function reviseCandidate(ctx: ExtensionContext, token: CandidateToken, instruction: string, resultNotes?: RevisionInput["resultNotes"]): string | undefined {
+  function reviseCandidate(ctx: ExtensionContext, token: CandidateToken, instruction: string, resultNotes?: RevisionInput["resultNotes"]): string | number {
     const { maxDraftChars, projectContext, thinkingLevel } = readConfig();
     if (!controller.isCandidateCurrent(token) || controller.getState().pendingSend) return "The result changed or is being sent. Reopen Revise for the current result.";
     if (!instruction.trim()) return "Enter revision instructions; the current result is unchanged.";
@@ -197,7 +197,7 @@ export function createRequestFlows({ controller, readConfig, useContext, setComp
       ({ historySnapshot, projectLabel, projectWarnings } = previousContext);
       return "Could not revise this result. Reopen Revise; the current draft was not changed.";
     }
-    return undefined;
+    return result.recordId;
   }
 
   function clearContext(): void {

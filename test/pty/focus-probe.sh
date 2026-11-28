@@ -4,7 +4,7 @@ box=$(mktemp -d)
 mkdir -p "$box/home" "$box/agent" "$box/project"
 sock="$box/tmux"
 t() { tmux -S "$sock" "$@"; }
-trap 't kill-server 2>/dev/null || true' EXIT
+trap 't kill-server 2>/dev/null || true; rm -rf -- "$box"' EXIT
 t -f /dev/null new-session -d -x 80 -y 24 -c "$box/project" "env -i TERM=xterm-256color PATH='$PATH' HOME='$box/home' PI_CODING_AGENT_DIR='$box/agent' PI_OFFLINE=1 PROBE_LOG='$box/log' '$root/node_modules/.bin/pi' --no-session --no-extensions --no-skills --no-prompt-templates --no-themes -e '$root/test/pty/focus-probe.mjs'"
 sleep 3
 t capture-pane -p

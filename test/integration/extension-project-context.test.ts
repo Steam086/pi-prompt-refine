@@ -303,7 +303,7 @@ describe("project context injection", () => {
     const systemPrompt = vi.spyOn(harness.context, "getSystemPrompt").mockReturnValue(resourcePrompt());
     harness.holdPanel();
     const view = shortcut(harness, "ctrl+\\")(harness.context);
-    expect(harness.panelLines().join("\n")).toMatch(/›\s+└─ fake-chat/);
+    expect(harness.panelLines().join("\n")).toContain("Generating · fake-chat");
     systemPrompt.mockReturnValue("Resources changed after capture");
     await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
     const request = (harness.complete.mock.calls[0] as any[])[1];

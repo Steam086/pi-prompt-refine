@@ -63,7 +63,10 @@ describe("explicit candidate revision", () => {
   it("opens an empty editor/workspace to browse and Add/Edit/Delete Preferences without a request", async () => {
     const h = await makeHarness({ config: { preferencesKey: null } });
     const store = new PreferenceStore(h.agentDir, h.context.cwd);
-    h.setEditorText(""); h.holdPanel(); const view = shortcut(h, "ctrl+\\")(h.context);
+    h.setEditorText(""); h.holdPanel(); await shortcut(h, "ctrl+\\")(h.context);
+    expect(h.customCalls()).toBe(0);
+    expect(h.notifications.at(-1)).toBe("Refine: Type a prompt first. /refine for workspace.");
+    const view = h.command("", h.context);
     expect(h.panelLines(100).join("\n")).toContain("p: Preferences");
     h.panelInput("?");
     expect(h.panelLines(100).join("\n")).toContain("p Preferences");

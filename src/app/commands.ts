@@ -1,4 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { quickTarget } from "../quick-preview.js";
 import type { ShortcutAction } from "../config.js";
 import type { RefineController } from "../controller.js";
 import type { TaskPanelPosition } from "../task-panel.js";
@@ -10,7 +11,7 @@ import type { Notify } from "./contracts.js";
 
 interface CommandDependencies {
   controller: Pick<RefineController,
-    "cancelAndDismiss" | "getAppliedRecordId" | "getHistory" | "getModel" | "hasCapturedDraft">;
+    "cancelAndDismiss" | "getRoundId" | "getTaskDisplayRecords">;
   taskPositions: Map<string, TaskPanelPosition>;
   useContext(ctx: ExtensionContext): void;
   host: Pick<ReturnType<typeof createWorkspaceHost>, "showPreview" | "isInteracting">;
@@ -29,44 +30,27 @@ export function createCommands({ controller, taskPositions, useContext, host, re
   const { triggerOptimize } = requests;
   const { selectModel, cycleModel } = models;
   const { restoreDraft } = editor;
+  const remembered = new Map<number, number>();
   const actions: Record<ShortcutAction, (ctx: ExtensionContext) => void | Promise<void>> = {
     optimize: (ctx) => {
       if (ctx.mode !== "tui") { triggerOptimize(ctx); return; }
       if (isInteracting()) return;
       useContext(ctx);
       const draft = ctx.ui.getEditorText();
-      if (!controller.getModel() || !draft.trim()) return showPreview(ctx);
-      const knownDraft = controller.hasCapturedDraft(draft);
-      const warnQuota = showOptimizerQuota();
-      const result = !knownDraft ? triggerOptimize(ctx, false, draft, true, "shortcut") : undefined;
-      if (result?.kind === "started" && warnQuota) notify(ctx, "Refine may use optimizer quota or incur charges.");
-      const records = controller.getHistory();
       const position = taskPositions.get(ctx.sessionManager.getSessionId());
-      const selected = records.find((record) => position?.selectedTaskId !== undefined
-        ? record.taskId === position.selectedTaskId
-        : record.id === (position?.selectedId ?? controller.getAppliedRecordId()));
-      // Opening with an editor draft is an explicit navigation intent. Background
-      // updates still preserve selection; a newly captured prompt must not inherit it.
-      const targetId = result?.kind === "captured" || result?.kind === "started" ? result.recordId : undefined;
-      let target = records.find((record) => record.id === targetId);
-      let original = result?.kind !== "started";
-      if (!target && knownDraft) {
-        let matching = records.filter((record) => record.input.draft === draft);
-        if (!matching.length) {
-          matching = records.filter((record) => record.candidate?.text === draft && (record.acceptedAt !== undefined || record.sentAt !== undefined));
-          original = false;
-        }
-        const current = matching.filter((record) => record.archivedAt === undefined);
-        if (current.length) matching = current;
-        if (!matching.some((record) => original ? record.taskId === selected?.taskId : record.id === selected?.id && position?.selectedTaskId === undefined)) {
-          target = matching.at(-1);
-        }
+      const records = controller.getTaskDisplayRecords();
+      const tasks = new Set(records.map(record => record.taskId));
+      for (const task of remembered.keys()) if (!tasks.has(task)) remembered.delete(task);
+      let id = quickTarget(records, controller.getRoundId(), draft, position?.selectedId, remembered, position?.selectedTaskId)?.id;
+      if (id === undefined) {
+        if (!draft.trim()) { notify(ctx, "Refine: Type a prompt first. /refine for workspace."); return; }
+        const warnQuota = showOptimizerQuota();
+        const result = triggerOptimize(ctx, false, draft, true, "shortcut");
+        if (result?.kind !== "captured" && result?.kind !== "started") return;
+        id = result.recordId;
+        if (result.kind === "started" && warnQuota) notify(ctx, "Refine may use optimizer quota or incur charges.");
       }
-      if (target) taskPositions.set(ctx.sessionManager.getSessionId(), {
-        ...position, selectedId: target.id, selectedTaskId: original ? target.taskId : undefined, scroll: 0,
-        scrolls: { ...position?.scrolls, [`${original ? "task" : "run"}-${original ? target.taskId : target.id}`]: 0 },
-      });
-      return showPreview(ctx);
+      return showPreview(ctx, undefined, false, { id, remembered });
     },
     view: (ctx) => showPreview(ctx, undefined, true),
     dismiss: (ctx) => {

@@ -1,0 +1,60 @@
+
+ ▀▀█  v1.6.0
+ █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+ Press ctrl+o to show full startup help and loaded resources.
+
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+
+[Extensions]
+  extension.ts, fixture-provider.ts
+
+
+ Warning: fd not found. Offline mode enabled, skipping download.
+
+ Refine may use optimizer quota or incur charges.
+
+
+ Review the scheduling design and explain the main trade-offs.
+
+
+ {"prompt":"Review the scheduling design and explain the main trade-offs."}
+
+
+
+
+     ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+     │ Refine · Ready · Lines 7–13/60 · writer · 1s                                                                                                                                                                                       │
+     │ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+     │ 7. Compare 中文 and 👩‍💻 output, preserve é, and explain the scheduling constraints.                                                                                                                                                 │
+     │ 8. Compare 中文 and 👩‍💻 output, preserve é, and explain the scheduling constraints.                                                                                                                                                 │
+     │ 9. Compare 中文 and 👩‍💻 output, preserve é, and explain the scheduling constraints.                                                                                                                                                 │
+     │ 10. Compare 中文 and 👩‍💻 output, preserve é, and explain the scheduling constraints.                                                                                                                                                │
+     │ 11. Compare 中文 and 👩‍💻 output, preserve é, and explain the scheduling constraints.                                                                                                                                                │
+     │ 12. Compare 中文 and 👩‍💻 output, preserve é, and explain the scheduling constraints.                                                                                                                                                │
+     │ 13. Compare 中文 and 👩‍💻 output, preserve é, and explain the scheduling constraints.                                                                                                                                                │
+     │ a Accept  Esc Close  ? Help  ↑↓ Scroll  v Expand  f Revise  m Model  p Preferences  n New draft  w Workspace                                                                                                                       │
+     ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Long fixture
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/tmp/tmp.e646w2XNcg/project
+1.5%/32k (auto)                                                                                                                                                                                                                           writer

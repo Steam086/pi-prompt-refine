@@ -1,0 +1,40 @@
+
+ ▀▀█  v1.6.0
+ █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+ Press ctrl+o to show full startup help and loaded resources.
+
+ P╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │  Refine · Revise · #2 · fixture/writer                                                                          │
+[E│  Current result: 1. Compare 中文 and 👩‍💻 output, preserve é, and explain the scheduling constraints.             │
+  │  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────  │
+  │  Preferences: None · Review full requirements                                                                   │
+  │  › Additional requirements:                                                                                     │
+ W│                                                                                                                 │
+  │                                                                                                                 │
+ R│                                                                                                                 │
+  │                                                                                                                 │
+  │                                                                                                                 │
+ R│                                                                                                                 │
+  │                                                                                                                 │
+  │                                                                                                                 │
+ {│                                                                                                                 │
+  │                                                                                                                 │
+  │                                                                                                                 │
+  │                                                                                                                 │
+  │                                                                                                                 │
+  │                                                                                                                 │
+  │                                                                                                                 │
+  │                                                                                                                 │
+  │                                                                                                                 │
+  │                                                                                                                 │
+  │                                                                                                                 │
+  │                                                                                                                 │
+  │                                                                                                                 │
+  │                                                                                                                 │
+  │  Esc Back · Ctrl+S Revise · Tab Focus · Enter Newline · ALT+P Preferences                                       │
+  ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Long fixture
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+/tmp/tmp.lUx7CT6ncB/project
+1.5%/32k (auto)                                                                                                   writer

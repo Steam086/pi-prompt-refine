@@ -1,4 +1,6 @@
-import { parseKey, type Component } from "@earendil-works/pi-tui";
+import { mountQuick, type QuickSelection } from "./quick-session.js";
+import type { TuiOperations } from "../adapters/tui-operations.js";
+import { matchesKey, parseKey, type KeyId, type Component } from "@earendil-works/pi-tui";
 import { copyToClipboard } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ConfigReader } from "../config.js";
@@ -30,10 +32,9 @@ function errorStatus(state: ControllerState): string {
 }
 
 interface WorkspaceHostDependencies {
-  controller: Pick<RefineController,
-    "cancelAndDismiss" | "cycleCandidate" | "getCandidate" | "getCandidatePosition" | "getCandidateToken" |
-    "getDisplayedInput" | "getGeneration" | "getModel" | "getRequestSource" | "getRestore" | "getSessionId" |
-    "getState" | "getViewedAccepted" | "isCandidateCurrent" | "stopRequest">;
+  controller: RefineController;
+  operations: TuiOperations;
+  shortcut: KeyId | null;
   readConfig: ConfigReader<"thinkingLevel">;
   openHint: string;
   taskPositions: Map<string, TaskPanelPosition>;
@@ -41,36 +42,37 @@ interface WorkspaceHostDependencies {
   useContext(ctx: ExtensionContext): void;
   canNameSession(ctx: ExtensionContext): boolean;
   updatePresentation(): void;
-  acknowledge(sessionId: string): void;
+  acknowledge(sessionId: string, viewedId?: number): void;
   workspaceActions: ReturnType<typeof createWorkspaceActions>;
   editor: ReturnType<typeof createEditorActions>;
   models: Pick<ReturnType<typeof createModelSelection>, "selectModel" | "cycleModel" | "modelSwitchBlocked" | "registeredModels">;
-  requests: Pick<ReturnType<typeof createRequestFlows>, "triggerOptimize" | "generateSameInput" | "contextLabel">;
+  requests: Pick<ReturnType<typeof createRequestFlows>, "triggerOptimize" | "generateSameInput" | "contextLabel" | "checkOptimization">;
   notify: Notify;
   notifyCurrent: NotifyCurrent;
 }
 
-export function createWorkspaceHost({ controller, readConfig, openHint, taskPositions, usagePositions,
+export function createWorkspaceHost({ controller, operations, shortcut, readConfig, openHint, taskPositions, usagePositions,
   useContext, canNameSession, updatePresentation, acknowledge, workspaceActions,
   editor, models, requests, notify, notifyCurrent }: WorkspaceHostDependencies) {
   const { acceptCandidate, editCandidate, restoreDraft, sendCandidate } = editor;
   const { selectModel, cycleModel, modelSwitchBlocked, registeredModels } = models;
   const { triggerOptimize, generateSameInput, contextLabel } = requests;
   const previewPositions = new Map<string, number>();
+  let quick: ReturnType<typeof mountQuick> | undefined;
   let interacting = false;
   let refreshPreview: (() => void) | undefined;
   let closePreview: ((reason?: "idle") => void) | undefined;
-  async function showPreview(ctx: ExtensionContext, initialPage?: "usage", resultView = false): Promise<void> {
+  async function showPreview(ctx: ExtensionContext, initialPage?: "usage", resultView = false, quickSelection?: QuickSelection): Promise<void> {
     if (interacting || ctx.mode !== "tui") return;
     interacting = true;
-    try { await showPreviewContent(ctx, initialPage, resultView); }
+    try { await showPreviewContent(ctx, initialPage, resultView, quickSelection); }
     finally {
       interacting = false;
       updatePresentation();
     }
   }
 
-  async function showPreviewContent(ctx: ExtensionContext, initialPage?: "usage", resultView = false): Promise<void> {
+  async function showPreviewContent(ctx: ExtensionContext, initialPage?: "usage", resultView = false, quickSelection?: QuickSelection): Promise<void> {
     useContext(ctx);
     if (ctx.mode !== "tui") {
       notify(ctx, "Preview requires TUI mode.", "warning");
@@ -141,14 +143,14 @@ export function createWorkspaceHost({ controller, readConfig, openHint, taskPosi
             modelPicker = factory(tui, theme, keybindings, finishModelPicker);
             workspace.focused = false;
             tui.requestRender();
-          }), origin).catch(() => {
+          }), origin, (id) => { if (!closed) quick?.followRun(id); }).catch(() => {
             if (!closed) notify(ctx, "Could not select optimizer model; existing work kept.", "error");
           }).finally(() => {
             choosingModel = false;
             modelPicker = undefined;
             finishModelPicker = undefined;
             if (closed) return;
-            workspace.focused = focused;
+            workspace.focused = focused && !quick?.reading;
             refreshPreview?.();
           });
         };
@@ -156,10 +158,11 @@ export function createWorkspaceHost({ controller, readConfig, openHint, taskPosi
         taskPositions.set(sessionId, position);
         const usagePosition = usagePositions.get(sessionId) ?? {};
         usagePositions.set(sessionId, usagePosition);
-        const workspace: RefineWorkspace = new RefineWorkspace(panel, tui, theme, keybindings, workspaceActions({
+        const actions = workspaceActions({
           ctx, sessionId, isClosed: () => closed, isUsage: () => workspace.isUsage(),
-          position, usagePosition, openModelPicker, finish: (value) => finish(value),
-        }), (text) => {
+          position, usagePosition, openModelPicker, onRevisionRun: (id) => quick?.followRun(id), finish: (value) => finish(value),
+        });
+        const workspace = new RefineWorkspace(panel, tui, theme, keybindings, actions, (text) => {
           void copyToClipboard(text).catch(() => {
             if (!closed) notify(ctx, "Could not copy the selected text.", "warning");
           });
@@ -167,6 +170,7 @@ export function createWorkspaceHost({ controller, readConfig, openHint, taskPosi
         const finish = (value?: WorkspaceSelection) => {
           if (closed) return;
           closed = true;
+          quick = undefined;
           finishModelPicker?.(undefined);
           modelPicker = undefined;
           panel.rememberPosition();
@@ -175,6 +179,9 @@ export function createWorkspaceHost({ controller, readConfig, openHint, taskPosi
           closePreview = undefined;
           done(value);
         };
+        if (quickSelection) quick = mountQuick({ controller, selection: quickSelection, ctx, workspace, theme, position,
+          rows: () => tui.terminal.rows, operations, shortcut, run: id => actions.tasks?.run(id),
+          model: openModelPicker, check: requests.checkOptimization, close: finish });
         if (initialPage) workspace.openUsage();
         else if (resultView) workspace.openResult();
         closePreview = (reason) => {
@@ -185,33 +192,43 @@ export function createWorkspaceHost({ controller, readConfig, openHint, taskPosi
         };
         refreshPreview = () => {
           if (closed) return;
+          if (quick && !quick.valid()) { finish(); return; }
           panel.update(snapshot());
           workspace.refreshSettings();
           tui.requestRender();
         };
         // Opening the workspace acknowledges completed requests and hides the background status.
-        acknowledge(sessionId);
+        acknowledge(sessionId, quick?.viewedId);
         ctx.ui.setStatus(STATUS_KEY, undefined);
         ctx.ui.setWidget(STATUS_KEY, undefined);
         return {
           get focused() { return focused; },
-          set focused(value: boolean) { focused = value; workspace.focused = value && !choosingModel; },
-          render: (width) => modelPicker ? modelPicker.render(width) : workspace.render(width),
-          handleMouse: (event) => !closed && !choosingModel ? workspace.handleMouse(event) : undefined,
+          set focused(value: boolean) { focused = value; workspace.focused = value && !choosingModel && !quick?.reading; },
+          render: (width) => modelPicker ? modelPicker.render(width) : quick?.reading ? quick.render(width) : workspace.render(width),
+          handleMouse: (event) => !closed && !choosingModel && !quick?.reading ? workspace.handleMouse(event) : undefined,
           invalidate: () => { workspace.invalidate(); modelPicker?.invalidate(); },
           handleInput(data) {
-            if (closed) return;
+            if (closed || !focused) return;
             if (choosingModel) {
               // A confirmed picker remains visible while settings are persisted;
               // consume further keys instead of confirming twice or leaking input.
               if (finishModelPicker) modelPicker?.handleInput?.(data);
               return;
             }
+            if (quick?.input(data)) {
+              workspace.focused = !closed && focused && !quick?.reading && !choosingModel;
+              tui.requestRender();
+              return;
+            }
+            const leaveWorkspace = () => {
+              if (quick && !(shortcut && matchesKey(data, shortcut))) { quick.back(); workspace.focused = false; tui.requestRender(); }
+              else finish();
+            };
             const handled = workspace.handleInput(data);
-            if (handled === "close") { finish(); return; }
+            if (handled === "close") { leaveWorkspace(); return; }
             if (handled) return;
             const navigationKey = parseKey(data);
-            if (keybindings.matches(data, "tui.select.cancel") || navigationKey === "ctrl+\\") { finish(); return; }
+            if (keybindings.matches(data, "tui.select.cancel") || navigationKey === "ctrl+\\" || (shortcut && matchesKey(data, shortcut))) { leaveWorkspace(); return; }
             if (keybindings.matches(data, "tui.input.submit")) return;
             if (keybindings.matches(data, "tui.editor.cursorUp")) panel.scrollBy(-1);
             else if (keybindings.matches(data, "tui.editor.cursorDown")) panel.scrollBy(1);
@@ -244,6 +261,7 @@ export function createWorkspaceHost({ controller, readConfig, openHint, taskPosi
                 r: "optimize", m: "model", c: "cycle", q: "close",
               };
               const action = key ? keys[key] : undefined;
+              if (action === "close") { leaveWorkspace(); return; }
               if (action === "model") { openModelPicker(); return; }
               if (action) {
                 if (["accept", "edit", "send"].includes(action) && !displayedToken) return;
@@ -283,6 +301,7 @@ export function createWorkspaceHost({ controller, readConfig, openHint, taskPosi
 
   return {
     showPreview,
+    viewedId: () => quick?.viewedId,
     isInteracting: () => interacting,
     isOpen: () => !!closePreview,
     refresh: () => refreshPreview?.(),

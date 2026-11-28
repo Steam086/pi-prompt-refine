@@ -4,6 +4,8 @@ For installation and your first rewrite, start with the [README](../README.md). 
 
 ## Work with drafts and results
 
+Press `Ctrl+\` in the editor to open a compact centered preview. Press `a` to put the full result in the editor. Pi handles the next editor submission. Use `v` for a full-height reading pane, `f` for revision instructions, or `w` for the workspace. Esc returns one level. Closing a running preview moves its progress to the single line above the editor.
+
 The workspace has three tabs: **Preview** for the current round, **Usage** for current and earlier records, and **Settings** for configuration. Use the Left and Right arrow keys to switch tabs and `?` to see the actions available for your current selection. Press `Esc` from a top-level tab to close the workspace. Settings asks before discarding staged changes. In a subpage, such as Usage record details, `Esc` returns to the parent page.
 
 Scroll within the workspace to read long results. The frame stays stable as you switch pages and may cover part of the Pi footer in a short terminal.
@@ -12,14 +14,14 @@ With Pi's mouse support enabled, wheel over a document to scroll its pane. Drag 
 
 | To… | Do this |
 | --- | --- |
-| Refine from the Pi editor | With an optimizer selected, type a new draft and press `Ctrl+\`. The first rewrite of the round starts immediately with the current session choices, including inherited project defaults. Later new drafts open as **Unsent**. |
-| Rewrite an Unsent draft | Select it and press `Enter`. To add Preferences first, press `Tab`, then `Space` on each item you want. Press `Enter` to start the rewrite. |
+| Refine from the Pi editor | With an optimizer selected, type a new draft and press `Ctrl+\`. Each new draft starts with the captured session choices, including inherited project defaults. An exact match opens the existing task. |
+| Rewrite an Unsent draft | Press `Enter` in the quick preview to start. To choose Preferences first, press `p`, toggle items with `Space`, then return with `Esc`. In the workspace, `Tab` opens the inline checklist. Press `Enter` to start the rewrite. |
 | Try a different model | Select the draft or a run and press `m`. Choose a model and press `Enter` to run it without changing your default. |
 | Revise a result | Select the result and press `f`. Enter your revision instructions, then press `Ctrl+S` to request a new rewrite. |
 | Use a result | Press `a` to put it in the Pi editor **without sending**. Review and submit it yourself, or press `s` in result details to send directly. The first direct send after loading asks for confirmation. |
 | Stop a rewrite | Select its queued or running entry and press `x`. Closing the workspace does not stop it. |
 
-The first request counts as soon as Refine queues it, even if you stop it, it fails, or you delete its record. An unchanged draft reopens its existing entry without calling the optimizer again. Sending a user message to Pi ends the round; merely accepting a result into the editor does not. The shortcut never changes the editor or sends to the main agent.
+With an empty editor the shortcut resumes an actionable task in the current round. An accepted result still in the editor reopens for reading. Use `n` in the quick preview to start a fresh editor draft. Refine asks before clearing unrelated text and keeps a confirmed copy as an in-memory Unsent draft. A user message starting in Pi ends the round.
 
 ### Preferences
 

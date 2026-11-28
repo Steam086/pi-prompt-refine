@@ -26,7 +26,7 @@ Start Pi, or run `/reload` in an existing Pi session.
 
 1. Run `/refine model` in Pi and choose your rewrite model.
 2. Type a draft in the Pi editor. For example, “Look at the error handling we just discussed. Suggest improvements, but leave the code as it is.”
-3. Press `Ctrl+\` to start the first rewrite and open the Refine workspace. If the draft appears as **Unsent**, select it and press `Enter` to start.
+3. Press `Ctrl+\` to rewrite the draft and open its quick preview. The same shortcut reopens a matching result in the current round. Use `v` for the full preview or `w` for the workspace.
 4. Review a completed result and press `a` to accept it into the Pi editor. Edit it if needed, then submit it yourself when you're ready.
 
 ## Essential commands

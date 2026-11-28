@@ -16,7 +16,7 @@
 | 修改范围 | 指南 |
 | --- | --- |
 | 扩展入口、状态和模型请求 | [架构](architecture.md) · [上下文与输出协议](context.md) · [设计取舍](design.md) |
-| 原生终端界面 | [TUI 维护约定](ui-conventions.md) |
+| 原生终端界面 | [TUI 维护约定](ui-conventions.md) · [快速预览实验与验收记录](inline-evidence/README.md) |
 | 应用 API、RPC 与实验 Web | [应用契约](application-api.md) · [RPC 宿主行为与验证范围](rpc-slash-verification.md) · [Web 子包](../packages/pi-web/README.md) |
 | 测试与发布 | [测试指南](testing.md) · [原生包发布清单](release.md) |
 | 评估改写质量 | [语义验收](optimizer-evaluation.md) · [实验记录与基准设计](experiments/README.md) |

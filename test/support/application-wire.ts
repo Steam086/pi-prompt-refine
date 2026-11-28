@@ -34,3 +34,8 @@ export function requireValue<T>(reply: Reply<T>): T {
   if (reply.kind !== "ok") throw new Error(`${reply.kind}: ${reply.code}`);
   return reply.value;
 }
+
+export async function createUnsent(events: SessionBus, text: string) {
+  const hello = requireValue(await wireRequest<Hello>(events, { action: "hello", clientId: "fixture" }));
+  requireValue(await wireMutation(events, hello, {method: "createDraft", text}));
+}

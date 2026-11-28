@@ -30,7 +30,7 @@ interface WorkspaceActionsDependencies {
   checkOptimization: ReturnType<typeof createRequestFlows>["checkOptimization"];
   operations: TuiOperations;
   triggerOptimize: ReturnType<typeof createRequestFlows>["triggerOptimize"];
-  reviseCandidate(ctx: ExtensionContext, token: CandidateToken, instruction: string, resultNotes?: RevisionInput["resultNotes"]): string | undefined;
+  reviseCandidate(ctx: ExtensionContext, token: CandidateToken, instruction: string, resultNotes?: RevisionInput["resultNotes"]): string | number;
   registeredModels(ctx: ExtensionContext): ReturnType<ExtensionContext["modelRegistry"]["getAvailable"]>;
   showOptimizerQuota(): boolean;
   notify: Notify;
@@ -44,6 +44,7 @@ interface WorkspaceMount {
   isUsage(): boolean;
   position: TaskPanelPosition;
   usagePosition: TaskPanelPosition;
+  onRevisionRun?(id: number): void;
   openModelPicker(id?: number, origin?: "settings"): void;
   finish(value?: WorkspaceSelection): void;
 }
@@ -55,7 +56,7 @@ export function createWorkspaceActions({ controller, readConfig, settings, setCo
   const inputDrafts = new Map<string, string>();
   const revisionDrafts = new Map<string, RevisionDraft>();
   return ({ ctx, sessionId, isClosed, isUsage, position, usagePosition,
-    openModelPicker, finish }: WorkspaceMount): WorkspaceOptions => {
+    openModelPicker, onRevisionRun, finish }: WorkspaceMount): WorkspaceOptions => {
     const runRecord = (id: number) => {
       if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId) return;
       const record = controller.getRecord(id);
@@ -230,7 +231,10 @@ export function createWorkspaceActions({ controller, readConfig, settings, setCo
           },
           submit: (text: string, resultNotes?: RevisionInput["resultNotes"]) => {
             if (isClosed() || ctx.sessionManager.getSessionId() !== sessionId) return "Session changed; no request sent.";
-            return reviseCandidate(ctx, token, text, resultNotes);
+            const result = reviseCandidate(ctx, token, text, resultNotes);
+            if (typeof result === "string") return result;
+            onRevisionRun?.(result);
+            return undefined;
           },
         };
       },

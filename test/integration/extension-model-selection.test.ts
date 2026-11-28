@@ -20,7 +20,9 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
   it("opens the action panel instead of issuing a request when no model is configured", async () => {
     const harness = await makeHarness({ useDefaultShortcuts: true, configureModel: false });
     await shortcut(harness, "ctrl+\\")(harness.context);
-    expect(harness.customCalls()).toBe(1);
+    expect(harness.customCalls()).toBe(0);
+    expect(harness.notifications.at(-1)).toContain("/refine model");
+    await harness.command("", harness.context);
     const frame = harness.panelLines().join("\n");
     expect(frame).toContain("No current prompts.");
     expect(frame).not.toContain("Refine model:");

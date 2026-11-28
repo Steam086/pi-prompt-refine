@@ -169,7 +169,7 @@ export class RefineWorkspace implements Component, Focusable {
     if (this.inlinePreferences) this.inlinePreferences.focused = value && !this.preferencePanel && this.mode === "main";
   }
 
-  private openRevision(id?: number): void {
+  openRevision(id?: number, excerpt?: string): void {
     const target = this.actions.revision?.(id);
     if (!target) {
       const notice = "Result unavailable or send pending; reopen an actionable result to revise.";
@@ -179,9 +179,9 @@ export class RefineWorkspace implements Component, Focusable {
     }
     this.inputKind = "revision";
     this.inputReturnMode = this.mode === "usage" ? "usage" : this.mode === "result" ? "result" : "main";
-    const source = this.inputReturnMode === "usage" ? this.historyPanel?.snapshot(true)
+    const source = excerpt !== undefined ? undefined : this.inputReturnMode === "usage" ? this.historyPanel?.snapshot(true)
       : this.inputReturnMode === "main" ? this.taskPanel?.snapshot(true) ?? this.panel.snapshot(true) : this.panel.snapshot(true);
-    this.revise.open(target, source);
+    this.revise.open(target, source, excerpt);
     this.switchMode("input");
   }
 
@@ -198,7 +198,7 @@ export class RefineWorkspace implements Component, Focusable {
     this.tui.requestRender();
   }
 
-  private openDraftPreferences(id?: number, original?: boolean): void {
+  openDraftPreferences(id?: number, original?: boolean): void {
     const options = this.actions.preferences;
     if (!options || this.preferencePanel) return;
     const usage = this.mode === "usage";
@@ -307,6 +307,8 @@ export class RefineWorkspace implements Component, Focusable {
     this.openResult(true);
   }
 
+  choosingPreferences(): boolean { return !!this.preferencePanel; }
+  inQuickChild(): boolean { return !!this.preferencePanel || this.mode === "input"; }
   isUsage(): boolean { return this.mode === "usage"; }
   isEditingOptimizationPrompt(): boolean { return this.mode === "context" && this.settings.editingOptimizationPrompt; }
   openTasks(): void { this.taskPanel?.openList(); this.switchMode("main"); }

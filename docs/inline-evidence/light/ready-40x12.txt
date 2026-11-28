@@ -1,0 +1,12 @@
+ explain the main trade-offs.
+
+
+ {"prompt":"Review the scheduling
+ Refine · Ready · Lines 19–19/180 · wri
+ 7. Compare 中文 and 👩‍💻 output,
+ a Accept  Esc Close  ? Help  ↑↓ Scroll
+────────────────────────────────────────
+Long fixture
+────────────────────────────────────────
+/tmp/tmp.e646w2XNcg/project
+1.5%/32k (auto)                   writer

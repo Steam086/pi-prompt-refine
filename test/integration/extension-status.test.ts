@@ -23,7 +23,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.setEditorText("Draft B");
     resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "Automatic visible result", title: "Background refinement" }) }], stopReason: "stop" });
     await flushPromises();
-    expect(harness.widgetLines().join("\n")).toContain("1 new");
+    expect(harness.widgetLines().join("\n")).toContain("1 ready");
     expect(harness.widgetLines()).toHaveLength(1);
     expect(harness.customCalls()).toBe(0);
     expect(harness.getEditor()).toBe("Draft B");
@@ -38,17 +38,16 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.holdPanel();
     let view = shortcut(harness, "ctrl+\\")(harness.context);
     await vi.waitFor(() => expect(harness.complete).toHaveBeenCalledTimes(1));
-    expect(harness.panelLines().join("\n")).toMatch(/›\s+└─ fake-chat/);
-    harness.panelInput("q"); await view;
+    expect(harness.panelLines().join("\n")).toContain("Generating · fake-chat");
+    harness.panelInput("\x1c"); await view;
     view = shortcut(harness, "ctrl+\\")(harness.context);
-    expect(harness.panelLines().join("\n")).toContain("Running");
-    expect(harness.panelLines().join("\n")).toContain("Original prompt");
-    expect(harness.panelLines().join("\n")).toContain("Draft A");
+    expect(harness.panelLines().join("\n")).toContain("Generating");
+    expect(harness.getEditor()).toBe("Draft A");
     expect(harness.complete).toHaveBeenCalledTimes(1);
     resolve({ content: [{ type: "text", text: JSON.stringify({ prompt: "Fresh completed result", title: "Live preview" }) }], stopReason: "stop" });
     await flushPromises();
     expect(harness.panelLines().join("\n")).toContain("Fresh completed result");
-    expect(harness.panelLines().join("\n")).toContain("Draft A"); // Task label remains stable.
+    expect(harness.getEditor()).toBe("Draft A");
     expect(harness.customCalls()).toBe(2);
     harness.panelInput("a");
     await view;

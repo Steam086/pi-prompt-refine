@@ -33,19 +33,24 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.context.ui.confirm).toHaveBeenCalledExactlyOnceWith("Draft changed", expect.stringContaining("Current draft:\n---\nDraft B"));
   });
 
-  it.each(["Refined prompt", "Draft A", ""])("shortcut views an accepted result without calling the model when the editor contains %j", async (draft) => {
+  it.each(["Refined prompt", "Draft A", ""])("reuses the accepted task for matching nonempty input and leaves a cleared editor empty (%j)", async (draft) => {
     const harness = await makeHarness({ useDefaultShortcuts: true });
     await trigger(harness);
     harness.setCustomAction("a");
     await shortcut(harness, "ctrl+\\")(harness.context);
     harness.setEditorText(draft);
-    harness.setCustomAction("q");
-    await shortcut(harness, "ctrl+\\")(harness.context);
-    await shortcut(harness, "ctrl+\\")(harness.context);
+    const calls = harness.customCalls();
+    harness.holdPanel();
+    for (let i = 0; i < 2; i++) {
+      const view = shortcut(harness, "ctrl+\\")(harness.context);
+      if (draft) {
+        expect(harness.panelLines().join("\n")).toContain("Refined prompt");
+        harness.panelInput("q");
+      }
+      await view;
+    }
+    expect(harness.customCalls()).toBe(calls + (draft ? 2 : 0));
     expect(harness.complete).toHaveBeenCalledTimes(1);
-    const panel = harness.panelLines().join("\n");
-    expect(panel).toContain("Accepted");
-    expect(panel).not.toContain("Applied");
     expect(harness.getEditor()).toBe(draft);
     expect(harness.editorWrites).toEqual(["Refined prompt"]);
     expect(harness.sent).toEqual([]);
@@ -69,7 +74,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.getEditor()).toBe("my final edits");
   });
 
-  it("captures an edited accepted prompt without automatically requesting", async () => {
+  it("optimizes edited accepted text once and reuses the resulting run", async () => {
     const harness = await makeHarness({ useDefaultShortcuts: true });
     await trigger(harness);
     harness.setCustomAction("a");
@@ -80,13 +85,13 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     await shortcut(harness, "ctrl+\\")(harness.context);
     await flushPromises();
     expect(harness.customCalls()).toBe(panelsBefore + 1);
-    expect(harness.complete).toHaveBeenCalledTimes(1);
-    expect(harness.panelLines().join("\n")).toContain("Unsent");
+    expect(harness.complete).toHaveBeenCalledTimes(2);
     expect(harness.getEditor()).toBe("my edited accepted prompt");
-    harness.setCustomAction("q");
-    await shortcut(harness, "ctrl+\\")(harness.context);
-    expect(harness.complete).toHaveBeenCalledTimes(1);
-    expect(harness.panelLines().join("\n")).toContain("2 prompts");
+    harness.holdPanel();
+    const reopened = shortcut(harness, "ctrl+\\")(harness.context);
+    expect(harness.panelLines().join("\n")).toContain("Ready");
+    expect(harness.complete).toHaveBeenCalledTimes(2);
+    harness.panelInput("q"); await reopened;
   });
 
   it("explicit view opens an edited candidate without regenerating and labels a changed main draft", async () => {
@@ -125,13 +130,11 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.complete.mockImplementationOnce(() => new Promise((resolve) => { finishB = resolve; }));
     harness.holdPanel();
     const view = shortcut(harness, "ctrl+\\")(harness.context);
-    expect(harness.complete).toHaveBeenCalledTimes(1);
-    expect(harness.panelLines().join("\n")).toContain("Draft B");
-    expect(harness.panelLines().join("\n")).toContain("Draft A");
-    expect(harness.panelLines().join("\n")).toContain("Unsent");
-    expect(harness.panelLines(100).join("\n")).toContain("› ○ Unsent · Draft B");
-    harness.panelInput("\r"); // Explicitly start B and automatically follow its model child.
-    expect(harness.panelLines(100).join("\n")).toMatch(/›\s+└─ fake-chat/);
+    expect(harness.complete).toHaveBeenCalledTimes(2);
+    expect(harness.panelLines().join("\n")).toContain("Generating");
+    expect(harness.getEditor()).toBe("Draft B");
+    harness.panelInput("\r");
+    expect(harness.editorWrites).toEqual([]);
     const request = (harness.complete.mock.calls[1] as any[])[1];
     expect(JSON.parse(request.messages[0].content[0].text).draft).toBe("Draft B");
     if (phase === "generating") {
@@ -143,7 +146,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     finishB(refinement("Result B"));
     await flushPromises();
     expect(harness.panelLines().join("\n")).toContain("Result B");
-    expect(harness.panelLines().join("\n")).toContain("Draft B");
+    expect(harness.getEditor()).toBe("Draft B");
     expect(harness.complete).toHaveBeenCalledTimes(2);
     expect(harness.getEditor()).toBe("Draft B");
     expect(harness.editorWrites).toEqual([]);
@@ -166,7 +169,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     expect(harness.panelLines().join("\n")).not.toContain("Draft B");
   });
 
-  it("uses the shortcut to inspect failures and blocks the legacy r retry",  async () => {
+  it("uses the shortcut to inspect failures and retries the frozen input only on r",  async () => {
     const harness = await makeHarness({ useDefaultShortcuts: true });
     harness.complete.mockRejectedValueOnce(new Error("offline"));
     await trigger(harness);
@@ -177,7 +180,7 @@ describe("Pi extension integration (mocked TUI and provider)", () => {
     harness.setCustomAction("r");
     await shortcut(harness, "ctrl+\\")(harness.context);
     await flushPromises();
-    expect(harness.complete).toHaveBeenCalledTimes(1);
+    expect(harness.complete).toHaveBeenCalledTimes(2);
   });
 
   it("honors an explicit optimize command even when a ready result has the same source draft", async () => {

@@ -72,7 +72,7 @@ describe("project defaults through the extension", () => {
     h.panelInput("q"); await view;
 
     h.setEditorText("Following request"); view = shortcut(h, "ctrl+\\")(h.context);
-    expect(output()).toContain("Preferences · 1 selected");
+    expect(output()).toContain("1 preference");
     h.panelInput("\r"); await flushPromises();
     expect(h.complete).toHaveBeenCalledTimes(2);
     const next = JSON.parse((h.complete.mock.calls[1] as any[])[1].messages[0].content[0].text);
@@ -211,7 +211,7 @@ describe("project defaults through the extension", () => {
     await store.setProjectDefault(entry, true); await h.reload();
     h.setEditorText("Short task"); h.holdPanel(); const view = shortcut(h, "ctrl+\\")(h.context);
     const output = () => h.panelLines(100).join("\n");
-    expect(output()).toContain("Preferences · 1 selected");
+    expect(output()).toContain("Unsent");
     expect(h.notifications.some((notice) => notice.includes("Project defaults exceed"))).toBe(true);
     h.panelInput("\r"); await flushPromises(); expect(h.complete).not.toHaveBeenCalled();
     h.panelInput("p"); await vi.waitFor(() => expect(output()).toContain("Too long"));

@@ -148,10 +148,10 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     notify, preferenceRepository, sessionPreferences,
   });
   const host = createWorkspaceHost({
-    controller, readConfig, openHint, taskPositions, usagePositions, useContext,
+    controller, operations, shortcut: config.shortcuts.optimize, readConfig, openHint, taskPositions, usagePositions, useContext,
     canNameSession: lifecycle.canNameSession,
     updatePresentation: presentation,
-    acknowledge: (sessionId) => { backgroundStatus.update(sessionId, controller.getHistory(), true, openHint); },
+    acknowledge: (sessionId, id) => { backgroundStatus.update(sessionId, controller.getHistory(), true, openHint, id); },
     workspaceActions, editor, models, requests, notify, notifyCurrent,
   });
   const rpc = createRpcSlash({
@@ -185,10 +185,10 @@ export async function createRefineApplication(pi: Pick<ExtensionAPI, "sendUserMe
     }
     const ctx = currentUiContext;
     if (ctx?.mode !== "tui") return;
-    const status = backgroundStatus.update(controller.getSessionId() ?? "", controller.getHistory(), host.isOpen(), openHint);
+    const status = backgroundStatus.update(controller.getSessionId() ?? "", controller.getHistory(), host.isOpen(), openHint, host.viewedId());
     ctx.ui.setStatus(STATUS_KEY, undefined);
     ctx.ui.setWidget(STATUS_KEY, host.isInteracting() || host.isOpen() || !status ? undefined : (_tui, theme) => ({
-      render: (width) => renderBackgroundStatus(status, width, theme),
+      render: (width) => renderBackgroundStatus(status, width, theme, !!config.shortcuts.optimize && !config.shortcuts.view),
       invalidate() {},
     }), { placement: "aboveEditor" });
     if (state.phase === "idle" && !state.runningCount && !state.queuedCount) {
