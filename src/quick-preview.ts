@@ -116,6 +116,7 @@ export class QuickReader {
     return [...(frame ? [border("╭" + "─".repeat(width - 2) + "╮")] : []), line(title + theme.fg("muted", meta)),
       ...(divider ? [line(theme.fg("borderMuted", "─".repeat(inner)))] : []),
       ...Array.from({length: this.view}, (_, i) => line(theme.fg("text", this.lines[this.offset + i]?.text ?? ""))),
-      line(fittingKeyHints(actions, inner, theme, "  ")), ...(frame ? [border("╰" + "─".repeat(width - 2) + "╯")] : [])];
+      line(fittingKeyHints(actions, inner, theme, "  ", this.question ? "primary" : "secondary-compact")),
+      ...(frame ? [border("╰" + "─".repeat(width - 2) + "╯")] : [])];
   }
 }
