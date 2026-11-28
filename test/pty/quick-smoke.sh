@@ -83,6 +83,10 @@ key -l 'Preserve the tables.'
 capture revision
 key Escape
 wait_for 'a Accept'
+t send-keys -H 1b 5b 34 7e  # legacy End: ESC [ 4 ~
+wait_for '60. Compare'
+t send-keys -H 1b 5b 31 7e  # legacy Home: ESC [ 1 ~
+wait_for 'Lines 1–'
 key PageDown
 sleep .13
 capture scrolled

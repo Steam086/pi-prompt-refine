@@ -6,7 +6,7 @@
 
 在实现前，探针给 aboveEditor Widget 和一个底部 Overlay 分别安装了组件本地输入处理器。输入的 `original` 到达 Pi 编辑器。Overlay 收到了 Enter、方向键和 Esc。下一次调用快捷键读回 `original restored`。在 80×24 上，底部锚点上移三行正好盖住编辑器原文。完整屏幕和按键记录保存在 [focus-probe.txt](focus-probe.txt)，可在仓库根目录执行 `bash test/pty/focus-probe.sh` 复测。
 
-Pi 1.6.0 的公开 TUI 提供 `setFocus(component)`、终端行列和 Overlay 所有权管理，缺少读取当前焦点组件及获取 editor/footer 组合边界的接口。多行编辑器、自定义编辑器和其他 Widget 均可改变底部布局。本实现按 §9.2 采用**居中专用预览 Overlay**。收起后使用原有单行 aboveEditor 状态 Widget。紧凑预览、Expanded、Revision、Workspace 和模型选择共用一次 `ctx.ui.custom` 生命周期。Pi 负责把焦点归还之前的组件。终端输入由聚焦组件接收。
+Pi 1.6.0 和 1.7.0 均提供 `getFocusedComponent()` 与 `setFocus(component)`。但在 1.7.0 的 PTY 中，即使显式聚焦 aboveEditor Widget，关闭宿主选择器后，Widget 仍显示，下一次打字却进入原编辑器。能查询焦点并不代表 Widget 会自动收回焦点。宿主也没有提供 editor/footer 的组合边界。多行编辑器、自定义编辑器和其他 Widget 均可改变底部布局。本实现按 §9.2 采用**居中专用预览 Overlay**。收起后使用原有单行 aboveEditor 状态 Widget。紧凑预览、Expanded、Revision、Workspace 和模型选择共用一次 `ctx.ui.custom` 生命周期。Pi 负责把焦点归还之前的组件。终端输入由聚焦组件接收。
 
 同一 PTY 中的两个 Enter 都编码为 `\r`。为避免连续 Enter 在焦点切换时发送草稿，Ready 和 Expanded 使用 **`a Accept`**。Enter 在 Unsent 启动请求，回到 Pi 编辑器后沿用原生提交。紧凑预览使用最多 12 行及屏高 30% 的预算，Expanded 和高级子页使用原有的 75% 高度。居中 Overlay 会遮挡背后的内容，主聊天保留六行及正文与主输入同时完整可见均无宿主几何保证。
 
@@ -28,9 +28,11 @@ bash test/pty/quick-smoke.sh "$(mktemp -d)" light
 
 最后两项在真实 Pi 进程中额外加载委托给 Pi CustomEditor 的测试编辑器，记录事件并驱动宿主 selector、另一扩展的 Overlay、原生提交、窗口 resize 及 bracketed paste。每次运行观测到四次 fixture stream（短稿、主 Agent 的明确提交、长稿、多行粘贴各一次），一次用户 message_start。重复进入同一份多行草稿沿用了第一次捕获。详见 [dark 事件记录](dark/events.txt) 和 [light 事件记录](light/events.txt)。
 
-根目录没有 lint 脚本。TypeScript、Vitest、包内容检查和 `git diff --check` 均已执行。完整套件中 1,433 个测试通过；35 个真实供应商或 benchmark 用例按项目 opt-in 配置跳过。打包检查覆盖 77 个文件，fixture、会话数据及截图均在发布包之外。
+根目录没有 lint 脚本。TypeScript、Vitest、包内容检查和 `git diff --check` 均已执行。补上 Home/End 回归后，锁定的 Pi 1.6.0 和单独安装的 1.7.0 均通过类型检查及 1,435 项测试；35 项 opt-in 用例跳过。打包检查覆盖 77 个文件，fixture、会话数据及截图均在发布包之外。
 
-## 终端截图
+Pi 1.7.0 复测使用临时仓库副本，将 `@earendil-works/pi-coding-agent`、`pi-ai`、`pi-tui` 三个包均安装为 1.7.0。在该副本中运行上述深浅主题 PTY 脚本，六种尺寸均通过。脚本直接发送旧式 End (`ESC [ 4 ~`) 和 Home (`ESC [ 1 ~`)；判定依据是长结果的末段和首屏分别出现，而非仅记录按键。
+
+## 终端截图（Pi 1.6.0）
 
 PNG 取自独立虚拟显示器上的实际 Alacritty 客户窗口。客户端通过 UTF-8 tmux 连接隔离 Pi。各 PNG 的同名 txt 是 tmux 屏幕文本。复现场景用上面的 smoke 脚本；如需重新拍摄 PNG，可设置 `REFINE_CAPTURE_HOOK` 为本地截图程序，三个参数依次为 tmux socket、目标 PNG 路径和主题。现有截图用 Alacritty 连接对应 socket 后以 ImageMagick 抓取 Xwayland 客户窗口。
 

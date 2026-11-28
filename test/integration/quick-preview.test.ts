@@ -47,6 +47,31 @@ describe("quick preview transactions", () => {
     expect(h.sent).toEqual([]);
   });
 
+  it.each([
+    ["legacy CSI", "\x1b[1~", "\x1b[4~"],
+    ["cursor CSI", "\x1b[H", "\x1b[F"],
+  ])("routes %s Home/End to the compact and expanded reader", async (_encoding, home, end) => {
+    const h = await makeHarness();
+    const lines = Array.from({ length: 80 }, (_, i) => `Paragraph ${i}.`);
+    h.complete.mockResolvedValueOnce(refinement(lines.join("\n")));
+    h.holdPanel();
+    const view = open(h);
+    await flushPromises();
+    for (const expanded of [false, true]) {
+      if (expanded) h.panelInput("v");
+      expect(screen(h)).toContain("Paragraph 0.");
+      expect(screen(h)).not.toContain("Paragraph 79.");
+      h.panelInput(end);
+      expect(screen(h)).toContain("Paragraph 79.");
+      h.panelInput(home);
+      expect(screen(h)).toContain("Paragraph 0.");
+    }
+    h.panelInput("\x1c"); await view;
+    expect(h.complete).toHaveBeenCalledTimes(1);
+    expect(h.editorWrites).toEqual([]);
+    expect(h.sent).toEqual([]);
+  });
+
   it("retains the replaced text for restore and ignores repeated Enter in Ready", async () => {
     const h = await makeHarness();
     h.holdPanel();

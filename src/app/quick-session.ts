@@ -97,7 +97,6 @@ export function mountQuick({ selection, controller, ctx, theme, rows, position, 
     input(data: string): boolean {
       const target = record();
       if (!target) { close(); return true; }
-      const key = parseKey(data);
       if (shortcut && matchesKey(data, shortcut) && page !== "workspace" && !workspace.choosingPreferences()) { close(); return true; }
       if (page === "workspace") return false;
       if (isKeyRelease(data)) return true;
@@ -106,6 +105,7 @@ export function mountQuick({ selection, controller, ctx, theme, rows, position, 
         if (!workspace.inQuickChild()) page = "reader";
         return true;
       }
+      const key = parseKey(data) ?? (["home", "end"] as const).find(k => matchesKey(data, k));
       if (confirm) {
         const pending = confirm;
         confirm = undefined;
