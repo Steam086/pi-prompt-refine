@@ -104,8 +104,10 @@ export class QuickReader {
     const overflow = this.lines.length > this.view;
     const title = theme.fg("text", theme.bold("Refine")) + " · " + (this.question ? "Confirm" : this.help ? "Help" : this.expanded ? "Full preview" :
       theme.fg(record.status === "generated" ? "success" : record.status === "error" ? "error" : record.status === "generating" ? "accent" : "muted", labels[record.status]));
+    const noteCount = this.expanded || this.help || this.question ? 0 : record.candidate?.additional?.length ?? 0;
+    const notes = noteCount ? ` · ${noteCount} ${noteCount === 1 ? "note" : "notes"}` : "";
     const counts = overflow ? ` · Lines ${this.offset + 1}–${this.offset + this.view}/${this.lines.length}` : "";
-    const meta = sanitizeTerminalText(index + counts + (changed ? " · Editor changed" : "") + ` · ${record.input.model.id} · ${elapsed}s`).replace(/\n/g, " ");
+    const meta = sanitizeTerminalText(notes + index + counts + (changed ? " · Editor changed" : "") + ` · ${record.input.model.id} · ${elapsed}s`).replace(/\n/g, " ");
     const border = (s: string) => theme.fg("borderAccent", s);
     const line = (s: string) => {
       const fit = truncateToWidth(s, inner, "");

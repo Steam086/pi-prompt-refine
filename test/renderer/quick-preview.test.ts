@@ -9,6 +9,29 @@ const sizes = [[80,24], [120,40], [160,50], [48,18], [240,60], [40,12]] as const
 const document = Array.from({length: 40}, (_, i) => `第${i}段 🧑‍💻 é\t\x1b[2J ` + "https://example.test/long-path/".repeat(4)).join("\n");
 
 describe.each(["light", "dark"])("%s quick reader", name => {
+  it("shows the note count in the compact header without changing the body, footer, or height", () => {
+    const theme = getThemeByName(name)!;
+    const run = record(1);
+    const reader = new QuickReader();
+    const render = (view = reader) => view.render(80, 40, run, " · 1/2", true, false, 2, theme);
+
+    const withoutNotes = render(new QuickReader());
+    expect(strip(withoutNotes[1]!)).not.toContain("note");
+    run.candidate!.additional = [{ name: "In Your Own Words", text: "Only in expanded notes." }];
+    const compact = render();
+    expect(strip(compact[1]!)).toContain("Refine · Ready · 1 note");
+    expect(compact[1]).toContain(theme.fg("muted", " · 1 note · 1/2 · model-1 · 2s"));
+    expect(compact.slice(2)).toEqual(withoutNotes.slice(2));
+
+    run.candidate!.additional!.push({ name: "Summary", text: "Another note." });
+    expect(strip(render()[1]!)).toContain("Refine · Ready · 2 notes");
+
+    reader.expanded = true;
+    const expanded = render().map(strip);
+    expect(expanded[1]).not.toContain("2 notes");
+    expect(expanded.join("\n")).toContain("Only in expanded notes.");
+  });
+
   it.each(sizes)("bounds and locks Ready at %i×%i and preserves independent reading positions", (cols, rows) => {
     const reader = new QuickReader();
     const a = record(1), b = record(2);
